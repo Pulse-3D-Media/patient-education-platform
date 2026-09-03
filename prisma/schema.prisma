@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")   // pooled connection, used by the app
+  directUrl = env("DIRECT_URL")     // direct connection, used by migrations
+}
+
+enum Category {
+  SPINE
+  KNEE
+  SHOULDER
+  HIP
+  FOOT_ANKLE
+}
+
+/// Pulse 3D's own library. Not owned by any clinic.
+model Video {
+  id              String   @id @default(cuid())
+  title           String                        // "Total Knee Replacement"
+  category        Category
+  videoUrl        String                        // read via getPlaybackUrl(), never directly
+  durationSeconds Int?
+  isPublished     Boolean  @default(false)      // staging: Van finishes animations before they go live
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  shares          Share[]
+
+  @@index([category])
+}
+
+/// A customer practice. Phase 1 has exactly ONE row, our own test clinic.
+/// This table exists now so that Phase 2 does not need a migration on live data.
+model Clinic {
+  id         String   @id @default(cuid())
+  name       String                             // used for the on-video watermark
+  clerkOrgId String?  @unique                   // filled in Phase 2. Leave it alone until then.
+  createdAt  DateTime @default(now())
+  shares     Share[]
+}
+
+model Share {
+  id           String    @id @default(cuid())
+  code         String    @unique                // short random string in the URL, e.g. k7m2xq
+  clinicId     String                           // the tenant column. Always filter by it.
+  clinic       Clinic    @relation(fields: [clinicId], references: [id])
+  videoId      String
+  video        Video     @relation(fields: [videoId], references: [id])
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  viewCount    Int       @default(0)
+  lastViewedAt DateTime?
+
+  @@index([clinicId])
+}

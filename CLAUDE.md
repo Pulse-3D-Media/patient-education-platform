@@ -1,4 +1,3 @@
-[3 - Repo rules file.md](https://github.com/user-attachments/files/31811969/3.-.Repo.rules.file.md)
 # CLAUDE.md
 
 Copy this file into the root of the `patient-education-platform` repository, named exactly `CLAUDE.md`.

@@ -6,7 +6,7 @@ import { getPlaybackUrl } from "@/lib/video";
 import { VideoGrid } from "./VideoGrid";
 
 /**
- * One category: its published videos as big thumbnails. Tapping one plays it.
+ * One category: its published videos as cards. Tapping one plays it.
  * This is tap two of two.
  */
 export const revalidate = 60;
@@ -18,32 +18,29 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
 
   const videos = await listPublishedVideosByCategory(category.value);
 
-  // Only plain data crosses into the browser: the id, the title and the
+  // Only plain data crosses into the browser: id, title, duration and the
   // playback address (built here on the server, through the video boundary).
   const items = videos.map((video) => ({
     id: video.id,
     title: video.title,
     src: getPlaybackUrl(video),
+    durationSeconds: video.durationSeconds,
   }));
 
   return (
-    <main className="min-h-screen bg-black px-6 py-8 text-white sm:px-10">
-      <header className="mb-8 flex items-center gap-5">
-        <Link
-          href="/library"
-          className="flex h-14 min-w-14 items-center justify-center rounded-full border border-white/15 px-5 text-lg font-medium text-[#bfbfbf] hover:border-[#2a829b] hover:text-white"
-          aria-label="Back to all categories"
-        >
-          &larr; Back
-        </Link>
-        <h1 className="text-3xl font-semibold sm:text-4xl">{category.label}</h1>
+    <main className="px-5 py-6 sm:px-8">
+      <header className="mb-6">
+        <p className="mb-1 text-sm text-[#667085]">
+          <Link href="/library" className="hover:text-white">
+            My Library
+          </Link>
+          <span className="mx-2">/</span>
+          <span className="text-[#bfbfbf]">{category.label}</span>
+        </p>
+        <h1 className="text-2xl font-semibold sm:text-3xl">{category.label}</h1>
       </header>
 
-      {items.length === 0 ? (
-        <p className="text-xl text-[#bfbfbf]">No {category.label.toLowerCase()} videos yet.</p>
-      ) : (
-        <VideoGrid videos={items} />
-      )}
+      <VideoGrid videos={items} categoryLabel={category.label} />
     </main>
   );
 }

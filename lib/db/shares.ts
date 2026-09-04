@@ -67,3 +67,30 @@ export async function listSharesForClinic(clinicId: string) {
     orderBy: { createdAt: "desc" },
   });
 }
+
+/**
+ * Look a share up by the code in its URL, with the video it plays and the
+ * name of the clinic that made it. Returns null for a code that does not exist.
+ *
+ * Public on purpose: the patient is not signed in and belongs to no clinic,
+ * so this is the one function here that does not take a clinicId. The rules
+ * file allows exactly this for the watch page.
+ */
+export async function getShareByCode(code: string) {
+  return prisma.share.findUnique({
+    where: { code },
+    include: { video: true, clinic: { select: { name: true } } },
+  });
+}
+
+/**
+ * Count one view of a share: add one to viewCount and stamp lastViewedAt.
+ * Called when the patient presses play. Does nothing for a code that does
+ * not exist or has already expired, so an old link can never move the numbers.
+ */
+export async function recordShareView(code: string) {
+  await prisma.share.updateMany({
+    where: { code, expiresAt: { gt: new Date() } },
+    data: { viewCount: { increment: 1 }, lastViewedAt: new Date() },
+  });
+}

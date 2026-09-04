@@ -37,3 +37,14 @@ export async function countPublishedVideosByCategory() {
   }
   return counts;
 }
+
+/**
+ * Every published video across all categories, for the admin console.
+ * Sorted by category (in the order the enum lists them), then by title.
+ */
+export async function listPublishedVideos() {
+  return prisma.video.findMany({
+    where: { isPublished: true },
+    orderBy: [{ category: "asc" }, { title: "asc" }],
+  });
+}

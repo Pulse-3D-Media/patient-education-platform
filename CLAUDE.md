@@ -1,9 +1,9 @@
 # CLAUDE.md
 
-Copy this file into the root of the `patient-education-platform` repository, named exactly `CLAUDE.md`.
-Claude reads it automatically at the start of every session.
+The rules file for the `patient-education-platform` repository, where it lives as `CLAUDE.md` in the root.
+Claude reads it automatically at the start of every session, so this is the one place project rules belong.
 
-**Put this file in the repository BEFORE any code gets written.** The schema below is what the first build prompt reads.
+A copy is kept on the desktop as `3 - Repo rules file.md`. If you edit one, copy it to the other.
 
 ---
 
@@ -16,6 +16,12 @@ A clinic creates a share link. The patient scans a QR code or opens the link, wa
 **We are in Phase 1:** create a link, watch a video, link expires. That is the whole of Phase 1.
 **Phase 2 is the clinic dashboard:** logins, clinics, doctors, permissions, real video hosting.
 **Phase 3 is billing.**
+
+## This repository is public
+
+Deliberate, for now: Vercel's free plan will not deploy a private repository, and we are pre-revenue. It goes private when we move to Vercel Pro, which will be before launch.
+
+Two consequences while it stays public. **No secret may ever be committed** (see rule 7, which is the most important rule in this file today). And anything written here is readable by anyone, so no client names, no unreleased animation stills, and no commercial detail that is not already on the public website.
 
 ## Who works on this
 
@@ -68,9 +74,17 @@ Do the thing that was asked, not the three adjacent things that would also be ni
 
 Ask first, and say what the package is for in plain English.
 
-### 7. Never commit secrets.
+### 7. Never commit secrets. THIS REPOSITORY IS PUBLIC.
 
-Everything sensitive lives in `.env`, which stays out of git.
+Everything sensitive lives in `.env`, which stays out of git. `.gitignore` must always cover `.env*`.
+
+**The repository is public while we are pre-launch.** That raises the stakes on this rule considerably:
+
+- A committed database URL or API key is found by automated scanners **within minutes**, not eventually.
+- **Git history is permanent.** Deleting the file in a later commit does not remove the secret from history. Anything committed once must be **rotated**, not just deleted.
+- **Never hardcode a connection string, key or token anywhere in the code**, not even temporarily while testing. If a value is needed, it comes from `process.env`.
+
+Before any commit that touches configuration, confirm `.env` is still ignored.
 
 ---
 

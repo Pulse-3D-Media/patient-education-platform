@@ -42,7 +42,7 @@ export function LibraryShell({ children }: { children: ReactNode }) {
         <LibraryButton open={open} onClick={toggle} className="md:hidden" />
         <Link href="/library" className="flex items-center" aria-label="Pulse 3D, library home">
           {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-          <img src={LOGO} alt="Pulse 3D" className="h-6 w-auto" />
+          <img src={LOGO} alt="Pulse 3D" className="h-7 w-auto" />
         </Link>
         <span className="ml-auto hidden text-sm text-[#667085] sm:inline">Patient Education Library</span>
       </header>

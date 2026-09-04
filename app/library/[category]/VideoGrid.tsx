@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { VideoPlayer } from "@/components/ui/VideoPlayer";
 
 type Item = { id: string; title: string; src: string; durationSeconds: number | null };
 
 /**
- * The procedure cards, the search box and the full-screen player.
+ * The procedure cards, the search box and the full-screen player
+ * (the player's controls live in components/ui/VideoPlayer.tsx).
  *
  * This is a client component because tapping a card has to start playback
  * inside the tap itself. Browsers only allow a video to start with sound when
@@ -78,24 +80,12 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
 
       {playing && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black" role="dialog" aria-label={playing.title}>
-          <div className="flex items-center justify-between gap-4 px-6 py-4">
-            <h2 className="truncate text-2xl font-semibold text-white">{playing.title}</h2>
-            <button
-              type="button"
-              onClick={() => setPlaying(null)}
-              className="flex h-14 shrink-0 items-center rounded-full bg-white/10 px-6 text-lg font-medium text-white hover:bg-white/20"
-            >
-              Close
-            </button>
-          </div>
-          <video
+          <VideoPlayer
             key={playing.id}
             src={playing.src}
-            autoPlay
-            controls
-            playsInline
-            controlsList="nodownload"
-            className="min-h-0 w-full flex-1 bg-black"
+            title={playing.title}
+            subtitle={categoryLabel}
+            onClose={() => setPlaying(null)}
           />
         </div>
       )}

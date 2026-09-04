@@ -14,14 +14,10 @@ import { PrintButton } from "./PrintButton";
  * Letter sheet (8.5 by 11 inches) carrying the pamphlet twice, one per half,
  * with a dashed line to cut along, so one sheet makes two pamphlets.
  *
- * Each half-page pamphlet has the procedure name, the QR code, one line of
- * instructions (plus the typed-out link for anyone who cannot scan), and the
- * Pulse 3D logo on a black band, which prints fine in black and white.
+ * Each half-page pamphlet has the procedure name, the QR code, and one line
+ * of instructions (plus the typed-out link for anyone who cannot scan).
  */
 export const dynamic = "force-dynamic";
-
-// Same logo as the library banner. It is light, so it sits on a black band.
-const LOGO = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/6a394f4daad9a6c8cc1d16a4_pulse3dmedia-logo-p-500.png";
 
 /**
  * Print rules. Sizes are in inches because that is what paper is measured
@@ -32,7 +28,7 @@ const LOGO = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/6a394f
 const PRINT_CSS = `
   @page { size: 8.5in 11in; margin: 0; }
   .sheet { width: 8.5in; height: 11in; position: relative; }
-  .pamphlet { height: 5.5in; padding: 0.5in; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .pamphlet { height: 5.5in; padding: 0.5in; }
   .cut-line { position: absolute; top: 5.5in; left: 0; right: 0; border-top: 1px dashed #98a2b3; }
   @media print { html, body { background: white; } }
 `;
@@ -79,8 +75,8 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
 /** One half-page pamphlet: 8.5 by 5.5 inches. */
 function Pamphlet({ title, link, qrImage }: { title: string; link: string; qrImage: string }) {
   return (
-    <section className="pamphlet flex flex-col">
-      <div className="flex flex-1 items-center gap-[0.5in]">
+    <section className="pamphlet flex items-center">
+      <div className="flex w-full items-center gap-[0.5in]">
         <div className="min-w-0 flex-1">
           <p className="text-[11pt] font-medium uppercase tracking-wider text-[#667085]">Your procedure</p>
           <h1 className="mt-[0.1in] text-[26pt] font-semibold leading-tight">{title}</h1>
@@ -95,10 +91,6 @@ function Pamphlet({ title, link, qrImage }: { title: string; link: string; qrIma
         <img src={qrImage} alt={`QR code that opens ${link}`} className="h-[2.6in] w-[2.6in] shrink-0" />
       </div>
 
-      <div className="flex h-[0.6in] shrink-0 items-center rounded-md bg-black px-[0.3in]">
-        {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-        <img src={LOGO} alt="Pulse 3D" className="h-[0.28in] w-auto" />
-      </div>
     </section>
   );
 }

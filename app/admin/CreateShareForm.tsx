@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { CopyButton } from "@/components/ui/CopyButton";
+import { watchLink } from "@/lib/share-link";
 import { createShareAction } from "./actions";
 import { DEFAULT_EXPIRY_DAYS, EXPIRY_DAYS } from "./expiry";
 
@@ -17,7 +18,7 @@ export function CreateShareForm({ videoId, baseUrl }: { videoId: string; baseUrl
   // hands back whatever it returned (the new code, or an error message).
   const [state, formAction, pending] = useActionState(createShareAction, null);
 
-  const link = state?.code ? `${baseUrl}/watch/${state.code}` : null;
+  const link = state?.code ? watchLink(baseUrl, state.code) : null;
   const selectId = `days-${videoId}`;
 
   return (

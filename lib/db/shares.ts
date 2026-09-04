@@ -94,3 +94,15 @@ export async function recordShareView(code: string) {
     data: { viewCount: { increment: 1 }, lastViewedAt: new Date() },
   });
 }
+
+/**
+ * One of this clinic's shares, by code, for the admin pages. Returns null if
+ * the code does not exist or belongs to another clinic; the admin pages
+ * treat both the same way.
+ */
+export async function getShareForClinic(clinicId: string, code: string) {
+  return prisma.share.findFirst({
+    where: { code, clinicId },
+    include: { video: { select: { title: true } } },
+  });
+}

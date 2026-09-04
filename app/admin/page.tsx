@@ -1,11 +1,12 @@
-import { headers } from "next/headers";
 import Link from "next/link";
 import type { Category } from "@prisma/client";
 import { CopyButton } from "@/components/ui/CopyButton";
+import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { listSharesForClinic } from "@/lib/db/shares";
 import { listPublishedVideos } from "@/lib/db/videos";
+import { qrFileName, watchLink } from "@/lib/share-link";
 import { CreateShareForm } from "./CreateShareForm";
 
 /**
@@ -13,7 +14,9 @@ import { CreateShareForm } from "./CreateShareForm";
  *
  * Two things on the page:
  *   1. Every published video, each with a "Create share link" form.
- *   2. Every share link this clinic has made, with its expiry and view count.
+ *   2. Every share link this clinic has made, with its expiry, view count,
+ *      QR code, and buttons to copy the link, download the QR code as a
+ *      picture, or open a printable pamphlet.
  *
  * Always rendered fresh (never cached): someone who just made a link needs
  * to see it in the list straight away.
@@ -23,6 +26,10 @@ export const dynamic = "force-dynamic";
 // Same logo as the library banner. Copied rather than imported because
 // LibraryShell is a client component and this page is a server component.
 const LOGO = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/6a394f4daad9a6c8cc1d16a4_pulse3dmedia-logo-p-500.png";
+
+/** The look of the secondary buttons in the links table (Copy uses the same look). */
+const SECONDARY_BUTTON =
+  "inline-flex h-10 shrink-0 items-center rounded-lg border border-white/15 px-4 text-sm font-medium text-[#bfbfbf] transition hover:border-[#2a829b] hover:text-white";
 
 export default async function AdminPage() {
   const clinicId = getCurrentClinicId();
@@ -110,14 +117,18 @@ export default async function AdminPage() {
                   <th scope="col" className="px-4 py-3 text-right font-medium">
                     Views
                   </th>
+                  <th scope="col" className="px-4 py-3 font-medium">
+                    QR code
+                  </th>
                   <th scope="col" className="px-4 py-3">
-                    <span className="sr-only">Copy</span>
+                    <span className="sr-only">Actions</span>
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
                 {shares.map((share) => {
-                  const link = `${baseUrl}/watch/${share.code}`;
+                  const link = watchLink(baseUrl, share.code);
+                  const qrUrl = `/admin/qr/${share.code}`;
                   const expired = share.expiresAt < now;
                   return (
                     <tr key={share.id} className={expired ? "text-[#667085]" : ""}>
@@ -132,8 +143,27 @@ export default async function AdminPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">{share.viewCount}</td>
-                      <td className="px-4 py-3 text-right">
-                        <CopyButton text={link} />
+                      <td className="px-4 py-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- drawn by /admin/qr, not a photo to resize */}
+                        <img
+                          src={qrUrl}
+                          alt={`QR code for ${link}`}
+                          width={64}
+                          height={64}
+                          className="h-16 w-16 rounded-md bg-white"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-2">
+                          <CopyButton text={link} label="Copy link" />
+                          {/* A plain link with a download name: the browser saves the picture instead of opening it */}
+                          <a href={qrUrl} download={qrFileName(share.video.title, share.code)} className={SECONDARY_BUTTON}>
+                            Download QR
+                          </a>
+                          <Link href={`/admin/print/${share.code}`} className={SECONDARY_BUTTON}>
+                            Print
+                          </Link>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -158,21 +188,9 @@ function Frame({ children }: { children: React.ReactNode }) {
         </Link>
         <span className="ml-auto text-sm text-[#667085]">Admin</span>
       </header>
-      <main className="mx-auto w-full max-w-5xl px-5 py-8 sm:px-8">{children}</main>
+      <main className="mx-auto w-full max-w-6xl px-5 py-8 sm:px-8">{children}</main>
     </div>
   );
-}
-
-/**
- * The address this page is being viewed at, such as https://example.com,
- * so share links point back at the same site (local, preview or live)
- * without a setting to keep in sync. Vercel sets x-forwarded-proto.
- */
-async function getBaseUrl() {
-  const requestHeaders = await headers();
-  const host = requestHeaders.get("host") ?? "localhost:3000";
-  const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${protocol}://${host}`;
 }
 
 /** "KNEE" becomes "Knee". */

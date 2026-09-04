@@ -14,9 +14,9 @@ import { CreateShareForm } from "./CreateShareForm";
  *
  * Two things on the page:
  *   1. Every published video, each with a "Create share link" form.
- *   2. Every share link this clinic has made, with its expiry, view count,
- *      QR code, and buttons to copy the link, download the QR code as a
- *      picture, or open a printable pamphlet.
+ *   2. Every share link this clinic has made, with its expiry and view count,
+ *      and buttons to copy the link, download its QR code as a picture, or
+ *      open a printable pamphlet.
  *
  * Always rendered fresh (never cached): someone who just made a link needs
  * to see it in the list straight away.
@@ -117,9 +117,6 @@ export default async function AdminPage() {
                   <th scope="col" className="px-4 py-3 text-right font-medium">
                     Views
                   </th>
-                  <th scope="col" className="px-4 py-3 font-medium">
-                    QR code
-                  </th>
                   <th scope="col" className="px-4 py-3">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -143,16 +140,6 @@ export default async function AdminPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">{share.viewCount}</td>
-                      <td className="px-4 py-3">
-                        {/* eslint-disable-next-line @next/next/no-img-element -- drawn by /admin/qr, not a photo to resize */}
-                        <img
-                          src={qrUrl}
-                          alt={`QR code for ${link}`}
-                          width={64}
-                          height={64}
-                          className="h-16 w-16 rounded-md bg-white"
-                        />
-                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           <CopyButton text={link} label="Copy link" />

@@ -4,17 +4,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { CATEGORIES, CATEGORY_GROUP } from "@/lib/categories";
-import { BooksIcon, CloseIcon, HomeIcon } from "./icons";
+import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
 
 /**
  * The frame around every library page. One navigation model on every screen:
  *
  *   - a thin banner across the top with the Pulse 3D mark
- *   - an icon rail down the left (on phones the rail's one icon sits in the
- *     banner instead, so nothing permanent eats the narrow width)
+ *   - an icon rail down the left: the books icon at the top, the admin gear
+ *     at the bottom (on phones both icons sit in the banner instead, so
+ *     nothing permanent eats the narrow width)
  *   - the category drawer, opened by the books icon, listing Home and every
  *     category from lib/categories. It floats over the content rather than
  *     pushing it, and closes on outside click, Escape, or choosing a category.
+ *
+ * The gear opens the admin console, so a surgeon can make a share link
+ * without leaving the library. Phase 2 shows it only to people allowed in.
  *
  * It is a client component only because the drawer needs open/closed state.
  * The page content arrives as children and stays server-rendered.
@@ -44,7 +48,10 @@ export function LibraryShell({ children }: { children: ReactNode }) {
           {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
           <img src={LOGO} alt="Pulse 3D" className="h-7 w-auto" />
         </Link>
-        <span className="ml-auto hidden text-sm text-[#667085] sm:inline">Patient Education Library</span>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="hidden text-sm text-[#667085] sm:inline">Patient Education Library</span>
+          <AdminLink className="md:hidden" />
+        </div>
       </header>
 
       <div className="flex flex-1">
@@ -54,6 +61,7 @@ export function LibraryShell({ children }: { children: ReactNode }) {
           className="sticky top-12 hidden h-[calc(100vh-3rem)] w-16 shrink-0 flex-col items-center gap-2 border-r border-white/10 bg-[#07090b] py-3 md:flex"
         >
           <LibraryButton open={open} onClick={toggle} />
+          <AdminLink className="mt-auto" />
         </nav>
 
         {/* Drawer and its backdrop */}
@@ -90,6 +98,20 @@ function LibraryButton({ open, onClick, className = "" }: { open: boolean; onCli
     >
       <BooksIcon className="h-6 w-6" />
     </button>
+  );
+}
+
+/** The gear that opens the admin console. Same size as the books button so the rail lines up. */
+function AdminLink({ className = "" }: { className?: string }) {
+  return (
+    <Link
+      href="/admin"
+      title="Admin"
+      aria-label="Open the admin console"
+      className={`flex h-11 w-11 items-center justify-center rounded-xl text-[#bfbfbf] transition hover:bg-white/5 hover:text-white ${className}`}
+    >
+      <AdminIcon className="h-6 w-6" />
+    </Link>
   );
 }
 

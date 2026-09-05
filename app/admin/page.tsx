@@ -6,6 +6,7 @@ import { SECONDARY_BUTTON } from "@/components/ui/styles";
 import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
 import { getCurrentClinicId } from "@/lib/clinic";
+import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { formatDuration } from "@/lib/format";
 import { listSharesForClinic } from "@/lib/db/shares";
 import { listPublishedVideos } from "@/lib/db/videos";
@@ -62,8 +63,8 @@ export default async function AdminPage() {
           <header>
             <h1 className="text-2xl font-semibold sm:text-3xl">Share links</h1>
             <p className="mt-1 max-w-2xl text-[#bfbfbf]">
-              Create a link for a procedure and copy it to send to a patient. The link stops working after the
-              number of days you choose.
+              Create a link for a procedure and copy it to send to a patient. The link stops working after{" "}
+              {SHARE_EXPIRY_DAYS} days.
             </p>
           </header>
 

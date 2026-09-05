@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { createShare, deleteShareForClinic } from "@/lib/db/shares";
-import { EXPIRY_DAYS } from "./expiry";
+import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 
 /**
  * Server Actions for the admin console.
@@ -18,7 +18,8 @@ type CreateShareState = { code?: string; error?: string } | null;
 
 /**
  * Handles the "Create share link" form for one video.
- * The form sends two fields: videoId (hidden) and days (the dropdown).
+ * The form sends one field, videoId (hidden). How long the link works is
+ * not chosen on the form: every link gets SHARE_EXPIRY_DAYS.
  */
 export async function createShareAction(
   _previous: CreateShareState,
@@ -32,17 +33,13 @@ export async function createShareAction(
   }
 
   const videoId = String(formData.get("videoId") ?? "").trim();
-  const days = Number(formData.get("days"));
 
   if (!videoId) {
     return { error: "No video was selected." };
   }
-  if (!(EXPIRY_DAYS as readonly number[]).includes(days)) {
-    return { error: "Choose 3, 7, 14 or 30 days." };
-  }
 
   try {
-    const share = await createShare(clinicId, videoId, days);
+    const share = await createShare(clinicId, videoId, SHARE_EXPIRY_DAYS);
     // Tell Next.js the admin page's data changed so the links list refreshes.
     revalidatePath("/admin");
     return { code: share.code };

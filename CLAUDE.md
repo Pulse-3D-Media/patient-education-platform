@@ -227,6 +227,7 @@ lib/base-url.ts      getBaseUrl(). The site's own address, read from the request
 lib/qr.ts            QR codes for share links, as PNG (download) or SVG (print).
 lib/brand.ts         The logo address.
 lib/format.ts        formatDuration(). Seconds as "4:12".
+lib/expiry.ts        SHARE_EXPIRY_DAYS. How long every share link works. The only place that number lives.
 prisma/              Schema and migrations.
 components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin.
 ```

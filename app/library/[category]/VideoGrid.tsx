@@ -17,7 +17,7 @@ type Sending = { video: Item; result: SendResult | null };
  * live in components/ui/VideoPlayer.tsx) and the Send panel.
  *
  * Each card has two actions, both one tap: tapping the thumbnail plays, and
- * the small send icon beside the title creates a 14-day patient link and
+ * the small send icon beside the title creates a patient link and
  * shows it with a QR code, right here, without leaving the page.
  *
  * This is a client component because tapping a card has to start playback

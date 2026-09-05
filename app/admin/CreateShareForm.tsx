@@ -2,13 +2,16 @@
 
 import { useActionState } from "react";
 import { CopyButton } from "@/components/ui/CopyButton";
+import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { watchLink } from "@/lib/share-link";
 import { createShareAction } from "./actions";
-import { DEFAULT_EXPIRY_DAYS, EXPIRY_DAYS } from "./expiry";
 
 /**
- * The "expires after [dropdown] [Create share link]" controls next to one
- * video, and the link that appears once one has been created.
+ * The "Create share link" button next to one video, and the link that
+ * appears once one has been created.
+ *
+ * There is nothing to choose: every link works for SHARE_EXPIRY_DAYS days,
+ * and a line of helper text beside the button says so.
  *
  * Client component because it needs to remember the link it just made.
  * The actual creating happens on the server, in createShareAction.
@@ -19,28 +22,13 @@ export function CreateShareForm({ videoId, baseUrl }: { videoId: string; baseUrl
   const [state, formAction, pending] = useActionState(createShareAction, null);
 
   const link = state?.code ? watchLink(baseUrl, state.code) : null;
-  const selectId = `days-${videoId}`;
 
   return (
     <div className="flex flex-col items-start gap-3 lg:items-end">
       <form action={formAction} className="flex flex-wrap items-center gap-3">
         <input type="hidden" name="videoId" value={videoId} />
 
-        <label htmlFor={selectId} className="text-sm text-[#bfbfbf]">
-          Expires after
-        </label>
-        <select
-          id={selectId}
-          name="days"
-          defaultValue={DEFAULT_EXPIRY_DAYS}
-          className="h-10 rounded-lg border border-white/15 bg-[#0d1113] px-3 text-sm text-white focus:border-[#2a829b] focus:outline-none"
-        >
-          {EXPIRY_DAYS.map((days) => (
-            <option key={days} value={days}>
-              {days} days
-            </option>
-          ))}
-        </select>
+        <p className="text-sm text-[#bfbfbf]">Links work for {SHARE_EXPIRY_DAYS} days</p>
 
         <button
           type="submit"

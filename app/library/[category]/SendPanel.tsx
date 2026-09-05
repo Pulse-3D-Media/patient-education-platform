@@ -108,7 +108,8 @@ function Creating() {
 
 /** The link, its Copy button and the QR code, side by side on wide screens. */
 function Ready({ link, qrImage, expiresAt, days }: { link: string; qrImage: string; expiresAt: string; days: number }) {
-  const until = new Date(expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // With the year, because a link made in the autumn runs into the next one.
+  const until = new Date(expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   return (
     <div className="mt-6 flex flex-col items-center gap-6 sm:flex-row sm:items-start">

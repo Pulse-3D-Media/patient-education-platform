@@ -27,7 +27,7 @@ export function HomeIcon({ className }: IconProps) {
   );
 }
 
-/** A box with an arrow rising out of it: the share symbol. Opens the admin console. */
+/** A box with an arrow rising out of it: the share symbol. The Send button on library cards, and the rail link to the admin console. */
 export function ShareIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">

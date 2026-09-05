@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { VideoPlayer } from "@/components/ui/VideoPlayer";
+import { formatDuration } from "@/lib/format";
 
 type Item = { id: string; title: string; src: string; durationSeconds: number | null };
 
@@ -143,11 +144,4 @@ function BrandedFallback() {
       <span className="rounded-lg bg-[#2a829b] px-3 py-1.5 text-lg font-bold text-white">P3</span>
     </span>
   );
-}
-
-/** 252 seconds becomes "4:12". */
-function formatDuration(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }

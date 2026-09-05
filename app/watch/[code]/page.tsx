@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { LOGO_URL } from "@/lib/brand";
 import { getShareByCode } from "@/lib/db/shares";
 import { getPlaybackUrl } from "@/lib/video";
 import { WatchPlayer } from "./WatchPlayer";
@@ -17,10 +18,6 @@ export const dynamic = "force-dynamic";
 
 /** Share links are private to the patient, so search engines are told to stay away. */
 export const metadata: Metadata = { robots: { index: false, follow: false } };
-
-// Same logo as the library banner. Here it is a picture, not a link:
-// the patient has nowhere else to go.
-const LOGO = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/6a394f4daad9a6c8cc1d16a4_pulse3dmedia-logo-p-500.png";
 
 export default async function WatchPage({ params }: PageProps<"/watch/[code]">) {
   const { code } = await params;
@@ -48,8 +45,9 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
     <main className="flex min-h-screen flex-col bg-black text-white">
       <div className="mx-auto w-full max-w-3xl sm:px-6 sm:py-6">
         <div className="flex items-center justify-between gap-4 px-5 py-4 sm:px-0 sm:pt-0">
+          {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
           {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-          <img src={LOGO} alt="Pulse 3D" className="h-6 w-auto" />
+          <img src={LOGO_URL} alt="Pulse 3D" className="h-6 w-auto" />
           <p className="truncate text-base text-[#bfbfbf]">Shared by {share.clinic.name}</p>
         </div>
 
@@ -75,7 +73,7 @@ function Unavailable({ heading, body }: { heading: string; body: string }) {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-black px-6 py-12 text-center text-white">
       {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-      <img src={LOGO} alt="Pulse 3D" className="mb-10 h-7 w-auto" />
+      <img src={LOGO_URL} alt="Pulse 3D" className="mb-10 h-7 w-auto" />
       <h1 className="text-2xl font-semibold sm:text-3xl">{heading}</h1>
       <p className="mt-4 max-w-md text-lg leading-relaxed text-[#bfbfbf]">{body}</p>
     </main>

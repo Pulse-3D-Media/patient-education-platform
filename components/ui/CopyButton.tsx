@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SECONDARY_BUTTON, SECONDARY_BUTTON_DONE } from "./styles";
 
 /**
  * A button that copies the given text to the clipboard and says "Copied" for
@@ -25,11 +26,7 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
       type="button"
       onClick={copy}
       aria-live="polite"
-      className={`h-10 shrink-0 rounded-lg px-4 text-sm font-medium transition ${
-        copied
-          ? "bg-[#2a829b]/20 text-[#5fb8d4]"
-          : "border border-white/15 text-[#bfbfbf] hover:border-[#2a829b] hover:text-white"
-      }`}
+      className={copied ? SECONDARY_BUTTON_DONE : SECONDARY_BUTTON}
     >
       {copied ? "Copied" : label}
     </button>

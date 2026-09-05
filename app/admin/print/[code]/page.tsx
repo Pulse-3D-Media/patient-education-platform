@@ -75,22 +75,19 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
 /** One half-page pamphlet: 8.5 by 5.5 inches. */
 function Pamphlet({ title, link, qrImage }: { title: string; link: string; qrImage: string }) {
   return (
-    <section className="pamphlet flex items-center">
-      <div className="flex w-full items-center gap-[0.5in]">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11pt] font-medium uppercase tracking-wider text-[#667085]">Your procedure</p>
-          <h1 className="mt-[0.1in] text-[26pt] font-semibold leading-tight">{title}</h1>
-          <p className="mt-[0.3in] text-[13pt] leading-snug">
-            Scan this code with your phone&rsquo;s camera to watch a short animation about your procedure.
-          </p>
-          <p className="mt-[0.2in] text-[10pt] leading-snug text-[#667085]">
-            Or type this address into your phone: <span className="text-black">{link}</span>
-          </p>
-        </div>
-        {/* eslint-disable-next-line @next/next/no-img-element -- a drawn QR code, not a photo to resize */}
-        <img src={qrImage} alt={`QR code that opens ${link}`} className="h-[2.6in] w-[2.6in] shrink-0" />
+    <section className="pamphlet flex items-center gap-[0.5in]">
+      <div className="min-w-0 flex-1">
+        <p className="text-[11pt] font-medium uppercase tracking-wider text-[#667085]">Your procedure</p>
+        <h1 className="mt-[0.1in] text-[26pt] font-semibold leading-tight">{title}</h1>
+        <p className="mt-[0.3in] text-[13pt] leading-snug">
+          Scan this code with your phone&rsquo;s camera to watch a short animation about your procedure.
+        </p>
+        <p className="mt-[0.2in] text-[10pt] leading-snug text-[#667085]">
+          Or type this address into your phone: <span className="text-black">{link}</span>
+        </p>
       </div>
-
+      {/* eslint-disable-next-line @next/next/no-img-element -- a drawn QR code, not a photo to resize */}
+      <img src={qrImage} alt={`QR code that opens ${link}`} className="h-[2.6in] w-[2.6in] shrink-0" />
     </section>
   );
 }

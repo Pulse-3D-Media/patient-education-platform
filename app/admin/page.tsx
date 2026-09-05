@@ -1,9 +1,12 @@
+import Link from "next/link";
 import type { Category } from "@prisma/client";
 import { AppShell } from "@/components/ui/AppShell";
 import { CopyButton } from "@/components/ui/CopyButton";
+import { SECONDARY_BUTTON } from "@/components/ui/styles";
 import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
 import { getCurrentClinicId } from "@/lib/clinic";
+import { formatDuration } from "@/lib/format";
 import { listSharesForClinic } from "@/lib/db/shares";
 import { listPublishedVideos } from "@/lib/db/videos";
 import { qrFileName, watchLink } from "@/lib/share-link";
@@ -26,10 +29,6 @@ import { CreateShareForm } from "./CreateShareForm";
  * to see it in the list straight away.
  */
 export const dynamic = "force-dynamic";
-
-/** The look of the secondary buttons on each link (Copy uses the same look). */
-const SECONDARY_BUTTON =
-  "inline-flex h-10 shrink-0 items-center rounded-lg border border-white/15 px-4 text-sm font-medium text-[#bfbfbf] transition hover:border-[#2a829b] hover:text-white";
 
 export default async function AdminPage() {
   const clinicId = getCurrentClinicId();
@@ -137,9 +136,9 @@ export default async function AdminPage() {
                         <a href={qrUrl} download={qrFileName(share.video.title, share.code)} className={SECONDARY_BUTTON}>
                           Download QR
                         </a>
-                        <a href={`/admin/print/${share.code}`} className={SECONDARY_BUTTON}>
+                        <Link href={`/admin/print/${share.code}`} className={SECONDARY_BUTTON}>
                           Print
-                        </a>
+                        </Link>
                       </div>
                     </li>
                   );
@@ -156,13 +155,6 @@ export default async function AdminPage() {
 /** "KNEE" becomes "Knee". */
 function categoryLabel(value: Category) {
   return CATEGORIES.find((c) => c.value === value)?.label ?? value;
-}
-
-/** 110 seconds becomes "1:50". */
-function formatDuration(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 /** Shown in Utah time for now, since the one Phase 1 clinic is ours. */

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { CATEGORIES, CATEGORY_GROUP } from "@/lib/categories";
+import { LOGO_URL } from "@/lib/brand";
 import { BooksIcon, CloseIcon, HomeIcon, ShareIcon } from "./icons";
 
 /**
@@ -26,8 +27,6 @@ import { BooksIcon, CloseIcon, HomeIcon, ShareIcon } from "./icons";
  * Phase 2 shows the share icon only to people allowed into the admin console.
  */
 
-const LOGO = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/6a394f4daad9a6c8cc1d16a4_pulse3dmedia-logo-p-500.png";
-
 export function AppShell({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -49,7 +48,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <LibraryButton open={open} onClick={toggle} className="md:hidden" />
         <Link href="/library" className="flex items-center" aria-label="Pulse 3D, library home">
           {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-          <img src={LOGO} alt="Pulse 3D" className="h-7 w-auto" />
+          <img src={LOGO_URL} alt="Pulse 3D" className="h-7 w-auto" />
         </Link>
         <div className="ml-auto flex items-center gap-2">
           <span className="hidden text-sm text-[#667085] sm:inline">

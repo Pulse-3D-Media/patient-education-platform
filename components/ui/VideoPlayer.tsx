@@ -11,6 +11,7 @@ import {
   ReplayIcon,
   VolumeIcon,
 } from "./icons";
+import { formatDuration } from "@/lib/format";
 
 /**
  * The full-screen procedure player, with our own controls instead of the
@@ -195,8 +196,8 @@ export function VideoPlayer({
         className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-5 pb-3 pt-12 transition-opacity duration-300 ${fade}`}
       >
         <div className="flex items-center justify-between text-sm font-medium text-white">
-          <span>{fmt(time)}</span>
-          <span className="text-[#bfbfbf]">{fmt(duration)}</span>
+          <span>{formatDuration(time)}</span>
+          <span className="text-[#bfbfbf]">{formatDuration(duration)}</span>
         </div>
 
         {/* Scrub bar: a drawn track and thumb, with an invisible range input over it for dragging */}
@@ -269,12 +270,4 @@ function Control({ onClick, label, children }: { onClick: () => void; label: str
       {children}
     </button>
   );
-}
-
-/** 252 seconds becomes "4:12". */
-function fmt(seconds: number) {
-  if (!Number.isFinite(seconds)) return "0:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }

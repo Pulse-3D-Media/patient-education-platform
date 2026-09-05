@@ -14,7 +14,7 @@ import { EXPIRY_DAYS } from "./expiry";
  */
 
 /** What the create-link form gets back: the new code, or a message to show. */
-export type CreateShareState = { code?: string; error?: string } | null;
+type CreateShareState = { code?: string; error?: string } | null;
 
 /**
  * Handles the "Create share link" form for one video.

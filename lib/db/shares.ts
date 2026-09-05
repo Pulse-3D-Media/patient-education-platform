@@ -5,9 +5,10 @@ import { prisma } from "./client";
  * Queries for the Share table. A share is one link a clinic gives a patient:
  * /watch/<code>, tied to a procedure video and a clinic, never to a person.
  *
- * Every function here takes clinicId as its first argument and filters by it
- * (rule 1 in CLAUDE.md). That is what keeps one clinic from ever seeing
- * another clinic's links.
+ * Functions used on the clinic side take clinicId as their first argument
+ * and filter by it (rule 1 in CLAUDE.md). That is what keeps one clinic from
+ * ever seeing another clinic's links. The two exceptions, getShareByCode and
+ * recordShareView, serve the public patient page, where there is no clinic.
  */
 
 /** The characters a share code is made from: lowercase letters and digits. */

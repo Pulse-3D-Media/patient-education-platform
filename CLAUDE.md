@@ -217,10 +217,18 @@ model Share {
 app/watch/[code]     The patient viewer. Phone-first, no login, no navigation.
 app/library          The surgeon's exam-room browser. Tablet-first. Browse, play, send.
 app/admin            The office-manager console. Share links, QR codes, reporting.
+app/admin/print/     The printable pamphlet for one share link.
+app/admin/qr/        The QR code image for one share link.
 lib/db/              EVERY database query. Nothing else touches Prisma.
 lib/video.ts         getPlaybackUrl(). The only place a video URL is built.
+lib/clinic.ts        getCurrentClinicId(). Phase 1 reads CLINIC_ID, Phase 2 reads the signed-in user. The one swap point.
+lib/share-link.ts    watchLink() and qrFileName(). The only place a patient link is built.
+lib/base-url.ts      getBaseUrl(). The site's own address, read from the request, so links work on any deployment.
+lib/qr.ts            QR codes for share links, as PNG (download) or SVG (print).
+lib/brand.ts         The logo address.
+lib/format.ts        formatDuration(). Seconds as "4:12".
 prisma/              Schema and migrations.
-components/ui/       Shared buttons, cards, layout.
+components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin.
 ```
 
 ---

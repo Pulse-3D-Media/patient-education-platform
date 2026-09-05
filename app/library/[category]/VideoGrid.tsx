@@ -16,11 +16,11 @@ type Sending = { video: Item; result: SendResult | null };
  * The procedure cards, the search box, the full-screen player (its controls
  * live in components/ui/VideoPlayer.tsx) and the Send panel.
  *
- * Each card has two actions, both one tap: Play opens the player, Send
- * creates a 14-day patient link and shows it with a QR code, right here,
- * without leaving the page. Tapping the thumbnail plays too.
+ * Each card has two actions, both one tap: tapping the thumbnail plays, and
+ * the small send icon beside the title creates a 14-day patient link and
+ * shows it with a QR code, right here, without leaving the page.
  *
- * This is a client component because tapping Play has to start playback
+ * This is a client component because tapping a card has to start playback
  * inside the tap itself. Browsers only allow a video to start with sound when
  * the user has just interacted with the page.
  *
@@ -141,9 +141,6 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
   );
 }
 
-/** The two card buttons share a size big enough for a tablet held in one hand. */
-const CARD_BUTTON = "inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-lg text-base font-medium transition";
-
 function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => void; onSend: () => void }) {
   const [thumbFailed, setThumbFailed] = useState(false);
 
@@ -182,30 +179,18 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
         )}
       </button>
 
-      <div className="flex flex-1 flex-col px-5 pt-4 pb-5">
-        <h3 className="line-clamp-2 text-xl font-semibold leading-snug">{video.title}</h3>
-
-        {/* Play and Send: separate actions, both one tap, as the rules file asks. */}
-        <div className="mt-4 flex gap-3">
-          <button
-            type="button"
-            onClick={onPlay}
-            aria-label={`Play ${video.title}`}
-            className={`${CARD_BUTTON} bg-[#2a829b] text-white hover:bg-[#1e5668] active:scale-[0.97]`}
-          >
-            <PlayIcon className="h-5 w-5" />
-            Play
-          </button>
-          <button
-            type="button"
-            onClick={onSend}
-            aria-label={`Send ${video.title} to a patient`}
-            className={`${CARD_BUTTON} border border-white/15 text-[#bfbfbf] hover:border-[#2a829b] hover:text-white active:scale-[0.97]`}
-          >
-            <ShareIcon className="h-5 w-5" />
-            Send
-          </button>
-        </div>
+      {/* Title on the left, the send icon on the right. Playing is the thumbnail above. */}
+      <div className="flex flex-1 items-center justify-between gap-4 px-5 py-4">
+        <h3 className="line-clamp-2 min-w-0 text-xl font-semibold leading-snug">{video.title}</h3>
+        <button
+          type="button"
+          onClick={onSend}
+          aria-label={`Send ${video.title} to a patient`}
+          title="Send to a patient"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/15 text-[#bfbfbf] transition hover:border-[#2a829b] hover:text-white active:scale-[0.95]"
+        >
+          <ShareIcon className="h-5 w-5" />
+        </button>
       </div>
     </article>
   );

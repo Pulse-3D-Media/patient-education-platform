@@ -10,6 +10,7 @@ import { formatDuration } from "@/lib/format";
 import { listSharesForClinic } from "@/lib/db/shares";
 import { listPublishedVideos } from "@/lib/db/videos";
 import { qrFileName, watchLink } from "@/lib/share-link";
+import { CancelShareButton } from "./CancelShareButton";
 import { CreateShareForm } from "./CreateShareForm";
 
 /**
@@ -19,8 +20,8 @@ import { CreateShareForm } from "./CreateShareForm";
  * Two things on the page:
  *   1. Every published video, each with a "Create share link" form.
  *   2. Every share link this clinic has made, with its expiry and view count,
- *      and buttons to copy the link, download its QR code as a picture, or
- *      open a printable pamphlet.
+ *      and buttons to copy the link, download its QR code as a picture,
+ *      open a printable pamphlet, or cancel it (after a yes/no popup).
  *
  * Everything wraps to the width it is given. Long links break across lines
  * and the buttons drop to a second row, so the page never scrolls sideways.
@@ -139,6 +140,7 @@ export default async function AdminPage() {
                         <Link href={`/admin/print/${share.code}`} className={SECONDARY_BUTTON}>
                           Print
                         </Link>
+                        <CancelShareButton code={share.code} title={share.video.title} expired={expired} />
                       </div>
                     </li>
                   );

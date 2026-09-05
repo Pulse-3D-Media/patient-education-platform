@@ -107,3 +107,15 @@ export async function getShareForClinic(clinicId: string, code: string) {
     include: { video: { select: { title: true } } },
   });
 }
+
+/**
+ * Cancel one of this clinic's share links by deleting it. The link stops
+ * working at once: a patient who still has it sees the "we couldn't find
+ * this link" page. Returns true if a link was removed, false if no link had
+ * that code or it belongs to another clinic (the clinicId filter is what
+ * stops one clinic cancelling another clinic's links).
+ */
+export async function deleteShareForClinic(clinicId: string, code: string) {
+  const result = await prisma.share.deleteMany({ where: { code, clinicId } });
+  return result.count > 0;
+}

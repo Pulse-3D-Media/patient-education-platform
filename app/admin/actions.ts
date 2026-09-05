@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getCurrentClinicId } from "@/lib/clinic";
-import { createShare } from "@/lib/db/shares";
+import { createShare, deleteShareForClinic } from "@/lib/db/shares";
 import { EXPIRY_DAYS } from "./expiry";
 
 /**
@@ -48,5 +48,36 @@ export async function createShareAction(
     return { code: share.code };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "Could not create the link." };
+  }
+}
+
+/** What the Cancel link popup gets back: nothing on success, or a message to show. */
+type CancelShareState = { error?: string };
+
+/**
+ * Handles "Yes, cancel it" in the popup for one share link. The link is
+ * deleted, so it stops working at once, and the admin list is refreshed.
+ */
+export async function cancelShareAction(code: string): Promise<CancelShareState> {
+  const clinicId = getCurrentClinicId();
+  if (!clinicId) {
+    return { error: "CLINIC_ID is not set. Run npm run db:seed and copy the id into .env." };
+  }
+
+  const trimmed = typeof code === "string" ? code.trim() : "";
+  if (!trimmed) {
+    return { error: "No link was selected." };
+  }
+
+  try {
+    // deleteShareForClinic says whether a row was actually removed. If it was
+    // not (someone cancelled it moments ago in another tab), the end result is
+    // the same, the link is gone, so that still counts as success here.
+    await deleteShareForClinic(clinicId, trimmed);
+    // Tell Next.js the admin page's data changed so the links list refreshes.
+    revalidatePath("/admin");
+    return {};
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Could not cancel the link." };
   }
 }

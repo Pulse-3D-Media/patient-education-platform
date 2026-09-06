@@ -2,10 +2,10 @@
  * Seed for the PLACEHOLDER library. Run with: npm run db:seed-placeholders
  *
  * Twelve videos, two per category. Each carries a real procedure name from
- * the production tracker, but the animation that plays is one of four sample
- * clips already on the Webflow CDN, not that procedure. They exist so the
- * library, the send flow and the patient page can be tested with something in
- * every category before the finished animations arrive.
+ * the production tracker, but the animation that plays is a compressed copy
+ * of a finished Pulse 3D client animation, not that procedure. They exist so
+ * the library, the send flow and the patient page can be tested with
+ * something in every category before the finished animations arrive.
  *
  * Every row is marked isPlaceholder (and isPublished, so it shows). The app
  * shows that mark everywhere the video can appear: the library card, the
@@ -28,38 +28,34 @@ import { prisma } from "../lib/db/client";
 const CDN = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/";
 
 /**
- * The four sample animations. durationSeconds must match the file it names:
- * the patient page turns it into "About 2 minutes", so a wrong number lies.
- * (Measured with ffprobe: 109.97s, 75.80s, 30.00s and 26.28s.)
+ * Two per category, each playing a different animation. The files are 720p
+ * compressed copies (4 to 15 MB each) of client work that is already public
+ * on pulse3dmedia.com, uploaded to the Webflow CDN with a "ph-" prefix so
+ * they are easy to find and remove later.
+ *
+ * Each was chosen to sit near the procedure it stands in for (an anterior
+ * lumbar fusion for Lumbar Spinal Fusion, a deformity construct for
+ * scoliosis, a printed acetabular cup for Total Hip Replacement), but none
+ * of them IS that procedure, which is why every row is a placeholder. The
+ * "shows" note says what actually plays.
+ *
+ * durationSeconds must match the file it names: the patient page turns it
+ * into "About 2 minutes", so a wrong number lies. Each was measured with
+ * ffprobe after encoding and rounded to the nearest second.
  */
-const SAMPLES = {
-  /** The full Total Knee Replacement animation, 1080p with narration. */
-  tkaFull: { videoUrl: CDN + "6a9b3ee8b6ec46348bcd5e45_knee-tka-full.mp4", durationSeconds: 110 },
-  /** The website's hero reel: several procedures, 720p, silent. */
-  heroReel: { videoUrl: CDN + "6a91edc05b3602fb5efca05a_hero-optimized.mp4", durationSeconds: 76 },
-  /** A 30 second silent teaser cut of the knee animation. */
-  tkaTeaser: { videoUrl: CDN + "6a4fc5dbbbce8d36065ff9b0_knee-tka-teaser-silent.mp4", durationSeconds: 30 },
-  /** A 26 second header cut of the knee animation, with sound. */
-  tkaHeader: { videoUrl: CDN + "6a4ed124d5c41de325c28578_knee-tka-header.mp4", durationSeconds: 26 },
-} as const;
-
-/**
- * Two per category. The samples are spread so that no category plays the
- * same clip twice and each clip is used three times across the twelve.
- */
-const PLACEHOLDERS: { title: string; category: Category; sample: keyof typeof SAMPLES }[] = [
-  { title: "Lumbar Discectomy", category: "SPINE", sample: "heroReel" },
-  { title: "Lumbar Spinal Fusion", category: "SPINE", sample: "tkaFull" },
-  { title: "Pedicle Subtraction Osteotomy (L3)", category: "COMPLEX_SPINE", sample: "tkaFull" },
-  { title: "Adult Scoliosis Correction", category: "COMPLEX_SPINE", sample: "tkaTeaser" },
-  { title: "Partial Knee Replacement", category: "KNEE", sample: "tkaHeader" },
-  { title: "ACL Reconstruction", category: "KNEE", sample: "heroReel" },
-  { title: "Arthroscopic Rotator Cuff Repair", category: "SHOULDER", sample: "tkaTeaser" },
-  { title: "Reverse Total Shoulder Arthroplasty", category: "SHOULDER", sample: "tkaFull" },
-  { title: "Total Hip Replacement", category: "HIP", sample: "heroReel" },
-  { title: "Hip Arthroscopy (FAI)", category: "HIP", sample: "tkaHeader" },
-  { title: "Bunion Correction", category: "FOOT_ANKLE", sample: "tkaTeaser" },
-  { title: "Achilles Tendon Repair", category: "FOOT_ANKLE", sample: "tkaHeader" },
+const PLACEHOLDERS: { title: string; category: Category; file: string; durationSeconds: number; shows: string }[] = [
+  { title: "Lumbar Discectomy", category: "SPINE", file: "6a9cd63ecb6d4022ce7481ed_ph-canyon-port.mp4", durationSeconds: 78, shows: "lateral lumbar access port" },
+  { title: "Lumbar Spinal Fusion", category: "SPINE", file: "6a9cd63ece49ad1ffc877dea_ph-sigma-alif.mp4", durationSeconds: 124, shows: "anterior lumbar interbody fusion" },
+  { title: "Pedicle Subtraction Osteotomy (L3)", category: "COMPLEX_SPINE", file: "6a9cd63e82aa537acd97e1ac_ph-corpectomy-retractor.mp4", durationSeconds: 63, shows: "corpectomy retractor and implant" },
+  { title: "Adult Scoliosis Correction", category: "COMPLEX_SPINE", file: "6a9cd63e97bddf109c447bc9_ph-everest-deformity.mp4", durationSeconds: 404, shows: "long deformity pedicle screw construct" },
+  { title: "Partial Knee Replacement", category: "KNEE", file: "6a9cd63e97bddf109c447be1_ph-meniscus-root-repair.mp4", durationSeconds: 223, shows: "meniscus root repair" },
+  { title: "ACL Reconstruction", category: "KNEE", file: "6a9cd63f6f4d62ece154c248_ph-switchcut-acl.mp4", durationSeconds: 129, shows: "retrograde ACL tunnel reaming" },
+  { title: "Arthroscopic Rotator Cuff Repair", category: "SHOULDER", file: "6a9cd63fa1f6d1014115c6be_ph-rotator-cuff-repair.mp4", durationSeconds: 198, shows: "rotator cuff suture repair" },
+  { title: "Reverse Total Shoulder Arthroplasty", category: "SHOULDER", file: "6a9cd63f99bc97465038d36d_ph-humeris-reverse-shoulder.mp4", durationSeconds: 203, shows: "reverse shoulder humeral component" },
+  { title: "Total Hip Replacement", category: "HIP", file: "6a9cd63ff7be1fa65cefc0e0_ph-osseoti-hip.mp4", durationSeconds: 113, shows: "printed acetabular cup" },
+  { title: "Hip Arthroscopy (FAI)", category: "HIP", file: "6a9cd63febbb1197269e8684_ph-iconix-hip-labral.mp4", durationSeconds: 197, shows: "arthroscopic hip labral repair" },
+  { title: "Bunion Correction", category: "FOOT_ANKLE", file: "6a9cd63f6dadb978a9f27b8d_ph-bunionplasty.mp4", durationSeconds: 192, shows: "bunion correction with sesamoid adjustment" },
+  { title: "Achilles Tendon Repair", category: "FOOT_ANKLE", file: "6a9cd6403b90d1aec7450ddb_ph-achilles-repair.mp4", durationSeconds: 143, shows: "insertional Achilles repair with anchors" },
 ];
 
 async function main() {
@@ -68,10 +64,9 @@ async function main() {
   let skipped = 0;
 
   for (const placeholder of PLACEHOLDERS) {
-    const sample = SAMPLES[placeholder.sample];
     const data = {
-      videoUrl: sample.videoUrl,
-      durationSeconds: sample.durationSeconds,
+      videoUrl: CDN + placeholder.file,
+      durationSeconds: placeholder.durationSeconds,
       isPublished: true,
       isPlaceholder: true,
     };
@@ -90,7 +85,7 @@ async function main() {
     if (existing) {
       await prisma.video.update({ where: { id: existing.id }, data });
       updated++;
-      console.log(`Updated  ${placeholder.title} (${placeholder.category}, ${placeholder.sample}, ${sample.durationSeconds}s)`);
+      console.log(`Updated  ${placeholder.title} (${placeholder.category}, ${placeholder.durationSeconds}s, shows ${placeholder.shows})`);
       continue;
     }
 
@@ -98,7 +93,7 @@ async function main() {
       data: { title: placeholder.title, category: placeholder.category, ...data },
     });
     created++;
-    console.log(`Created  ${placeholder.title} (${placeholder.category}, ${placeholder.sample}, ${sample.durationSeconds}s)`);
+    console.log(`Created  ${placeholder.title} (${placeholder.category}, ${placeholder.durationSeconds}s, shows ${placeholder.shows})`);
   }
 
   console.log(`Placeholders: ${created} created, ${updated} updated, ${skipped} skipped, ${PLACEHOLDERS.length} in this file.`);

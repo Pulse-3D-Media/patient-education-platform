@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Category } from "@prisma/client";
 import { AppShell } from "@/components/ui/AppShell";
 import { CopyButton } from "@/components/ui/CopyButton";
-import { SECONDARY_BUTTON } from "@/components/ui/styles";
+import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
 import { getCurrentClinicId } from "@/lib/clinic";
@@ -23,6 +23,10 @@ import { CreateShareForm } from "./CreateShareForm";
  *   2. Every share link this clinic has made, with its expiry and view count,
  *      and buttons to copy the link, download its QR code as a picture,
  *      open a printable pamphlet, or cancel it (after a yes/no popup).
+ *
+ * A placeholder video (a sample animation under a real procedure name) is
+ * marked with an amber "Placeholder" badge in both lists, so whoever is at
+ * the desk can see at a glance which links play a sample.
  *
  * Everything wraps to the width it is given. Long links break across lines
  * and the buttons drop to a second row, so the page never scrolls sideways.
@@ -84,7 +88,10 @@ export default async function AdminPage() {
                     className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#0d1113] p-5 lg:flex-row lg:items-start lg:justify-between"
                   >
                     <div>
-                      <p className="text-xl font-semibold">{video.title}</p>
+                      <p className="flex flex-wrap items-center gap-2 text-xl font-semibold">
+                        {video.title}
+                        {video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
+                      </p>
                       <p className="mt-1 text-sm text-[#667085]">
                         {categoryLabel(video.category)}
                         {video.durationSeconds != null && <> &middot; {formatDuration(video.durationSeconds)}</>}
@@ -117,7 +124,10 @@ export default async function AdminPage() {
                       className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#0d1113] p-5 lg:flex-row lg:items-center lg:justify-between"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className={`text-lg font-semibold ${expired ? "text-[#667085]" : ""}`}>{share.video.title}</p>
+                        <p className={`flex flex-wrap items-center gap-2 text-lg font-semibold ${expired ? "text-[#667085]" : ""}`}>
+                          {share.video.title}
+                          {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
+                        </p>
                         {/* break-all lets a long address wrap anywhere instead of widening the page */}
                         <p className="mt-1 break-all text-sm text-[#bfbfbf]">{link}</p>
                         <p className="mt-2 text-sm text-[#667085]">

@@ -158,6 +158,7 @@ datasource db {
 
 enum Category {
   SPINE
+  COMPLEX_SPINE
   KNEE
   SHOULDER
   HIP
@@ -172,6 +173,7 @@ model Video {
   videoUrl        String                        // read via getPlaybackUrl(), never directly
   durationSeconds Int?
   isPublished     Boolean  @default(false)      // staging: Van finishes animations before they go live
+  isPlaceholder   Boolean  @default(false)      // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shares          Share[]
@@ -208,6 +210,8 @@ model Share {
 **Why `Clinic` exists in Phase 1 when there is only one of them.** Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter. Adding it now costs one table and one column. This is the single most important scale decision in the project.
 
 **Neon needs both URLs.** `DATABASE_URL` is the pooled connection the app uses; `DIRECT_URL` is the unpooled one Prisma needs to run migrations. Leaving `directUrl` out causes migrations to fail in ways that are hard to read.
+
+**Placeholder videos.** A video with `isPlaceholder` true carries a real procedure name but plays a sample animation, so the library can be tested before the finished animations exist. This is not the same as unpublished: placeholders are visible on purpose. The app marks them everywhere they appear (an amber "Placeholder" mark on the library card, in the player, across the top of the patient page, and in the admin lists). **If you show a video somewhere new, carry the mark with it.** They are seeded by `prisma/seed-placeholders.ts`; the real animations live in `prisma/seed-video.ts`, which never touches them.
 
 ---
 

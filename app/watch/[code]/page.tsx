@@ -26,6 +26,10 @@ import { WatchPlayer } from "./WatchPlayer";
  * sent me this, what is it, why, how long will it take. The Pulse 3D logo sits
  * at the very bottom, small, because the practice sent this, not us.
  *
+ * A placeholder link (a sample animation standing in for the named
+ * procedure) gets an amber bar above everything else saying so. The patient
+ * must never be able to watch one without seeing that.
+ *
  * The code in the address is looked up. If no link has that code, or the
  * link has expired, the patient sees a calm page asking them to get a new
  * link from the practice.
@@ -66,8 +70,10 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
 
   return (
     <main className="flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a]">
-      {/* 46px at the top keeps the first line clear of a phone's notch and status bar. */}
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-10 pt-[46px] sm:px-8">
+      {share.video.isPlaceholder && <PlaceholderBar />}
+
+      {/* 46px at the top keeps the first line clear of a phone's notch and status bar. When the placeholder bar is there, it carries that clearance instead. */}
+      <div className={`mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-10 sm:px-8 ${share.video.isPlaceholder ? "pt-6" : "pt-[46px]"}`}>
         {/* Who sent it comes first: it is the first thing an anxious person wants to know. */}
         <p className="text-[15px] font-semibold tracking-[.01em] text-[#46555e]">From {share.clinic.name}</p>
         <h1 className="mt-1.5 text-[29px] leading-[1.15] font-bold tracking-[-.022em]">{share.video.title}</h1>
@@ -118,5 +124,24 @@ function Unavailable({ icon, heading, body, note }: { icon: ReactNode; heading: 
       {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
       <img src={LOGO_URL} alt="Pulse 3D" className="mt-12 h-6 w-auto" />
     </main>
+  );
+}
+
+/**
+ * The bar across the top of a placeholder link. The video below it carries a
+ * real procedure name but plays a sample animation, so the patient is told
+ * before anything else on the page. It keeps to the page's own rules: 16px
+ * text, and #5a3d00 on #fff3d6 measures 9.1:1 against a 4.5:1 floor. Amber,
+ * not red, because nothing has gone wrong.
+ *
+ * It carries the 46px notch clearance itself, so the page below drops its own.
+ */
+function PlaceholderBar() {
+  return (
+    <div role="note" className="border-b-2 border-[#e2a12a] bg-[#fff3d6] px-6 pb-3.5 pt-[46px] sm:px-8">
+      <p className="mx-auto max-w-2xl text-[16px] leading-[1.45] text-[#5a3d00]">
+        <strong className="font-bold">Placeholder.</strong> This plays a sample animation, not this procedure.
+      </p>
+    </div>
   );
 }

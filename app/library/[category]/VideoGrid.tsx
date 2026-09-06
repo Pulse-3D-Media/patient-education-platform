@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { VideoPlayer } from "@/components/ui/VideoPlayer";
 import { PlayIcon, ShareIcon } from "@/components/ui/icons";
+import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { formatDuration } from "@/lib/format";
 import { sendShareAction, type SendResult } from "./actions";
 import { SendPanel } from "./SendPanel";
 
-type Item = { id: string; title: string; src: string; durationSeconds: number | null };
+type Item = { id: string; title: string; src: string; durationSeconds: number | null; isPlaceholder: boolean };
 
 /** The Send panel's state: which video, and the server's answer once it arrives. */
 type Sending = { video: Item; result: SendResult | null };
@@ -28,6 +29,11 @@ type Sending = { video: Item; result: SendResult | null };
  * preload="metadata" so each card costs only a few kilobytes and playback
  * starts faster because the file is already partly fetched. If a thumbnail
  * cannot load, the card shows a branded fallback instead of a broken box.
+ *
+ * A placeholder video (a sample animation standing in for the procedure it
+ * is named after) carries an amber "Placeholder" badge on its thumbnail,
+ * and the player shows the same mark the whole time it plays, so it cannot
+ * be mistaken for finished work.
  */
 export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryLabel: string }) {
   const [playing, setPlaying] = useState<Item | null>(null);
@@ -123,6 +129,7 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
             src={playing.src}
             title={playing.title}
             subtitle={categoryLabel}
+            placeholder={playing.isPlaceholder}
             onClose={() => setPlaying(null)}
           />
         </div>
@@ -150,7 +157,7 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
       <button
         type="button"
         onClick={onPlay}
-        aria-label={`Play ${video.title}`}
+        aria-label={video.isPlaceholder ? `Play ${video.title} (placeholder animation)` : `Play ${video.title}`}
         className="group relative block aspect-video w-full overflow-hidden bg-[#0f1518] active:scale-[0.985]"
       >
         {thumbFailed ? (
@@ -176,6 +183,9 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
           <span className="absolute bottom-3 right-3 rounded-md bg-black/70 px-2 py-0.5 text-sm font-medium text-white">
             {formatDuration(video.durationSeconds)}
           </span>
+        )}
+        {video.isPlaceholder && (
+          <span className={`absolute left-3 top-3 ${PLACEHOLDER_BADGE} shadow-[0_2px_10px_rgba(0,0,0,.5)]`}>Placeholder</span>
         )}
       </button>
 

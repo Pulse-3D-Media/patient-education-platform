@@ -58,13 +58,15 @@ export async function createShare(clinicId: string, videoId: string, days: numbe
 }
 
 /**
- * Every share link this clinic has created, newest first, with the title of
- * the video each one points at and whether that video is a placeholder.
+ * Every share link this clinic has created, newest first, with the title and
+ * category of the video each one points at and whether that video is a
+ * placeholder. The category is what lets the admin page filter links with
+ * the same pills it uses for procedures.
  */
 export async function listSharesForClinic(clinicId: string) {
   return prisma.share.findMany({
     where: { clinicId },
-    include: { video: { select: { title: true, isPlaceholder: true } } },
+    include: { video: { select: { title: true, category: true, isPlaceholder: true } } },
     orderBy: { createdAt: "desc" },
   });
 }

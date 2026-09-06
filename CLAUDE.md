@@ -226,7 +226,7 @@ lib/share-link.ts    watchLink() and qrFileName(). The only place a patient link
 lib/base-url.ts      getBaseUrl(). The site's own address, read from the request, so links work on any deployment.
 lib/qr.ts            QR codes for share links, as PNG (download) or SVG (print).
 lib/brand.ts         The logo address.
-lib/format.ts        formatDuration(). Seconds as "4:12".
+lib/format.ts        formatDuration(), seconds as "4:12" for the staff screens. describeDuration(), "About 2 minutes" for the patient page.
 lib/expiry.ts        SHARE_EXPIRY_DAYS. How long every share link works. The only place that number lives.
 prisma/              Schema and migrations.
 components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin.

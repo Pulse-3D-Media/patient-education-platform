@@ -18,13 +18,15 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
 
   const videos = await listPublishedVideosByCategory(category.value);
 
-  // Only plain data crosses into the browser: id, title, duration and the
-  // playback address (built here on the server, through the video boundary).
+  // Only plain data crosses into the browser: id, title, duration, whether it
+  // is a placeholder, and the playback address (built here on the server,
+  // through the video boundary).
   const items = videos.map((video) => ({
     id: video.id,
     title: video.title,
     src: getPlaybackUrl(video),
     durationSeconds: video.durationSeconds,
+    isPlaceholder: video.isPlaceholder,
   }));
 
   return (

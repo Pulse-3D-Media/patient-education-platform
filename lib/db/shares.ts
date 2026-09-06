@@ -59,12 +59,12 @@ export async function createShare(clinicId: string, videoId: string, days: numbe
 
 /**
  * Every share link this clinic has created, newest first, with the title of
- * the video each one points at.
+ * the video each one points at and whether that video is a placeholder.
  */
 export async function listSharesForClinic(clinicId: string) {
   return prisma.share.findMany({
     where: { clinicId },
-    include: { video: { select: { title: true } } },
+    include: { video: { select: { title: true, isPlaceholder: true } } },
     orderBy: { createdAt: "desc" },
   });
 }

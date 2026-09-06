@@ -1,4 +1,5 @@
 import type { Category } from "@prisma/client";
+import { CATEGORIES } from "../categories";
 import { prisma } from "./client";
 
 /**
@@ -40,11 +41,21 @@ export async function countPublishedVideosByCategory() {
 
 /**
  * Every published video across all categories, for the admin console.
- * Sorted by category (in the order the enum lists them), then by title.
+ * Sorted by category in the order lib/categories lists them (the same order
+ * as the library tiles and the drawer), then by title.
+ *
+ * The sort happens here rather than in the database because Postgres keeps
+ * enum values in the order they were added, so Complex Spine would land
+ * after Foot & Ankle instead of next to Orthopedic Spine.
  */
 export async function listPublishedVideos() {
-  return prisma.video.findMany({
+  const videos = await prisma.video.findMany({
     where: { isPublished: true },
-    orderBy: [{ category: "asc" }, { title: "asc" }],
+    orderBy: { title: "asc" },
   });
+
+  // Where each category sits in the on-screen order. Sorting is stable, so
+  // videos in the same category keep their title order from the query.
+  const position = new Map(CATEGORIES.map((c, index) => [c.value, index]));
+  return videos.sort((a, b) => (position.get(a.category) ?? 99) - (position.get(b.category) ?? 99));
 }

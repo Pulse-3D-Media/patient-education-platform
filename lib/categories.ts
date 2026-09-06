@@ -7,11 +7,13 @@ import type { Category } from "@prisma/client";
  * each one to the label a surgeon reads ("Knee", "Foot & Ankle"), the slug in
  * the URL (/library/knee, /library/foot-ankle) and a tile image.
  *
- * Adding a category is one line here plus the enum value in the schema. The
+ * Adding a category is one entry here plus the enum value in the schema. The
  * navigation, tiles and pages all render from this list.
  *
  * Tile images are stills already published on pulse3dmedia.com, served from
- * its CDN. Nothing here is unreleased.
+ * its CDN. Nothing here is unreleased. Every address was checked to return
+ * 200 before it was committed: a wrong asset id returns 403 and the tile
+ * renders empty, so do not invent one.
  */
 
 /** The heading the category navigation groups these under. */
@@ -21,10 +23,28 @@ const CDN = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/";
 
 export const CATEGORIES: { value: Category; label: string; slug: string; image: string }[] = [
   {
+    // The enum value stayed SPINE when the label became "Orthopedic Spine",
+    // so no migration was needed. Nothing outside this app links to the old
+    // /library/spine slug.
     value: "SPINE",
-    label: "Spine",
-    slug: "spine",
+    label: "Orthopedic Spine",
+    slug: "orthopedic-spine",
     image: CDN + "6949c3ca377bfce5f6c7fbe8_PCF_04_Cervical_Construct-p-1080.png",
+  },
+  {
+    // Deformity and revision work: osteotomies, scoliosis correction, long
+    // constructs. A permanent category that sits next to Orthopedic Spine.
+    // Only the videos inside it are placeholders for now.
+    value: "COMPLEX_SPINE",
+    label: "Complex Spine",
+    slug: "complex-spine",
+    // A long posterior pedicle screw and rod construct (K2M NILE), from the
+    // Still Images page on pulse3dmedia.com. That is the kind of construct a
+    // deformity patient gets, and it is a different picture from the cervical
+    // construct on the tile above. Checked 200 on 2026-09-05. The original is
+    // 640x360 and Webflow made no resized (-p-800) copy of it, so this is the
+    // only working address.
+    image: CDN + "6949c4131995a0c298500b44_K2M_NILE_01.jpg",
   },
   {
     value: "KNEE",

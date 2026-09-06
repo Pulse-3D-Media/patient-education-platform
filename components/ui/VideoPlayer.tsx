@@ -11,6 +11,7 @@ import {
   ReplayIcon,
   VolumeIcon,
 } from "./icons";
+import { PLACEHOLDER_CHIP } from "./styles";
 import { formatDuration } from "@/lib/format";
 
 /**
@@ -24,16 +25,23 @@ import { formatDuration } from "@/lib/format";
  *
  * Playback starts as soon as the element mounts (autoPlay), which is inside
  * the tap that opened the player, so sound is allowed.
+ *
+ * A placeholder video gets an amber "Placeholder animation" chip in the top
+ * left corner. Unlike the controls it never fades: the mark has to be there
+ * for as long as the picture is.
  */
 export function VideoPlayer({
   src,
   title,
   subtitle,
+  placeholder = false,
   onClose,
 }: {
   src: string;
   title: string;
   subtitle?: string;
+  /** True for a sample animation standing in for the named procedure. Keeps a chip over the picture the whole time. */
+  placeholder?: boolean;
   onClose: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -173,9 +181,12 @@ export function VideoPlayer({
         className="absolute inset-0 h-full w-full object-contain"
       />
 
-      {/* Title band */}
+      {/* The placeholder chip sits outside the fading bands so it stays put while the controls hide. */}
+      {placeholder && <span className={`absolute left-5 top-4 z-10 ${PLACEHOLDER_CHIP}`}>Placeholder animation</span>}
+
+      {/* Title band. It starts lower when the chip is there, so the title sits under it, not behind it. */}
       <div
-        className={`absolute inset-x-0 top-0 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pt-4 pb-10 transition-opacity duration-300 ${fade}`}
+        className={`absolute inset-x-0 top-0 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pb-10 transition-opacity duration-300 ${placeholder ? "pt-14" : "pt-4"} ${fade}`}
       >
         <div className="min-w-0">
           <h2 className="truncate text-xl font-semibold text-white sm:text-2xl">{title}</h2>

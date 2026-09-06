@@ -10,7 +10,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx --env-file=.env prisma/seed.ts",
-    "db:seed-video": "tsx --env-file=.env prisma/seed-video.ts"
+    "db:seed-video": "tsx --env-file=.env prisma/seed-video.ts",
+    "db:seed-placeholders": "tsx --env-file=.env prisma/seed-placeholders.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

@@ -10,6 +10,7 @@ datasource db {
 
 enum Category {
   SPINE
+  COMPLEX_SPINE
   KNEE
   SHOULDER
   HIP
@@ -24,6 +25,7 @@ model Video {
   videoUrl        String                        // read via getPlaybackUrl(), never directly
   durationSeconds Int?
   isPublished     Boolean  @default(false)      // staging: Van finishes animations before they go live
+  isPlaceholder   Boolean  @default(false)      // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shares          Share[]

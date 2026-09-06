@@ -1,8 +1,5 @@
-import Link from "next/link";
 import type { Category } from "@prisma/client";
 import { AppShell } from "@/components/ui/AppShell";
-import { CopyButton } from "@/components/ui/CopyButton";
-import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
 import { getCurrentClinicId } from "@/lib/clinic";
@@ -10,26 +7,28 @@ import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { formatDuration } from "@/lib/format";
 import { listSharesForClinic } from "@/lib/db/shares";
 import { listPublishedVideos } from "@/lib/db/videos";
-import { qrFileName, watchLink } from "@/lib/share-link";
-import { CancelShareButton } from "./CancelShareButton";
-import { CreateShareForm } from "./CreateShareForm";
+import { ShareLists } from "./ShareLists";
 
 /**
  * The office-manager console, inside the same shell (banner, icon rail,
  * category drawer) as the library, so a surgeon can reach it from the rail.
  *
- * Two things on the page:
+ * Two things on the page, both drawn by ShareLists:
  *   1. Every published video, each with a "Create share link" form.
  *   2. Every share link this clinic has made, with its expiry and view count,
  *      and buttons to copy the link, download its QR code as a picture,
  *      open a printable pamphlet, or cancel it (after a yes/no popup).
  *
+ * Above both lists sit category pills and a search box, so the desk can find
+ * one procedure (or its links) without reading the whole list.
+ *
  * A placeholder video (a sample animation under a real procedure name) is
  * marked with an amber "Placeholder" badge in both lists, so whoever is at
  * the desk can see at a glance which links play a sample.
  *
- * Everything wraps to the width it is given. Long links break across lines
- * and the buttons drop to a second row, so the page never scrolls sideways.
+ * This file fetches the data on the server (rule 1) and turns it into plain
+ * text for the browser: dates become the words the page shows, so the
+ * client side has no date maths and no time zone to get wrong.
  *
  * Always rendered fresh (never cached): someone who just made a link needs
  * to see it in the list straight away.
@@ -60,6 +59,32 @@ export default async function AdminPage() {
 
   const now = new Date();
 
+  const procedures = videos.map((video) => ({
+    id: video.id,
+    title: video.title,
+    category: video.category,
+    categoryLabel: categoryLabel(video.category),
+    durationText: video.durationSeconds == null ? null : formatDuration(video.durationSeconds),
+    isPlaceholder: video.isPlaceholder,
+  }));
+
+  const links = shares.map((share) => {
+    const expired = share.expiresAt < now;
+    return {
+      id: share.id,
+      code: share.code,
+      title: share.video.title,
+      category: share.video.category,
+      categoryLabel: categoryLabel(share.video.category),
+      isPlaceholder: share.video.isPlaceholder,
+      expired,
+      whenText: expired
+        ? `Expired ${formatDate(share.expiresAt)}`
+        : `Expires ${formatDate(share.expiresAt)} · ${daysLeft(share.expiresAt, now)}`,
+      viewCount: share.viewCount,
+    };
+  });
+
   return (
     <AppShell>
       <main className="px-5 py-6 sm:px-8">
@@ -72,93 +97,7 @@ export default async function AdminPage() {
             </p>
           </header>
 
-          {/* 1. Published videos, each with its create form */}
-          <section aria-labelledby="videos-heading" className="mt-10">
-            <h2 id="videos-heading" className="text-lg font-semibold">
-              Procedures
-            </h2>
-
-            {videos.length === 0 ? (
-              <p className="mt-3 text-[#bfbfbf]">No published videos yet.</p>
-            ) : (
-              <ul className="mt-3 flex flex-col gap-3">
-                {videos.map((video) => (
-                  <li
-                    key={video.id}
-                    className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#0d1113] p-5 lg:flex-row lg:items-start lg:justify-between"
-                  >
-                    <div>
-                      <p className="flex flex-wrap items-center gap-2 text-xl font-semibold">
-                        {video.title}
-                        {video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
-                      </p>
-                      <p className="mt-1 text-sm text-[#667085]">
-                        {categoryLabel(video.category)}
-                        {video.durationSeconds != null && <> &middot; {formatDuration(video.durationSeconds)}</>}
-                      </p>
-                    </div>
-                    <CreateShareForm videoId={video.id} baseUrl={baseUrl} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          {/* 2. Existing share links for this clinic */}
-          <section aria-labelledby="links-heading" className="mt-12">
-            <h2 id="links-heading" className="text-lg font-semibold">
-              Existing links
-            </h2>
-
-            {shares.length === 0 ? (
-              <p className="mt-3 text-[#bfbfbf]">No links yet. Create one above.</p>
-            ) : (
-              <ul className="mt-3 flex flex-col gap-3">
-                {shares.map((share) => {
-                  const link = watchLink(baseUrl, share.code);
-                  const qrUrl = `/admin/qr/${share.code}`;
-                  const expired = share.expiresAt < now;
-                  return (
-                    <li
-                      key={share.id}
-                      className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#0d1113] p-5 lg:flex-row lg:items-center lg:justify-between"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className={`flex flex-wrap items-center gap-2 text-lg font-semibold ${expired ? "text-[#667085]" : ""}`}>
-                          {share.video.title}
-                          {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
-                        </p>
-                        {/* break-all lets a long address wrap anywhere instead of widening the page */}
-                        <p className="mt-1 break-all text-sm text-[#bfbfbf]">{link}</p>
-                        <p className="mt-2 text-sm text-[#667085]">
-                          {expired ? (
-                            <>Expired {formatDate(share.expiresAt)}</>
-                          ) : (
-                            <>
-                              Expires {formatDate(share.expiresAt)} &middot; {daysLeft(share.expiresAt, now)}
-                            </>
-                          )}
-                          &nbsp;&middot; {share.viewCount} {share.viewCount === 1 ? "view" : "views"}
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 lg:shrink-0 lg:justify-end">
-                        <CopyButton text={link} label="Copy link" />
-                        {/* A plain link with a download name: the browser saves the picture instead of opening it */}
-                        <a href={qrUrl} download={qrFileName(share.video.title, share.code)} className={SECONDARY_BUTTON}>
-                          Download QR
-                        </a>
-                        <Link href={`/admin/print/${share.code}`} className={SECONDARY_BUTTON}>
-                          Print
-                        </Link>
-                        <CancelShareButton code={share.code} title={share.video.title} expired={expired} />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
+          <ShareLists procedures={procedures} links={links} baseUrl={baseUrl} />
         </div>
       </main>
     </AppShell>

@@ -234,6 +234,7 @@ lib/format.ts        formatDuration(), seconds as "4:12" for the staff screens. 
 lib/expiry.ts        SHARE_EXPIRY_DAYS. How long every share link works. The only place that number lives.
 prisma/              Schema and migrations.
 components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin.
+.claude/skills/      Two process skills Claude loads here automatically: verification-before-completion, systematic-debugging. See its README. Never put .ts files under .claude/.
 ```
 
 ---

@@ -1,3 +1,4 @@
+import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getBaseUrl } from "@/lib/base-url";
@@ -36,7 +37,11 @@ const PRINT_CSS = `
 export default async function PrintPage({ params }: PageProps<"/admin/print/[code]">) {
   const { code } = await params;
 
-  const clinicId = getCurrentClinicId();
+  // Signed out: Clerk sends them to sign in and back here afterwards.
+  await auth.protect();
+
+  // Signed in but not a member of a linked clinic: the pamphlet does not exist for them.
+  const clinicId = await getCurrentClinicId();
   if (!clinicId) notFound();
 
   const share = await getShareForClinic(clinicId, code);

@@ -1,16 +1,25 @@
+import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
+import { NotLinked } from "@/components/ui/NotLinked";
 import { CATEGORIES } from "@/lib/categories";
+import { getCurrentClinicId } from "@/lib/clinic";
 import { countPublishedVideosByCategory } from "@/lib/db/videos";
 
 /**
  * The library home: every category as a visual tile. This is tap one of two.
  *
- * Re-checked against the database at most once a minute, so a newly published
- * video shows up without a redeploy while repeat visits stay instant.
+ * Rendered fresh on every request, because what it shows depends on who is
+ * signed in (proxy.ts sends signed-out visitors to the sign-in page first,
+ * and this page checks again itself, as Clerk's guidance asks).
  */
-export const revalidate = 60;
+export const dynamic = "force-dynamic";
 
 export default async function LibraryPage() {
+  await auth.protect();
+
+  // Signed in, but not a member of a linked clinic: a calm page, not the library.
+  if (!(await getCurrentClinicId())) return <NotLinked />;
+
   const counts = await countPublishedVideosByCategory();
 
   return (

@@ -1,5 +1,6 @@
 "use client";
 
+import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -12,7 +13,9 @@ import { BooksIcon, CloseIcon, HomeIcon, ShareIcon } from "./icons";
  * console. (The patient page at /watch has no frame at all, on purpose.)
  * One navigation model on every screen:
  *
- *   - a thin banner across the top with the Pulse 3D mark
+ *   - a thin banner across the top with the Pulse 3D mark and, on the right,
+ *     Clerk's user button (the signed-in person's avatar; Sign out lives in
+ *     its menu)
  *   - an icon rail down the left: the books icon opens the category drawer,
  *     and the share icon right below it opens the admin console, where share
  *     links are made (on phones both icons sit in the banner instead, so
@@ -55,6 +58,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             {onAdmin ? "Admin" : "Patient Education Library"}
           </span>
           <AdminLink active={onAdmin} className="md:hidden" />
+          {/* Clerk's user button: the signed-in person's avatar, with Sign out in its menu. */}
+          <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
         </div>
       </header>
 

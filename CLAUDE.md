@@ -13,8 +13,8 @@ The Pulse 3D Patient Education Platform. Surgical patient education animations, 
 
 A clinic creates a share link. The patient scans a QR code or opens the link, watches an animation explaining their upcoming procedure, and the link expires after a set number of days.
 
-**We are in Phase 1:** create a link, watch a video, link expires. That is the whole of Phase 1.
-**Phase 2 is the clinic dashboard:** logins, clinics, doctors, permissions, real video hosting.
+**Phase 1 is done:** create a link, watch a video, link expires.
+**We are in Phase 2, the clinic dashboard:** logins (done, see Auth), clinics, doctors, permissions, real video hosting.
 **Phase 3 is billing.**
 
 ## This repository is public
@@ -64,7 +64,7 @@ This keeps the platform outside the scope of HIPAA. If a task appears to require
 
 ### 4. Do not remove things that look unused.
 
-Several fields exist for Phase 2 and are deliberately unused right now, including `Clinic.clerkOrgId` and `Video.isPublished`. **They are load-bearing later. Leave them alone.**
+Several fields exist for later phases and are deliberately unused right now, including `Video.isPublished` (only ever set by the seed scripts so far). **They are load-bearing later. Leave them alone.**
 
 ### 5. One task at a time.
 
@@ -92,12 +92,12 @@ Before any commit that touches configuration, confirm `.env` is still ignored.
 
 The app is four different screens for four different people. Keep them separate from the start, because Phase 2 gates them by role and that is much easier if they were never mixed.
 
-| Surface | Who | Device | Phase 1 |
+| Surface | Who | Device | Access |
 |---|---|---|---|
 | `app/watch/[code]` | **The patient** | Their own phone | Public, no login, ever |
-| `app/library` | **The surgeon**, in the room | Tablet or phone | Open, one user |
-| `app/admin` | **The office manager** | Desktop | Open, one user |
-| `app/pulse` | **Pulse 3D staff** (Evan and Van) | Desktop | Not built yet. Phase 2. |
+| `app/library` | **The surgeon**, in the room | Tablet or phone | Clerk sign-in, member of a linked clinic |
+| `app/admin` | **The office manager** | Desktop | Clerk sign-in, member of a linked clinic |
+| `app/pulse` | **Pulse 3D staff** (Evan and Van) | Desktop | Not built yet. Clerk sign-in plus `isPulseStaff()`. |
 
 **`app/library` is the exam-room surface.** A surgeon opens it mid-consult, finds the procedure, and either plays it right there on their own device or sends the patient a link. It is used standing up, in front of a patient, under time pressure. **It obeys the same speed rule as the patient viewer** (see below): tablet-first, big touch targets, browse to playing in two taps, no dense tables.
 
@@ -111,9 +111,9 @@ In Phase 1 both are unguarded and one person uses both. In Phase 2 a surgeon see
 
 **In scope:** the three models below · `app/library` to browse and play · `app/admin` to create and manage share links · `app/watch/[code]` for patients · QR code generation · link expiry.
 
-**Out of scope, do not build:** logins, authentication of any kind, user accounts, invitations, roles, per-clinic category entitlements, subscriptions, payments, Stripe, analytics dashboards, email sending, video uploading, file storage.
+**Out of scope in Phase 1, and still not built unless a task asks for it:** user accounts of our own, invitations, roles, per-clinic category entitlements, subscriptions, payments, Stripe, analytics dashboards, email sending, video uploading, file storage.
 
-**Do not invent a login system.** Phase 2 uses **Clerk**, and its organisations feature is what models clinics and doctors. Anything built now would have to be torn out.
+**Do not invent a login system.** Sign-in is **Clerk** (see Auth), and its organizations feature is what models clinics and doctors. Never add a users table, a password field or a session cookie of our own.
 
 If a request seems to need something on the out-of-scope list, say so before building it.
 
@@ -151,8 +151,24 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 | Database | **Neon** (PostgreSQL) | |
 | Data access | **Prisma**, behind `lib/db` | Server-side only. See rule 1. |
 | Video | **the existing Webflow CDN URL** in Phase 1 | Read it through `getPlaybackUrl()`. See below. |
-| Logins | **none in Phase 1.** Clerk in Phase 2. | |
+| Logins | **Clerk** (`@clerk/nextjs`) | Staff only. See Auth below. |
+| Tests | **Vitest**, against a Neon branch called `testing` | `npm test`. See Tests below. |
 | Payments | **none until Phase 3** | |
+
+### Auth
+
+Clerk guards the staff surfaces. The patient surface is never behind it.
+
+- **`/admin`, `/library` and `/pulse`, and everything under them, need a signed-in user.** `/watch`, `/q`, `/api/webhooks`, `/sign-in` and static files are always public. The list of guarded prefixes lives in `proxy.ts` (Next.js 16's name for the middleware file).
+- **`proxy.ts` is a convenience, not the security boundary.** It sends signed-out visitors to `/sign-in` and back again. Clerk's guidance is that every page, Server Action and Route Handler that reads protected data checks for itself, so: pages under `/admin` and `/library` call `await auth.protect()` first; actions and handlers rely on `getCurrentClinicId()` returning null. Keep both layers.
+- **`getCurrentClinicId()` in `lib/clinic.ts` maps the signed-in user's active Clerk organization to a Clinic row** (through `getClinicByClerkOrgId()` in `lib/db/clinics.ts`) and returns that clinic's id, or null. It is the only place the signed-in user meets the database. **A Clerk organization id (`org_...`) is not a clinic id** and must never be passed to a `lib/db` function that takes a `clinicId`.
+- **Null from `getCurrentClinicId()` means: signed out, no active organization, or no Clinic linked to it.** Pages show the calm `<NotLinked />` page with a sign-out button; actions return a plain message. Never crash, never a blank page.
+- **A Clinic is linked to its Clerk organization with `npm run db:link-clinic -- <clinicId> <orgId>`**, never by hand in Neon. (Later Phase 2 work makes this automatic when a clinic signs up.)
+- **`CLINIC_ID` is retired.** Nothing reads it. Remove it from `.env` and from Vercel.
+- **Clerk's provider wraps only the staff side** (`StaffClerkProvider` in the layouts of `app/library`, `app/admin` and `app/sign-in`). Never put it in the root layout: that would load Clerk's script on every patient's phone. `auth()` on the server works without it.
+- The sign-in path, `/sign-in`, is set in code in three places that must agree: `proxy.ts`, `StaffClerkProvider` and the `<SignIn path>` prop. No `NEXT_PUBLIC_CLERK_SIGN_IN_URL` variable is used.
+- Clerk treats a session that still has a task to finish (such as choosing an organization) as signed out. The prebuilt `<SignIn />` component walks the user through that step itself.
+- Keys: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`, in `.env` and in Vercel (Production and Preview). Rule 7 applies.
 
 ### The video boundary
 
@@ -212,7 +228,7 @@ model Video {
 model Clinic {
   id         String   @id @default(cuid())
   name       String                             // used for the on-video watermark
-  clerkOrgId String?  @unique                   // filled in Phase 2. Leave it alone until then.
+  clerkOrgId String?  @unique                   // the Clerk organization its staff sign in with. Set by npm run db:link-clinic.
   createdAt  DateTime @default(now())
   shares     Share[]
 }
@@ -250,21 +266,34 @@ app/admin            The office-manager console. Share links, QR codes, reportin
 app/admin/print/     The printable pamphlet for one share link.
 app/admin/qr/        The QR code image for one share link.
 app/pulse            The Pulse 3D master dashboard. Pulse staff only. Every clinic, video, price and rule.
-lib/db/              EVERY database query. Nothing else touches Prisma.
+app/sign-in          The staff sign-in page, Clerk's prebuilt <SignIn /> component.
+proxy.ts             Clerk's middleware. Sends signed-out visitors of /admin, /library and /pulse to /sign-in.
+lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup.
 lib/video.ts         getPlaybackUrl(). The only place a video URL is built.
-lib/clinic.ts        getCurrentClinicId(). Phase 1 reads CLINIC_ID, Phase 2 reads the signed-in user. The one swap point.
+lib/clinic.ts        getCurrentClinicId(). The signed-in user's active Clerk organization, turned into a clinic id. The one swap point.
 lib/share-link.ts    watchLink() and qrFileName(). The only place a patient link is built.
 lib/base-url.ts      getBaseUrl(). The site's own address, read from the request, so links work on any deployment.
 lib/qr.ts            QR codes for share links, as PNG (download) or SVG (print).
 lib/brand.ts         The logo address.
 lib/format.ts        formatDuration(), seconds as "4:12" for the staff screens. describeDuration(), "About 2 minutes" for the patient page.
 lib/expiry.ts        SHARE_EXPIRY_DAYS. How long every share link works. The only place that number lives.
-prisma/              Schema and migrations.
-components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin.
+prisma/              Schema, migrations, and the scripts: seed, seed-video, seed-placeholders, link-clinic.
+components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin. StaffClerkProvider and NotLinked are the auth pieces.
+vitest.setup.ts      Points the tests at the testing database and refuses to run against production.
 .claude/skills/      Two process skills Claude loads here automatically: verification-before-completion, systematic-debugging. See its README. Never put .ts files under .claude/.
 ```
 
 ---
+
+## Tests
+
+`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it and **refuses to run if that host matches `DATABASE_URL` or `DIRECT_URL`**, so a test run can never touch production.
+
+- Tests must pass before any pull request that touches `lib/db`.
+- Tests create their own rows and delete them by id afterwards. They never touch rows they did not make.
+- Tests in `lib/db` never need Clerk. Anything that needs a signed-in user is tested by clicking through the preview.
+- After any schema migration, the `testing` branch needs **Reset from parent** in Neon before the tests will run against the new schema.
+- Tests are not part of the Vercel build and not a required GitHub check yet.
 
 ## Design
 

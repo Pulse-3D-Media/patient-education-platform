@@ -8,7 +8,7 @@ Built by [Pulse 3D Media](https://www.pulse3dmedia.com).
 
 ## Status
 
-**Phase 1, in development.** Create a link, watch a video, link expires. Logins, clinic management and billing come later.
+**Phase 1 done, Phase 2 in development.** Create a link, watch a video, link expires. Staff sign in with Clerk; clinic management and billing come next.
 
 ## Three surfaces
 
@@ -31,7 +31,9 @@ npx prisma migrate dev   # set up the database tables
 npm run dev
 ```
 
-`.env.example` lists the variables you need. Real values never go in this repository.
+`.env.example` lists the variables you need: two Neon connection strings and two Clerk keys. Real values never go in this repository.
+
+`npm test` runs the tests against a separate Neon branch (see the Tests section of `CLAUDE.md`).
 
 ## Conventions
 

@@ -1,5 +1,7 @@
+import { auth } from "@clerk/nextjs/server";
 import type { Category } from "@prisma/client";
 import { AppShell } from "@/components/ui/AppShell";
+import { NotLinked } from "@/components/ui/NotLinked";
 import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
 import { getCurrentClinicId } from "@/lib/clinic";
@@ -36,17 +38,17 @@ import { ShareLists } from "./ShareLists";
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  const clinicId = getCurrentClinicId();
+  // Signed out? Clerk sends them to the sign-in page and back here after.
+  // proxy.ts already does this for /admin, but Clerk's guidance is that every
+  // page reading protected data keeps its own check.
+  await auth.protect();
+
+  // Signed in, but not a member of a linked clinic: a calm page, not an error.
+  const clinicId = await getCurrentClinicId();
   if (!clinicId) {
     return (
       <AppShell>
-        <main className="px-5 py-6 sm:px-8">
-          <h1 className="text-2xl font-semibold">Set-up needed</h1>
-          <p className="mt-2 max-w-xl text-[#bfbfbf]">
-            CLINIC_ID is not set. Run <span className="text-white">npm run db:seed</span>, copy the id it prints
-            into .env (and into Vercel&rsquo;s environment variables), then reload this page.
-          </p>
-        </main>
+        <NotLinked />
       </AppShell>
     );
   }

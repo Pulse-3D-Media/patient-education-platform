@@ -37,11 +37,15 @@ export type SendResult =
 
 /** Create a share link for one video and return it with its QR code. */
 export async function sendShareAction(videoId: string): Promise<SendResult> {
-  // The clinic comes from the server, never from the browser. In Phase 1 that
-  // is the CLINIC_ID environment variable; in Phase 2 it will be the signed-in user.
-  const clinicId = getCurrentClinicId();
+  // The clinic comes from the signed-in user's organization, never from the
+  // browser. Null means signed out, no organization, or an organization with
+  // no clinic linked yet; none of those may create a link.
+  const clinicId = await getCurrentClinicId();
   if (!clinicId) {
-    return { ok: false, error: "CLINIC_ID is not set. Run npm run db:seed and copy the id into .env." };
+    return {
+      ok: false,
+      error: "Your account isn't linked to a clinic. Sign in again, or ask Pulse 3D to link your clinic.",
+    };
   }
 
   if (typeof videoId !== "string" || !videoId.trim()) {

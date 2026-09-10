@@ -1,8 +1,9 @@
 /**
  * Seed script. Run with: npm run db:seed
  *
- * Creates the one Clinic row Phase 1 needs and prints its id.
- * Copy that id into .env as CLINIC_ID (and into Vercel's environment variables).
+ * Creates the one Clinic row Phase 1 needs and prints its id. To connect it to
+ * the Clerk organization its staff sign in with, run:
+ *   npm run db:link-clinic -- <that id> <the organization id>
  *
  * Safe to run more than once: if the clinic already exists it just prints the
  * existing id instead of creating a duplicate.
@@ -18,7 +19,7 @@ async function main() {
 
   if (existing) {
     console.log(`Clinic "${CLINIC_NAME}" already exists.`);
-    console.log(`CLINIC_ID=${existing.id}`);
+    console.log(`Clinic id: ${existing.id}`);
     return;
   }
 
@@ -27,7 +28,7 @@ async function main() {
   });
 
   console.log(`Created clinic "${CLINIC_NAME}".`);
-  console.log(`CLINIC_ID=${clinic.id}`);
+  console.log(`Clinic id: ${clinic.id}`);
 }
 
 main()

@@ -13,6 +13,9 @@ import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
  * (rule 1) while the page stays a simple form.
  */
 
+/** Shown when the request came from someone who is not a linked clinic user. */
+const NOT_LINKED_MESSAGE = "Your account isn't linked to a clinic. Sign in again, or ask Pulse 3D to link your clinic.";
+
 /** What the create-link form gets back: the new code, or a message to show. */
 type CreateShareState = { code?: string; error?: string } | null;
 
@@ -25,11 +28,12 @@ export async function createShareAction(
   _previous: CreateShareState,
   formData: FormData,
 ): Promise<CreateShareState> {
-  // The clinic comes from the server, never from the form. In Phase 1 that is
-  // the CLINIC_ID environment variable; in Phase 2 it will be the signed-in user.
-  const clinicId = getCurrentClinicId();
+  // The clinic comes from the signed-in user's organization, never from the
+  // form. Null means signed out, no organization, or an organization with no
+  // clinic linked yet; none of those may create a link.
+  const clinicId = await getCurrentClinicId();
   if (!clinicId) {
-    return { error: "CLINIC_ID is not set. Run npm run db:seed and copy the id into .env." };
+    return { error: NOT_LINKED_MESSAGE };
   }
 
   const videoId = String(formData.get("videoId") ?? "").trim();
@@ -56,9 +60,9 @@ type CancelShareState = { error?: string };
  * deleted, so it stops working at once, and the admin list is refreshed.
  */
 export async function cancelShareAction(code: string): Promise<CancelShareState> {
-  const clinicId = getCurrentClinicId();
+  const clinicId = await getCurrentClinicId();
   if (!clinicId) {
-    return { error: "CLINIC_ID is not set. Run npm run db:seed and copy the id into .env." };
+    return { error: NOT_LINKED_MESSAGE };
   }
 
   const trimmed = typeof code === "string" ? code.trim() : "";

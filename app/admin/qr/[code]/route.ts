@@ -14,9 +14,11 @@ import { qrFileName, watchLink } from "@/lib/share-link";
 export async function GET(_request: Request, { params }: RouteContext<"/admin/qr/[code]">) {
   const { code } = await params;
 
-  const clinicId = getCurrentClinicId();
+  // Not signed in, or not a member of a linked clinic: no image. 404 rather
+  // than 401 so the response gives nothing away about which codes exist.
+  const clinicId = await getCurrentClinicId();
   if (!clinicId) {
-    return new Response("CLINIC_ID is not set.", { status: 500 });
+    return new Response("No share link has that code.", { status: 404 });
   }
 
   const share = await getShareForClinic(clinicId, code);

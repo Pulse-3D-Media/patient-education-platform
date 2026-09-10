@@ -7,13 +7,16 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx --env-file=.env prisma/seed.ts",
     "db:seed-video": "tsx --env-file=.env prisma/seed-video.ts",
-    "db:seed-placeholders": "tsx --env-file=.env prisma/seed-placeholders.ts"
+    "db:seed-placeholders": "tsx --env-file=.env prisma/seed-placeholders.ts",
+    "db:link-clinic": "tsx --env-file=.env prisma/link-clinic.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.9.2",
     "@prisma/client": "^6.19.3",
     "next": "16.3.4",
     "qrcode": "^1.5.4",
@@ -22,7 +25,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24.13.4",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -31,7 +34,8 @@
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.0"
   },
   "prisma": {
     "seed": "tsx --env-file=.env prisma/seed.ts"

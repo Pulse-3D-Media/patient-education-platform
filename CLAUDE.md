@@ -88,21 +88,24 @@ Before any commit that touches configuration, confirm `.env` is still ignored.
 
 ---
 
-## The three surfaces
+## The four surfaces
 
-The app is three different screens for three different people. Keep them separate from the start, because Phase 2 gates them by role and that is much easier if they were never mixed.
+The app is four different screens for four different people. Keep them separate from the start, because Phase 2 gates them by role and that is much easier if they were never mixed.
 
 | Surface | Who | Device | Phase 1 |
 |---|---|---|---|
 | `app/watch/[code]` | **The patient** | Their own phone | Public, no login, ever |
 | `app/library` | **The surgeon**, in the room | Tablet or phone | Open, one user |
 | `app/admin` | **The office manager** | Desktop | Open, one user |
+| `app/pulse` | **Pulse 3D staff** (Evan and Van) | Desktop | Not built yet. Phase 2. |
 
 **`app/library` is the exam-room surface.** A surgeon opens it mid-consult, finds the procedure, and either plays it right there on their own device or sends the patient a link. It is used standing up, in front of a patient, under time pressure. **It obeys the same speed rule as the patient viewer** (see below): tablet-first, big touch targets, browse to playing in two taps, no dense tables.
 
 **`app/admin` is the back-office surface.** Creating and managing share links, printing pamphlets, checking what got watched. Desktop, sitting down, no hurry.
 
 In Phase 1 both are unguarded and one person uses both. In Phase 2 a surgeon sees the library and an office manager sees both. **Do not merge them into one page.**
+
+**`app/pulse` is the Pulse 3D master dashboard.** Used only by Pulse staff, Evan and Van. It shows every clinic, every video, and every price and rule. **Nothing on it is visible to clinics.** It is not a bigger `app/admin`: admin shows one clinic its own data, pulse sees across all of them, so the two never share a page. Who may open it is decided in one function, `isPulseStaff()` (see "Nothing breaks while the library fills up").
 
 ## Phase 1 scope
 
@@ -113,6 +116,29 @@ In Phase 1 both are unguarded and one person uses both. In Phase 2 a surgeon see
 **Do not invent a login system.** Phase 2 uses **Clerk**, and its organisations feature is what models clinics and doctors. Anything built now would have to be torn out.
 
 If a request seems to need something on the out-of-scope list, say so before building it.
+
+## Phase 2 scope
+
+Phase 2 is the clinic dashboard: logins, clinics, doctors, permissions, real video hosting. It also adds **`app/pulse`**, the Pulse 3D master dashboard (see the four surfaces above).
+
+**Decided: self sign-up with card payment.** Solo (1 surgeon) and Clinic (2 to 10 surgeons) sign themselves up and pay by card. Enterprise (11 or more surgeons, or any hospital) is set up by Pulse from `app/pulse`. The card payment itself is billing work (Phase 3): decided, not yet built.
+
+### Pricing shape
+
+Pricing is per category, per surgeon seat. Each category has its own monthly price per seat, and a clinic pays the sum of its chosen categories times its number of seats, with optional discounts by how many categories it takes. Office staff are never charged. **The numbers are settings, not code** (see below).
+
+---
+
+## Nothing breaks while the library fills up
+
+Finished animations arrive slowly and placeholders stand in until they do, while clinics use the app the whole time. Every change has to be safe to ship with the library half full.
+
+- **A migration only adds.** Every new column has a default or is optional. Never delete or rename.
+- **Anything shown to a person has a fallback for when its data is missing.** No logo: show the clinic name. No poster: the branded fallback. No Mux id: the CDN file.
+- **A category with no published video shows "Coming soon" in the library** and is not offered for sale.
+- **A placeholder video carries its mark everywhere it appears.** Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working.
+- **Prices, expiry days and limits are settings, read at request time through `lib/db`**, never constants in a page. Each setting has a default in code.
+- **Access is decided in one function each.** Whether a clinic can use a video: `canUseVideo()`. Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement either check.
 
 ---
 
@@ -223,6 +249,7 @@ app/library          The surgeon's exam-room browser. Tablet-first. Browse, play
 app/admin            The office-manager console. Share links, QR codes, reporting.
 app/admin/print/     The printable pamphlet for one share link.
 app/admin/qr/        The QR code image for one share link.
+app/pulse            The Pulse 3D master dashboard. Pulse staff only. Every clinic, video, price and rule.
 lib/db/              EVERY database query. Nothing else touches Prisma.
 lib/video.ts         getPlaybackUrl(). The only place a video URL is built.
 lib/clinic.ts        getCurrentClinicId(). Phase 1 reads CLINIC_ID, Phase 2 reads the signed-in user. The one swap point.

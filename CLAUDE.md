@@ -62,6 +62,16 @@ This keeps the platform outside the scope of HIPAA. If a task appears to require
 
 **Never change the database by hand in the Neon console.** Every change is a Prisma migration, committed to git. Hand edits break migration history in ways that are painful to unwind.
 
+**How a schema change ships: production last, after the review.** A git revert does not undo a migration, so the production database is the one thing a pull request must not change before someone has read it. The order is:
+
+1. **Write the migration without applying it.** `npx prisma migrate dev --create-only --name <what-it-adds>`, then read the SQL it wrote. `.env` in the main checkout points at production, so a plain `migrate dev` there would apply the change to production on the spot: always `--create-only`. Look in `prisma/migrations` before re-running any migrate command, because a second run applies the pending draft.
+2. **Apply it to the `testing` branch and run the tests.** `DATABASE_URL=<testing pooled> DIRECT_URL=<testing direct> npx prisma migrate deploy`, then `npm test`. (A Neon branch shares its parent's password, so the direct string is the pooled one with `-pooler` removed from the host.)
+3. **Push and open the pull request.** The summary lists the migration and any script that changes rows. Neon clones the preview's database from production when the PR opens, so the preview does not have the migration yet: apply it to the preview branch the same way (its strings are under Neon, Branches, `preview/<branch name>`), then check the preview page that uses the new columns.
+4. **Evan reads the summary.** That is the review. Only after it: apply to production with `npx prisma migrate deploy` from the main checkout (whose `.env` is production), run any data script, and then merge. Production is migrated right before the merge, not after it, because the new code expects the columns the moment Vercel deploys `main`; the old code ignores columns it does not know, so the minutes between the migration and the merge are safe.
+5. **Point-in-time restore must be on for the production branch** (Neon, project settings, history retention) before any production migration. Check it once; it is the undo button.
+
+A migration that turns out wrong is fixed forward with another migration that only adds. Never edited, never rolled back by hand.
+
 ### 4. Do not remove things that look unused.
 
 Several fields exist for later phases and are deliberately unused right now, including `Video.isPublished` (only ever set by the seed scripts so far). **They are load-bearing later. Leave them alone.**
@@ -406,7 +416,7 @@ lib/format.ts        formatDuration(), seconds as "4:12" for the staff screens. 
 lib/expiry.ts        SHARE_EXPIRY_DAYS. How long every share link works. The only place that number lives.
 prisma/              Schema, migrations, and the scripts: seed, seed-video, seed-placeholders (both for a fresh database only; the catalogue is edited at /pulse/videos), link-clinic, set-status, set-plan.
 components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin (its admin icon shows only for admins). PulseShell is the same for /pulse. StaffClerkProvider, ClinicClosed (clinic not open) and AdminsOnly (a member on an admin page) are the auth pieces. styles.ts holds the shared button and form-field looks.
-vitest.setup.ts      Points the tests at the testing database and refuses to run against production.
+vitest.setup.ts      Points the tests at the testing database and refuses to run against production. The decision itself is vitest.guard.ts, a pure function with its own tests.
 .claude/skills/      Two process skills Claude loads here automatically: verification-before-completion, systematic-debugging. See its README. Never put .ts files under .claude/.
 ```
 
@@ -414,12 +424,12 @@ vitest.setup.ts      Points the tests at the testing database and refuses to run
 
 ## Tests
 
-`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; `lib/db/videos.test.ts` covers the catalogue; `app/pulse/actions.test.ts` covers the dashboard's actions; pure rules such as `lib/clinic-status.ts` and `lib/format.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it and **refuses to run if that host matches `DATABASE_URL` or `DIRECT_URL`**, so a test run can never touch production.
+`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; `lib/db/videos.test.ts` covers the catalogue; `app/pulse/actions.test.ts` covers the dashboard's actions; pure rules such as `lib/clinic-status.ts` and `lib/format.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it, and **refuses to run unless it can show that is not production**: the decision is in `vitest.guard.ts` (which has its own tests) and it fails closed. The test string and every production string that is set must be readable, at least one production string must be set so there is something to compare against, and the test string may not name the same Neon endpoint as `DATABASE_URL` or `DIRECT_URL`, pooled or direct (Neon's `-pooler` address and the direct address of one endpoint count as the same database).
 
 - Tests must pass before any pull request that touches `lib/db`.
-- Tests create their own rows and delete them by id afterwards. They never touch rows they did not make.
+- Tests create their own rows and delete them by id afterwards. They never touch rows they did not make. **A table with one shared row (AppSettings) is tested against an in-memory stand-in for the Prisma client instead** (`lib/db/settings.test.ts`), because there is no row a test could call its own.
 - Tests in `lib/db` never need Clerk. A gate or an action that reads the signed-in user (`lib/pulse.test.ts`, `app/pulse/actions.test.ts`) replaces Clerk with `vi.mock("@clerk/nextjs/server")` and plays a staff member or an ordinary user. Everything else that needs a signed-in user is tested by clicking through the preview.
-- After any schema migration, the `testing` branch needs **Reset from parent** in Neon before the tests will run against the new schema.
+- After any schema migration, apply it to the `testing` branch with `migrate deploy` (step 2 of "How a schema change ships", under rule 3) before running the tests. Neon's **Reset from parent** also works, but it copies production's rows into the testing branch and throws away whatever the tests had there.
 - Tests are not part of the Vercel build and not a required GitHub check yet.
 
 ## Design

@@ -2,6 +2,7 @@ import { getBaseUrl } from "@/lib/base-url";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { getShareForClinic } from "@/lib/db/shares";
 import { qrPng } from "@/lib/qr";
+import { isClinicAdmin } from "@/lib/roles";
 import { qrFileName, watchLink } from "@/lib/share-link";
 
 /**
@@ -14,9 +15,9 @@ import { qrFileName, watchLink } from "@/lib/share-link";
 export async function GET(_request: Request, { params }: RouteContext<"/admin/qr/[code]">) {
   const { code } = await params;
 
-  // Not signed in, or not a member of a linked clinic: no image. 404 rather
-  // than 401 so the response gives nothing away about which codes exist.
-  const clinicId = await getCurrentClinicId();
+  // Admins only, and only for an open clinic. Anyone else gets a 404 rather
+  // than a 401, so the response gives nothing away about which codes exist.
+  const clinicId = (await isClinicAdmin()) ? await getCurrentClinicId() : null;
   if (!clinicId) {
     return new Response("No share link has that code.", { status: 404 });
   }

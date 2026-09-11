@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { createShare, deleteShareForClinic } from "@/lib/db/shares";
 import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
+import { isClinicAdmin } from "@/lib/roles";
 
 /**
  * Server Actions for the admin console.
@@ -11,10 +12,25 @@ import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
  * A Server Action is a function that runs on the server but can be called
  * from a form in the browser, so the database work stays on the server
  * (rule 1) while the page stays a simple form.
+ *
+ * Every action here is for admins only (org:admin, see lib/roles.ts) and
+ * only for a clinic that is open. Both are checked on the server, first
+ * thing, in every action: a member who somehow submits the form gets a
+ * message, not a link.
  */
 
-/** Shown when the request came from someone who is not a linked clinic user. */
-const NOT_LINKED_MESSAGE = "Your account isn't linked to a clinic. Sign in again, or ask Pulse 3D to link your clinic.";
+/** Shown when the request came from someone who is not an admin of an open clinic. */
+const NOT_ALLOWED_MESSAGE = "Only your clinic's office admins can do this, and only while the clinic is on a plan.";
+
+/**
+ * The clinic id for an admin of an open clinic, or null. Every action starts
+ * with this. Null means signed out, not an admin, or the clinic is not open;
+ * the message above covers all three without saying which.
+ */
+async function adminClinicId(): Promise<string | null> {
+  if (!(await isClinicAdmin())) return null;
+  return getCurrentClinicId();
+}
 
 /** What the create-link form gets back: the new code, or a message to show. */
 type CreateShareState = { code?: string; error?: string } | null;
@@ -28,12 +44,10 @@ export async function createShareAction(
   _previous: CreateShareState,
   formData: FormData,
 ): Promise<CreateShareState> {
-  // The clinic comes from the signed-in user's organization, never from the
-  // form. Null means signed out, no organization, or an organization with no
-  // clinic linked yet; none of those may create a link.
-  const clinicId = await getCurrentClinicId();
+  // The clinic comes from the signed-in user's organization, never from the form.
+  const clinicId = await adminClinicId();
   if (!clinicId) {
-    return { error: NOT_LINKED_MESSAGE };
+    return { error: NOT_ALLOWED_MESSAGE };
   }
 
   const videoId = String(formData.get("videoId") ?? "").trim();
@@ -60,9 +74,9 @@ type CancelShareState = { error?: string };
  * deleted, so it stops working at once, and the admin list is refreshed.
  */
 export async function cancelShareAction(code: string): Promise<CancelShareState> {
-  const clinicId = await getCurrentClinicId();
+  const clinicId = await adminClinicId();
   if (!clinicId) {
-    return { error: NOT_LINKED_MESSAGE };
+    return { error: NOT_ALLOWED_MESSAGE };
   }
 
   const trimmed = typeof code === "string" ? code.trim() : "";

@@ -33,13 +33,26 @@ model Video {
   @@index([category])
 }
 
-/// A customer practice. Phase 1 has exactly ONE row, our own test clinic.
-/// This table exists now so that Phase 2 does not need a migration on live data.
+/// Where a clinic stands with us. Only ACTIVE clinics can use the library
+/// (see clinicIsOpen() in lib/clinic-status.ts). New clinics start PENDING
+/// until they choose a plan; the other states come with billing.
+enum ClinicStatus {
+  PENDING
+  ACTIVE
+  PAUSED
+  PAST_DUE
+  CANCELED
+}
+
+/// A customer practice. One row per Clerk organization: the row is created
+/// the first time someone from that organization signs in (lib/clinic.ts).
 model Clinic {
-  id         String   @id @default(cuid())
-  name       String                             // used for the on-video watermark
-  clerkOrgId String?  @unique                   // filled in Phase 2. Leave it alone until then.
-  createdAt  DateTime @default(now())
+  id         String       @id @default(cuid())
+  name       String                             // copied from the Clerk organization's name; used for the on-video watermark
+  clerkOrgId String?      @unique               // the Clerk organization its staff sign in with
+  status     ClinicStatus @default(PENDING)     // changed by billing, or by npm run db:set-status
+  logoUrl    String?                            // copied from the Clerk organization's logo, when it has one
+  createdAt  DateTime     @default(now())
   shares     Share[]
 }
 

@@ -5,6 +5,7 @@ import { getBaseUrl } from "@/lib/base-url";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { getShareForClinic } from "@/lib/db/shares";
 import { qrSvg } from "@/lib/qr";
+import { isClinicAdmin } from "@/lib/roles";
 import { watchLink } from "@/lib/share-link";
 import { PrintButton } from "./PrintButton";
 
@@ -40,7 +41,9 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
   // Signed out: Clerk sends them to sign in and back here afterwards.
   await auth.protect();
 
-  // Signed in but not a member of a linked clinic: the pamphlet does not exist for them.
+  // Admins only, and only for an open clinic. Anyone else gets a plain
+  // not-found, which also gives nothing away about which codes exist.
+  if (!(await isClinicAdmin())) notFound();
   const clinicId = await getCurrentClinicId();
   if (!clinicId) notFound();
 

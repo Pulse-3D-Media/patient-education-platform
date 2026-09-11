@@ -38,13 +38,14 @@ export type SendResult =
 /** Create a share link for one video and return it with its QR code. */
 export async function sendShareAction(videoId: string): Promise<SendResult> {
   // The clinic comes from the signed-in user's organization, never from the
-  // browser. Null means signed out, no organization, or an organization with
-  // no clinic linked yet; none of those may create a link.
+  // browser. Null means signed out, no organization, or a clinic that is not
+  // open (not on a plan yet); none of those may create a link. Any member
+  // may send, admin or not: sending is the surgeon's job.
   const clinicId = await getCurrentClinicId();
   if (!clinicId) {
     return {
       ok: false,
-      error: "Your account isn't linked to a clinic. Sign in again, or ask Pulse 3D to link your clinic.",
+      error: "Your clinic can't send links right now. Sign in again, or ask your clinic's admin.",
     };
   }
 

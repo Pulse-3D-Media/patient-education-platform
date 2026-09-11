@@ -1,8 +1,8 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
-import { NotLinked } from "@/components/ui/NotLinked";
+import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { CATEGORIES } from "@/lib/categories";
-import { getCurrentClinicId } from "@/lib/clinic";
+import { requireClinicPage } from "@/lib/clinic";
+import { clinicIsOpen } from "@/lib/clinic-status";
 import { countPublishedVideosByCategory } from "@/lib/db/videos";
 
 /**
@@ -10,15 +10,16 @@ import { countPublishedVideosByCategory } from "@/lib/db/videos";
  *
  * Rendered fresh on every request, because what it shows depends on who is
  * signed in (proxy.ts sends signed-out visitors to the sign-in page first,
- * and this page checks again itself, as Clerk's guidance asks).
+ * and requireClinicPage() checks again here, as Clerk's guidance asks).
  */
 export const dynamic = "force-dynamic";
 
 export default async function LibraryPage() {
-  await auth.protect();
-
-  // Signed in, but not a member of a linked clinic: a calm page, not the library.
-  if (!(await getCurrentClinicId())) return <NotLinked />;
+  // Signed out, no clinic, or the surgeon question unanswered: sent to the
+  // right step. A clinic that is not open (not on a plan yet) sees a calm
+  // page instead of the library.
+  const clinic = await requireClinicPage();
+  if (!clinicIsOpen(clinic.status)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
 
   const counts = await countPublishedVideosByCategory();
 

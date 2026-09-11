@@ -9,6 +9,20 @@ const BUTTON_BASE = "inline-flex h-10 shrink-0 items-center rounded-lg px-4 text
 /** The quiet outlined button: Copy link, Download QR, Print. */
 export const SECONDARY_BUTTON = `${BUTTON_BASE} border border-white/15 text-[#bfbfbf] hover:border-[#2a829b] hover:text-white`;
 
+/** The filled teal button: the one action a form is for. Same height as the others. */
+export const PRIMARY_BUTTON = `${BUTTON_BASE} bg-[#2a829b] text-white hover:bg-[#1e5668] disabled:opacity-60`;
+
+/** A text box, number box or select on the dark staff screens. 44px tall so it is easy to hit. */
+export const INPUT =
+  "h-11 w-full rounded-lg border border-white/15 bg-[#07090b] px-3 text-[15px] text-white placeholder:text-[#667085] focus:border-[#2a829b] focus:outline-none";
+
+/** A multi-line text box, same look as INPUT. */
+export const TEXTAREA =
+  "w-full rounded-lg border border-white/15 bg-[#07090b] px-3 py-2 text-[15px] text-white placeholder:text-[#667085] focus:border-[#2a829b] focus:outline-none";
+
+/** The label above a field. */
+export const LABEL = "mb-1 block text-sm font-medium text-[#bfbfbf]";
+
 /** The same button for a moment after it has done its job: "Copied". */
 export const SECONDARY_BUTTON_DONE = `${BUTTON_BASE} border border-transparent bg-[#2a829b]/20 text-[#5fb8d4]`;
 

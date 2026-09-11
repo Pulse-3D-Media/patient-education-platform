@@ -14,7 +14,7 @@ The Pulse 3D Patient Education Platform. Surgical patient education animations, 
 A clinic creates a share link. The patient scans a QR code or opens the link, watches an animation explaining their upcoming procedure, and the link expires after a set number of days.
 
 **Phase 1 is done:** create a link, watch a video, link expires.
-**We are in Phase 2, the clinic dashboard:** logins (done, see Auth), clinics and people (done, see Roles), then billing screens, branding, real video hosting.
+**We are in Phase 2, the clinic dashboard:** logins (done, see Auth), clinics and people (done, see Roles), the Pulse 3D master dashboard (done, see the four surfaces), then billing screens, branding, real video hosting.
 **Phase 3 is billing.**
 
 ## This repository is public
@@ -97,7 +97,7 @@ The app is four different screens for four different people. Keep them separate 
 | `app/watch/[code]` | **The patient** | Their own phone | Public, no login, ever |
 | `app/library` | **The surgeon**, in the room | Tablet or phone | Clerk sign-in, any member of an open clinic |
 | `app/admin` | **The office manager** | Desktop | Clerk sign-in, `org:admin` of an open clinic (see Roles) |
-| `app/pulse` | **Pulse 3D staff** (Evan and Van) | Desktop | Not built yet. Clerk sign-in plus `isPulseStaff()`. |
+| `app/pulse` | **Pulse 3D staff** (Evan and Van) | Desktop | Clerk sign-in plus `isPulseStaff()`. Anyone else gets not-found. |
 
 **`app/library` is the exam-room surface.** A surgeon opens it mid-consult, finds the procedure, and either plays it right there on their own device or sends the patient a link. It is used standing up, in front of a patient, under time pressure. **It obeys the same speed rule as the patient viewer** (see below): tablet-first, big touch targets, browse to playing in two taps, no dense tables.
 
@@ -105,7 +105,11 @@ The app is four different screens for four different people. Keep them separate 
 
 A member sees the library; an admin sees both. **Do not merge them into one page.**
 
-**`app/pulse` is the Pulse 3D master dashboard.** Used only by Pulse staff, Evan and Van. It shows every clinic, every video, and every price and rule. **Nothing on it is visible to clinics.** It is not a bigger `app/admin`: admin shows one clinic its own data, pulse sees across all of them, so the two never share a page. Who may open it is decided in one function, `isPulseStaff()` (see "Nothing breaks while the library fills up").
+**`app/pulse` is the Pulse 3D master dashboard.** Used only by Pulse staff, Evan and Van. It shows every clinic, every video, and every price and rule. **Nothing on it is visible to clinics.** It is not a bigger `app/admin`: admin shows one clinic its own data, pulse sees across all of them, so the two never share a page.
+
+**Who may open it is decided in one function, `isPulseStaff()` in `lib/pulse.ts`.** A person is Pulse staff when their Clerk user has `pulseStaff: true` in its public metadata, set by hand in the Clerk dashboard (Users, the user, Metadata, Public) and nowhere else. It is read on the server from Clerk's backend API on every request. **Every page and every Server Action under `app/pulse` calls `requirePulseStaff()` first**, which ends the request with not-found for anyone else: not a redirect, not a message, so the dashboard's existence is not confirmed to people who cannot use it. The `/pulse` layout checks too, so the not-found page has no dashboard rail around it. Never check this in the browser only.
+
+Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, six sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, People, Links, and Notes, an append-only log to which every change saved on the page adds an entry of its own) and the platform settings (`/pulse/settings`). Videos, Pricing and Reports are placeholder pages.
 
 ## Phase 1 scope
 
@@ -123,7 +127,7 @@ Phase 2 is the clinic dashboard: logins, clinics, doctors, permissions, real vid
 
 **Decided: self sign-up with card payment.** Solo (1 surgeon) and Clinic (2 to 10 surgeons) sign themselves up and pay by card. Enterprise (11 or more surgeons, or any hospital) is set up by Pulse from `app/pulse`. The card payment itself is billing work (Phase 3): decided, not yet built.
 
-**Built so far:** a person signs up, creates their clinic (a Clerk organization) at `/onboarding`, answers the surgeon-or-staff question once, and lands on a PENDING clinic that shows "Choose a plan to start" until billing (or `npm run db:set-status`) makes it ACTIVE. Admins invite people and mark each one Surgeon or Staff in `/admin/people`. Seat limits come with billing.
+**Built so far:** a person signs up, creates their clinic (a Clerk organization) at `/onboarding`, answers the surgeon-or-staff question once, and lands on a PENDING clinic that shows "Choose a plan to start" until billing, `npm run db:set-status`, or Pulse staff on `/pulse` makes it ACTIVE. Admins invite people and mark each one Surgeon or Staff in `/admin/people`. Pulse staff set each clinic's plan (categories and surgeon seats) on `/pulse` or with `npm run db:set-plan`; seat limits are not enforced until billing.
 
 ### Pricing shape
 
@@ -139,7 +143,7 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 - **Anything shown to a person has a fallback for when its data is missing.** No logo: show the clinic name. No poster: the branded fallback. No Mux id: the CDN file.
 - **A category with no published video shows "Coming soon" in the library** and is not offered for sale.
 - **A placeholder video carries its mark everywhere it appears.** Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working.
-- **Prices, expiry days and limits are settings, read at request time through `lib/db`**, never constants in a page. Each setting has a default in code.
+- **Settings come from `getSettings()` in `lib/db/settings.ts`, never constants.** Prices, expiry days and limits are one AppSettings row, read at request time. `getSettings()` returns the code defaults when the row does not exist, so nothing depends on it having been saved. A clinic can carry its own override for a setting (`Clinic.viewDaysOverride` today); read the clinic's value first, then the platform's. Never put one of these numbers in a page or a constant. (`lib/expiry.ts` still holds `SHARE_EXPIRY_DAYS` from Phase 1; it moves onto the settings row when the 7-days-from-first-view expiry is built.)
 - **Access is decided in one function each.** Whether a clinic may use the app at all: `clinicIsOpen(status)` in `lib/clinic-status.ts` (today: ACTIVE only; a grace period or pausing changes that one function). Whether a person is an admin: `isClinicAdmin()`. Whether a clinic can use a video: `canUseVideo()`. Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement any check.
 
 ---
@@ -208,7 +212,7 @@ Phase 1 returns the stored URL. Phase 2 returns a signed, expiring URL from Mux 
 
 ## The database
 
-Three models and two enums. If a task seems to need a fourth model, stop and ask.
+Five models and three enums. If a task seems to need a sixth model, stop and ask.
 
 ```prisma
 generator client {
@@ -263,10 +267,60 @@ model Clinic {
   id         String       @id @default(cuid())
   name       String                             // copied from the Clerk organization's name; used for the on-video watermark
   clerkOrgId String?      @unique               // the Clerk organization its staff sign in with
-  status     ClinicStatus @default(PENDING)     // changed by billing, or by npm run db:set-status
-  logoUrl    String?                            // copied from the Clerk organization's logo, when it has one
+  status     ClinicStatus @default(PENDING)     // changed by billing, by npm run db:set-status, or by Pulse staff on /pulse
+  logoUrl    String?                            // copied from the Clerk organization's logo, when it has one; Pulse staff can set one too
   createdAt  DateTime     @default(now())
-  shares     Share[]
+
+  // Set by Pulse staff on /pulse. Nothing here is shown to the clinic except
+  // noticeText (top of its /admin) and the effect of showPlaceholders and
+  // viewDaysOverride.
+  managedByPulse   Boolean    @default(false)   // enterprise or comped: billing screens hidden, plan edited by Pulse
+  statusReason     String?                      // why staff set the status by hand
+  statusChangedBy  String?                      // who last changed the status: a staff name, or "billing" later
+  statusChangedAt  DateTime?                    // when the status was last changed
+  notes            String?                      // the old single notes box. Superseded by ClinicNote; kept, never read (rule 4)
+  noticeText       String?                      // a line shown at the top of that clinic's /admin
+  showPlaceholders Boolean    @default(true)    // false hides placeholder videos from this clinic's library
+  viewDaysOverride Int?                         // days a patient link works after first view, instead of AppSettings.viewDays
+  phone            String?                      // the clinic's phone, stored as digits only; see lib/phone.ts
+  categories       Category[] @default([])      // the categories on the clinic's plan; empty means none yet
+  surgeonSeats     Int        @default(0)       // surgeon seats the clinic pays for
+  shares           Share[]
+  clinicNotes      ClinicNote[]
+}
+
+/// What kind of entry a clinic note is: typed by a staff member, or written
+/// by the app when something changed (any change saved on /pulse today; billing later).
+enum NoteKind {
+  STAFF  // typed by a staff member
+  STATUS // written by the app when a change was saved on /pulse: status, plan, details, managed by Pulse. Named for the first such change; shown as "Change"
+}
+
+/// The running log on a clinic's /pulse page. Append-only: entries are never
+/// edited or deleted, so it reads as a history. Internal, never shown to
+/// the clinic.
+model ClinicNote {
+  id         String   @id @default(cuid())
+  clinicId   String
+  clinic     Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  kind       NoteKind @default(STAFF)
+  body       String
+  authorName String                              // the staff member's name, or "billing" and the like for app-written entries
+  createdAt  DateTime @default(now())
+
+  @@index([clinicId, createdAt])
+}
+
+/// Platform-wide settings. Exactly one row, with id "default". Read through
+/// getSettings() in lib/db/settings.ts, which returns these defaults when the
+/// row does not exist yet, so nothing depends on it having been created.
+model AppSettings {
+  id            String   @id @default("default")
+  unclaimedDays Int      @default(90)   // days a patient link works if nobody ever opens it
+  viewDays      Int      @default(7)    // days a patient link keeps working after the first view
+  graceDays     Int      @default(14)   // days a clinic keeps access after a missed payment
+  qrDailyFlag   Int      @default(200)  // scans of one QR code in a day that get flagged for a look
+  updatedAt     DateTime @updatedAt
 }
 
 model Share {
@@ -287,7 +341,13 @@ model Share {
 
 **Why `Clinic` existed in Phase 1 when there was only one of them.** Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter. Adding it early cost one table and one column. This is the single most important scale decision in the project.
 
-**Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, `npm run db:set-status -- <clinicId> ACTIVE` is how a clinic that has agreed a plan is switched on. Never change a status by hand in Neon.
+**Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, Pulse staff switch a clinic on from its page on `/pulse`, or with `npm run db:set-status -- <clinicId> ACTIVE`. Never change a status by hand in Neon.
+
+**The clinic log.** `ClinicNote` is the history of a clinic as Pulse sees it: notes staff type (kind STAFF), and entries the app writes when something changes (kind STATUS, named for the first such change and shown as "Change"). **Every change staff save on a clinic's page writes an entry: status, plan, managed by Pulse, and each detail field**, saying what it was and what it became, under the staff member's name. The change and its entry go in one transaction (`changeClinicWithLog()` in `lib/db/clinics.ts`), so the current state and the history cannot disagree, and a save that changes nothing writes nothing. Entries are only ever added. When billing changes a status later, it writes the same pair under its own name. If you add a new thing staff can change about a clinic, write it through the same helper so it is logged too. Nothing in the log is ever shown to the clinic.
+
+**Clinic plan.** `Clinic.categories` and `Clinic.surgeonSeats` are the plan. Set on `/pulse` or with `npm run db:set-plan -- <clinicId> --categories all --seats 10`. Nothing enforces them yet; that comes with billing and category entitlements.
+
+**The name and logo sync.** On every sign-in `upsertClinicForClerkOrg()` copies the organization's name from Clerk, and its logo when Clerk has one. A logo set by Pulse staff survives when the organization has no logo of its own. A name changed on `/pulse` is written to the Clerk organization as well (`lib/organization.ts`), so it does not change back.
 
 **Neon needs both URLs.** `DATABASE_URL` is the pooled connection the app uses; `DIRECT_URL` is the unpooled one Prisma needs to run migrations. Leaving `directUrl` out causes migrations to fail in ways that are hard to read.
 
@@ -305,11 +365,17 @@ app/admin/print/     The printable pamphlet for one share link.
 app/admin/qr/        The QR code image for one share link.
 app/admin/people/    The People section: everyone in the clinic, Surgeon / Staff on each, Clerk's invite and role panel. Admins only.
 app/onboarding       Set up your clinic (Clerk's CreateOrganization), then the surgeon-or-staff question at /onboarding/kind.
-app/pulse            The Pulse 3D master dashboard. Pulse staff only. Every clinic, video, price and rule.
+app/pulse            The Pulse 3D master dashboard. Pulse staff only. The clinics table at /pulse; actions.ts holds every Server Action; ui.tsx the shared pieces.
+app/pulse/clinics/   One clinic behind a row of pills (ClinicTabs.tsx): overview, plan, details, people, links, notes. forms.tsx holds the client forms.
+app/pulse/settings/  The AppSettings form.
+app/pulse/videos, pricing, reports   Placeholder pages until each section is built.
 app/sign-in          The staff sign-in page, Clerk's prebuilt <SignIn /> component.
 app/sign-up          The staff sign-up page, Clerk's prebuilt <SignUp /> component. A new account is sent on to /onboarding.
 proxy.ts             Clerk's middleware. Sends signed-out visitors of /admin, /library, /pulse and /onboarding to /sign-in.
-lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup and the first-use upsert.
+lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, and the Pulse-side reads and writes. settings.ts holds getSettings() and saveSettings(). notes.ts holds the clinic log.
+lib/pulse.ts         isPulseStaff() and requirePulseStaff(). The one gate for /pulse.
+lib/phone.ts         US phone numbers: normalizeUsPhone() to ten digits for storing, formatUsPhone() for showing.
+lib/organization.ts  renameClerkOrganization(). Writes a clinic's new name back to its Clerk organization.
 lib/video.ts         getPlaybackUrl(). The only place a video URL is built.
 lib/clinic.ts        getCurrentClinic() (creates the clinic on first use, syncs name and logo), getCurrentClinicId() for actions, requireClinicPage() for pages. The one place the signed-in user meets the database.
 lib/clinic-status.ts clinicIsOpen(status). The one place that decides whether a clinic may use the app.
@@ -321,8 +387,8 @@ lib/qr.ts            QR codes for share links, as PNG (download) or SVG (print).
 lib/brand.ts         The logo address.
 lib/format.ts        formatDuration(), seconds as "4:12" for the staff screens. describeDuration(), "About 2 minutes" for the patient page.
 lib/expiry.ts        SHARE_EXPIRY_DAYS. How long every share link works. The only place that number lives.
-prisma/              Schema, migrations, and the scripts: seed, seed-video, seed-placeholders, link-clinic, set-status.
-components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin (its admin icon shows only for admins). StaffClerkProvider, ClinicClosed (clinic not open) and AdminsOnly (a member on an admin page) are the auth pieces.
+prisma/              Schema, migrations, and the scripts: seed, seed-video, seed-placeholders, link-clinic, set-status, set-plan.
+components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin (its admin icon shows only for admins). PulseShell is the same for /pulse. StaffClerkProvider, ClinicClosed (clinic not open) and AdminsOnly (a member on an admin page) are the auth pieces. styles.ts holds the shared button and form-field looks.
 vitest.setup.ts      Points the tests at the testing database and refuses to run against production.
 .claude/skills/      Two process skills Claude loads here automatically: verification-before-completion, systematic-debugging. See its README. Never put .ts files under .claude/.
 ```
@@ -331,11 +397,11 @@ vitest.setup.ts      Points the tests at the testing database and refuses to run
 
 ## Tests
 
-`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; pure rules such as `lib/clinic-status.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it and **refuses to run if that host matches `DATABASE_URL` or `DIRECT_URL`**, so a test run can never touch production.
+`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; `app/pulse/actions.test.ts` covers the dashboard's actions; pure rules such as `lib/clinic-status.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it and **refuses to run if that host matches `DATABASE_URL` or `DIRECT_URL`**, so a test run can never touch production.
 
 - Tests must pass before any pull request that touches `lib/db`.
 - Tests create their own rows and delete them by id afterwards. They never touch rows they did not make.
-- Tests in `lib/db` never need Clerk. Anything that needs a signed-in user is tested by clicking through the preview.
+- Tests in `lib/db` never need Clerk. A gate or an action that reads the signed-in user (`lib/pulse.test.ts`, `app/pulse/actions.test.ts`) replaces Clerk with `vi.mock("@clerk/nextjs/server")` and plays a staff member or an ordinary user. Everything else that needs a signed-in user is tested by clicking through the preview.
 - After any schema migration, the `testing` branch needs **Reset from parent** in Neon before the tests will run against the new schema.
 - Tests are not part of the Vercel build and not a required GitHub check yet.
 

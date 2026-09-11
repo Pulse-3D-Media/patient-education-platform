@@ -21,6 +21,10 @@ export type CurrentClinic = {
   name: string;
   status: ClinicStatus;
   logoUrl: string | null;
+  /** A line Pulse staff want shown at the top of this clinic's admin console, or null. */
+  noticeText: string | null;
+  /** False when Pulse staff have hidden placeholder videos from this clinic's library. */
+  showPlaceholders: boolean;
   /** Surgeon or staff, or null if this person has not been asked yet. See lib/roles.ts. */
   kind: Kind | null;
   /** Is this person an org:admin of the clinic? */
@@ -70,6 +74,8 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     name: clinic.name,
     status: clinic.status,
     logoUrl: clinic.logoUrl,
+    noticeText: clinic.noticeText,
+    showPlaceholders: clinic.showPlaceholders,
     kind: kindFromMetadata(membership.publicMetadata),
     isAdmin: has({ role: ADMIN_ROLE }),
   };

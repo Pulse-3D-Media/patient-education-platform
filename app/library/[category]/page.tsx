@@ -27,7 +27,9 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   const category = categoryFromSlug(slug);
   if (!category) notFound();
 
-  const videos = await listPublishedVideosByCategory(category.value);
+  // A clinic whose placeholders are switched off (a per-clinic setting on
+  // /pulse) sees only finished animations here.
+  const videos = await listPublishedVideosByCategory(category.value, { includePlaceholders: clinic.showPlaceholders });
 
   // Only plain data crosses into the browser: id, title, duration, whether it
   // is a placeholder, and the playback address (built here on the server,

@@ -1,7 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "./client";
-import { getClinicByClerkOrgId, linkClinicToClerkOrg, setClinicStatus, upsertClinicForClerkOrg } from "./clinics";
+import {
+  getClinicByClerkOrgId,
+  linkClinicToClerkOrg,
+  setClinicPlan,
+  setClinicStatus,
+  updateClinicDetails,
+  upsertClinicForClerkOrg,
+} from "./clinics";
 import { createShare, getShareForClinic, listSharesForClinic } from "./shares";
 
 /**
@@ -107,6 +114,60 @@ describe("upsertClinicForClerkOrg", () => {
     expect(updated.name).toBe("Vitest new name");
     expect(updated.logoUrl).toBe("https://example.com/l.png");
     expect(updated.status).toBe("ACTIVE");
+  });
+});
+
+describe("upsertClinicForClerkOrg and a logo set by Pulse staff", () => {
+  it("keeps a staff-set logo when Clerk has no logo, and takes Clerk's logo when it has one", async () => {
+    const orgId = fakeOrgId();
+    const created = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: null });
+    createdClinicIds.push(created.id);
+
+    await updateClinicDetails(
+      created.id,
+      {
+        name: created.name,
+        logoUrl: "https://example.com/staff-logo.png",
+        phone: null,
+        noticeText: null,
+        showPlaceholders: true,
+        viewDaysOverride: null,
+      },
+      "Evan Miller",
+    );
+
+    // The clinic signs in again; its organization still has no logo of its own.
+    const afterSignIn = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: null });
+    expect(afterSignIn.logoUrl).toBe("https://example.com/staff-logo.png");
+
+    // Now the organization gets a real logo in Clerk: that one wins.
+    const afterUpload = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: "https://example.com/clerk-logo.png" });
+    expect(afterUpload.logoUrl).toBe("https://example.com/clerk-logo.png");
+  });
+});
+
+describe("setClinicPlan", () => {
+  it("writes the categories and seats, dropping a repeated category", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest plan clinic", logoUrl: null });
+    createdClinicIds.push(clinic.id);
+
+    const { clinic: planned } = await setClinicPlan(clinic.id, ["KNEE", "HIP", "KNEE"], 10, "Evan Miller");
+    expect(planned.categories).toEqual(["KNEE", "HIP"]);
+    expect(planned.surgeonSeats).toBe(10);
+
+    const row = await prisma.clinic.findUnique({ where: { id: clinic.id }, select: { categories: true, surgeonSeats: true } });
+    expect(row).toEqual({ categories: ["KNEE", "HIP"], surgeonSeats: 10 });
+  });
+
+  it("an empty list and zero seats means no plan", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest no-plan clinic", logoUrl: null });
+    createdClinicIds.push(clinic.id);
+
+    const { clinic: planned } = await setClinicPlan(clinic.id, [], 0, "Evan Miller");
+    expect(planned.categories).toEqual([]);
+    expect(planned.surgeonSeats).toBe(0);
   });
 });
 

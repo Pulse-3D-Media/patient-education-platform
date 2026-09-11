@@ -123,14 +123,18 @@ describe("upsertClinicForClerkOrg and a logo set by Pulse staff", () => {
     const created = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: null });
     createdClinicIds.push(created.id);
 
-    await updateClinicDetails(created.id, {
-      name: created.name,
-      logoUrl: "https://example.com/staff-logo.png",
-      phone: null,
-      noticeText: null,
-      showPlaceholders: true,
-      viewDaysOverride: null,
-    });
+    await updateClinicDetails(
+      created.id,
+      {
+        name: created.name,
+        logoUrl: "https://example.com/staff-logo.png",
+        phone: null,
+        noticeText: null,
+        showPlaceholders: true,
+        viewDaysOverride: null,
+      },
+      "Evan Miller",
+    );
 
     // The clinic signs in again; its organization still has no logo of its own.
     const afterSignIn = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: null });
@@ -148,7 +152,7 @@ describe("setClinicPlan", () => {
     const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest plan clinic", logoUrl: null });
     createdClinicIds.push(clinic.id);
 
-    const planned = await setClinicPlan(clinic.id, ["KNEE", "HIP", "KNEE"], 10);
+    const { clinic: planned } = await setClinicPlan(clinic.id, ["KNEE", "HIP", "KNEE"], 10, "Evan Miller");
     expect(planned.categories).toEqual(["KNEE", "HIP"]);
     expect(planned.surgeonSeats).toBe(10);
 
@@ -161,7 +165,7 @@ describe("setClinicPlan", () => {
     const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest no-plan clinic", logoUrl: null });
     createdClinicIds.push(clinic.id);
 
-    const planned = await setClinicPlan(clinic.id, [], 0);
+    const { clinic: planned } = await setClinicPlan(clinic.id, [], 0, "Evan Miller");
     expect(planned.categories).toEqual([]);
     expect(planned.surgeonSeats).toBe(0);
   });

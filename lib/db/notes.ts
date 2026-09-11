@@ -5,9 +5,14 @@ import { prisma } from "./client";
  * The running log on a clinic's /pulse page.
  *
  * Every entry is a ClinicNote row: something a staff member typed (kind
- * STAFF) or something the app recorded on its own, such as a status change
- * (kind STATUS). Entries are only ever added, never edited or deleted, so
- * the log reads as a true history. Newest first.
+ * STAFF) or something the app recorded on its own because a change was
+ * saved: the status, the plan, the details, managed by Pulse (kind STATUS,
+ * named for the first such change; it now covers all of them). Entries are
+ * only ever added, never edited or deleted, so the log reads as a true
+ * history. Newest first.
+ *
+ * The app-written entries are made in lib/db/clinics.ts, in the same
+ * transaction as the change they describe.
  *
  * Internal to Pulse 3D: nothing here is shown to a clinic. Takes clinicId
  * first like every clinic-owned query (rule 1).

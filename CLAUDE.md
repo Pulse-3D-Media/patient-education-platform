@@ -109,7 +109,7 @@ A member sees the library; an admin sees both. **Do not merge them into one page
 
 **Who may open it is decided in one function, `isPulseStaff()` in `lib/pulse.ts`.** A person is Pulse staff when their Clerk user has `pulseStaff: true` in its public metadata, set by hand in the Clerk dashboard (Users, the user, Metadata, Public) and nowhere else. It is read on the server from Clerk's backend API on every request. **Every page and every Server Action under `app/pulse` calls `requirePulseStaff()` first**, which ends the request with not-found for anyone else: not a redirect, not a message, so the dashboard's existence is not confirmed to people who cannot use it. The `/pulse` layout checks too, so the not-found page has no dashboard rail around it. Never check this in the browser only.
 
-Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, six sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, People, Links, and Notes, an append-only log to which a status change adds an entry of its own) and the platform settings (`/pulse/settings`). Videos, Pricing and Reports are placeholder pages.
+Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, six sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, People, Links, and Notes, an append-only log to which every change saved on the page adds an entry of its own) and the platform settings (`/pulse/settings`). Videos, Pricing and Reports are placeholder pages.
 
 ## Phase 1 scope
 
@@ -290,10 +290,10 @@ model Clinic {
 }
 
 /// What kind of entry a clinic note is: typed by a staff member, or written
-/// by the app when something happened (a status change today; billing later).
+/// by the app when something changed (any change saved on /pulse today; billing later).
 enum NoteKind {
-  STAFF
-  STATUS
+  STAFF  // typed by a staff member
+  STATUS // written by the app when a change was saved on /pulse: status, plan, details, managed by Pulse. Named for the first such change; shown as "Change"
 }
 
 /// The running log on a clinic's /pulse page. Append-only: entries are never
@@ -343,7 +343,7 @@ model Share {
 
 **Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, Pulse staff switch a clinic on from its page on `/pulse`, or with `npm run db:set-status -- <clinicId> ACTIVE`. Never change a status by hand in Neon.
 
-**The clinic log.** `ClinicNote` is the history of a clinic as Pulse sees it: notes staff type, and entries the app writes when something happens. `setClinicStatusByStaff()` writes the status fields and a STATUS note in one transaction, so the current state and the history cannot disagree. Entries are only ever added. When billing changes a status later, it writes the same pair under its own name. Nothing in the log is ever shown to the clinic.
+**The clinic log.** `ClinicNote` is the history of a clinic as Pulse sees it: notes staff type (kind STAFF), and entries the app writes when something changes (kind STATUS, named for the first such change and shown as "Change"). **Every change staff save on a clinic's page writes an entry: status, plan, managed by Pulse, and each detail field**, saying what it was and what it became, under the staff member's name. The change and its entry go in one transaction (`changeClinicWithLog()` in `lib/db/clinics.ts`), so the current state and the history cannot disagree, and a save that changes nothing writes nothing. Entries are only ever added. When billing changes a status later, it writes the same pair under its own name. If you add a new thing staff can change about a clinic, write it through the same helper so it is logged too. Nothing in the log is ever shown to the clinic.
 
 **Clinic plan.** `Clinic.categories` and `Clinic.surgeonSeats` are the plan. Set on `/pulse` or with `npm run db:set-plan -- <clinicId> --categories all --seats 10`. Nothing enforces them yet; that comes with billing and category entitlements.
 

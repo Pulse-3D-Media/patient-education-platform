@@ -21,7 +21,7 @@ import { DetailsForm, ManagedForm, NoteForm, PlanForm, StatusForm } from "./form
  * The editable sections are forms in forms.tsx, each saving through its own
  * Server Action. People come from Clerk; links are the same list the
  * clinic's own admin console shows; Notes is the running log, newest first,
- * to which a status change adds an entry of its own.
+ * to which every change saved on this page adds an entry of its own.
  *
  * Staff only. Rendered fresh on every request so a save is seen at once.
  */
@@ -157,7 +157,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   const notesSection = (
     <Section
       title="Notes"
-      blurb="Internal, and the clinic never sees this. Every entry stays: a note is added, never edited or deleted, and a status change writes one on its own."
+      blurb="Internal, and the clinic never sees this. Every entry stays: a note is added, never edited or deleted, and every change made on this page (status, plan, details, managed by Pulse) writes one on its own."
     >
       <NoteForm clinicId={clinic.id} />
       {notes.length === 0 ? (
@@ -172,7 +172,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
                     note.kind === "STATUS" ? "bg-[#2a829b]/20 text-[#5fb8d4]" : "bg-white/10 text-[#bfbfbf]"
                   }`}
                 >
-                  {note.kind === "STATUS" ? "Status" : "Note"}
+                  {note.kind === "STATUS" ? "Change" : "Note"}
                 </span>
                 <span className="text-[#bfbfbf]">{note.authorName}</span>
                 <span>{formatDateTime(note.createdAt)}</span>

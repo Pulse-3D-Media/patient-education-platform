@@ -77,11 +77,13 @@ async function main() {
     process.exit(1);
   }
 
-  const after = await setClinicPlan(clinicId, categories, seats);
+  // The change goes in the clinic's log on /pulse like any other, under this script's name.
+  const { clinic: after, logged } = await setClinicPlan(clinicId, categories, seats, "npm run db:set-plan");
 
   console.log(`Clinic "${after.name}" (${after.id})`);
   console.log(`  categories: ${before.categories.join(", ") || "(none)"} -> ${after.categories.join(", ") || "(none)"}`);
   console.log(`  surgeon seats: ${before.surgeonSeats} -> ${after.surgeonSeats}`);
+  console.log(logged ? `  logged: ${logged}` : "  nothing changed, nothing logged");
 }
 
 main()

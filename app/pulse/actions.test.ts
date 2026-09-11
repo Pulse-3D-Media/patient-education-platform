@@ -2,7 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
-import { addNoteAction, setPlanAction, setStatusAction } from "./actions";
+import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction } from "./actions";
 
 /**
  * The Server Actions behind /pulse, with Clerk replaced by a stand-in and
@@ -128,6 +128,30 @@ describe("addNoteAction", () => {
   });
 });
 
+describe("setManagedAction and saveDetailsAction", () => {
+  it("log what changed under the staff member's name", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+
+    expect(await setManagedAction(null, form({ clinicId, managedByPulse: "on" }))).toEqual({ ok: "This clinic is now managed by Pulse." });
+
+    // The test clinic has no Clerk organization, so no rename goes to Clerk.
+    const details = await saveDetailsAction(
+      null,
+      form({ clinicId, name: "Vitest renamed clinic", phone: "801-555-0123", logoUrl: "", noticeText: "Welcome", viewDaysOverride: "" }),
+    );
+    expect(details).toEqual({ ok: "Details saved." });
+
+    const notes = await prisma.clinicNote.findMany({ where: { clinicId }, orderBy: { createdAt: "asc" }, select: { body: true, authorName: true } });
+    expect(notes.map((note) => note.authorName)).toEqual(["Evan Miller", "Evan Miller"]);
+    expect(notes[0].body).toBe("Managed by Pulse turned on.");
+    expect(notes[1].body).toContain('name changed from "Vitest pulse clinic');
+    expect(notes[1].body).toContain("phone set to (801) 555-0123");
+    expect(notes[1].body).toContain('notice set to "Welcome"');
+    expect(notes[1].body).toContain("placeholder videos hidden");
+  });
+});
+
 describe("setPlanAction", () => {
   it("refuses a non-staff user", async () => {
     const clinicId = await makeClinic();
@@ -147,6 +171,17 @@ describe("setPlanAction", () => {
     const clinic = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { categories: true, surgeonSeats: true } });
     expect(clinic?.categories).toEqual(["KNEE", "HIP"]);
     expect(clinic?.surgeonSeats).toBe(3);
+
+    // The change is in the clinic's log under the staff member's name.
+    const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { kind: true, body: true, authorName: true } });
+    expect(notes).toEqual([
+      { kind: "STATUS", body: "Plan changed: categories set to Knee, Hip (was none); surgeon seats set to 3 (was 0).", authorName: "Evan Miller" },
+    ]);
+
+    // Saving the same plan again says so and adds nothing to the log.
+    const again = await setPlanAction(null, form({ clinicId, categories: ["KNEE", "HIP"], surgeonSeats: "3" }));
+    expect(again).toEqual({ ok: "Nothing changed, so nothing was saved." });
+    expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(1);
   });
 
   it("rejects a category we do not have and a seat count that is not a whole number", async () => {

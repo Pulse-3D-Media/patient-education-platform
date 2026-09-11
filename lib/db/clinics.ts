@@ -1,4 +1,6 @@
-import type { Category, ClinicStatus } from "@prisma/client";
+import type { Category, ClinicStatus, Prisma } from "@prisma/client";
+import { CATEGORIES } from "../categories";
+import { formatUsPhone } from "../phone";
 import { prisma } from "./client";
 
 /**
@@ -214,6 +216,45 @@ export async function getClinicForPulse(clinicId: string) {
   });
 }
 
+/** One clinic as /pulse sees it. */
+type PulseClinic = NonNullable<Awaited<ReturnType<typeof getClinicForPulse>>>;
+
+// ---------------------------------------------------------------------------
+// Changes staff make to a clinic. Every one of them is written together with
+// an entry in the clinic's log (a ClinicNote of kind STATUS, the kind for
+// entries the app writes itself), in one transaction, so the change and its
+// history cannot disagree. A save that changes nothing writes nothing.
+// ---------------------------------------------------------------------------
+
+/**
+ * Change one clinic and log it, together.
+ *
+ * `describe` is given the clinic as it is now and returns the sentence for
+ * the log, or null when the new values are the same as the old ones, in
+ * which case nothing at all is written. Throws if the clinic does not exist.
+ *
+ * Returns the clinic as it now is, and the sentence that went in the log
+ * (null when nothing changed) so the caller can tell the staff member.
+ */
+async function changeClinicWithLog(
+  clinicId: string,
+  data: Prisma.ClinicUncheckedUpdateInput,
+  describe: (before: PulseClinic) => string | null,
+  changedBy: string,
+) {
+  const before = await getClinicForPulse(clinicId);
+  if (!before) throw new Error(`No clinic has the id "${clinicId}".`);
+
+  const body = describe(before);
+  if (body === null) return { clinic: before, logged: null };
+
+  const [clinic] = await prisma.$transaction([
+    prisma.clinic.update({ where: { id: clinicId }, data, select: PULSE_CLINIC_FIELDS }),
+    prisma.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: changedBy }, select: { id: true } }),
+  ]);
+  return { clinic, logged: body };
+}
+
 /** How each status reads in a log entry. */
 const STATUS_WORDS: Record<ClinicStatus, string> = {
   PENDING: "Pending",
@@ -225,48 +266,66 @@ const STATUS_WORDS: Record<ClinicStatus, string> = {
 
 /**
  * A staff member sets a clinic's status by hand, with the reason why and
- * who did it. Two things are written together, so neither can happen
- * without the other: the clinic's status fields (what it is now, and the
- * last change), and a STATUS entry in the clinic's log (the history). Later,
+ * who did it. The status fields (what it is now, and the last change) and
+ * the log entry are written together. Setting the same status again with a
+ * new reason still counts as a change, since the reason is new. Later,
  * billing writes the same pair with its own name. Throws if the clinic does
  * not exist.
  */
 export async function setClinicStatusByStaff(clinicId: string, status: ClinicStatus, reason: string, changedBy: string) {
-  const [clinic] = await prisma.$transaction([
-    prisma.clinic.update({
-      where: { id: clinicId },
-      data: { status, statusReason: reason, statusChangedBy: changedBy, statusChangedAt: new Date() },
-      select: PULSE_CLINIC_FIELDS,
-    }),
-    prisma.clinicNote.create({
-      data: { clinicId, kind: "STATUS", body: `Status set to ${STATUS_WORDS[status]}: ${reason}`, authorName: changedBy },
-      select: { id: true },
-    }),
-  ]);
+  const { clinic } = await changeClinicWithLog(
+    clinicId,
+    { status, statusReason: reason, statusChangedBy: changedBy, statusChangedAt: new Date() },
+    () => `Status set to ${STATUS_WORDS[status]}: ${reason}`,
+    changedBy,
+  );
   return clinic;
+}
+
+/** "Knee, Hip" as a person reads it, in the order the library shows them; "none" for an empty plan. */
+function categoryWords(categories: Category[]) {
+  const labels = CATEGORIES.filter((category) => categories.includes(category.value)).map((category) => category.label);
+  return labels.length > 0 ? labels.join(", ") : "none";
+}
+
+/** True when two lists hold the same categories, in any order. */
+function sameCategories(a: Category[], b: Category[]) {
+  return a.length === b.length && a.every((category) => b.includes(category));
 }
 
 /**
  * Set the categories on a clinic's plan and how many surgeon seats it pays
- * for. Used by /pulse and by npm run db:set-plan. Duplicate categories are
- * dropped and the rest kept in the order given. Throws if the clinic does
- * not exist.
+ * for, and log what changed under the name given. Used by /pulse and by npm
+ * run db:set-plan. Duplicate categories are dropped and the rest kept in
+ * the order given. Throws if the clinic does not exist.
  */
-export async function setClinicPlan(clinicId: string, categories: Category[], surgeonSeats: number) {
-  return prisma.clinic.update({
-    where: { id: clinicId },
-    data: { categories: Array.from(new Set(categories)), surgeonSeats },
-    select: PULSE_CLINIC_FIELDS,
-  });
+export async function setClinicPlan(clinicId: string, categories: Category[], surgeonSeats: number, changedBy: string) {
+  const wanted = Array.from(new Set(categories));
+  return changeClinicWithLog(
+    clinicId,
+    { categories: wanted, surgeonSeats },
+    (before) => {
+      const parts: string[] = [];
+      if (!sameCategories(before.categories, wanted)) {
+        parts.push(`categories set to ${categoryWords(wanted)} (was ${categoryWords(before.categories)})`);
+      }
+      if (before.surgeonSeats !== surgeonSeats) {
+        parts.push(`surgeon seats set to ${surgeonSeats} (was ${before.surgeonSeats})`);
+      }
+      return parts.length > 0 ? `Plan changed: ${parts.join("; ")}.` : null;
+    },
+    changedBy,
+  );
 }
 
-/** Mark a clinic as managed by Pulse (enterprise or comped), or not. */
-export async function setClinicManagedByPulse(clinicId: string, managedByPulse: boolean) {
-  return prisma.clinic.update({
-    where: { id: clinicId },
-    data: { managedByPulse },
-    select: PULSE_CLINIC_FIELDS,
-  });
+/** Mark a clinic as managed by Pulse (enterprise or comped), or not, and log it. */
+export async function setClinicManagedByPulse(clinicId: string, managedByPulse: boolean, changedBy: string) {
+  return changeClinicWithLog(
+    clinicId,
+    { managedByPulse },
+    (before) => (before.managedByPulse === managedByPulse ? null : `Managed by Pulse turned ${managedByPulse ? "on" : "off"}.`),
+    changedBy,
+  );
 }
 
 /** The details a staff member can edit on one clinic. Phone is digits only (see lib/phone.ts). */
@@ -279,11 +338,48 @@ export type ClinicDetails = {
   viewDaysOverride: number | null;
 };
 
-/** Save the editable details of one clinic. Callers check the values first. */
-export async function updateClinicDetails(clinicId: string, details: ClinicDetails) {
-  return prisma.clinic.update({
-    where: { id: clinicId },
-    data: details,
-    select: PULSE_CLINIC_FIELDS,
-  });
+/**
+ * One part of a "Details changed" entry: how a value went from one thing to
+ * another, or null when it did not change. A null value is "not set".
+ */
+function changeWords(label: string, before: string | null, after: string | null): string | null {
+  if (before === after) return null;
+  if (before === null) return `${label} set to ${after}`;
+  if (after === null) return `${label} removed (was ${before})`;
+  return `${label} changed from ${before} to ${after}`;
+}
+
+/** Quoted for the log, so a notice or a name with a comma in it still reads as one thing. */
+function quoted(text: string | null) {
+  return text === null ? null : `"${text}"`;
+}
+
+/**
+ * Save the editable details of one clinic and log every field that changed,
+ * under the name given. Callers check the values first.
+ */
+export async function updateClinicDetails(clinicId: string, details: ClinicDetails, changedBy: string) {
+  return changeClinicWithLog(
+    clinicId,
+    details,
+    (before) => {
+      const platform = "the platform setting";
+      const parts = [
+        changeWords("name", quoted(before.name), quoted(details.name)),
+        changeWords("phone", formatUsPhone(before.phone) || null, formatUsPhone(details.phone) || null),
+        changeWords("logo", before.logoUrl, details.logoUrl),
+        changeWords("notice", quoted(before.noticeText), quoted(details.noticeText)),
+        before.showPlaceholders === details.showPlaceholders
+          ? null
+          : `placeholder videos ${details.showPlaceholders ? "shown" : "hidden"}`,
+        changeWords(
+          "days a link works after first view",
+          before.viewDaysOverride === null ? platform : String(before.viewDaysOverride),
+          details.viewDaysOverride === null ? platform : String(details.viewDaysOverride),
+        ),
+      ].filter((part): part is string => part !== null);
+      return parts.length > 0 ? `Details changed: ${parts.join("; ")}.` : null;
+    },
+    changedBy,
+  );
 }

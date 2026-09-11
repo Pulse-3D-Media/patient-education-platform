@@ -1,14 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "./client";
-import { setClinicStatusByStaff, upsertClinicForClerkOrg } from "./clinics";
+import { setClinicManagedByPulse, setClinicPlan, setClinicStatusByStaff, updateClinicDetails, upsertClinicForClerkOrg } from "./clinics";
 import { addClinicNote, listNotesForClinic } from "./notes";
 
 /**
  * The clinic log, against the real test database: notes are added and come
- * back newest first, one clinic never sees another's, and a status change
- * writes an entry of its own. Clinics made here are deleted afterwards;
- * their notes go with them (the relation cascades).
+ * back newest first, one clinic never sees another's, and every change
+ * staff make (status, plan, managed by Pulse, details) writes an entry of
+ * its own, while a save that changes nothing writes none. Clinics made here
+ * are deleted afterwards; their notes go with them (the relation cascades).
  */
 
 const createdClinicIds: string[] = [];
@@ -56,6 +57,73 @@ describe("addClinicNote and listNotesForClinic", () => {
       body: "Status set to Active: Paid by invoice through March",
       authorName: "Evan Miller",
     });
+  });
+
+  it("a plan change writes an entry saying what changed, and saving the same plan again writes nothing", async () => {
+    const clinicId = await makeClinic("plan");
+
+    const first = await setClinicPlan(clinicId, ["KNEE", "HIP"], 3, "Evan Miller");
+    expect(first.logged).toBe("Plan changed: categories set to Knee, Hip (was none); surgeon seats set to 3 (was 0).");
+    expect(first.clinic.categories).toEqual(["KNEE", "HIP"]);
+
+    // Same categories in a different order, same seats: not a change.
+    const again = await setClinicPlan(clinicId, ["HIP", "KNEE"], 3, "Evan Miller");
+    expect(again.logged).toBeNull();
+
+    // Only the seats move: only the seats are mentioned.
+    const seats = await setClinicPlan(clinicId, ["KNEE", "HIP"], 5, "Van Miller");
+    expect(seats.logged).toBe("Plan changed: surgeon seats set to 5 (was 3).");
+
+    const notes = await listNotesForClinic(clinicId);
+    expect(notes.map((note) => [note.kind, note.authorName, note.body])).toEqual([
+      ["STATUS", "Van Miller", "Plan changed: surgeon seats set to 5 (was 3)."],
+      ["STATUS", "Evan Miller", "Plan changed: categories set to Knee, Hip (was none); surgeon seats set to 3 (was 0)."],
+    ]);
+  });
+
+  it("managed by Pulse writes an entry when it flips, and nothing when it does not", async () => {
+    const clinicId = await makeClinic("managed");
+
+    expect((await setClinicManagedByPulse(clinicId, true, "Evan Miller")).logged).toBe("Managed by Pulse turned on.");
+    expect((await setClinicManagedByPulse(clinicId, true, "Evan Miller")).logged).toBeNull();
+    expect((await setClinicManagedByPulse(clinicId, false, "Evan Miller")).logged).toBe("Managed by Pulse turned off.");
+
+    const notes = await listNotesForClinic(clinicId);
+    expect(notes.map((note) => note.body)).toEqual(["Managed by Pulse turned off.", "Managed by Pulse turned on."]);
+  });
+
+  it("a details save lists each field that changed, and only those", async () => {
+    const clinicId = await makeClinic("details");
+    const unchanged = { logoUrl: null, noticeText: null, showPlaceholders: true, viewDaysOverride: null };
+
+    const first = await updateClinicDetails(
+      clinicId,
+      { ...unchanged, name: "Vitest notes renamed", phone: "8015550123", showPlaceholders: false, viewDaysOverride: 10 },
+      "Evan Miller",
+    );
+    expect(first.logged).toBe(
+      'Details changed: name changed from "Vitest notes details" to "Vitest notes renamed"; phone set to (801) 555-0123; placeholder videos hidden; days a link works after first view changed from the platform setting to 10.',
+    );
+
+    // Saving the form untouched writes nothing.
+    const same = await updateClinicDetails(
+      clinicId,
+      { ...unchanged, name: "Vitest notes renamed", phone: "8015550123", showPlaceholders: false, viewDaysOverride: 10 },
+      "Evan Miller",
+    );
+    expect(same.logged).toBeNull();
+
+    // Taking things away reads as removed or back to the platform setting.
+    const cleared = await updateClinicDetails(
+      clinicId,
+      { ...unchanged, name: "Vitest notes renamed", phone: null, noticeText: "Welcome to the pilot", showPlaceholders: false, viewDaysOverride: null },
+      "Evan Miller",
+    );
+    expect(cleared.logged).toBe(
+      'Details changed: phone removed (was (801) 555-0123); notice set to "Welcome to the pilot"; days a link works after first view changed from 10 to the platform setting.',
+    );
+
+    expect(await listNotesForClinic(clinicId)).toHaveLength(2);
   });
 
   it("deleting a clinic takes its notes with it", async () => {

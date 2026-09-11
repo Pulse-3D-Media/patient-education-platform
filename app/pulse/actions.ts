@@ -81,9 +81,12 @@ export async function setStatusAction(_previous: FormState, formData: FormData):
   return { ok: `Status set to ${status.toLowerCase()}.` };
 }
 
+/** What a form hears when it was saved with the same values it already had. */
+const NOTHING_CHANGED = "Nothing changed, so nothing was saved.";
+
 /** Set which categories a clinic has and how many surgeon seats it pays for. */
 export async function setPlanAction(_previous: FormState, formData: FormData): Promise<FormState> {
-  await requirePulseStaff();
+  const staff = await requirePulseStaff();
 
   const clinic = await clinicFromForm(formData);
   if (!clinic) return { error: "That clinic no longer exists." };
@@ -95,28 +98,30 @@ export async function setPlanAction(_previous: FormState, formData: FormData): P
   const seats = wholeNumber(formData.get("surgeonSeats"));
   if (seats === null) return { error: "Surgeon seats must be a whole number, 0 or more." };
 
-  await setClinicPlan(clinic.id, chosen as Category[], seats);
+  const { logged } = await setClinicPlan(clinic.id, chosen as Category[], seats, staff.name);
+  if (!logged) return { ok: NOTHING_CHANGED };
   refreshClinic(clinic.id);
   return { ok: `Plan saved: ${chosen.length} ${chosen.length === 1 ? "category" : "categories"}, ${seats} ${seats === 1 ? "seat" : "seats"}.` };
 }
 
 /** Turn "managed by Pulse" on or off for a clinic. */
 export async function setManagedAction(_previous: FormState, formData: FormData): Promise<FormState> {
-  await requirePulseStaff();
+  const staff = await requirePulseStaff();
 
   const clinic = await clinicFromForm(formData);
   if (!clinic) return { error: "That clinic no longer exists." };
 
   // An unticked checkbox sends nothing; a ticked one sends "on".
   const managed = formData.get("managedByPulse") === "on";
-  await setClinicManagedByPulse(clinic.id, managed);
+  const { logged } = await setClinicManagedByPulse(clinic.id, managed, staff.name);
+  if (!logged) return { ok: NOTHING_CHANGED };
   refreshClinic(clinic.id);
   return { ok: managed ? "This clinic is now managed by Pulse." : "This clinic now manages itself." };
 }
 
 /** Save a clinic's name, logo, phone, notice, placeholder setting and view-days override. */
 export async function saveDetailsAction(_previous: FormState, formData: FormData): Promise<FormState> {
-  await requirePulseStaff();
+  const staff = await requirePulseStaff();
 
   const clinic = await clinicFromForm(formData);
   if (!clinic) return { error: "That clinic no longer exists." };
@@ -153,14 +158,19 @@ export async function saveDetailsAction(_previous: FormState, formData: FormData
     }
   }
 
-  await updateClinicDetails(clinic.id, {
-    name,
-    logoUrl: logoText || null,
-    phone,
-    noticeText: notice || null,
-    showPlaceholders: formData.get("showPlaceholders") === "on",
-    viewDaysOverride,
-  });
+  const { logged } = await updateClinicDetails(
+    clinic.id,
+    {
+      name,
+      logoUrl: logoText || null,
+      phone,
+      noticeText: notice || null,
+      showPlaceholders: formData.get("showPlaceholders") === "on",
+      viewDaysOverride,
+    },
+    staff.name,
+  );
+  if (!logged) return { ok: NOTHING_CHANGED };
   refreshClinic(clinic.id);
   return { ok: "Details saved." };
 }

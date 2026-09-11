@@ -106,6 +106,16 @@ export default async function AdminPage() {
     <AppShell showAdmin>
       <main className="px-5 py-6 sm:px-8">
         <div className="mx-auto max-w-6xl">
+          {/* A line from Pulse 3D for this clinic, set on /pulse. Nothing shows when there is none. */}
+          {clinic.noticeText && (
+            <p
+              role="status"
+              className="mb-5 rounded-xl border border-[#2a829b]/50 bg-[#2a829b]/15 px-4 py-3 text-[15px] text-white"
+            >
+              <span className="mr-2 font-semibold text-[#5fb8d4]">From Pulse 3D:</span>
+              {clinic.noticeText}
+            </p>
+          )}
           <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">{clinic.name}</p>

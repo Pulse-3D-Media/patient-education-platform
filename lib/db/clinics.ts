@@ -1,4 +1,4 @@
-import type { ClinicStatus } from "@prisma/client";
+import type { Category, ClinicStatus } from "@prisma/client";
 import { prisma } from "./client";
 
 /**
@@ -15,8 +15,19 @@ import { prisma } from "./client";
  * because they are how a clinicId is found in the first place.
  */
 
-/** The fields the app reads about a clinic. */
-const CLINIC_FIELDS = { id: true, name: true, clerkOrgId: true, status: true, logoUrl: true } as const;
+/**
+ * The fields the clinic side of the app reads about a clinic. noticeText and
+ * showPlaceholders are set by Pulse staff and change what the clinic sees.
+ */
+const CLINIC_FIELDS = {
+  id: true,
+  name: true,
+  clerkOrgId: true,
+  status: true,
+  logoUrl: true,
+  noticeText: true,
+  showPlaceholders: true,
+} as const;
 
 /** What Clerk tells us about an organization that we keep a copy of. */
 export type ClerkOrgDetails = {
@@ -55,14 +66,20 @@ export async function getClinicByClerkOrgId(clerkOrgId: string) {
  */
 export async function upsertClinicForClerkOrg(clerkOrgId: string, details: ClerkOrgDetails) {
   const existing = await getClinicByClerkOrgId(clerkOrgId);
-  if (existing && existing.name === details.name && existing.logoUrl === details.logoUrl) {
+
+  // The logo is copied only when Clerk has one. When the organization has no
+  // logo of its own, a logo Pulse staff set on /pulse is left in place rather
+  // than wiped on the clinic's next sign-in.
+  const logoUrl = details.logoUrl ?? existing?.logoUrl ?? null;
+
+  if (existing && existing.name === details.name && existing.logoUrl === logoUrl) {
     return existing;
   }
 
   return prisma.clinic.upsert({
     where: { clerkOrgId },
-    create: { clerkOrgId, name: details.name, logoUrl: details.logoUrl, status: "PENDING" },
-    update: { name: details.name, logoUrl: details.logoUrl },
+    create: { clerkOrgId, name: details.name, logoUrl, status: "PENDING" },
+    update: { name: details.name, logoUrl },
     select: CLINIC_FIELDS,
   });
 }
@@ -94,5 +111,171 @@ export async function linkClinicToClerkOrg(clinicId: string, clerkOrgId: string)
     where: { id: clinicId },
     data: { clerkOrgId },
     select: CLINIC_FIELDS,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The Pulse 3D master dashboard (app/pulse). Staff only: every caller has
+// already passed requirePulseStaff() in lib/pulse.ts. These see across all
+// clinics, which is exactly what no clinic-side function may do.
+// ---------------------------------------------------------------------------
+
+/** Everything /pulse shows about one clinic. */
+const PULSE_CLINIC_FIELDS = {
+  ...CLINIC_FIELDS,
+  createdAt: true,
+  managedByPulse: true,
+  statusReason: true,
+  statusChangedBy: true,
+  statusChangedAt: true,
+  notes: true,
+  viewDaysOverride: true,
+  phone: true,
+  categories: true,
+  surgeonSeats: true,
+} as const;
+
+/** How far back "links in the last 30 days" looks. */
+const RECENT_DAYS = 30;
+
+/** One row of the clinics table on /pulse. */
+export type PulseClinicRow = {
+  id: string;
+  name: string;
+  clerkOrgId: string | null;
+  status: ClinicStatus;
+  managedByPulse: boolean;
+  categories: Category[];
+  surgeonSeats: number;
+  createdAt: Date;
+  /** Share links made in the last 30 days. */
+  recentLinks: number;
+  /** When the newest share link was made, or null if the clinic has never made one. */
+  lastLinkAt: Date | null;
+};
+
+/**
+ * Every clinic, for the clinics table on /pulse, with its link activity.
+ * Sorted by last activity: the clinic that most recently made a link comes
+ * first, clinics that never made one last, newest of those first.
+ *
+ * Optionally narrowed by a name search (any part of the name, any case) and
+ * by one status. The search happens in the database, so the list stays
+ * quick as clinics accumulate.
+ */
+export async function listClinicsForPulse(filter: { query?: string; status?: ClinicStatus } = {}): Promise<PulseClinicRow[]> {
+  const since = new Date(Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000);
+  const query = filter.query?.trim();
+
+  const clinics = await prisma.clinic.findMany({
+    where: {
+      ...(query ? { name: { contains: query, mode: "insensitive" } } : {}),
+      ...(filter.status ? { status: filter.status } : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      clerkOrgId: true,
+      status: true,
+      managedByPulse: true,
+      categories: true,
+      surgeonSeats: true,
+      createdAt: true,
+      _count: { select: { shares: { where: { createdAt: { gte: since } } } } },
+      shares: { select: { createdAt: true }, orderBy: { createdAt: "desc" }, take: 1 },
+    },
+  });
+
+  const rows: PulseClinicRow[] = clinics.map((clinic) => ({
+    id: clinic.id,
+    name: clinic.name,
+    clerkOrgId: clinic.clerkOrgId,
+    status: clinic.status,
+    managedByPulse: clinic.managedByPulse,
+    categories: clinic.categories,
+    surgeonSeats: clinic.surgeonSeats,
+    createdAt: clinic.createdAt,
+    recentLinks: clinic._count.shares,
+    lastLinkAt: clinic.shares[0]?.createdAt ?? null,
+  }));
+
+  return rows.sort((a, b) => {
+    const activityA = a.lastLinkAt?.getTime() ?? 0;
+    const activityB = b.lastLinkAt?.getTime() ?? 0;
+    if (activityA !== activityB) return activityB - activityA;
+    return b.createdAt.getTime() - a.createdAt.getTime();
+  });
+}
+
+/** One clinic with every field /pulse shows, or null if the id is unknown. */
+export async function getClinicForPulse(clinicId: string) {
+  return prisma.clinic.findUnique({
+    where: { id: clinicId },
+    select: PULSE_CLINIC_FIELDS,
+  });
+}
+
+/**
+ * A staff member sets a clinic's status by hand, with the reason why and
+ * who did it. Recorded as a staff override, so when billing also sets
+ * statuses later the two can be told apart (billing will write its own name
+ * into statusChangedBy). Throws if the clinic does not exist.
+ */
+export async function setClinicStatusByStaff(clinicId: string, status: ClinicStatus, reason: string, changedBy: string) {
+  return prisma.clinic.update({
+    where: { id: clinicId },
+    data: { status, statusReason: reason, statusChangedBy: changedBy, statusChangedAt: new Date() },
+    select: PULSE_CLINIC_FIELDS,
+  });
+}
+
+/**
+ * Set the categories on a clinic's plan and how many surgeon seats it pays
+ * for. Used by /pulse and by npm run db:set-plan. Duplicate categories are
+ * dropped and the rest kept in the order given. Throws if the clinic does
+ * not exist.
+ */
+export async function setClinicPlan(clinicId: string, categories: Category[], surgeonSeats: number) {
+  return prisma.clinic.update({
+    where: { id: clinicId },
+    data: { categories: Array.from(new Set(categories)), surgeonSeats },
+    select: PULSE_CLINIC_FIELDS,
+  });
+}
+
+/** Mark a clinic as managed by Pulse (enterprise or comped), or not. */
+export async function setClinicManagedByPulse(clinicId: string, managedByPulse: boolean) {
+  return prisma.clinic.update({
+    where: { id: clinicId },
+    data: { managedByPulse },
+    select: PULSE_CLINIC_FIELDS,
+  });
+}
+
+/** The details a staff member can edit on one clinic. Phone is digits only (see lib/phone.ts). */
+export type ClinicDetails = {
+  name: string;
+  logoUrl: string | null;
+  phone: string | null;
+  noticeText: string | null;
+  showPlaceholders: boolean;
+  viewDaysOverride: number | null;
+};
+
+/** Save the editable details of one clinic. Callers check the values first. */
+export async function updateClinicDetails(clinicId: string, details: ClinicDetails) {
+  return prisma.clinic.update({
+    where: { id: clinicId },
+    data: details,
+    select: PULSE_CLINIC_FIELDS,
+  });
+}
+
+/** Save the internal notes on one clinic. Never shown to the clinic. */
+export async function setClinicNotes(clinicId: string, notes: string | null) {
+  return prisma.clinic.update({
+    where: { id: clinicId },
+    data: { notes },
+    select: { id: true, notes: true },
   });
 }

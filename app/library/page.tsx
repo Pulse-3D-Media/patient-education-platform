@@ -21,7 +21,9 @@ export default async function LibraryPage() {
   const clinic = await requireClinicPage();
   if (!clinicIsOpen(clinic.status)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
 
-  const counts = await countPublishedVideosByCategory();
+  // Placeholder videos are counted only when this clinic is shown them (a
+  // setting Pulse staff control per clinic).
+  const counts = await countPublishedVideosByCategory({ includePlaceholders: clinic.showPlaceholders });
 
   return (
     <main className="px-5 py-6 sm:px-8">

@@ -12,10 +12,23 @@ import { prisma } from "./client";
  * staging area and must never reach a surgeon's screen.
  */
 
+/**
+ * Whether placeholder videos are wanted. A clinic whose showPlaceholders is
+ * off (set by Pulse staff) sees only finished animations.
+ */
+export type VideoFilter = { includePlaceholders: boolean };
+
+const ANY_VIDEO: VideoFilter = { includePlaceholders: true };
+
+/** The extra where-clause that leaves placeholders out when they are not wanted. */
+function placeholderClause(filter: VideoFilter) {
+  return filter.includePlaceholders ? {} : { isPlaceholder: false };
+}
+
 /** The published videos in one category, newest first. */
-export async function listPublishedVideosByCategory(category: Category) {
+export async function listPublishedVideosByCategory(category: Category, filter: VideoFilter = ANY_VIDEO) {
   return prisma.video.findMany({
-    where: { category, isPublished: true },
+    where: { category, isPublished: true, ...placeholderClause(filter) },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -25,10 +38,10 @@ export async function listPublishedVideosByCategory(category: Category) {
  * surgeon can see which categories have something in them before tapping.
  * Categories with nothing published are simply missing from the result.
  */
-export async function countPublishedVideosByCategory() {
+export async function countPublishedVideosByCategory(filter: VideoFilter = ANY_VIDEO) {
   const rows = await prisma.video.groupBy({
     by: ["category"],
-    where: { isPublished: true },
+    where: { isPublished: true, ...placeholderClause(filter) },
     _count: { _all: true },
   });
 

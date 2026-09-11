@@ -4,8 +4,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")   // pooled connection, used by the app
-  directUrl = env("DIRECT_URL")     // direct connection, used by migrations
+  url       = env("DATABASE_URL") // pooled connection, used by the app
+  directUrl = env("DIRECT_URL") // direct connection, used by migrations
 }
 
 enum Category {
@@ -20,12 +20,12 @@ enum Category {
 /// Pulse 3D's own library. Not owned by any clinic.
 model Video {
   id              String   @id @default(cuid())
-  title           String                        // "Total Knee Replacement"
+  title           String // "Total Knee Replacement"
   category        Category
-  videoUrl        String                        // read via getPlaybackUrl(), never directly
+  videoUrl        String // read via getPlaybackUrl(), never directly
   durationSeconds Int?
-  isPublished     Boolean  @default(false)      // staging: Van finishes animations before they go live
-  isPlaceholder   Boolean  @default(false)      // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
+  isPublished     Boolean  @default(false) // staging: Van finishes animations before they go live
+  isPlaceholder   Boolean  @default(false) // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shares          Share[]
@@ -48,18 +48,45 @@ enum ClinicStatus {
 /// the first time someone from that organization signs in (lib/clinic.ts).
 model Clinic {
   id         String       @id @default(cuid())
-  name       String                             // copied from the Clerk organization's name; used for the on-video watermark
-  clerkOrgId String?      @unique               // the Clerk organization its staff sign in with
-  status     ClinicStatus @default(PENDING)     // changed by billing, or by npm run db:set-status
-  logoUrl    String?                            // copied from the Clerk organization's logo, when it has one
+  name       String // copied from the Clerk organization's name; used for the on-video watermark
+  clerkOrgId String?      @unique // the Clerk organization its staff sign in with
+  status     ClinicStatus @default(PENDING) // changed by billing, by npm run db:set-status, or by Pulse staff on /pulse
+  logoUrl    String? // copied from the Clerk organization's logo, when it has one; Pulse staff can set one too
   createdAt  DateTime     @default(now())
-  shares     Share[]
+
+  // Set by Pulse staff on /pulse. Nothing here is shown to the clinic except
+  // noticeText (top of its /admin) and the effect of showPlaceholders and
+  // viewDaysOverride.
+  managedByPulse   Boolean    @default(false) // enterprise or comped: billing screens hidden, plan edited by Pulse
+  statusReason     String? // why staff set the status by hand
+  statusChangedBy  String? // who last changed the status: a staff name, or "billing" later
+  statusChangedAt  DateTime? // when the status was last changed
+  notes            String? // internal, never shown to the clinic
+  noticeText       String? // a line shown at the top of that clinic's /admin
+  showPlaceholders Boolean    @default(true) // false hides placeholder videos from this clinic's library
+  viewDaysOverride Int? // days a patient link works after first view, instead of AppSettings.viewDays
+  phone            String? // the clinic's phone, stored as digits only; see lib/phone.ts
+  categories       Category[] @default([]) // the categories on the clinic's plan; empty means none yet
+  surgeonSeats     Int        @default(0) // surgeon seats the clinic pays for
+  shares           Share[]
+}
+
+/// Platform-wide settings. Exactly one row, with id "default". Read through
+/// getSettings() in lib/db/settings.ts, which returns these defaults when the
+/// row does not exist yet, so nothing depends on it having been created.
+model AppSettings {
+  id            String   @id @default("default")
+  unclaimedDays Int      @default(90) // days a patient link works if nobody ever opens it
+  viewDays      Int      @default(7) // days a patient link keeps working after the first view
+  graceDays     Int      @default(14) // days a clinic keeps access after a missed payment
+  qrDailyFlag   Int      @default(200) // scans of one QR code in a day that get flagged for a look
+  updatedAt     DateTime @updatedAt
 }
 
 model Share {
   id           String    @id @default(cuid())
-  code         String    @unique                // short random string in the URL, e.g. k7m2xq
-  clinicId     String                           // the tenant column. Always filter by it.
+  code         String    @unique // short random string in the URL, e.g. k7m2xq
+  clinicId     String // the tenant column. Always filter by it.
   clinic       Clinic    @relation(fields: [clinicId], references: [id])
   videoId      String
   video        Video     @relation(fields: [videoId], references: [id])

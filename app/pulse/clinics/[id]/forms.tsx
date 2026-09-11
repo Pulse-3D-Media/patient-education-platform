@@ -2,10 +2,11 @@
 
 import type { Category, ClinicStatus } from "@prisma/client";
 import { useActionState } from "react";
-import { INPUT, LABEL, PRIMARY_BUTTON, TEXTAREA } from "@/components/ui/styles";
+import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
 import { formatUsPhone } from "@/lib/phone";
-import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction, type FormState } from "../../actions";
+import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction } from "../../actions";
+import { Outcome, SaveButton } from "../../FormBits";
 
 /**
  * The editable sections of one clinic's page, each a small form that calls
@@ -17,32 +18,6 @@ import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setS
  * id up before using it, so a changed hidden field gets "no longer exists",
  * not someone else's clinic.
  */
-
-/** The line under a form's button: what the server said, or nothing yet. */
-function Outcome({ state }: { state: FormState }) {
-  if (!state) return null;
-  if (state.error) {
-    return (
-      <p role="alert" className="text-sm text-[#f3b94d]">
-        {state.error}
-      </p>
-    );
-  }
-  return (
-    <p role="status" className="text-sm text-[#5fb8d4]">
-      {state.ok}
-    </p>
-  );
-}
-
-/** The one filled button every form ends with. Says "Saving..." while the server works. */
-function SaveButton({ pending, label = "Save" }: { pending: boolean; label?: string }) {
-  return (
-    <button type="submit" disabled={pending} className={`${PRIMARY_BUTTON} h-11`}>
-      {pending ? "Saving..." : label}
-    </button>
-  );
-}
 
 const STATUS_CHOICES: { value: ClinicStatus; label: string; hint: string }[] = [
   { value: "ACTIVE", label: "Active", hint: "Library and share links on." },

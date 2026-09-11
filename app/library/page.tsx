@@ -3,7 +3,9 @@ import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
+import { getCategoryConfigs } from "@/lib/db/category-config";
 import { countPublishedVideosByCategory } from "@/lib/db/videos";
+import { ComingSoonTile } from "./ComingSoon";
 
 /**
  * The library home: every category as a visual tile. This is tap one of two.
@@ -23,7 +25,10 @@ export default async function LibraryPage() {
 
   // Placeholder videos are counted only when this clinic is shown them (a
   // setting Pulse staff control per clinic).
-  const counts = await countPublishedVideosByCategory({ includePlaceholders: clinic.showPlaceholders });
+  const [counts, configs] = await Promise.all([
+    countPublishedVideosByCategory({ includePlaceholders: clinic.showPlaceholders }),
+    getCategoryConfigs(),
+  ]);
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -35,6 +40,17 @@ export default async function LibraryPage() {
       <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {CATEGORIES.map((category) => {
           const count = counts[category.value] ?? 0;
+
+          // Nothing published in it yet (for this clinic): a dimmed tile with
+          // no link, saying so, instead of a page with nothing on it.
+          if (count === 0) {
+            return (
+              <li key={category.value}>
+                <ComingSoonTile label={category.label} image={category.image} config={configs[category.value]} />
+              </li>
+            );
+          }
+
           return (
             <li key={category.value}>
               <Link
@@ -51,7 +67,7 @@ export default async function LibraryPage() {
                 <span className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 p-5">
                   <span className="text-2xl font-semibold sm:text-[26px]">{category.label}</span>
                   <span className="shrink-0 rounded-full bg-black/50 px-3 py-1 text-sm text-[#bfbfbf] backdrop-blur">
-                    {count === 0 ? "No videos yet" : `${count} ${count === 1 ? "procedure" : "procedures"}`}
+                    {count} {count === 1 ? "procedure" : "procedures"}
                   </span>
                 </span>
               </Link>

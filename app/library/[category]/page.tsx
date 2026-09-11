@@ -4,8 +4,10 @@ import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { categoryFromSlug } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
+import { getCategoryConfigs } from "@/lib/db/category-config";
 import { listPublishedVideosByCategory } from "@/lib/db/videos";
 import { getPlaybackUrl } from "@/lib/video";
+import { ComingSoon } from "../ComingSoon";
 import { VideoGrid } from "./VideoGrid";
 
 /**
@@ -38,9 +40,14 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
     id: video.id,
     title: video.title,
     src: getPlaybackUrl(video),
+    posterUrl: video.posterUrl,
     durationSeconds: video.durationSeconds,
     isPlaceholder: video.isPlaceholder,
   }));
+
+  // Nothing published here (for this clinic): the same "Coming soon" the
+  // library home shows on the tile, with the category's own sentence.
+  const configs = items.length === 0 ? await getCategoryConfigs() : null;
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -55,7 +62,11 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
         <h1 className="text-2xl font-semibold sm:text-3xl">{category.label}</h1>
       </header>
 
-      <VideoGrid videos={items} categoryLabel={category.label} />
+      {configs ? (
+        <ComingSoon label={category.label} config={configs[category.value]} />
+      ) : (
+        <VideoGrid videos={items} categoryLabel={category.label} />
+      )}
     </main>
   );
 }

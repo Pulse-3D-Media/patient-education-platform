@@ -8,7 +8,15 @@ import { formatDuration } from "@/lib/format";
 import { sendShareAction, type SendResult } from "./actions";
 import { SendPanel } from "./SendPanel";
 
-type Item = { id: string; title: string; src: string; durationSeconds: number | null; isPlaceholder: boolean };
+type Item = {
+  id: string;
+  title: string;
+  src: string;
+  /** A still for the card, chosen on /pulse. Null means the video's own first frame, or the branded fallback. */
+  posterUrl: string | null;
+  durationSeconds: number | null;
+  isPlaceholder: boolean;
+};
 
 /** The Send panel's state: which video, and the server's answer once it arrives. */
 type Sending = { video: Item; result: SendResult | null };
@@ -25,10 +33,15 @@ type Sending = { video: Item; result: SendResult | null };
  * inside the tap itself. Browsers only allow a video to start with sound when
  * the user has just interacted with the page.
  *
- * Thumbnails are the video's own frame at one second, loaded with
- * preload="metadata" so each card costs only a few kilobytes and playback
- * starts faster because the file is already partly fetched. If a thumbnail
- * cannot load, the card shows a branded fallback instead of a broken box.
+ * A card shows the poster still chosen on /pulse when the video has one.
+ * Otherwise the thumbnail is the video's own frame at one second, loaded
+ * with preload="metadata" so each card costs only a few kilobytes and
+ * playback starts faster because the file is already partly fetched. If
+ * neither can load, the card shows a branded fallback instead of a broken
+ * box.
+ *
+ * The category page only renders this when there is at least one video;
+ * a category with nothing published shows its "Coming soon" block instead.
  *
  * A placeholder video (a sample animation standing in for the procedure it
  * is named after) carries an amber "Placeholder" badge on its thumbnail,
@@ -83,15 +96,6 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
     };
   }, [overlayOpen]);
 
-  if (videos.length === 0) {
-    return (
-      <div className="rounded-2xl border border-dashed border-white/15 px-6 py-14 text-center">
-        <p className="text-xl font-medium">Nothing published in {categoryLabel} yet.</p>
-        <p className="mt-2 text-base text-[#bfbfbf]">Procedures appear here as soon as they are released.</p>
-      </div>
-    );
-  }
-
   return (
     <>
       {videos.length > 1 && (
@@ -130,6 +134,7 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
             title={playing.title}
             subtitle={categoryLabel}
             placeholder={playing.isPlaceholder}
+            poster={playing.posterUrl ?? undefined}
             onClose={() => setPlaying(null)}
           />
         </div>
@@ -162,6 +167,14 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
       >
         {thumbFailed ? (
           <BrandedFallback />
+        ) : video.posterUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a CDN still, no resizing needed
+          <img
+            src={video.posterUrl}
+            alt=""
+            onError={() => setThumbFailed(true)}
+            className="h-full w-full object-cover transition group-hover:scale-[1.03]"
+          />
         ) : (
           <video
             src={`${video.src}#t=1`}

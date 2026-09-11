@@ -14,3 +14,14 @@ import type { Video } from "@prisma/client";
 export function getPlaybackUrl(video: Video): string {
   return video.videoUrl;
 }
+
+/**
+ * Where a video's file lives, as a word for the Videos table on /pulse.
+ * Phase 1: everything is a file on the Webflow CDN. Phase 2: a video with a
+ * Mux (or Cloudflare Stream) id answers "Mux" here, and getPlaybackUrl()
+ * above starts returning its signed address. Same file, same pair of
+ * functions, so a page never has to know which it is.
+ */
+export function describeVideoSource(video: Pick<Video, "videoUrl">): "CDN" | "Other" {
+  return video.videoUrl.startsWith("https://cdn.prod.website-files.com/") ? "CDN" : "Other";
+}

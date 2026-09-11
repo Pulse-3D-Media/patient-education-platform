@@ -25,3 +25,29 @@ export function describeDuration(seconds: number | null | undefined) {
   if (seconds < 90) return "About a minute";
   return `About ${Math.round(seconds / 60)} minutes`;
 }
+
+/**
+ * The opposite of formatDuration, for the video form on /pulse/videos: turns
+ * what a staff member typed into whole seconds. Accepts "4:12" (minutes and
+ * seconds), "1:04:12" (hours too) or a plain number of seconds such as "252".
+ *
+ * Returns null for an empty box (the length is not known), and undefined for
+ * text that is not a duration at all ("4:70", "abc", "-5"), so the form can
+ * tell "left empty" from "typed wrong".
+ */
+export function parseDuration(text: string): number | null | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+
+  const match = /^(?:(\d+):)?(\d{1,2}):(\d{2})$/.exec(trimmed);
+  if (!match) return undefined;
+
+  const hours = Number(match[1] ?? 0);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  if (seconds > 59 || (match[1] !== undefined && minutes > 59)) return undefined;
+
+  return hours * 3600 + minutes * 60 + seconds;
+}

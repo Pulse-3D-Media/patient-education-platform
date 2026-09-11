@@ -1,4 +1,12 @@
 /**
+ * THE CATALOGUE IS NOW MANAGED AT /pulse/videos. This script is for a fresh
+ * database only: it fills every category with sample animations so the app
+ * can be tried before the finished ones exist. A placeholder that has since
+ * been replaced on /pulse/videos (isPlaceholder off) is left alone by this
+ * script, but one that is still a placeholder gets its address, length and
+ * published flag written back to what is below, so do not rerun it on a
+ * database that is in use.
+ *
  * Seed for the PLACEHOLDER library. Run with: npm run db:seed-placeholders
  *
  * Twelve videos, two per category. Each carries a real procedure name from

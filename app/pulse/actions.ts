@@ -2,6 +2,8 @@
 
 import { Category, ClinicStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { saveCategoryConfig } from "@/lib/db/category-config";
 import {
   getClinicForPulse,
   setClinicManagedByPulse,
@@ -11,6 +13,8 @@ import {
 } from "@/lib/db/clinics";
 import { addClinicNote } from "@/lib/db/notes";
 import { saveSettings, type Settings } from "@/lib/db/settings";
+import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/lib/db/videos";
+import { parseDuration } from "@/lib/format";
 import { renameClerkOrganization } from "@/lib/organization";
 import { normalizeUsPhone } from "@/lib/phone";
 import { requirePulseStaff } from "@/lib/pulse";
@@ -215,3 +219,113 @@ const LABELS: Record<keyof Settings, string> = {
   graceDays: "Grace days",
   qrDailyFlag: "QR scans per day to flag",
 };
+
+// ---------------------------------------------------------------------------
+// The catalogue (/pulse/videos): videos and the categories panel.
+// ---------------------------------------------------------------------------
+
+/** The longest a title may be. */
+const TITLE_LIMIT = 120;
+
+/** The longest the internal notes on a video may be. */
+const VIDEO_NOTES_LIMIT = 2000;
+
+/** A web address a browser can load without a warning: https and nothing else. */
+function isHttpsUrl(text: string) {
+  try {
+    return new URL(text).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read a video's fields out of the form and check them. Returns the values
+ * to save, or the sentence to show the staff member.
+ */
+function videoFromForm(formData: FormData): { input: VideoInput } | { error: string } {
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title) return { error: "The video needs a title: the procedure name a surgeon would look for." };
+  if (title.length > TITLE_LIMIT) return { error: `Keep the title under ${TITLE_LIMIT} characters.` };
+
+  const category = String(formData.get("category") ?? "") as Category;
+  if (!ALL_CATEGORIES.includes(category)) return { error: "Choose one of our categories." };
+
+  const videoUrl = String(formData.get("videoUrl") ?? "").trim();
+  if (!isHttpsUrl(videoUrl)) return { error: "The video address must be a full https:// address." };
+
+  const durationSeconds = parseDuration(String(formData.get("durationSeconds") ?? ""));
+  if (durationSeconds === undefined) return { error: "Type the length as minutes and seconds, like 4:12, or leave it empty." };
+
+  const posterText = String(formData.get("posterUrl") ?? "").trim();
+  if (posterText && !isHttpsUrl(posterText)) return { error: "The poster address must be a full https:// address, or empty." };
+
+  const notes = String(formData.get("notes") ?? "").trim();
+  if (notes.length > VIDEO_NOTES_LIMIT) return { error: `Keep the notes under ${VIDEO_NOTES_LIMIT} characters.` };
+
+  return {
+    input: {
+      title,
+      category,
+      videoUrl,
+      durationSeconds,
+      posterUrl: posterText || null,
+      // An unticked checkbox sends nothing; a ticked one sends "on".
+      isPlaceholder: formData.get("isPlaceholder") === "on",
+      isPublished: formData.get("isPublished") === "on",
+      notes: notes || null,
+    },
+  };
+}
+
+/** Tell Next.js the catalogue changed, wherever it is shown. */
+function refreshCatalogue(videoId?: string) {
+  revalidatePath("/pulse/videos");
+  if (videoId) revalidatePath(`/pulse/videos/${videoId}`);
+  revalidatePath("/library");
+  revalidatePath("/admin");
+}
+
+/**
+ * Add a video, or change one in place. The form carries the video's id in a
+ * hidden field when it is editing; an empty id means "add". Editing keeps
+ * the same row, so every share link and QR code already pointing at it
+ * keeps working. A new video is sent on to its own page once saved.
+ */
+export async function saveVideoAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  await requirePulseStaff();
+
+  const checked = videoFromForm(formData);
+  if ("error" in checked) return checked;
+
+  const id = String(formData.get("id") ?? "").trim();
+  if (id) {
+    const existing = await getVideoForPulse(id);
+    if (!existing) return { error: "That video no longer exists." };
+    await updateVideo(id, checked.input);
+    refreshCatalogue(id);
+    return { ok: "Saved. Every link that points at this video plays the new version." };
+  }
+
+  const video = await createVideo(checked.input);
+  refreshCatalogue(video.id);
+  redirect(`/pulse/videos/${video.id}?added=1`);
+}
+
+/** Save one category's "for sale" switch and its coming-soon sentence. */
+export async function saveCategoryConfigAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  await requirePulseStaff();
+
+  const category = String(formData.get("category") ?? "") as Category;
+  if (!ALL_CATEGORIES.includes(category)) return { error: "That is not one of our categories." };
+
+  const text = String(formData.get("comingSoonText") ?? "").trim();
+  if (text.length > SHORT_TEXT_LIMIT) return { error: `Keep the sentence under ${SHORT_TEXT_LIMIT} characters.` };
+
+  const saved = await saveCategoryConfig(category, {
+    sellable: formData.get("sellable") === "on",
+    comingSoonText: text || null,
+  });
+  refreshCatalogue();
+  return { ok: saved.sellable ? "Saved. This category is for sale." : "Saved. This category is not for sale." };
+}

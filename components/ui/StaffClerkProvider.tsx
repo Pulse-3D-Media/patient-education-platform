@@ -19,6 +19,8 @@ export function StaffClerkProvider({ children }: { children: ReactNode }) {
     <ClerkProvider
       // Where the sign-in page lives. Must match proxy.ts and the <SignIn /> path.
       signInUrl="/sign-in"
+      // Where the sign-up page lives, so the sign-in page can link to it. Must match proxy.ts.
+      signUpUrl="/sign-up"
       // Where the user button's "Sign out" sends people.
       afterSignOutUrl="/sign-in"
       appearance={{

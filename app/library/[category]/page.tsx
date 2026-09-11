@@ -1,9 +1,9 @@
-import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { NotLinked } from "@/components/ui/NotLinked";
+import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { categoryFromSlug } from "@/lib/categories";
-import { getCurrentClinicId } from "@/lib/clinic";
+import { requireClinicPage } from "@/lib/clinic";
+import { clinicIsOpen } from "@/lib/clinic-status";
 import { listPublishedVideosByCategory } from "@/lib/db/videos";
 import { getPlaybackUrl } from "@/lib/video";
 import { VideoGrid } from "./VideoGrid";
@@ -18,10 +18,10 @@ import { VideoGrid } from "./VideoGrid";
 export const dynamic = "force-dynamic";
 
 export default async function CategoryPage({ params }: PageProps<"/library/[category]">) {
-  await auth.protect();
-
-  // Signed in, but not a member of a linked clinic: a calm page, not the library.
-  if (!(await getCurrentClinicId())) return <NotLinked />;
+  // Same gate as the library home: signed in, in a clinic, question answered,
+  // and the clinic open. Otherwise the right step or a calm page.
+  const clinic = await requireClinicPage();
+  if (!clinicIsOpen(clinic.status)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
 
   const { category: slug } = await params;
   const category = categoryFromSlug(slug);

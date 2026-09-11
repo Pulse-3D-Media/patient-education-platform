@@ -8,7 +8,7 @@ Built by [Pulse 3D Media](https://www.pulse3dmedia.com).
 
 ## Status
 
-**Phase 1 done, Phase 2 in development.** Create a link, watch a video, link expires. Staff sign in with Clerk; clinic management and billing come next.
+**Phase 1 done, Phase 2 in development.** Create a link, watch a video, link expires. Staff sign in with Clerk, a new sign-up sets up their own clinic (a Clerk organization), admins invite their team and mark who is a surgeon. Billing and real video hosting come next.
 
 ## Three surfaces
 
@@ -16,7 +16,7 @@ Built by [Pulse 3D Media](https://www.pulse3dmedia.com).
 |---|---|
 | `/watch/[code]` | The patient, on their own phone. No login, ever. |
 | `/library` | The surgeon, mid-consult. Browse and play on a tablet. |
-| `/admin` | The office manager. Create share links and QR codes. |
+| `/admin` | The office manager (clinic admin). Create share links and QR codes, manage people. |
 
 ## Stack
 

@@ -11,8 +11,8 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
  *      Server Actions and Route Handlers. This is what clerkMiddleware() does
  *      on its own, for every matched request, signed in or not.
  *
- *   2. Send signed-out visitors of the staff surfaces (/admin, /library and
- *      /pulse) to the sign-in page, and bring them back to the page they
+ *   2. Send signed-out visitors of the staff surfaces (/admin, /library,
+ *      /pulse and /onboarding) to the sign-in page, and bring them back to the page they
  *      wanted once they have signed in.
  *
  * Clerk's current guidance is that this redirect is a convenience, not the
@@ -21,11 +21,11 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
  * getCurrentClinicId()). Keep both.
  *
  * Everything not listed in STAFF_PATHS is public. That covers the patient
- * page (/watch), the sign-in page, and later /q and /api/webhooks.
+ * page (/watch), the sign-in and sign-up pages, and later /q and /api/webhooks.
  */
 
 /** The path prefixes that need a signed-in user. Everything under them too. */
-const STAFF_PATHS = ["/admin", "/library", "/pulse"];
+const STAFF_PATHS = ["/admin", "/library", "/pulse", "/onboarding"];
 
 function isStaffPath(pathname: string) {
   return STAFF_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -47,6 +47,8 @@ export default clerkMiddleware(
     // missing on a deployment. The same path is given to ClerkProvider and
     // to the <SignIn /> component; keep the three in step.
     signInUrl: "/sign-in",
+    // Where the sign-up page lives, so the sign-in page can link to it.
+    signUpUrl: "/sign-up",
   },
 );
 

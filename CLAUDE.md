@@ -14,7 +14,7 @@ The Pulse 3D Patient Education Platform. Surgical patient education animations, 
 A clinic creates a share link. The patient scans a QR code or opens the link, watches an animation explaining their upcoming procedure, and the link expires after a set number of days.
 
 **Phase 1 is done:** create a link, watch a video, link expires.
-**We are in Phase 2, the clinic dashboard:** logins (done, see Auth), clinics, doctors, permissions, real video hosting.
+**We are in Phase 2, the clinic dashboard:** logins (done, see Auth), clinics and people (done, see Roles), then billing screens, branding, real video hosting.
 **Phase 3 is billing.**
 
 ## This repository is public
@@ -95,15 +95,15 @@ The app is four different screens for four different people. Keep them separate 
 | Surface | Who | Device | Access |
 |---|---|---|---|
 | `app/watch/[code]` | **The patient** | Their own phone | Public, no login, ever |
-| `app/library` | **The surgeon**, in the room | Tablet or phone | Clerk sign-in, member of a linked clinic |
-| `app/admin` | **The office manager** | Desktop | Clerk sign-in, member of a linked clinic |
+| `app/library` | **The surgeon**, in the room | Tablet or phone | Clerk sign-in, any member of an open clinic |
+| `app/admin` | **The office manager** | Desktop | Clerk sign-in, `org:admin` of an open clinic (see Roles) |
 | `app/pulse` | **Pulse 3D staff** (Evan and Van) | Desktop | Not built yet. Clerk sign-in plus `isPulseStaff()`. |
 
 **`app/library` is the exam-room surface.** A surgeon opens it mid-consult, finds the procedure, and either plays it right there on their own device or sends the patient a link. It is used standing up, in front of a patient, under time pressure. **It obeys the same speed rule as the patient viewer** (see below): tablet-first, big touch targets, browse to playing in two taps, no dense tables.
 
 **`app/admin` is the back-office surface.** Creating and managing share links, printing pamphlets, checking what got watched. Desktop, sitting down, no hurry.
 
-In Phase 1 both are unguarded and one person uses both. In Phase 2 a surgeon sees the library and an office manager sees both. **Do not merge them into one page.**
+A member sees the library; an admin sees both. **Do not merge them into one page.**
 
 **`app/pulse` is the Pulse 3D master dashboard.** Used only by Pulse staff, Evan and Van. It shows every clinic, every video, and every price and rule. **Nothing on it is visible to clinics.** It is not a bigger `app/admin`: admin shows one clinic its own data, pulse sees across all of them, so the two never share a page. Who may open it is decided in one function, `isPulseStaff()` (see "Nothing breaks while the library fills up").
 
@@ -123,6 +123,8 @@ Phase 2 is the clinic dashboard: logins, clinics, doctors, permissions, real vid
 
 **Decided: self sign-up with card payment.** Solo (1 surgeon) and Clinic (2 to 10 surgeons) sign themselves up and pay by card. Enterprise (11 or more surgeons, or any hospital) is set up by Pulse from `app/pulse`. The card payment itself is billing work (Phase 3): decided, not yet built.
 
+**Built so far:** a person signs up, creates their clinic (a Clerk organization) at `/onboarding`, answers the surgeon-or-staff question once, and lands on a PENDING clinic that shows "Choose a plan to start" until billing (or `npm run db:set-status`) makes it ACTIVE. Admins invite people and mark each one Surgeon or Staff in `/admin/people`. Seat limits come with billing.
+
 ### Pricing shape
 
 Pricing is per category, per surgeon seat. Each category has its own monthly price per seat, and a clinic pays the sum of its chosen categories times its number of seats, with optional discounts by how many categories it takes. Office staff are never charged. **The numbers are settings, not code** (see below).
@@ -138,7 +140,7 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 - **A category with no published video shows "Coming soon" in the library** and is not offered for sale.
 - **A placeholder video carries its mark everywhere it appears.** Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working.
 - **Prices, expiry days and limits are settings, read at request time through `lib/db`**, never constants in a page. Each setting has a default in code.
-- **Access is decided in one function each.** Whether a clinic can use a video: `canUseVideo()`. Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement either check.
+- **Access is decided in one function each.** Whether a clinic may use the app at all: `clinicIsOpen(status)` in `lib/clinic-status.ts` (today: ACTIVE only; a grace period or pausing changes that one function). Whether a person is an admin: `isClinicAdmin()`. Whether a clinic can use a video: `canUseVideo()`. Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement any check.
 
 ---
 
@@ -159,16 +161,37 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 
 Clerk guards the staff surfaces. The patient surface is never behind it.
 
-- **`/admin`, `/library` and `/pulse`, and everything under them, need a signed-in user.** `/watch`, `/q`, `/api/webhooks`, `/sign-in` and static files are always public. The list of guarded prefixes lives in `proxy.ts` (Next.js 16's name for the middleware file).
-- **`proxy.ts` is a convenience, not the security boundary.** It sends signed-out visitors to `/sign-in` and back again. Clerk's guidance is that every page, Server Action and Route Handler that reads protected data checks for itself, so: pages under `/admin` and `/library` call `await auth.protect()` first; actions and handlers rely on `getCurrentClinicId()` returning null. Keep both layers.
-- **`getCurrentClinicId()` in `lib/clinic.ts` maps the signed-in user's active Clerk organization to a Clinic row** (through `getClinicByClerkOrgId()` in `lib/db/clinics.ts`) and returns that clinic's id, or null. It is the only place the signed-in user meets the database. **A Clerk organization id (`org_...`) is not a clinic id** and must never be passed to a `lib/db` function that takes a `clinicId`.
-- **Null from `getCurrentClinicId()` means: signed out, no active organization, or no Clinic linked to it.** Pages show the calm `<NotLinked />` page with a sign-out button; actions return a plain message. Never crash, never a blank page.
-- **A Clinic is linked to its Clerk organization with `npm run db:link-clinic -- <clinicId> <orgId>`**, never by hand in Neon. (Later Phase 2 work makes this automatic when a clinic signs up.)
+- **`/admin`, `/library`, `/pulse` and `/onboarding`, and everything under them, need a signed-in user.** `/watch`, `/q`, `/api/webhooks`, `/sign-in`, `/sign-up` and static files are always public. The list of guarded prefixes lives in `proxy.ts` (Next.js 16's name for the middleware file).
+- **`proxy.ts` is a convenience, not the security boundary.** It sends signed-out visitors to `/sign-in` and back again. Clerk's guidance is that every page, Server Action and Route Handler that reads protected data checks for itself, so: staff pages call `requireClinicPage()` first (which calls `await auth.protect()`); actions and handlers rely on `getCurrentClinicId()` returning null. Keep both layers.
+- **A clinic is a Clerk organization, and the Clinic row is created on first use.** `getCurrentClinic()` in `lib/clinic.ts` reads the signed-in user's membership in their active organization from Clerk (one call per request, cached), then upserts the Clinic row keyed on `clerkOrgId` (`upsertClinicForClerkOrg()` in `lib/db/clinics.ts`): the first visit creates it with status PENDING, later visits copy a changed name or logo. No webhooks. It is the only place the signed-in user meets the database. **A Clerk organization id (`org_...`) is not a clinic id** and must never be passed to a `lib/db` function that takes a `clinicId`.
+- **`requireClinicPage()` is what every staff page calls first.** Signed out goes to `/sign-in`; no organization goes to `/onboarding` (Clerk's CreateOrganization form, or the list of organizations they were invited to); surgeon question unanswered goes to `/onboarding/kind`. It returns the clinic (id, name, status, logoUrl, kind, isAdmin). Each page then checks `clinicIsOpen(clinic.status)` and shows `<ClinicClosed />` if not; admin pages also check `clinic.isAdmin` and show `<AdminsOnly />` if not. Never crash, never a blank page.
+- **`getCurrentClinicId()` is for Server Actions and Route Handlers.** A database lookup, no call to Clerk. It returns the clinic id only when the clinic is open, otherwise null, and actions return a plain message on null.
+- **`npm run db:link-clinic -- <clinicId> <orgId>`** still exists for a clinic created before its organization (the test clinic was). Clinics that sign themselves up never need it.
 - **`CLINIC_ID` is retired.** Nothing reads it. Remove it from `.env` and from Vercel.
-- **Clerk's provider wraps only the staff side** (`StaffClerkProvider` in the layouts of `app/library`, `app/admin` and `app/sign-in`). Never put it in the root layout: that would load Clerk's script on every patient's phone. `auth()` on the server works without it.
-- The sign-in path, `/sign-in`, is set in code in three places that must agree: `proxy.ts`, `StaffClerkProvider` and the `<SignIn path>` prop. No `NEXT_PUBLIC_CLERK_SIGN_IN_URL` variable is used.
+- **Clerk's provider wraps only the staff side** (`StaffClerkProvider` in the layouts of `app/library`, `app/admin`, `app/onboarding`, `app/sign-in` and `app/sign-up`). Never put it in the root layout: that would load Clerk's script on every patient's phone. `auth()` on the server works without it.
+- The sign-in and sign-up paths, `/sign-in` and `/sign-up`, are set in code in three places that must agree: `proxy.ts`, `StaffClerkProvider` and the `<SignIn path>` / `<SignUp path>` props. No `NEXT_PUBLIC_CLERK_*_URL` variables are used.
+- Clerk dashboard settings this depends on: Organizations enabled, and "Allow users to create organizations" on (so a new sign-up can set up a clinic).
 - Clerk treats a session that still has a task to finish (such as choosing an organization) as signed out. The prebuilt `<SignIn />` component walks the user through that step itself.
 - Keys: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`, in `.env` and in Vercel (Production and Preview). Rule 7 applies.
+
+### Roles
+
+Every person in a clinic has a **permission** (role) and a **kind**. They are separate things and stay separate.
+
+**Permission is the Clerk organization role.** Clerk's free plan has exactly two roles and we use only those (custom roles are a paid add-on):
+
+| Role | Who | Can |
+|---|---|---|
+| `org:admin` | The office admin | `/admin` and everything under it: share links, cancelling any link, QR codes and pamphlets, `/admin/people` (invite, change roles, remove, mark Surgeon or Staff), branding and billing when they exist. Plus everything a member can do. |
+| `org:member` | A surgeon, or anyone else on the team | `/library`, and sending links to patients from it. |
+
+The person who creates the clinic is its first admin. Admins invite the rest and choose each person's role in Clerk's panel on the People page.
+
+**Kind is what a person is for billing:** `surgeon` (a seat the clinic pays for) or `staff` (free). It lives on the Clerk membership's public metadata as `{ kind: "surgeon" | "staff" }`, is asked once at `/onboarding/kind`, and can be changed by an admin on the People page. **Kind never grants a permission.** An admin can be a surgeon; a member can be staff.
+
+**Check permission on the server, in every page and every action**, with `isClinicAdmin()` from `lib/roles.ts` (which uses Clerk's `has({ role })`). Hiding a button or an icon is a courtesy, never the check. A member who opens `/admin` sees "This page is for your clinic's office admins."
+
+The helpers live in `lib/roles.ts` (roles, kind, `isClinicAdmin()`) and `lib/people.ts` (list the people in a clinic, set a person's kind; talks to Clerk, never to `lib/db`).
 
 ### The video boundary
 
@@ -185,7 +208,7 @@ Phase 1 returns the stored URL. Phase 2 returns a signed, expiring URL from Mux 
 
 ## The database
 
-Three models. If a task seems to need a fourth, stop and ask.
+Three models and two enums. If a task seems to need a fourth model, stop and ask.
 
 ```prisma
 generator client {
@@ -223,13 +246,26 @@ model Video {
   @@index([category])
 }
 
-/// A customer practice. Phase 1 has exactly ONE row, our own test clinic.
-/// This table exists now so that Phase 2 does not need a migration on live data.
+/// Where a clinic stands with us. Only ACTIVE clinics can use the library
+/// (see clinicIsOpen() in lib/clinic-status.ts). New clinics start PENDING
+/// until they choose a plan; the other states come with billing.
+enum ClinicStatus {
+  PENDING
+  ACTIVE
+  PAUSED
+  PAST_DUE
+  CANCELED
+}
+
+/// A customer practice. One row per Clerk organization: the row is created
+/// the first time someone from that organization signs in (lib/clinic.ts).
 model Clinic {
-  id         String   @id @default(cuid())
-  name       String                             // used for the on-video watermark
-  clerkOrgId String?  @unique                   // the Clerk organization its staff sign in with. Set by npm run db:link-clinic.
-  createdAt  DateTime @default(now())
+  id         String       @id @default(cuid())
+  name       String                             // copied from the Clerk organization's name; used for the on-video watermark
+  clerkOrgId String?      @unique               // the Clerk organization its staff sign in with
+  status     ClinicStatus @default(PENDING)     // changed by billing, or by npm run db:set-status
+  logoUrl    String?                            // copied from the Clerk organization's logo, when it has one
+  createdAt  DateTime     @default(now())
   shares     Share[]
 }
 
@@ -249,7 +285,9 @@ model Share {
 }
 ```
 
-**Why `Clinic` exists in Phase 1 when there is only one of them.** Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter. Adding it now costs one table and one column. This is the single most important scale decision in the project.
+**Why `Clinic` existed in Phase 1 when there was only one of them.** Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter. Adding it early cost one table and one column. This is the single most important scale decision in the project.
+
+**Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, `npm run db:set-status -- <clinicId> ACTIVE` is how a clinic that has agreed a plan is switched on. Never change a status by hand in Neon.
 
 **Neon needs both URLs.** `DATABASE_URL` is the pooled connection the app uses; `DIRECT_URL` is the unpooled one Prisma needs to run migrations. Leaving `directUrl` out causes migrations to fail in ways that are hard to read.
 
@@ -265,20 +303,26 @@ app/library          The surgeon's exam-room browser. Tablet-first. Browse, play
 app/admin            The office-manager console. Share links, QR codes, reporting.
 app/admin/print/     The printable pamphlet for one share link.
 app/admin/qr/        The QR code image for one share link.
+app/admin/people/    The People section: everyone in the clinic, Surgeon / Staff on each, Clerk's invite and role panel. Admins only.
+app/onboarding       Set up your clinic (Clerk's CreateOrganization), then the surgeon-or-staff question at /onboarding/kind.
 app/pulse            The Pulse 3D master dashboard. Pulse staff only. Every clinic, video, price and rule.
 app/sign-in          The staff sign-in page, Clerk's prebuilt <SignIn /> component.
-proxy.ts             Clerk's middleware. Sends signed-out visitors of /admin, /library and /pulse to /sign-in.
-lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup.
+app/sign-up          The staff sign-up page, Clerk's prebuilt <SignUp /> component. A new account is sent on to /onboarding.
+proxy.ts             Clerk's middleware. Sends signed-out visitors of /admin, /library, /pulse and /onboarding to /sign-in.
+lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup and the first-use upsert.
 lib/video.ts         getPlaybackUrl(). The only place a video URL is built.
-lib/clinic.ts        getCurrentClinicId(). The signed-in user's active Clerk organization, turned into a clinic id. The one swap point.
+lib/clinic.ts        getCurrentClinic() (creates the clinic on first use, syncs name and logo), getCurrentClinicId() for actions, requireClinicPage() for pages. The one place the signed-in user meets the database.
+lib/clinic-status.ts clinicIsOpen(status). The one place that decides whether a clinic may use the app.
+lib/roles.ts         The two Clerk roles, kind, isClinicAdmin(). See Roles.
+lib/people.ts        The people in a clinic, from Clerk: listPeople(), setPersonKind(). Never touches lib/db.
 lib/share-link.ts    watchLink() and qrFileName(). The only place a patient link is built.
 lib/base-url.ts      getBaseUrl(). The site's own address, read from the request, so links work on any deployment.
 lib/qr.ts            QR codes for share links, as PNG (download) or SVG (print).
 lib/brand.ts         The logo address.
 lib/format.ts        formatDuration(), seconds as "4:12" for the staff screens. describeDuration(), "About 2 minutes" for the patient page.
 lib/expiry.ts        SHARE_EXPIRY_DAYS. How long every share link works. The only place that number lives.
-prisma/              Schema, migrations, and the scripts: seed, seed-video, seed-placeholders, link-clinic.
-components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin. StaffClerkProvider and NotLinked are the auth pieces.
+prisma/              Schema, migrations, and the scripts: seed, seed-video, seed-placeholders, link-clinic, set-status.
+components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin (its admin icon shows only for admins). StaffClerkProvider, ClinicClosed (clinic not open) and AdminsOnly (a member on an admin page) are the auth pieces.
 vitest.setup.ts      Points the tests at the testing database and refuses to run against production.
 .claude/skills/      Two process skills Claude loads here automatically: verification-before-completion, systematic-debugging. See its README. Never put .ts files under .claude/.
 ```
@@ -287,7 +331,7 @@ vitest.setup.ts      Points the tests at the testing database and refuses to run
 
 ## Tests
 
-`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it and **refuses to run if that host matches `DATABASE_URL` or `DIRECT_URL`**, so a test run can never touch production.
+`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; pure rules such as `lib/clinic-status.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it and **refuses to run if that host matches `DATABASE_URL` or `DIRECT_URL`**, so a test run can never touch production.
 
 - Tests must pass before any pull request that touches `lib/db`.
 - Tests create their own rows and delete them by id afterwards. They never touch rows they did not make.

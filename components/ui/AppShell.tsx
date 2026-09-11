@@ -27,10 +27,13 @@ import { BooksIcon, CloseIcon, HomeIcon, ShareIcon } from "./icons";
  * It is a client component only because the drawer needs open/closed state.
  * The page content arrives as children and stays server-rendered.
  *
- * Phase 2 shows the share icon only to people allowed into the admin console.
+ * The share icon that opens the admin console is shown only when showAdmin
+ * is true, which the server sets for clinic admins. That is a courtesy so
+ * members are not offered a page they cannot use; the admin pages check
+ * for themselves.
  */
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, showAdmin = false }: { children: ReactNode; showAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -57,7 +60,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="hidden text-sm text-[#667085] sm:inline">
             {onAdmin ? "Admin" : "Patient Education Library"}
           </span>
-          <AdminLink active={onAdmin} className="md:hidden" />
+          {showAdmin && <AdminLink active={onAdmin} className="md:hidden" />}
           {/* Clerk's user button: the signed-in person's avatar, with Sign out in its menu. */}
           <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
         </div>
@@ -70,7 +73,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="sticky top-12 hidden h-[calc(100vh-3rem)] w-16 shrink-0 flex-col items-center gap-2 border-r border-white/10 bg-[#07090b] py-3 md:flex"
         >
           <LibraryButton open={open} onClick={toggle} />
-          <AdminLink active={onAdmin} />
+          {showAdmin && <AdminLink active={onAdmin} />}
         </nav>
 
         {/* Drawer and its backdrop */}

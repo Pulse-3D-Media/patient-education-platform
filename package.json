@@ -13,7 +13,8 @@
     "db:seed": "tsx --env-file=.env prisma/seed.ts",
     "db:seed-video": "tsx --env-file=.env prisma/seed-video.ts",
     "db:seed-placeholders": "tsx --env-file=.env prisma/seed-placeholders.ts",
-    "db:link-clinic": "tsx --env-file=.env prisma/link-clinic.ts"
+    "db:link-clinic": "tsx --env-file=.env prisma/link-clinic.ts",
+    "db:set-status": "tsx --env-file=.env prisma/set-status.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.2",

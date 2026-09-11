@@ -1,10 +1,13 @@
-import { auth } from "@clerk/nextjs/server";
 import type { Category } from "@prisma/client";
+import Link from "next/link";
+import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { AppShell } from "@/components/ui/AppShell";
-import { NotLinked } from "@/components/ui/NotLinked";
+import { ClinicClosed } from "@/components/ui/ClinicClosed";
+import { SECONDARY_BUTTON } from "@/components/ui/styles";
 import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
-import { getCurrentClinicId } from "@/lib/clinic";
+import { requireClinicPage } from "@/lib/clinic";
+import { clinicIsOpen } from "@/lib/clinic-status";
 import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { formatDuration } from "@/lib/format";
 import { listSharesForClinic } from "@/lib/db/shares";
@@ -32,30 +35,42 @@ import { ShareLists } from "./ShareLists";
  * text for the browser: dates become the words the page shows, so the
  * client side has no date maths and no time zone to get wrong.
  *
+ * Admins only (org:admin, see lib/roles.ts). A member who opens it sees a
+ * short note saying so; the check is on the server, not a hidden icon.
+ *
  * Always rendered fresh (never cached): someone who just made a link needs
  * to see it in the list straight away.
  */
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  // Signed out? Clerk sends them to the sign-in page and back here after.
-  // proxy.ts already does this for /admin, but Clerk's guidance is that every
-  // page reading protected data keeps its own check.
-  await auth.protect();
+  // Signed out, no clinic, or the surgeon question unanswered: sent to the
+  // right step (proxy.ts already sends signed-out visitors away, but Clerk's
+  // guidance is that every page reading protected data keeps its own check).
+  const clinic = await requireClinicPage();
 
-  // Signed in, but not a member of a linked clinic: a calm page, not an error.
-  const clinicId = await getCurrentClinicId();
-  if (!clinicId) {
+  // A member, not an admin: say so. The shell hides the admin icon for them
+  // too, but this is the check that counts.
+  if (!clinic.isAdmin) {
     return (
       <AppShell>
-        <NotLinked />
+        <AdminsOnly />
+      </AppShell>
+    );
+  }
+
+  // A clinic that is not open (not on a plan yet): a calm page, not the console.
+  if (!clinicIsOpen(clinic.status)) {
+    return (
+      <AppShell showAdmin>
+        <ClinicClosed status={clinic.status} clinicName={clinic.name} />
       </AppShell>
     );
   }
 
   const [videos, shares, baseUrl] = await Promise.all([
     listPublishedVideos(),
-    listSharesForClinic(clinicId),
+    listSharesForClinic(clinic.id),
     getBaseUrl(),
   ]);
 
@@ -88,15 +103,22 @@ export default async function AdminPage() {
   });
 
   return (
-    <AppShell>
+    <AppShell showAdmin>
       <main className="px-5 py-6 sm:px-8">
         <div className="mx-auto max-w-6xl">
-          <header>
-            <h1 className="text-2xl font-semibold sm:text-3xl">Share links</h1>
-            <p className="mt-1 max-w-2xl text-[#bfbfbf]">
-              Create a link for a procedure and copy it to send to a patient. The link stops working after{" "}
-              {SHARE_EXPIRY_DAYS} days.
-            </p>
+          <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">{clinic.name}</p>
+              <h1 className="mt-1 text-2xl font-semibold sm:text-3xl">Share links</h1>
+              <p className="mt-1 max-w-2xl text-[#bfbfbf]">
+                Create a link for a procedure and copy it to send to a patient. The link stops working after{" "}
+                {SHARE_EXPIRY_DAYS} days.
+              </p>
+            </div>
+            {/* The other admin page: who is in the clinic, and who is a surgeon. */}
+            <Link href="/admin/people" className={SECONDARY_BUTTON}>
+              People
+            </Link>
           </header>
 
           <ShareLists procedures={procedures} links={links} baseUrl={baseUrl} />

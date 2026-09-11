@@ -109,7 +109,7 @@ A member sees the library; an admin sees both. **Do not merge them into one page
 
 **Who may open it is decided in one function, `isPulseStaff()` in `lib/pulse.ts`.** A person is Pulse staff when their Clerk user has `pulseStaff: true` in its public metadata, set by hand in the Clerk dashboard (Users, the user, Metadata, Public) and nowhere else. It is read on the server from Clerk's backend API on every request. **Every page and every Server Action under `app/pulse` calls `requirePulseStaff()` first**, which ends the request with not-found for anyone else: not a redirect, not a message, so the dashboard's existence is not confirmed to people who cannot use it. The `/pulse` layout checks too, so the not-found page has no dashboard rail around it. Never check this in the browser only.
 
-Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, six sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, People, Links, and Notes, an append-only log to which every change saved on the page adds an entry of its own) and the platform settings (`/pulse/settings`). Videos, Pricing and Reports are placeholder pages.
+Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, six sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, People, Links, and Notes, an append-only log to which every change saved on the page adds an entry of its own), the catalogue (`/pulse/videos`: every video, the add and edit form, and the Categories panel) and the platform settings (`/pulse/settings`). Pricing and Reports are placeholder pages.
 
 ## Phase 1 scope
 
@@ -141,8 +141,10 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 
 - **A migration only adds.** Every new column has a default or is optional. Never delete or rename.
 - **Anything shown to a person has a fallback for when its data is missing.** No logo: show the clinic name. No poster: the branded fallback. No Mux id: the CDN file.
-- **A category with no published video shows "Coming soon" in the library** and is not offered for sale.
-- **A placeholder video carries its mark everywhere it appears.** Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working.
+- **The catalogue is edited at `/pulse/videos`; the seed scripts are for a fresh database only.** Adding a video, publishing it, replacing a placeholder with the finished file, setting a poster: all of it happens on that page, through `createVideo()` and `updateVideo()` in `lib/db/videos.ts`. `prisma/seed-video.ts` and `prisma/seed-placeholders.ts` still work, but they write the address, length and published flag back to what they hold, so never run them on a database that is in use. **Unpublishing a video stops every link to it, old ones included**: the patient page shows the calm "not available right now" page, views are not counted, and the admin list greys the link and says why. Publishing it again makes them all work again.
+- **A category with no published video shows "Coming soon" in the library** (a dimmed tile with no link, and the same message on its own page) and is not offered for sale. The sentence on the tile is the category's `comingSoonText` from `CategoryConfig`, or the default. A category is offered for sale only while its `sellable` switch is on; `listSellableCategories()` in `lib/db/category-config.ts` is the one list billing and the plan screens should offer.
+- **A placeholder video carries its mark everywhere it appears.** Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working. Unticking "Placeholder" on `/pulse/videos` asks for a yes first, because links already sent start playing the new file at once.
+- **A video with a `posterUrl` shows it on the library card**; without one, the card shows the video's own first frame, and the branded fallback if that cannot load.
 - **Settings come from `getSettings()` in `lib/db/settings.ts`, never constants.** Prices, expiry days and limits are one AppSettings row, read at request time. `getSettings()` returns the code defaults when the row does not exist, so nothing depends on it having been saved. A clinic can carry its own override for a setting (`Clinic.viewDaysOverride` today); read the clinic's value first, then the platform's. Never put one of these numbers in a page or a constant. (`lib/expiry.ts` still holds `SHARE_EXPIRY_DAYS` from Phase 1; it moves onto the settings row when the 7-days-from-first-view expiry is built.)
 - **Access is decided in one function each.** Whether a clinic may use the app at all: `clinicIsOpen(status)` in `lib/clinic-status.ts` (today: ACTIVE only; a grace period or pausing changes that one function). Whether a person is an admin: `isClinicAdmin()`. Whether a clinic can use a video: `canUseVideo()`. Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement any check.
 
@@ -212,7 +214,7 @@ Phase 1 returns the stored URL. Phase 2 returns a signed, expiring URL from Mux 
 
 ## The database
 
-Five models and three enums. If a task seems to need a sixth model, stop and ask.
+Six models and three enums. If a task seems to need a seventh model, stop and ask.
 
 ```prisma
 generator client {
@@ -243,11 +245,24 @@ model Video {
   durationSeconds Int?
   isPublished     Boolean  @default(false)      // staging: Van finishes animations before they go live
   isPlaceholder   Boolean  @default(false)      // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
+  posterUrl       String?                       // a still shown on the library card instead of the video's own first frame; empty means the branded fallback
+  notes           String?                       // internal, for Pulse staff on /pulse/videos: what the file is, what is still to do. Never shown to a clinic
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shares          Share[]
 
   @@index([category])
+}
+
+/// One row per library category: whether it is offered for sale, and the
+/// sentence the library shows while it has nothing published. Rows are made
+/// on first read with the defaults (getCategoryConfigs() in
+/// lib/db/category-config.ts), so a category with no row behaves like one
+/// that was never touched: for sale, default sentence.
+model CategoryConfig {
+  category       Category @id
+  sellable       Boolean  @default(true)       // false takes the category off the price list; it still shows in the library
+  comingSoonText String?                       // shown on the library's "Coming soon" tile while the category has no published video
 }
 
 /// Where a clinic stands with us. Only ACTIVE clinics can use the library
@@ -351,7 +366,7 @@ model Share {
 
 **Neon needs both URLs.** `DATABASE_URL` is the pooled connection the app uses; `DIRECT_URL` is the unpooled one Prisma needs to run migrations. Leaving `directUrl` out causes migrations to fail in ways that are hard to read.
 
-**Placeholder videos.** A video with `isPlaceholder` true carries a real procedure name but plays a sample animation, so the library can be tested before the finished animations exist. This is not the same as unpublished: placeholders are visible on purpose. The app marks them everywhere they appear (an amber "Placeholder" mark on the library card, in the player, across the top of the patient page, and in the admin lists). **If you show a video somewhere new, carry the mark with it.** They are seeded by `prisma/seed-placeholders.ts`; the real animations live in `prisma/seed-video.ts`, which never touches them.
+**Placeholder videos.** A video with `isPlaceholder` true carries a real procedure name but plays a sample animation, so the library can be tested before the finished animations exist. This is not the same as unpublished: placeholders are visible on purpose. The app marks them everywhere they appear (an amber "Placeholder" mark on the library card, in the player, across the top of the patient page, and in the admin lists). **If you show a video somewhere new, carry the mark with it.** Placeholders are added, edited and replaced on `/pulse/videos` like any other video; `prisma/seed-placeholders.ts` only fills a fresh database, and `prisma/seed-video.ts` (the first real animation) never touches them.
 
 ---
 
@@ -368,15 +383,17 @@ app/onboarding       Set up your clinic (Clerk's CreateOrganization), then the s
 app/pulse            The Pulse 3D master dashboard. Pulse staff only. The clinics table at /pulse; actions.ts holds every Server Action; ui.tsx the shared pieces.
 app/pulse/clinics/   One clinic behind a row of pills (ClinicTabs.tsx): overview, plan, details, people, links, notes. forms.tsx holds the client forms.
 app/pulse/settings/  The AppSettings form.
-app/pulse/videos, pricing, reports   Placeholder pages until each section is built.
+app/pulse/videos     The catalogue: every video in a table with filters, plus the Categories panel (CategoryConfigForm.tsx). new/ adds a video, [id]/ edits one; both use VideoForm.tsx.
+app/pulse/pricing, reports   Placeholder pages until each section is built.
+app/pulse/FormBits.tsx   Outcome and SaveButton, the two pieces every dashboard form ends with.
 app/sign-in          The staff sign-in page, Clerk's prebuilt <SignIn /> component.
 app/sign-up          The staff sign-up page, Clerk's prebuilt <SignUp /> component. A new account is sent on to /onboarding.
 proxy.ts             Clerk's middleware. Sends signed-out visitors of /admin, /library, /pulse and /onboarding to /sign-in.
-lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, and the Pulse-side reads and writes. settings.ts holds getSettings() and saveSettings(). notes.ts holds the clinic log.
+lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, and the Pulse-side reads and writes. settings.ts holds getSettings() and saveSettings(). notes.ts holds the clinic log. videos.ts holds the clinic-side published-only lists and the Pulse-side catalogue (listVideosForPulse, createVideo, updateVideo). category-config.ts holds the per-category rows, comingSoonSentence() and listSellableCategories().
 lib/pulse.ts         isPulseStaff() and requirePulseStaff(). The one gate for /pulse.
 lib/phone.ts         US phone numbers: normalizeUsPhone() to ten digits for storing, formatUsPhone() for showing.
 lib/organization.ts  renameClerkOrganization(). Writes a clinic's new name back to its Clerk organization.
-lib/video.ts         getPlaybackUrl(). The only place a video URL is built.
+lib/video.ts         getPlaybackUrl(). The only place a video URL is built. describeVideoSource(), the "CDN" (later "Mux") word on /pulse/videos.
 lib/clinic.ts        getCurrentClinic() (creates the clinic on first use, syncs name and logo), getCurrentClinicId() for actions, requireClinicPage() for pages. The one place the signed-in user meets the database.
 lib/clinic-status.ts clinicIsOpen(status). The one place that decides whether a clinic may use the app.
 lib/roles.ts         The two Clerk roles, kind, isClinicAdmin(). See Roles.
@@ -385,9 +402,9 @@ lib/share-link.ts    watchLink() and qrFileName(). The only place a patient link
 lib/base-url.ts      getBaseUrl(). The site's own address, read from the request, so links work on any deployment.
 lib/qr.ts            QR codes for share links, as PNG (download) or SVG (print).
 lib/brand.ts         The logo address.
-lib/format.ts        formatDuration(), seconds as "4:12" for the staff screens. describeDuration(), "About 2 minutes" for the patient page.
+lib/format.ts        formatDuration(), seconds as "4:12" for the staff screens. describeDuration(), "About 2 minutes" for the patient page. parseDuration(), "4:12" typed on /pulse/videos back into seconds.
 lib/expiry.ts        SHARE_EXPIRY_DAYS. How long every share link works. The only place that number lives.
-prisma/              Schema, migrations, and the scripts: seed, seed-video, seed-placeholders, link-clinic, set-status, set-plan.
+prisma/              Schema, migrations, and the scripts: seed, seed-video, seed-placeholders (both for a fresh database only; the catalogue is edited at /pulse/videos), link-clinic, set-status, set-plan.
 components/ui/       Shared buttons, cards, layout. AppShell is the banner and rail around the library and admin (its admin icon shows only for admins). PulseShell is the same for /pulse. StaffClerkProvider, ClinicClosed (clinic not open) and AdminsOnly (a member on an admin page) are the auth pieces. styles.ts holds the shared button and form-field looks.
 vitest.setup.ts      Points the tests at the testing database and refuses to run against production.
 .claude/skills/      Two process skills Claude loads here automatically: verification-before-completion, systematic-debugging. See its README. Never put .ts files under .claude/.
@@ -397,7 +414,7 @@ vitest.setup.ts      Points the tests at the testing database and refuses to run
 
 ## Tests
 
-`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; `app/pulse/actions.test.ts` covers the dashboard's actions; pure rules such as `lib/clinic-status.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it and **refuses to run if that host matches `DATABASE_URL` or `DIRECT_URL`**, so a test run can never touch production.
+`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; `lib/db/videos.test.ts` covers the catalogue; `app/pulse/actions.test.ts` covers the dashboard's actions; pure rules such as `lib/clinic-status.ts` and `lib/format.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it and **refuses to run if that host matches `DATABASE_URL` or `DIRECT_URL`**, so a test run can never touch production.
 
 - Tests must pass before any pull request that touches `lib/db`.
 - Tests create their own rows and delete them by id afterwards. They never touch rows they did not make.

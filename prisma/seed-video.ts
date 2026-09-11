@@ -1,4 +1,10 @@
 /**
+ * THE CATALOGUE IS NOW MANAGED AT /pulse/videos. This script is for a fresh
+ * database only: it puts the first real animation in place so the library
+ * is not empty. Anything edited on /pulse/videos (poster, notes, title)
+ * survives a rerun, but the address, length and published flag below are
+ * written over, so do not rerun it on a database that is in use.
+ *
  * Seed for the first library video. Run with: npm run db:seed-video
  *
  * Makes sure the Total Knee Replacement animation (hosted on the Webflow CDN

@@ -72,3 +72,85 @@ export async function listPublishedVideos() {
   const position = new Map(CATEGORIES.map((c, index) => [c.value, index]));
   return videos.sort((a, b) => (position.get(a.category) ?? 99) - (position.get(b.category) ?? 99));
 }
+
+// ---------------------------------------------------------------------------
+// The catalogue, as Pulse staff edit it on /pulse/videos. Staff only: every
+// caller has already passed requirePulseStaff() in lib/pulse.ts. These see
+// unpublished videos too, which nothing on the clinic side ever does.
+// ---------------------------------------------------------------------------
+
+/** How the Videos table on /pulse can be narrowed. */
+export type PulseVideoFilter = {
+  category?: Category;
+  /** Published or not, placeholder or finished. Leave out for every video. */
+  status?: "published" | "unpublished" | "placeholder" | "real";
+};
+
+/** The where-clause for one status choice. */
+function statusClause(status: PulseVideoFilter["status"]) {
+  switch (status) {
+    case "published":
+      return { isPublished: true };
+    case "unpublished":
+      return { isPublished: false };
+    case "placeholder":
+      return { isPlaceholder: true };
+    case "real":
+      return { isPlaceholder: false };
+    default:
+      return {};
+  }
+}
+
+/**
+ * Every video, published or not, for the Videos table on /pulse, each with
+ * the number of share links pointing at it. Sorted the way the library
+ * shows categories, then by title (see listPublishedVideos for why the sort
+ * happens here and not in the database).
+ */
+export async function listVideosForPulse(filter: PulseVideoFilter = {}) {
+  const videos = await prisma.video.findMany({
+    where: { ...(filter.category ? { category: filter.category } : {}), ...statusClause(filter.status) },
+    include: { _count: { select: { shares: true } } },
+    orderBy: { title: "asc" },
+  });
+
+  const position = new Map(CATEGORIES.map((c, index) => [c.value, index]));
+  return videos.sort((a, b) => (position.get(a.category) ?? 99) - (position.get(b.category) ?? 99));
+}
+
+/** One video with every field, plus how many share links point at it, or null for an unknown id. */
+export async function getVideoForPulse(id: string) {
+  return prisma.video.findUnique({
+    where: { id },
+    include: { _count: { select: { shares: true } } },
+  });
+}
+
+/** Everything a staff member can set about a video. Callers check the values first (see saveVideoAction). */
+export type VideoInput = {
+  title: string;
+  category: Category;
+  videoUrl: string;
+  durationSeconds: number | null;
+  posterUrl: string | null;
+  isPlaceholder: boolean;
+  isPublished: boolean;
+  notes: string | null;
+};
+
+/** Add a video to the catalogue. Returns the new row. */
+export async function createVideo(input: VideoInput) {
+  return prisma.video.create({ data: input });
+}
+
+/**
+ * Change a video in place. The row keeps its id, so every share link and QR
+ * code already pointing at it keeps working and simply plays whatever the
+ * row now says. Swapping a placeholder for the finished animation is this
+ * function with the new address and isPlaceholder false. Throws if the id
+ * is unknown.
+ */
+export async function updateVideo(id: string, input: VideoInput) {
+  return prisma.video.update({ where: { id }, data: input });
+}

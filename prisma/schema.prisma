@@ -26,11 +26,24 @@ model Video {
   durationSeconds Int?
   isPublished     Boolean  @default(false) // staging: Van finishes animations before they go live
   isPlaceholder   Boolean  @default(false) // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
+  posterUrl       String? // a still shown on the library card instead of the video's own first frame; empty means the branded fallback
+  notes           String? // internal, for Pulse staff on /pulse/videos: what the file is, what is still to do. Never shown to a clinic
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shares          Share[]
 
   @@index([category])
+}
+
+/// One row per library category: whether it is offered for sale, and the
+/// sentence the library shows while it has nothing published. Rows are made
+/// on first read with the defaults (getCategoryConfigs() in
+/// lib/db/category-config.ts), so a category with no row behaves like one
+/// that was never touched: for sale, default sentence.
+model CategoryConfig {
+  category       Category @id
+  sellable       Boolean  @default(true) // false takes the category off the price list; it still shows in the library
+  comingSoonText String? // shown on the library's "Coming soon" tile while the category has no published video
 }
 
 /// Where a clinic stands with us. Only ACTIVE clinics can use the library

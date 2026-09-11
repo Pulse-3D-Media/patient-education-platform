@@ -2,7 +2,15 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
-import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction } from "./actions";
+import {
+  addNoteAction,
+  saveCategoryConfigAction,
+  saveDetailsAction,
+  saveVideoAction,
+  setManagedAction,
+  setPlanAction,
+  setStatusAction,
+} from "./actions";
 
 /**
  * The Server Actions behind /pulse, with Clerk replaced by a stand-in and
@@ -40,6 +48,7 @@ function form(fields: Record<string, string | string[]>) {
 }
 
 const createdClinicIds: string[] = [];
+const createdVideoIds: string[] = [];
 
 async function makeClinic() {
   const clinic = await prisma.clinic.create({
@@ -56,6 +65,7 @@ beforeEach(() => {
 
 afterAll(async () => {
   await prisma.clinic.deleteMany({ where: { id: { in: createdClinicIds } } });
+  await prisma.video.deleteMany({ where: { id: { in: createdVideoIds } } });
   await prisma.$disconnect();
 });
 
@@ -190,5 +200,98 @@ describe("setPlanAction", () => {
 
     expect(await setPlanAction(null, form({ clinicId, categories: ["ELBOW"], surgeonSeats: "3" }))).toMatchObject({ error: expect.any(String) });
     expect(await setPlanAction(null, form({ clinicId, categories: ["KNEE"], surgeonSeats: "2.5" }))).toMatchObject({ error: expect.any(String) });
+  });
+});
+
+describe("saveVideoAction", () => {
+  const fields = {
+    title: "Vitest Total Ankle Replacement",
+    category: "FOOT_ANKLE",
+    videoUrl: "https://cdn.prod.website-files.com/test/ankle.mp4",
+    durationSeconds: "2:05",
+    posterUrl: "",
+    isPlaceholder: "on",
+    isPublished: "on",
+    notes: "Sample until the real one lands.",
+  };
+
+  it("refuses a user who is not Pulse staff with not-found, and adds nothing", async () => {
+    signInAs("user_clinic_admin", { kind: "staff" });
+    const before = await prisma.video.count();
+    await expect(saveVideoAction(null, form(fields))).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    expect(await prisma.video.count()).toBe(before);
+  });
+
+  it("adds a video for staff, sends them to its page, and then edits it in place", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+
+    // A new video ends in a redirect to its own page (Next.js signals that by throwing).
+    await expect(saveVideoAction(null, form(fields))).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
+
+    const video = await prisma.video.findFirst({ where: { title: fields.title }, orderBy: { createdAt: "desc" } });
+    expect(video).not.toBeNull();
+    createdVideoIds.push(video!.id);
+    expect(video).toMatchObject({
+      category: "FOOT_ANKLE",
+      durationSeconds: 125,
+      posterUrl: null,
+      isPlaceholder: true,
+      isPublished: true,
+      notes: "Sample until the real one lands.",
+    });
+
+    // Replacing the placeholder: new address, placeholder off. Same row.
+    const result = await saveVideoAction(
+      null,
+      form({ ...fields, id: video!.id, videoUrl: "https://cdn.prod.website-files.com/test/ankle-final.mp4", isPlaceholder: "", notes: "" }),
+    );
+    expect(result).toEqual({ ok: "Saved. Every link that points at this video plays the new version." });
+
+    const edited = await prisma.video.findUnique({ where: { id: video!.id } });
+    expect(edited).toMatchObject({
+      id: video!.id,
+      videoUrl: "https://cdn.prod.website-files.com/test/ankle-final.mp4",
+      isPlaceholder: false,
+      notes: null,
+    });
+    expect(await prisma.video.count({ where: { title: fields.title } })).toBe(1);
+  });
+
+  it("rejects a non-https address, a length that is not a length, and an unknown category", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await saveVideoAction(null, form({ ...fields, videoUrl: "http://example.com/a.mp4" }))).toMatchObject({ error: expect.any(String) });
+    expect(await saveVideoAction(null, form({ ...fields, durationSeconds: "4:70" }))).toMatchObject({ error: expect.any(String) });
+    expect(await saveVideoAction(null, form({ ...fields, category: "ELBOW" }))).toMatchObject({ error: expect.any(String) });
+    expect(await saveVideoAction(null, form({ ...fields, id: "no-such-video" }))).toEqual({ error: "That video no longer exists." });
+  });
+});
+
+describe("saveCategoryConfigAction", () => {
+  it("refuses a non-staff user", async () => {
+    signInAs("user_clinic_admin", {});
+    await expect(saveCategoryConfigAction(null, form({ category: "KNEE", sellable: "on", comingSoonText: "" }))).rejects.toMatchObject({
+      digest: expect.stringContaining("404"),
+    });
+  });
+
+  it("saves the switch and the sentence for staff, and rejects a category we do not have", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    const before = await prisma.categoryConfig.findUnique({ where: { category: "COMPLEX_SPINE" } });
+
+    const result = await saveCategoryConfigAction(null, form({ category: "COMPLEX_SPINE", comingSoonText: "  Deformity work arrives in the spring.  " }));
+    expect(result).toEqual({ ok: "Saved. This category is not for sale." });
+    expect(await prisma.categoryConfig.findUnique({ where: { category: "COMPLEX_SPINE" } })).toMatchObject({
+      sellable: false,
+      comingSoonText: "Deformity work arrives in the spring.",
+    });
+
+    expect(await saveCategoryConfigAction(null, form({ category: "ELBOW", sellable: "on" }))).toMatchObject({ error: expect.any(String) });
+
+    // Put the row back the way it was found (or remove it if this test made it).
+    if (before) {
+      await prisma.categoryConfig.update({ where: { category: "COMPLEX_SPINE" }, data: { sellable: before.sellable, comingSoonText: before.comingSoonText } });
+    } else {
+      await prisma.categoryConfig.delete({ where: { category: "COMPLEX_SPINE" } });
+    }
   });
 });

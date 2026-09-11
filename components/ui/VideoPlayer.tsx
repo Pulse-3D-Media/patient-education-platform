@@ -35,11 +35,14 @@ export function VideoPlayer({
   title,
   subtitle,
   placeholder = false,
+  poster,
   onClose,
 }: {
   src: string;
   title: string;
   subtitle?: string;
+  /** A still to show before the first frame arrives. Empty means the browser shows black. */
+  poster?: string;
   /** True for a sample animation standing in for the named procedure. Keeps a chip over the picture the whole time. */
   placeholder?: boolean;
   onClose: () => void;
@@ -159,6 +162,7 @@ export function VideoPlayer({
       <video
         ref={vid}
         src={src}
+        poster={poster}
         autoPlay
         playsInline
         controlsList="nodownload"

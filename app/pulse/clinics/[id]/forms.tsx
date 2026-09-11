@@ -1,19 +1,11 @@
 "use client";
 
 import type { Category, ClinicStatus } from "@prisma/client";
-import { useActionState, useState, useTransition } from "react";
+import { useActionState } from "react";
 import { INPUT, LABEL, PRIMARY_BUTTON, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
 import { formatUsPhone } from "@/lib/phone";
-import {
-  saveDetailsAction,
-  saveNotesAction,
-  setManagedAction,
-  setPlanAction,
-  setStatusAction,
-  type FormState,
-  type NotesState,
-} from "../../actions";
+import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction, type FormState } from "../../actions";
 
 /**
  * The editable sections of one clinic's page, each a small form that calls
@@ -231,46 +223,30 @@ export function DetailsForm({ clinicId, values }: { clinicId: string; values: De
 }
 
 /**
- * The notes box saves itself when it loses focus, if the text changed. No
- * button: notes are jotted, not submitted.
+ * Add one entry to the clinic's log. The box empties itself once the note
+ * is saved (React resets a form after its action succeeds), and the list
+ * under it refreshes with the new entry on top.
  */
-export function NotesBox({ clinicId, notes }: { clinicId: string; notes: string | null }) {
-  const [saved, setSaved] = useState(notes ?? "");
-  const [result, setResult] = useState<NotesState | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  function save(text: string) {
-    if (text.trim() === saved.trim()) return;
-    startTransition(async () => {
-      const outcome = await saveNotesAction(clinicId, text);
-      setResult(outcome);
-      if (!outcome.error) setSaved(text);
-    });
-  }
-
+export function NoteForm({ clinicId }: { clinicId: string }) {
+  const [state, action, pending] = useActionState(addNoteAction, null);
   return (
-    <div className="flex flex-col gap-2">
-      <label htmlFor="notes" className="sr-only">
-        Internal notes
+    <form action={action} className="flex flex-col gap-3">
+      <input type="hidden" name="clinicId" value={clinicId} />
+      <label htmlFor="body" className="sr-only">
+        New note
       </label>
       <textarea
-        id="notes"
-        name="notes"
-        rows={5}
-        defaultValue={notes ?? ""}
-        onBlur={(event) => save(event.currentTarget.value)}
-        placeholder="Who we talked to, what they asked for, what was agreed. The clinic never sees this."
+        id="body"
+        name="body"
+        rows={3}
+        required
+        placeholder="Who we talked to, what they asked for, what was agreed."
         className={TEXTAREA}
       />
-      <p className="text-sm text-[#667085]" role="status">
-        {pending
-          ? "Saving..."
-          : result?.error
-            ? result.error
-            : result?.savedAt
-              ? `Saved ${new Date(result.savedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`
-              : "Saves when you click away."}
-      </p>
-    </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <SaveButton pending={pending} label="Add note" />
+        <Outcome state={state} />
+      </div>
+    </form>
   );
 }

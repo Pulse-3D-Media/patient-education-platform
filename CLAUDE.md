@@ -109,7 +109,7 @@ A member sees the library; an admin sees both. **Do not merge them into one page
 
 **Who may open it is decided in one function, `isPulseStaff()` in `lib/pulse.ts`.** A person is Pulse staff when their Clerk user has `pulseStaff: true` in its public metadata, set by hand in the Clerk dashboard (Users, the user, Metadata, Public) and nowhere else. It is read on the server from Clerk's backend API on every request. **Every page and every Server Action under `app/pulse` calls `requirePulseStaff()` first**, which ends the request with not-found for anyone else: not a redirect, not a message, so the dashboard's existence is not confirmed to people who cannot use it. The `/pulse` layout checks too, so the not-found page has no dashboard rail around it. Never check this in the browser only.
 
-Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`: status by hand with a required reason, plan, managed by Pulse, details, notes, plus read-only people and recent links) and the platform settings (`/pulse/settings`). Videos, Pricing and Reports are placeholder pages.
+Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, six sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, People, Links, and Notes, an append-only log to which a status change adds an entry of its own) and the platform settings (`/pulse/settings`). Videos, Pricing and Reports are placeholder pages.
 
 ## Phase 1 scope
 
@@ -212,7 +212,7 @@ Phase 1 returns the stored URL. Phase 2 returns a signed, expiring URL from Mux 
 
 ## The database
 
-Four models and two enums. If a task seems to need a fifth model, stop and ask.
+Five models and three enums. If a task seems to need a sixth model, stop and ask.
 
 ```prisma
 generator client {
@@ -278,7 +278,7 @@ model Clinic {
   statusReason     String?                      // why staff set the status by hand
   statusChangedBy  String?                      // who last changed the status: a staff name, or "billing" later
   statusChangedAt  DateTime?                    // when the status was last changed
-  notes            String?                      // internal, never shown to the clinic
+  notes            String?                      // the old single notes box. Superseded by ClinicNote; kept, never read (rule 4)
   noticeText       String?                      // a line shown at the top of that clinic's /admin
   showPlaceholders Boolean    @default(true)    // false hides placeholder videos from this clinic's library
   viewDaysOverride Int?                         // days a patient link works after first view, instead of AppSettings.viewDays
@@ -286,6 +286,29 @@ model Clinic {
   categories       Category[] @default([])      // the categories on the clinic's plan; empty means none yet
   surgeonSeats     Int        @default(0)       // surgeon seats the clinic pays for
   shares           Share[]
+  clinicNotes      ClinicNote[]
+}
+
+/// What kind of entry a clinic note is: typed by a staff member, or written
+/// by the app when something happened (a status change today; billing later).
+enum NoteKind {
+  STAFF
+  STATUS
+}
+
+/// The running log on a clinic's /pulse page. Append-only: entries are never
+/// edited or deleted, so it reads as a history. Internal, never shown to
+/// the clinic.
+model ClinicNote {
+  id         String   @id @default(cuid())
+  clinicId   String
+  clinic     Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  kind       NoteKind @default(STAFF)
+  body       String
+  authorName String                              // the staff member's name, or "billing" and the like for app-written entries
+  createdAt  DateTime @default(now())
+
+  @@index([clinicId, createdAt])
 }
 
 /// Platform-wide settings. Exactly one row, with id "default". Read through
@@ -318,7 +341,9 @@ model Share {
 
 **Why `Clinic` existed in Phase 1 when there was only one of them.** Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter. Adding it early cost one table and one column. This is the single most important scale decision in the project.
 
-**Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, Pulse staff switch a clinic on from its page on `/pulse` (which records who did it and why), or with `npm run db:set-status -- <clinicId> ACTIVE`. Never change a status by hand in Neon.
+**Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, Pulse staff switch a clinic on from its page on `/pulse`, or with `npm run db:set-status -- <clinicId> ACTIVE`. Never change a status by hand in Neon.
+
+**The clinic log.** `ClinicNote` is the history of a clinic as Pulse sees it: notes staff type, and entries the app writes when something happens. `setClinicStatusByStaff()` writes the status fields and a STATUS note in one transaction, so the current state and the history cannot disagree. Entries are only ever added. When billing changes a status later, it writes the same pair under its own name. Nothing in the log is ever shown to the clinic.
 
 **Clinic plan.** `Clinic.categories` and `Clinic.surgeonSeats` are the plan. Set on `/pulse` or with `npm run db:set-plan -- <clinicId> --categories all --seats 10`. Nothing enforces them yet; that comes with billing and category entitlements.
 
@@ -341,13 +366,13 @@ app/admin/qr/        The QR code image for one share link.
 app/admin/people/    The People section: everyone in the clinic, Surgeon / Staff on each, Clerk's invite and role panel. Admins only.
 app/onboarding       Set up your clinic (Clerk's CreateOrganization), then the surgeon-or-staff question at /onboarding/kind.
 app/pulse            The Pulse 3D master dashboard. Pulse staff only. The clinics table at /pulse; actions.ts holds every Server Action; ui.tsx the shared pieces.
-app/pulse/clinics/   One clinic: status, plan, managed by Pulse, details, notes, people, recent links. forms.tsx holds the client forms.
+app/pulse/clinics/   One clinic behind a row of pills (ClinicTabs.tsx): overview, plan, details, people, links, notes. forms.tsx holds the client forms.
 app/pulse/settings/  The AppSettings form.
 app/pulse/videos, pricing, reports   Placeholder pages until each section is built.
 app/sign-in          The staff sign-in page, Clerk's prebuilt <SignIn /> component.
 app/sign-up          The staff sign-up page, Clerk's prebuilt <SignUp /> component. A new account is sent on to /onboarding.
 proxy.ts             Clerk's middleware. Sends signed-out visitors of /admin, /library, /pulse and /onboarding to /sign-in.
-lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, and the Pulse-side reads and writes. settings.ts holds getSettings() and saveSettings().
+lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, and the Pulse-side reads and writes. settings.ts holds getSettings() and saveSettings(). notes.ts holds the clinic log.
 lib/pulse.ts         isPulseStaff() and requirePulseStaff(). The one gate for /pulse.
 lib/phone.ts         US phone numbers: normalizeUsPhone() to ten digits for storing, formatUsPhone() for showing.
 lib/organization.ts  renameClerkOrganization(). Writes a clinic's new name back to its Clerk organization.

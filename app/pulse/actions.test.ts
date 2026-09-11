@@ -2,7 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
-import { setPlanAction, setStatusAction } from "./actions";
+import { addNoteAction, setPlanAction, setStatusAction } from "./actions";
 
 /**
  * The Server Actions behind /pulse, with Clerk replaced by a stand-in and
@@ -88,6 +88,10 @@ describe("setStatusAction", () => {
     expect(clinic?.statusReason).toBe("Paid by invoice");
     expect(clinic?.statusChangedBy).toBe("Evan Miller");
     expect(clinic?.statusChangedAt).toBeInstanceOf(Date);
+
+    // The change also went into the clinic's log, under the staff member's name.
+    const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { kind: true, body: true, authorName: true } });
+    expect(notes).toEqual([{ kind: "STATUS", body: "Status set to Active: Paid by invoice", authorName: "Evan Miller" }]);
   });
 
   it("needs a reason, and only the three statuses staff may set", async () => {
@@ -97,6 +101,30 @@ describe("setStatusAction", () => {
     expect(await setStatusAction(null, form({ clinicId, status: "ACTIVE", reason: "  " }))).toMatchObject({ error: expect.any(String) });
     expect(await setStatusAction(null, form({ clinicId, status: "PAST_DUE", reason: "no" }))).toMatchObject({ error: expect.any(String) });
     expect((await prisma.clinic.findUnique({ where: { id: clinicId }, select: { status: true } }))?.status).toBe("PENDING");
+  });
+});
+
+describe("addNoteAction", () => {
+  it("refuses a non-staff user and writes nothing", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_clinic_admin", {});
+    await expect(addNoteAction(null, form({ clinicId, body: "Trying it on" }))).rejects.toMatchObject({
+      digest: expect.stringContaining("404"),
+    });
+    expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(0);
+  });
+
+  it("adds a STAFF note under the staff member's name, and needs some text", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+
+    expect(await addNoteAction(null, form({ clinicId, body: "   " }))).toMatchObject({ error: expect.any(String) });
+
+    const result = await addNoteAction(null, form({ clinicId, body: "Spoke to the office manager." }));
+    expect(result).toEqual({ ok: "Note added." });
+
+    const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { kind: true, body: true, authorName: true } });
+    expect(notes).toEqual([{ kind: "STAFF", body: "Spoke to the office manager.", authorName: "Evan Miller" }]);
   });
 });
 

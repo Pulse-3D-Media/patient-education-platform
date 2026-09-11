@@ -57,18 +57,41 @@ model Clinic {
   // Set by Pulse staff on /pulse. Nothing here is shown to the clinic except
   // noticeText (top of its /admin) and the effect of showPlaceholders and
   // viewDaysOverride.
-  managedByPulse   Boolean    @default(false) // enterprise or comped: billing screens hidden, plan edited by Pulse
+  managedByPulse   Boolean      @default(false) // enterprise or comped: billing screens hidden, plan edited by Pulse
   statusReason     String? // why staff set the status by hand
   statusChangedBy  String? // who last changed the status: a staff name, or "billing" later
   statusChangedAt  DateTime? // when the status was last changed
-  notes            String? // internal, never shown to the clinic
+  notes            String? // the old single notes box. Superseded by ClinicNote (its text was copied over); kept, never read (rule 4)
   noticeText       String? // a line shown at the top of that clinic's /admin
-  showPlaceholders Boolean    @default(true) // false hides placeholder videos from this clinic's library
+  showPlaceholders Boolean      @default(true) // false hides placeholder videos from this clinic's library
   viewDaysOverride Int? // days a patient link works after first view, instead of AppSettings.viewDays
   phone            String? // the clinic's phone, stored as digits only; see lib/phone.ts
-  categories       Category[] @default([]) // the categories on the clinic's plan; empty means none yet
-  surgeonSeats     Int        @default(0) // surgeon seats the clinic pays for
+  categories       Category[]   @default([]) // the categories on the clinic's plan; empty means none yet
+  surgeonSeats     Int          @default(0) // surgeon seats the clinic pays for
   shares           Share[]
+  clinicNotes      ClinicNote[]
+}
+
+/// What kind of entry a clinic note is: typed by a staff member, or written
+/// by the app when something happened (a status change today; billing later).
+enum NoteKind {
+  STAFF
+  STATUS
+}
+
+/// The running log on a clinic's /pulse page. Append-only: entries are never
+/// edited or deleted, so it reads as a history. Internal, never shown to
+/// the clinic.
+model ClinicNote {
+  id         String   @id @default(cuid())
+  clinicId   String
+  clinic     Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  kind       NoteKind @default(STAFF)
+  body       String
+  authorName String // the staff member's name, or "billing" and the like for app-written entries
+  createdAt  DateTime @default(now())
+
+  @@index([clinicId, createdAt])
 }
 
 /// Platform-wide settings. Exactly one row, with id "default". Read through

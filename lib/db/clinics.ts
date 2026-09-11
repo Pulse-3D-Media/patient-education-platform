@@ -128,7 +128,6 @@ const PULSE_CLINIC_FIELDS = {
   statusReason: true,
   statusChangedBy: true,
   statusChangedAt: true,
-  notes: true,
   viewDaysOverride: true,
   phone: true,
   categories: true,
@@ -215,18 +214,36 @@ export async function getClinicForPulse(clinicId: string) {
   });
 }
 
+/** How each status reads in a log entry. */
+const STATUS_WORDS: Record<ClinicStatus, string> = {
+  PENDING: "Pending",
+  ACTIVE: "Active",
+  PAUSED: "Paused",
+  PAST_DUE: "Past due",
+  CANCELED: "Canceled",
+};
+
 /**
  * A staff member sets a clinic's status by hand, with the reason why and
- * who did it. Recorded as a staff override, so when billing also sets
- * statuses later the two can be told apart (billing will write its own name
- * into statusChangedBy). Throws if the clinic does not exist.
+ * who did it. Two things are written together, so neither can happen
+ * without the other: the clinic's status fields (what it is now, and the
+ * last change), and a STATUS entry in the clinic's log (the history). Later,
+ * billing writes the same pair with its own name. Throws if the clinic does
+ * not exist.
  */
 export async function setClinicStatusByStaff(clinicId: string, status: ClinicStatus, reason: string, changedBy: string) {
-  return prisma.clinic.update({
-    where: { id: clinicId },
-    data: { status, statusReason: reason, statusChangedBy: changedBy, statusChangedAt: new Date() },
-    select: PULSE_CLINIC_FIELDS,
-  });
+  const [clinic] = await prisma.$transaction([
+    prisma.clinic.update({
+      where: { id: clinicId },
+      data: { status, statusReason: reason, statusChangedBy: changedBy, statusChangedAt: new Date() },
+      select: PULSE_CLINIC_FIELDS,
+    }),
+    prisma.clinicNote.create({
+      data: { clinicId, kind: "STATUS", body: `Status set to ${STATUS_WORDS[status]}: ${reason}`, authorName: changedBy },
+      select: { id: true },
+    }),
+  ]);
+  return clinic;
 }
 
 /**
@@ -268,14 +285,5 @@ export async function updateClinicDetails(clinicId: string, details: ClinicDetai
     where: { id: clinicId },
     data: details,
     select: PULSE_CLINIC_FIELDS,
-  });
-}
-
-/** Save the internal notes on one clinic. Never shown to the clinic. */
-export async function setClinicNotes(clinicId: string, notes: string | null) {
-  return prisma.clinic.update({
-    where: { id: clinicId },
-    data: { notes },
-    select: { id: true, notes: true },
   });
 }

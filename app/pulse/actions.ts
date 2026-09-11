@@ -5,11 +5,11 @@ import { revalidatePath } from "next/cache";
 import {
   getClinicForPulse,
   setClinicManagedByPulse,
-  setClinicNotes,
   setClinicPlan,
   setClinicStatusByStaff,
   updateClinicDetails,
 } from "@/lib/db/clinics";
+import { addClinicNote } from "@/lib/db/notes";
 import { saveSettings, type Settings } from "@/lib/db/settings";
 import { renameClerkOrganization } from "@/lib/organization";
 import { normalizeUsPhone } from "@/lib/phone";
@@ -38,6 +38,9 @@ const ALL_CATEGORIES = Object.values(Category);
 
 /** The longest a notice or reason may be. Keeps the admin banner one line or two. */
 const SHORT_TEXT_LIMIT = 300;
+
+/** The longest one note may be. */
+const NOTE_LIMIT = 2000;
 
 /** The clinic id from a form, checked to exist. Null means the form was tampered with or the clinic is gone. */
 async function clinicFromForm(formData: FormData) {
@@ -162,21 +165,20 @@ export async function saveDetailsAction(_previous: FormState, formData: FormData
   return { ok: "Details saved." };
 }
 
-/** What the notes box gets back after a blur: when it saved, or what went wrong. */
-export type NotesState = { savedAt?: string; error?: string };
+/** Add one entry to a clinic's log, under the signed-in staff member's name. */
+export async function addNoteAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePulseStaff();
 
-/** Save the internal notes on a clinic. Called when the notes box loses focus. */
-export async function saveNotesAction(clinicId: unknown, notes: unknown): Promise<NotesState> {
-  await requirePulseStaff();
-
-  const id = typeof clinicId === "string" ? clinicId.trim() : "";
-  const clinic = id ? await getClinicForPulse(id) : null;
+  const clinic = await clinicFromForm(formData);
   if (!clinic) return { error: "That clinic no longer exists." };
 
-  const text = typeof notes === "string" ? notes.trim() : "";
-  await setClinicNotes(clinic.id, text || null);
+  const body = String(formData.get("body") ?? "").trim();
+  if (!body) return { error: "Type the note first." };
+  if (body.length > NOTE_LIMIT) return { error: `Keep a note under ${NOTE_LIMIT} characters.` };
+
+  await addClinicNote(clinic.id, { kind: "STAFF", body, authorName: staff.name });
   revalidatePath(`/pulse/clinics/${clinic.id}`);
-  return { savedAt: new Date().toISOString() };
+  return { ok: "Note added." };
 }
 
 /** Save the four platform settings. Each must be a whole number, at least 1. */

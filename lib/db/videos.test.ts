@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "./client";
-import { createShare } from "./shares";
+import { createShare, getShareByCode, recordShareView } from "./shares";
 import {
   countPublishedVideosByCategory,
   createVideo,
@@ -140,5 +140,29 @@ describe("published-only lists", () => {
     const ids = (videos: { id: string }[]) => videos.map((v) => v.id);
     expect(ids(await listPublishedVideosByCategory("SHOULDER", { includePlaceholders: true }))).toContain(sample.id);
     expect(ids(await listPublishedVideosByCategory("SHOULDER", { includePlaceholders: false }))).not.toContain(sample.id);
+  });
+});
+
+describe("unpublishing a video", () => {
+  it("stops the links already sent: the share reports the video unpublished and a view is not counted", async () => {
+    const video = await makeVideo({ isPublished: true, category: "HIP" });
+    const clinicId = await makeClinic();
+    const share = await createShare(clinicId, video.id, 90);
+
+    // Published: the patient page plays it and a view counts.
+    await recordShareView(share.code);
+    expect((await getShareByCode(share.code))?.viewCount).toBe(1);
+
+    // Unpublished on /pulse/videos: the same link now reads as not available, and a view does not count.
+    await updateVideo(video.id, { ...input({ category: "HIP" }), title: video.title, isPublished: false });
+    const takenDown = await getShareByCode(share.code);
+    expect(takenDown?.video.isPublished).toBe(false);
+    await recordShareView(share.code);
+    expect((await getShareByCode(share.code))?.viewCount).toBe(1);
+
+    // Published again: the old link works again.
+    await updateVideo(video.id, { ...input({ category: "HIP" }), title: video.title, isPublished: true });
+    await recordShareView(share.code);
+    expect((await getShareByCode(share.code))?.viewCount).toBe(2);
   });
 });

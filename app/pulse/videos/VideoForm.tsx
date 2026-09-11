@@ -121,7 +121,7 @@ export function VideoForm({ video }: { video?: VideoValues }) {
           <input type="checkbox" name="isPublished" defaultChecked={video?.isPublished ?? false} className="mt-1 h-5 w-5 accent-[#2a829b]" />
           <span>
             <span className="block text-[15px] font-medium">Published</span>
-            <span className="block text-sm text-[#bfbfbf]">Off keeps it out of the library and the admin console, and no new links can be made for it. Links already sent keep playing it.</span>
+            <span className="block text-sm text-[#bfbfbf]">Off takes it out of the library and the admin console, and every link already sent stops working until it is published again.</span>
           </span>
         </label>
 

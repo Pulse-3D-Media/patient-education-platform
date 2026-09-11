@@ -87,6 +87,10 @@ export default async function AdminPage() {
 
   const links = shares.map((share) => {
     const expired = share.expiresAt < now;
+    // A link to a video that has been unpublished (on /pulse/videos) does not
+    // work either. It is shown greyed like an expired one, and the words say
+    // why. It starts working again if the video is published again.
+    const takenDown = !share.video.isPublished;
     return {
       id: share.id,
       code: share.code,
@@ -94,10 +98,12 @@ export default async function AdminPage() {
       category: share.video.category,
       categoryLabel: categoryLabel(share.video.category),
       isPlaceholder: share.video.isPlaceholder,
-      expired,
+      expired: expired || takenDown,
       whenText: expired
         ? `Expired ${formatDate(share.expiresAt)}`
-        : `Expires ${formatDate(share.expiresAt)} · ${daysLeft(share.expiresAt, now)}`,
+        : takenDown
+          ? "Not working: this video is not published right now"
+          : `Expires ${formatDate(share.expiresAt)} · ${daysLeft(share.expiresAt, now)}`,
       viewCount: share.viewCount,
     };
   });

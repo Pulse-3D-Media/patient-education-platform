@@ -30,9 +30,10 @@ import { WatchPlayer } from "./WatchPlayer";
  * procedure) gets an amber bar above everything else saying so. The patient
  * must never be able to watch one without seeing that.
  *
- * The code in the address is looked up. If no link has that code, or the
- * link has expired, the patient sees a calm page asking them to get a new
- * link from the practice.
+ * The code in the address is looked up. If no link has that code, the link
+ * has expired, or the video behind it has been taken out of the library
+ * (unpublished on /pulse/videos), the patient sees a calm page asking them
+ * to get a new link from the practice.
  *
  * Always rendered fresh, so the expiry check is never a stale, cached answer.
  */
@@ -61,6 +62,19 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
         icon={<ClockIcon className="h-8 w-8" />}
         heading="This link has expired"
         body={`Links stay open for a set time. ${share.clinic.name} can send you a fresh one whenever you need it.`}
+        note={`Call the office and ask for your ${share.video.title} video.`}
+      />
+    );
+  }
+
+  // Unpublishing a video on /pulse/videos stops every link to it, old ones
+  // included, until it is published again. Same calm page as an expired link.
+  if (!share.video.isPublished) {
+    return (
+      <Unavailable
+        icon={<ClockIcon className="h-8 w-8" />}
+        heading="This video isn't available right now"
+        body={`It has been taken down for now. ${share.clinic.name} can send you a new link when it is back.`}
         note={`Call the office and ask for your ${share.video.title} video.`}
       />
     );
@@ -109,7 +123,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
 }
 
 /**
- * The calm page for a link that is expired or does not exist. Same warm
+ * The calm page for a link that is expired, taken down or does not exist. Same warm
  * ground, a soft circular icon, plain words, nothing that reads as an alarm,
  * and nothing to do but ask the practice. Never the words "error" or
  * "invalid", and nothing red.

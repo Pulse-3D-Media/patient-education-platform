@@ -59,14 +59,15 @@ export async function createShare(clinicId: string, videoId: string, days: numbe
 
 /**
  * Every share link this clinic has created, newest first, with the title and
- * category of the video each one points at and whether that video is a
- * placeholder. The category is what lets the admin page filter links with
- * the same pills it uses for procedures.
+ * category of the video each one points at, whether that video is a
+ * placeholder, and whether it is published (a link to an unpublished video
+ * does not work). The category is what lets the admin page filter links
+ * with the same pills it uses for procedures.
  */
 export async function listSharesForClinic(clinicId: string) {
   return prisma.share.findMany({
     where: { clinicId },
-    include: { video: { select: { title: true, category: true, isPlaceholder: true } } },
+    include: { video: { select: { title: true, category: true, isPlaceholder: true, isPublished: true } } },
     orderBy: { createdAt: "desc" },
   });
 }
@@ -89,11 +90,13 @@ export async function getShareByCode(code: string) {
 /**
  * Count one view of a share: add one to viewCount and stamp lastViewedAt.
  * Called when the patient presses play. Does nothing for a code that does
- * not exist or has already expired, so an old link can never move the numbers.
+ * not exist, has already expired, or points at a video that is not
+ * published (the patient page shows nothing to play then), so an old link
+ * can never move the numbers.
  */
 export async function recordShareView(code: string) {
   await prisma.share.updateMany({
-    where: { code, expiresAt: { gt: new Date() } },
+    where: { code, expiresAt: { gt: new Date() }, video: { isPublished: true } },
     data: { viewCount: { increment: 1 }, lastViewedAt: new Date() },
   });
 }

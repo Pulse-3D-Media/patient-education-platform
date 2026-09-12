@@ -64,7 +64,7 @@ This keeps the platform outside the scope of HIPAA. If a task appears to require
 
 **How a schema change ships: production last, after the review.** A git revert does not undo a migration, so the production database is the one thing a pull request must not change before someone has read it. The order is:
 
-1. **Write the migration without applying it.** `npx prisma migrate dev --create-only --name <what-it-adds>`, then read the SQL it wrote. `.env` in the main checkout points at production, so a plain `migrate dev` there would apply the change to production on the spot: always `--create-only`. Look in `prisma/migrations` before re-running any migrate command, because a second run applies the pending draft.
+1. **Write the migration without connecting to any database.** Save the schema as it is on `main` (`git show main:prisma/schema.prisma > <scratch>/schema.old.prisma`), edit `prisma/schema.prisma`, then have Prisma diff the two files: `npx prisma migrate diff --from-schema-datamodel <scratch>/schema.old.prisma --to-schema-datamodel prisma/schema.prisma --script`. Put that SQL in a new folder, `prisma/migrations/<UTC timestamp>_<what-it-adds>/migration.sql`, and read it. Nothing in this step touches production, the testing branch or a shadow database. Never run `migrate dev` in a checkout whose `.env` is production, not even with `--create-only`: it still connects, and a second run applies the pending draft.
 2. **Apply it to the `testing` branch and run the tests.** `DATABASE_URL=<testing pooled> DIRECT_URL=<testing direct> npx prisma migrate deploy`, then `npm test`. (A Neon branch shares its parent's password, so the direct string is the pooled one with `-pooler` removed from the host.)
 3. **Push and open the pull request.** The summary lists the migration and any script that changes rows. Neon clones the preview's database from production when the PR opens, so the preview does not have the migration yet: apply it to the preview branch the same way (its strings are under Neon, Branches, `preview/<branch name>`), then check the preview page that uses the new columns.
 4. **Evan reads the summary.** That is the review. Only after it: apply to production with `npx prisma migrate deploy` from the main checkout (whose `.env` is production), run any data script, and then merge. Production is migrated right before the merge, not after it, because the new code expects the columns the moment Vercel deploys `main`; the old code ignores columns it does not know, so the minutes between the migration and the merge are safe.
@@ -119,7 +119,7 @@ A member sees the library; an admin sees both. **Do not merge them into one page
 
 **Who may open it is decided in one function, `isPulseStaff()` in `lib/pulse.ts`.** A person is Pulse staff when their Clerk user has `pulseStaff: true` in its public metadata, set by hand in the Clerk dashboard (Users, the user, Metadata, Public) and nowhere else. It is read on the server from Clerk's backend API on every request. **Every page and every Server Action under `app/pulse` calls `requirePulseStaff()` first**, which ends the request with not-found for anyone else: not a redirect, not a message, so the dashboard's existence is not confirmed to people who cannot use it. The `/pulse` layout checks too, so the not-found page has no dashboard rail around it. Never check this in the browser only.
 
-Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, six sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, People, Links, and Notes, an append-only log to which every change saved on the page adds an entry of its own), the catalogue (`/pulse/videos`: every video, the add and edit form, and the Categories panel) and the platform settings (`/pulse/settings`). Pricing and Reports are placeholder pages.
+Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, six sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, People, Links, and Notes, an append-only log to which every change saved on the page adds an entry of its own), the catalogue (`/pulse/videos`: every video, the add and edit form, and the Categories panel), the platform settings (`/pulse/settings`) and pricing (`/pulse/pricing`: the numbers behind every quote, a live calculator, and the saved versions with Make active on each). Reports is a placeholder page.
 
 ## Phase 1 scope
 
@@ -141,7 +141,14 @@ Phase 2 is the clinic dashboard: logins, clinics, doctors, permissions, real vid
 
 ### Pricing shape
 
-Pricing is per category, per surgeon seat. Each category has its own monthly price per seat, and a clinic pays the sum of its chosen categories times its number of seats, with optional discounts by how many categories it takes. Office staff are never charged. **The numbers are settings, not code** (see below).
+Pricing is a **ladder by number of categories, per surgeon seat**: one monthly price per seat for one category, another for two, and so on, whichever categories they are (defaults $59 / $89 / $109 / $125 / $139 for one to five). A clinic is charged the ladder price for the number of categories it takes, times its surgeon seats; a year is charged as a set number of months. Office staff are never charged. **Decided by Evan on 2026-09-11 (the record is at the top of `lib/pricing.test.ts`): the rounded ladder is the product, to the cent.** There are no per-category prices: a count-based price makes the identity of the categories irrelevant, and a price of a category's own would be a second pricing mode to decide on before it is built. **The ladder never goes down** (decided by Evan on 2026-09-12): each rung is at least the rung before it, equal rungs allowed, and `validatePricingConfig()` refuses a ladder that breaks this, so it can be neither saved nor activated. The numbers are placeholders to edit on `/pulse/pricing`; the model is settled.
+
+- **The engine is `lib/pricing.ts`**, pure and safe for the browser. `quote(config, input)` returns exact whole cents. The one rounding is the per-seat amount for the interval, after the founding offer if there is one, and the total is that times the seats; Stripe will be given that per-seat amount as the unit price. The monthly equivalent of a yearly price is for display only and is never charged.
+- **The numbers live in `PricingVersion` rows, never in code.** `getActivePricing()` in `lib/db/pricing.ts` is the only way to read them, and `getPricingForClinic(clinicId)` uses the clinic's pin when it has one. With no active version it returns `DEFAULT_PRICING_CONFIG` marked as an estimate; checkout must refuse an estimate and insist on a saved version. Never write a price literal anywhere but those defaults.
+- **The full library** (taking `fullLibraryFrom` categories, 5 by default) is charged at that count's ladder price and includes every category. It is only offered while every category is for sale; otherwise a clinic taking that many pays that count's price for, and gets, just those, and the quote says so. `selectedCategories`, `chargedCount` with `chargedCategories`, and `entitledCategories` are separate things and stay that way.
+- **Solo, Clinic and Enterprise** come from the seat limits on the config (defaults 1 and 10) and the practice type the quote is asked with. A hospital is always Enterprise, with no self-serve amount, and is never guessed from a name.
+- **The founding offer is 0 by default.** A number modelled on the calculator is not an offer to a customer. A real one needs a written rule for who qualifies and for how long, before checkout is built.
+- `listSellableCategories()` decides what a NEW purchase may include. It never removes a category a clinic already has; Pulse staff can grant one early on the clinic's Plan form, where a category that cannot be bought is labelled Not for sale or Coming soon.
 
 ---
 
@@ -155,7 +162,7 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 - **A category with no published video shows "Coming soon" in the library** (a dimmed tile with no link, and the same message on its own page) and is not offered for sale. The sentence on the tile is the category's `comingSoonText` from `CategoryConfig`, or the default. A category is offered for sale only while its `sellable` switch is on; `listSellableCategories()` in `lib/db/category-config.ts` is the one list billing and the plan screens should offer.
 - **A placeholder video carries its mark everywhere it appears.** Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working. Unticking "Placeholder" on `/pulse/videos` asks for a yes first, because links already sent start playing the new file at once.
 - **A video with a `posterUrl` shows it on the library card**; without one, the card shows the video's own first frame, and the branded fallback if that cannot load.
-- **Settings come from `getSettings()` in `lib/db/settings.ts`, never constants.** Prices, expiry days and limits are one AppSettings row, read at request time. `getSettings()` returns the code defaults when the row does not exist, so nothing depends on it having been saved. A clinic can carry its own override for a setting (`Clinic.viewDaysOverride` today); read the clinic's value first, then the platform's. Never put one of these numbers in a page or a constant. (`lib/expiry.ts` still holds `SHARE_EXPIRY_DAYS` from Phase 1; it moves onto the settings row when the 7-days-from-first-view expiry is built.)
+- **Settings come from `getSettings()` in `lib/db/settings.ts`, never constants.** Expiry days and limits are one AppSettings row, read at request time. Prices are not settings: they are pricing versions, read through `getActivePricing()` (see Pricing shape). `getSettings()` returns the code defaults when the row does not exist, so nothing depends on it having been saved. A clinic can carry its own override for a setting (`Clinic.viewDaysOverride` today); read the clinic's value first, then the platform's. Never put one of these numbers in a page or a constant. (`lib/expiry.ts` still holds `SHARE_EXPIRY_DAYS` from Phase 1; it moves onto the settings row when the 7-days-from-first-view expiry is built.)
 - **Access is decided in one function each.** Whether a clinic may use the app at all: `clinicIsOpen(status)` in `lib/clinic-status.ts` (today: ACTIVE only; a grace period or pausing changes that one function). Whether a person is an admin: `isClinicAdmin()`. Whether a clinic can use a video: `canUseVideo()`. Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement any check.
 
 ---
@@ -224,7 +231,7 @@ Phase 1 returns the stored URL. Phase 2 returns a signed, expiring URL from Mux 
 
 ## The database
 
-Six models and three enums. If a task seems to need a seventh model, stop and ask.
+Seven models and three enums. If a task seems to need an eighth model, stop and ask.
 
 ```prisma
 generator client {
@@ -312,6 +319,31 @@ model Clinic {
   surgeonSeats     Int        @default(0)       // surgeon seats the clinic pays for
   shares           Share[]
   clinicNotes      ClinicNote[]
+
+  // The pricing version this clinic is pinned to, once it has a subscription
+  // (billing sets it). Empty means the active version. Activating a new
+  // version never changes a pin: a clinic keeps the prices it signed up at.
+  pricingVersionId String?
+  pricingVersion   PricingVersion? @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict) // a pinned version cannot be deleted; a pin is never silently lost
+}
+
+/// One saved set of prices (see lib/pricing.ts for the shape). Versions are
+/// only ever added: a config is never edited after it is saved, so a clinic
+/// pinned to version 3 keeps exactly the prices version 3 held. At most one
+/// version is active, and it is what new quotes use.
+model PricingVersion {
+  id            String   @id @default(cuid())
+  version       Int      @unique @default(autoincrement()) // 1, 2, 3, handed out by the database, so two saves at once cannot share a number
+  config        Json     // a PricingConfig, validated before it is saved and again when it is read
+  note          String   // what changed and why, written by the staff member who saved it
+  createdAt     DateTime @default(now())
+  createdBy     String   // the Clerk user id of the staff member who saved it
+  createdByName String   // their name, for the history list
+  // true for the active version, null for every other one, never false. The
+  // unique constraint is what guarantees a single active version: only one
+  // row can hold true, while any number of rows can be empty.
+  active        Boolean? @unique
+  clinics       Clinic[]
 }
 
 /// What kind of entry a clinic note is: typed by a staff member, or written
@@ -370,7 +402,9 @@ model Share {
 
 **The clinic log.** `ClinicNote` is the history of a clinic as Pulse sees it: notes staff type (kind STAFF), and entries the app writes when something changes (kind STATUS, named for the first such change and shown as "Change"). **Every change staff save on a clinic's page writes an entry: status, plan, managed by Pulse, and each detail field**, saying what it was and what it became, under the staff member's name. The change and its entry go in one transaction (`changeClinicWithLog()` in `lib/db/clinics.ts`), so the current state and the history cannot disagree, and a save that changes nothing writes nothing. Entries are only ever added. When billing changes a status later, it writes the same pair under its own name. If you add a new thing staff can change about a clinic, write it through the same helper so it is logged too. Nothing in the log is ever shown to the clinic.
 
-**Clinic plan.** `Clinic.categories` and `Clinic.surgeonSeats` are the plan. Set on `/pulse` or with `npm run db:set-plan -- <clinicId> --categories all --seats 10`. Nothing enforces them yet; that comes with billing and category entitlements.
+**Clinic plan.** `Clinic.categories` and `Clinic.surgeonSeats` are the plan. Set on `/pulse` or with `npm run db:set-plan -- <clinicId> --categories all --seats 10`. Nothing enforces them yet; that comes with billing and category entitlements. Nothing on the clinic side shows the plan yet either: that belongs on `/admin/billing`, the clinic-facing home for categories, seats and an honestly labelled estimate, which the admin-dashboard work (prompt 6A) builds. Do not put plan or pricing information on `/admin` itself, which is for share links today and the office manager's overview later.
+
+**Pricing versions.** Saving on `/pulse/pricing` adds a `PricingVersion` row; nothing ever edits one. Making a version active is the only update the table sees, done in one transaction under the unique constraint on `active`, so two activations at once still end with one active version. The page asks before it does so (the confirmation names the version and says that new quotes and unpinned clinics move to it); that is a courtesy, and the server gate plus the constraint are the protection. The history list is bounded, so the page hands the editor the active config on its own, from `getActivePricing()`, never by looking for it in the list: the editor must open on the version the page says is active. A stored config that fails `validatePricingConfig()` (a hand edit in Neon) cannot be activated, and reading it as the active or a pinned version is a loud `PricingError`, never a quiet switch to other prices. A clinic's pin (`Clinic.pricingVersionId`) is set by billing later; nothing on `/pulse` sets one yet.
 
 **The name and logo sync.** On every sign-in `upsertClinicForClerkOrg()` copies the organization's name from Clerk, and its logo when Clerk has one. A logo set by Pulse staff survives when the organization has no logo of its own. A name changed on `/pulse` is written to the Clerk organization as well (`lib/organization.ts`), so it does not change back.
 
@@ -394,12 +428,14 @@ app/pulse            The Pulse 3D master dashboard. Pulse staff only. The clinic
 app/pulse/clinics/   One clinic behind a row of pills (ClinicTabs.tsx): overview, plan, details, people, links, notes. forms.tsx holds the client forms.
 app/pulse/settings/  The AppSettings form.
 app/pulse/videos     The catalogue: every video in a table with filters, plus the Categories panel (CategoryConfigForm.tsx). new/ adds a video, [id]/ edits one; both use VideoForm.tsx.
-app/pulse/pricing, reports   Placeholder pages until each section is built.
+app/pulse/pricing    Pricing: the editor, the live calculator and the version history, all in PricingEditor.tsx. Saving and Make active go through actions.ts.
+app/pulse/reports    Placeholder page until Reports is built.
 app/pulse/FormBits.tsx   Outcome and SaveButton, the two pieces every dashboard form ends with.
 app/sign-in          The staff sign-in page, Clerk's prebuilt <SignIn /> component.
 app/sign-up          The staff sign-up page, Clerk's prebuilt <SignUp /> component. A new account is sent on to /onboarding.
 proxy.ts             Clerk's middleware. Sends signed-out visitors of /admin, /library, /pulse and /onboarding to /sign-in.
-lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, and the Pulse-side reads and writes. settings.ts holds getSettings() and saveSettings(). notes.ts holds the clinic log. videos.ts holds the clinic-side published-only lists and the Pulse-side catalogue (listVideosForPulse, createVideo, updateVideo). category-config.ts holds the per-category rows, comingSoonSentence() and listSellableCategories().
+lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, and the Pulse-side reads and writes. settings.ts holds getSettings() and saveSettings(). notes.ts holds the clinic log. videos.ts holds the clinic-side published-only lists and the Pulse-side catalogue (listVideosForPulse, createVideo, updateVideo). category-config.ts holds the per-category rows, comingSoonSentence(), getCategoryAvailability() and listSellableCategories(). pricing.ts holds the version store: listPricingVersions, createPricingVersion, activatePricingVersion, getActivePricing, getPricingForClinic.
+lib/pricing.ts       The pricing engine: the config type and its validator, quote(), the built-in defaults, and the dollar and percent reading and writing. Pure, no database, safe for the browser. Never a price literal anywhere else.
 lib/pulse.ts         isPulseStaff() and requirePulseStaff(). The one gate for /pulse.
 lib/phone.ts         US phone numbers: normalizeUsPhone() to ten digits for storing, formatUsPhone() for showing.
 lib/organization.ts  renameClerkOrganization(). Writes a clinic's new name back to its Clerk organization.
@@ -428,6 +464,7 @@ vitest.setup.ts      Points the tests at the testing database and refuses to run
 
 - Tests must pass before any pull request that touches `lib/db`.
 - Tests create their own rows and delete them by id afterwards. They never touch rows they did not make. **A table with one shared row (AppSettings) is tested against an in-memory stand-in for the Prisma client instead** (`lib/db/settings.test.ts`), because there is no row a test could call its own.
+- `lib/pricing.test.ts` is the price fixtures, pure, and carries the record of the pricing decision. `lib/db/pricing.test.ts` hits the real testing database, and because only one version can be active in the whole table, it remembers which one was active when it started and makes it active again at the end. `lib/db/pricing.defaults.test.ts` uses an in-memory stand-in for the empty-installation and damaged-active-version cases, for the same reason the settings test does.
 - Tests in `lib/db` never need Clerk. A gate or an action that reads the signed-in user (`lib/pulse.test.ts`, `app/pulse/actions.test.ts`) replaces Clerk with `vi.mock("@clerk/nextjs/server")` and plays a staff member or an ordinary user. Everything else that needs a signed-in user is tested by clicking through the preview.
 - After any schema migration, apply it to the `testing` branch with `migrate deploy` (step 2 of "How a schema change ships", under rule 3) before running the tests. Neon's **Reset from parent** also works, but it copies production's rows into the testing branch and throws away whatever the tests had there.
 - Tests are not part of the Vercel build and not a required GitHub check yet.

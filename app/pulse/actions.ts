@@ -12,11 +12,13 @@ import {
   updateClinicDetails,
 } from "@/lib/db/clinics";
 import { addClinicNote } from "@/lib/db/notes";
+import { PricingError, activatePricingVersion, createPricingVersion } from "@/lib/db/pricing";
 import { saveSettings, type Settings } from "@/lib/db/settings";
 import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/lib/db/videos";
 import { parseDuration } from "@/lib/format";
 import { renameClerkOrganization } from "@/lib/organization";
 import { normalizeUsPhone } from "@/lib/phone";
+import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 
 /**
@@ -328,4 +330,64 @@ export async function saveCategoryConfigAction(_previous: FormState, formData: F
   });
   refreshCatalogue();
   return { ok: saved.sellable ? "Saved. This category is for sale." : "Saved. This category is not for sale." };
+}
+
+// ---------------------------------------------------------------------------
+// Pricing (/pulse/pricing): saving a version and making one active.
+// ---------------------------------------------------------------------------
+
+/** The longest a version note may be. */
+const VERSION_NOTE_LIMIT = 300;
+
+/** What the pricing editor gets back after "Save as a new version". */
+export type PricingSaveResult =
+  | { ok: string; version: number }
+  | { error: string; fieldErrors?: FieldError[] };
+
+/**
+ * Tell Next.js the prices changed. Only the pricing page shows them today;
+ * when the clinic-facing billing page (/admin/billing, the admin-dashboard
+ * work) quotes from them, add it here.
+ */
+function refreshPricing() {
+  revalidatePath("/pulse/pricing");
+}
+
+/**
+ * Save the editor's numbers as a new pricing version. The browser already
+ * checked them; they are checked again here, and the errors go back beside
+ * the fields. The draft in the editor is never cleared by this: a failed
+ * save leaves the numbers exactly as typed. Saving does not make the new
+ * version active; that is its own action below.
+ */
+export async function savePricingVersionAction(input: { config: unknown; note: unknown }): Promise<PricingSaveResult> {
+  const staff = await requirePulseStaff();
+
+  const note = String(input.note ?? "").trim();
+  if (!note) return { error: "Say what changed and why. The note is kept with the version." };
+  if (note.length > VERSION_NOTE_LIMIT) return { error: `Keep the note under ${VERSION_NOTE_LIMIT} characters.` };
+
+  const checked = validatePricingConfig(input.config);
+  if (!checked.ok) return { error: "Some of the numbers are not right. See the fields marked below.", fieldErrors: checked.errors };
+
+  const version = await createPricingVersion(checked.config, note, staff);
+  refreshPricing();
+  return { ok: `Saved as version ${version.version}. It is not active until you make it active.`, version: version.version };
+}
+
+/** Make one saved version the active one. The version's id comes from the history list. */
+export async function activatePricingVersionAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  await requirePulseStaff();
+
+  const versionId = String(formData.get("versionId") ?? "").trim();
+  if (!versionId) return { error: "Choose a version to make active." };
+
+  try {
+    const version = await activatePricingVersion(versionId);
+    refreshPricing();
+    return { ok: `Version ${version.version} is now active.` };
+  } catch (error) {
+    if (error instanceof PricingError) return { error: error.message };
+    throw error;
+  }
 }

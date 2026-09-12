@@ -3,7 +3,7 @@
 import type { Category, ClinicStatus } from "@prisma/client";
 import { useActionState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
-import { CATEGORIES } from "@/lib/categories";
+import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { formatUsPhone } from "@/lib/phone";
 import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction } from "../../actions";
 import { Outcome, SaveButton } from "../../FormBits";
@@ -59,7 +59,18 @@ export function StatusForm({ clinicId, status }: { clinicId: string; status: Cli
   );
 }
 
-export function PlanForm({ clinicId, categories, surgeonSeats }: { clinicId: string; categories: Category[]; surgeonSeats: number }) {
+export function PlanForm({
+  clinicId,
+  categories,
+  surgeonSeats,
+  availability,
+}: {
+  clinicId: string;
+  categories: Category[];
+  surgeonSeats: number;
+  /** Which categories can be bought right now. The others get a small label; they can still be ticked. */
+  availability: Record<Category, CategoryAvailability>;
+}) {
   const [state, action, pending] = useActionState(setPlanAction, null);
   return (
     <form action={action} className="flex flex-col gap-4">
@@ -67,21 +78,25 @@ export function PlanForm({ clinicId, categories, surgeonSeats }: { clinicId: str
       <fieldset>
         <legend className={LABEL}>Categories on the plan</legend>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {CATEGORIES.map((category) => (
-            <label
-              key={category.value}
-              className="flex h-12 cursor-pointer items-center gap-3 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15"
-            >
-              <input
-                type="checkbox"
-                name="categories"
-                value={category.value}
-                defaultChecked={categories.includes(category.value)}
-                className="h-5 w-5 accent-[#2a829b]"
-              />
-              <span className="text-[15px]">{category.label}</span>
-            </label>
-          ))}
+          {CATEGORIES.map((category) => {
+            const label = availabilityLabel(availability[category.value]);
+            return (
+              <label
+                key={category.value}
+                className="flex h-12 cursor-pointer items-center gap-3 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15"
+              >
+                <input
+                  type="checkbox"
+                  name="categories"
+                  value={category.value}
+                  defaultChecked={categories.includes(category.value)}
+                  className="h-5 w-5 accent-[#2a829b]"
+                />
+                <span className="text-[15px]">{category.label}</span>
+                {label && <span className="ml-auto text-xs font-medium uppercase tracking-wide text-[#f3b94d]">{label}</span>}
+              </label>
+            );
+          })}
         </div>
       </fieldset>
       <div className="max-w-xs">

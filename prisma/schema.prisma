@@ -83,6 +83,31 @@ model Clinic {
   surgeonSeats     Int          @default(0) // surgeon seats the clinic pays for
   shares           Share[]
   clinicNotes      ClinicNote[]
+
+  // The pricing version this clinic is pinned to, once it has a subscription
+  // (billing sets it). Empty means the active version. Activating a new
+  // version never changes a pin: a clinic keeps the prices it signed up at.
+  pricingVersionId String?
+  pricingVersion   PricingVersion? @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict) // a pinned version cannot be deleted; a pin is never silently lost
+}
+
+/// One saved set of prices (see lib/pricing.ts for the shape). Versions are
+/// only ever added: a config is never edited after it is saved, so a clinic
+/// pinned to version 3 keeps exactly the prices version 3 held. At most one
+/// version is active, and it is what new quotes use.
+model PricingVersion {
+  id            String   @id @default(cuid())
+  version       Int      @unique @default(autoincrement()) // 1, 2, 3, handed out by the database, so two saves at once cannot share a number
+  config        Json // a PricingConfig, validated before it is saved and again when it is read
+  note          String // what changed and why, written by the staff member who saved it
+  createdAt     DateTime @default(now())
+  createdBy     String // the Clerk user id of the staff member who saved it
+  createdByName String // their name, for the history list
+  // true for the active version, null for every other one, never false. The
+  // unique constraint is what guarantees a single active version: only one
+  // row can hold true, while any number of rows can be empty.
+  active        Boolean? @unique
+  clinics       Clinic[]
 }
 
 /// What kind of entry a clinic note is: typed by a staff member, or written

@@ -1,11 +1,14 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
+import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
+  activatePricingVersionAction,
   addNoteAction,
   saveCategoryConfigAction,
   saveDetailsAction,
+  savePricingVersionAction,
   saveVideoAction,
   setManagedAction,
   setPlanAction,
@@ -293,5 +296,76 @@ describe("saveCategoryConfigAction", () => {
     } else {
       await prisma.categoryConfig.delete({ where: { category: "COMPLEX_SPINE" } });
     }
+  });
+});
+
+describe("savePricingVersionAction and activatePricingVersionAction", () => {
+  const createdVersionIds: string[] = [];
+  let activeBefore: string | null = null;
+
+  beforeAll(async () => {
+    const active = await prisma.pricingVersion.findFirst({ where: { active: true }, select: { id: true } });
+    activeBefore = active?.id ?? null;
+  });
+
+  afterAll(async () => {
+    // Activating one of ours took the mark off whatever was active; put it back, then remove our rows.
+    await prisma.pricingVersion.updateMany({ where: { active: true }, data: { active: null } });
+    if (activeBefore) await prisma.pricingVersion.updateMany({ where: { id: activeBefore }, data: { active: true } });
+    await prisma.pricingVersion.deleteMany({ where: { id: { in: createdVersionIds } } });
+  });
+
+  it("refuses a user who is not Pulse staff with not-found, and writes nothing", async () => {
+    signInAs("user_clinic_admin", { kind: "staff" });
+    const before = await prisma.pricingVersion.count();
+    await expect(savePricingVersionAction({ config: DEFAULT_PRICING_CONFIG, note: "Trying it on" })).rejects.toMatchObject({
+      digest: expect.stringContaining("404"),
+    });
+    await expect(activatePricingVersionAction(null, form({ versionId: "anything" }))).rejects.toMatchObject({
+      digest: expect.stringContaining("404"),
+    });
+    expect(await prisma.pricingVersion.count()).toBe(before);
+  });
+
+  it("needs a note, and sends bad numbers back beside their fields without writing", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    const before = await prisma.pricingVersion.count();
+
+    expect(await savePricingVersionAction({ config: DEFAULT_PRICING_CONFIG, note: "   " })).toMatchObject({ error: expect.stringContaining("note") });
+
+    const bad = await savePricingVersionAction({
+      config: { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [-1, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1)], yearlyMonths: 13 },
+      note: "Bad numbers",
+    });
+    expect(bad).toMatchObject({ error: expect.any(String) });
+    expect("fieldErrors" in bad ? bad.fieldErrors?.map((e) => e.field).sort() : []).toEqual(["perSeatByCountCents.0", "yearlyMonths"]);
+
+    expect(await prisma.pricingVersion.count()).toBe(before);
+  });
+
+  it("saves a version under the staff member's id and name, then makes it active on request", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+
+    const config = { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [5900, 9500, 10900, 12500, 13900, 13900] };
+    const saved = await savePricingVersionAction({ config, note: "  Two categories to $95  " });
+    expect(saved).toMatchObject({ ok: expect.stringContaining("Saved as version"), version: expect.any(Number) });
+    if (!("version" in saved)) return;
+
+    const row = await prisma.pricingVersion.findUnique({ where: { version: saved.version } });
+    expect(row).not.toBeNull();
+    createdVersionIds.push(row!.id);
+    expect(row).toMatchObject({ note: "Two categories to $95", createdBy: "user_staff", createdByName: "Evan Miller", active: null });
+    expect(row!.config).toEqual(config);
+
+    // Saving does not activate. Activating does, and says so.
+    expect(await activatePricingVersionAction(null, form({ versionId: row!.id }))).toEqual({ ok: `Version ${saved.version} is now active.` });
+    expect((await prisma.pricingVersion.findUnique({ where: { id: row!.id }, select: { active: true } }))?.active).toBe(true);
+    expect(await prisma.pricingVersion.count({ where: { active: true } })).toBe(1);
+  });
+
+  it("answers a plain sentence, not a crash, for a version that cannot be activated", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await activatePricingVersionAction(null, form({ versionId: "" }))).toMatchObject({ error: expect.any(String) });
+    expect(await activatePricingVersionAction(null, form({ versionId: "no-such-version" }))).toMatchObject({ error: expect.stringContaining("no-such-version") });
   });
 });

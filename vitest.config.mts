@@ -15,7 +15,7 @@ export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL(".", import.meta.url)) } },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "vitest.guard.test.ts"],
+    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "app/**/*.test.tsx", "vitest.guard.test.ts"],
     setupFiles: ["./vitest.setup.ts"],
     // One test file at a time. They share one database, so running files side
     // by side would only make failures harder to read.

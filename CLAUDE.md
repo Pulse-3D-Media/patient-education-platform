@@ -19,7 +19,7 @@ A clinic creates a share link. The patient scans a QR code or opens the link, wa
 
 ## This repository is public
 
-Deliberate, for now: Vercel's free plan will not deploy a private repository, and we are pre-revenue. It goes private when we move to Vercel Pro, which will be before launch.
+Deliberate, for now: Vercel's free plan will not deploy a private repository owned by an organization, and we are pre-revenue. It goes private when we move to Vercel Pro, which will be before launch.
 
 Two consequences while it stays public. **No secret may ever be committed** (see rule 7, which is the most important rule in this file today). And anything written here is readable by anyone, so no client names, no unreleased animation stills, and no commercial detail that is not already on the public website.
 
@@ -48,37 +48,45 @@ export async function listSharesForClinic(clinicId: string)
 export async function getShareByCode(code: string)   // public, no clinic needed
 ```
 
-Why both: in Phase 1 `clinicId` comes from a single constant. In Phase 2 it comes from the signed-in user. **Because the seam already exists, Phase 2 is a swap, not a rewrite** - and there is exactly one place to check that clinics cannot see each other's data.
+**The `clinicId` comes from the server's own check of who is signed in** (`getCurrentClinicId()`, see Auth), never from a form field, a query string or anything else the browser sent. A clinic id that arrives from the browser is untrusted input, not an identity.
+
+The only functions that take no `clinicId` are the ones behind the patient's link, where the share code in the URL is the key: `getShareByCode()` and `recordShareView()`. That is the whole list. If a task seems to need another public-by-code function, say so first.
+
+Why both: in Phase 1 `clinicId` came from a single constant. In Phase 2 it comes from the signed-in user. **Because the seam already existed, Phase 2 was a swap, not a rewrite** - and there is exactly one place to check that clinics cannot see each other's data.
 
 ### 2. No patient-identifying information, anywhere, ever.
 
-No names, no dates of birth, no email addresses, no medical record numbers, no clinical notes. A share link is tied to a **procedure** and a **clinic**, never to a person.
+No names, no dates of birth, no email addresses, no medical record numbers, no clinical notes. A share link is tied to a **procedure** and a **clinic**, never to a person. No patient profiles, no marketing or advertising tracking on the patient page, and no patient-facing sales features, ever.
 
-This keeps the platform outside the scope of HIPAA. If a task appears to require storing patient information, **stop and flag it** rather than building it.
+The staff side is different: a staff member's identity is used for sign-in, for permissions and for the clinic log, and that is fine. It is patient data that never enters the system.
+
+**This is a product constraint, not a legal conclusion.** Storing no patient identifiers keeps the platform simple and is the reason we assume it sits outside HIPAA's scope, but that assumption has not been checked by anyone qualified to check it, and hosting, logging, the video host and any future analytics all receive data too. Never write, in code, docs, copy or a PR, that the platform "is outside HIPAA" or "is HIPAA compliant". The honest sentence is: it stores no patient identifiers, and the whole data flow is to be reviewed before any hospital contract.
+
+If a task appears to require storing patient information, **stop and flag it** rather than building it.
 
 ### 3. Never change the database schema unless explicitly asked.
 
-`prisma/schema.prisma` is the foundation everything else sits on. If a task seems to need a new column, table or relation, **stop and say so first.** Never rename or delete an existing field.
+`prisma/schema.prisma` is the foundation everything else sits on. If a task seems to need a new column, table or relation, **stop and say so first.** Never rename or delete an existing field. A change that is approved is **additive**: a new column has a default or is optional, and existing rows and fields are preserved. Anything else needs its own written migration plan, approved separately.
 
 **Never change the database by hand in the Neon console.** Every change is a Prisma migration, committed to git. Hand edits break migration history in ways that are painful to unwind.
 
-**How a schema change ships: production last, after the review.** A git revert does not undo a migration, so the production database is the one thing a pull request must not change before someone has read it. The order is:
+**How a schema change ships: production last, on Evan's word.** A git revert does not undo a migration, so the production database is the one thing a pull request must never change before it has been reviewed and released. The order is:
 
-1. **Write the migration without connecting to any database.** Save the schema as it is on `main` (`git show main:prisma/schema.prisma > <scratch>/schema.old.prisma`), edit `prisma/schema.prisma`, then have Prisma diff the two files: `npx prisma migrate diff --from-schema-datamodel <scratch>/schema.old.prisma --to-schema-datamodel prisma/schema.prisma --script`. Put that SQL in a new folder, `prisma/migrations/<UTC timestamp>_<what-it-adds>/migration.sql`, and read it. Nothing in this step touches production, the testing branch or a shadow database. Never run `migrate dev` in a checkout whose `.env` is production, not even with `--create-only`: it still connects, and a second run applies the pending draft.
-2. **Apply it to the `testing` branch and run the tests.** `DATABASE_URL=<testing pooled> DIRECT_URL=<testing direct> npx prisma migrate deploy`, then `npm test`. (A Neon branch shares its parent's password, so the direct string is the pooled one with `-pooler` removed from the host.)
-3. **Push and open the pull request.** The summary lists the migration and any script that changes rows. Neon clones the preview's database from production when the PR opens, so the preview does not have the migration yet: apply it to the preview branch the same way (its strings are under Neon, Branches, `preview/<branch name>`), then check the preview page that uses the new columns.
-4. **Evan reads the summary.** That is the review. Only after it: apply to production with `npx prisma migrate deploy` from the main checkout (whose `.env` is production), run any data script, and then merge. Production is migrated right before the merge, not after it, because the new code expects the columns the moment Vercel deploys `main`; the old code ignores columns it does not know, so the minutes between the migration and the merge are safe.
+1. **Write the migration without connecting to production. Preferably without connecting to anything.** Save the schema as it is on `main` (`git show main:prisma/schema.prisma > <scratch>/schema.old.prisma`), edit `prisma/schema.prisma`, then have Prisma diff the two files: `npx prisma migrate diff --from-schema-datamodel <scratch>/schema.old.prisma --to-schema-datamodel prisma/schema.prisma --script`. Put that SQL in a new folder, `prisma/migrations/<UTC timestamp>_<what-it-adds>/migration.sql`, and **read it** before going on. If a task genuinely needs `migrate dev` (to rehearse the SQL against a real database), it may only run with `DATABASE_URL` and `DIRECT_URL` pointed at an explicitly identified development database (the `testing` branch, or a throwaway Neon branch made for the purpose) plus a separate disposable shadow database, both named in the PR. **`--create-only` is not a safety boundary**: it still connects, and a second run applies the pending draft. The main checkout's `.env` is production, so `migrate dev` never runs there, with any flag.
+2. **Apply it to the `testing` branch and run the tests.** `DATABASE_URL=<testing pooled> DIRECT_URL=<testing direct> npx prisma migrate deploy`, then `npm test`. (A Neon branch shares its parent's password, so the direct string is the pooled one with `-pooler` removed from the host.) Never reset the testing branch to do this; `migrate deploy` is enough, and a reset throws away what the tests had there.
+3. **Push and open the pull request.** The description lists the migration, its SQL in plain words, any script that changes rows, the order production will be migrated in, why the old code keeps working on the new columns in the minutes between the migration and the deploy, and how it would be recovered if it went wrong. Neon clones the preview's database from production when the PR opens, so the preview does not have the migration yet: apply it to the preview branch the same way (its strings are under Neon, Branches, `preview/<branch name>`), then check the preview page that uses the new columns. Never reset the preview branch either; if it has fallen behind production, say so and let Evan decide.
+4. **Evan reads the summary and then says whether to release.** Reading it is the review; it is not the release. **Nothing touches production until Evan gives an explicit instruction after that review**: not the migration, not a data script, not a vendor setting, not the merge. When he does, apply the migration to production with `npx prisma migrate deploy` from the main checkout (whose `.env` is production; that is the one deployment command, never `migrate dev`, never `migrate reset`, never `db push`), run any data script, and then merge. Production is migrated right before the merge, not after it, because the new code expects the columns the moment Vercel deploys `main`; the old code ignores columns it does not know, so the minutes between the migration and the merge are safe.
 5. **Point-in-time restore must be on for the production branch** (Neon, project settings, history retention) before any production migration. Check it once; it is the undo button.
 
-A migration that turns out wrong is fixed forward with another migration that only adds. Never edited, never rolled back by hand.
+A migration that turns out wrong is fixed forward with another migration that only adds. An applied migration is never edited, never deleted from the folder, and never rolled back by hand.
 
 ### 4. Do not remove things that look unused.
 
 Several fields exist for later phases and are deliberately unused right now, including `Video.isPublished` (only ever set by the seed scripts so far). **They are load-bearing later. Leave them alone.**
 
-### 5. One task at a time.
+### 5. One task at a time. One prompt is one pull request.
 
-Do the thing that was asked, not the three adjacent things that would also be nice. If you spot something else worth doing, say so and wait. Small changes are reviewable by someone who cannot read code; large ones are not.
+Do the thing that was asked, not the three adjacent things that would also be nice. If you spot something else worth doing (a bug from a review, an item from the build plan, a tidy-up), say so and wait; it becomes its own prompt and its own PR. Small changes are reviewable by someone who cannot read code; large ones are not. **The title and description of the PR describe what it finally contains**, so if the scope moved during the work, rewrite them before asking for review.
 
 ### 6. Do not add dependencies casually.
 
@@ -96,24 +104,74 @@ Everything sensitive lives in `.env`, which stays out of git. `.gitignore` must 
 
 Before any commit that touches configuration, confirm `.env` is still ignored.
 
+**"Secret" is wider than keys.** None of the following goes into code, test fixtures, screenshots, logs, docs, commit messages or PR text: credentials; a real clinic's private data; anything about a patient (there should be none, see rule 2); a live share link or its code; a signed playback address; a webhook body; unreleased commercial detail. Test fixtures use made-up values and synthetic connection strings, and nothing ever prints a connection string, not even to say it was rejected.
+
+### 8. The server decides. The browser only asks.
+
+Prices, access, ownership, roles, seat counts and limits are worked out on the server for every request that matters, from what the server itself knows. A value the browser sends is a request, never a fact: the server recomputes it. **Hiding or disabling a button is a courtesy, never authorization**, and every Server Action and route handler rechecks who is asking before it changes anything.
+
+- **Writes to what is shared across clinics need Pulse staff.** The catalogue, category settings, pricing, platform settings, reporting and anything that manages a clinic from the outside: every such action calls `requirePulseStaff()` first. Clinic operations need the right organization role, checked on the server with `isClinicAdmin()` or the clinic lookup.
+- **Reject bad input at the edge.** An enum value the code does not know, a duplicate, a number that is not finite, a value outside what the column or the business allows, malformed form data: all refused with a plain message, never stored, never guessed at.
+- **Client-safe modules never import server modules.** A file that runs in the browser (anything under `"use client"`, and any type, constant, validator or calculator it imports) must not import `lib/db`, Prisma, a signing key, Clerk's backend client, the settings row or a clinic's internal notes. Put the shared pieces (types, defaults, help text, validators) in a plain module with no server imports, and import that from both sides; `lib/pricing.ts` is the model. Two client components still import `lib/db` today (`app/pulse/settings/SettingsForm.tsx` and `app/pulse/videos/CategoryConfigForm.tsx`); they are known bugs on the review checklist, not a pattern to copy. When a server-only guard such as the `server-only` package is practical (and mocked for Vitest), add it so the boundary is enforced rather than remembered.
+- **Lists and histories are bounded.** Any list that can grow (links, notes, videos, clinics, people, events) is read with a limit, paged, or aggregated in the database. Never load a whole operational history into a page or the browser.
+
+---
+
+## Working on a task
+
+### Starting
+
+- **Read before editing:** this file, `AGENTS.md`, the code the task touches, `prisma/schema.prisma` and the migrations folder, the tests next to that code, and any review notes the prompt points at. Look at `git status` and recent history, and preserve work already present: never overwrite a branch, a file or an uncommitted change you did not make.
+- **One focused branch from the latest reviewed `main`**, unless the prompt names another base. **Branch names are 17 characters or fewer** (Vercel's preview address is built from the branch name, and a longer one gets a hash nobody can guess). If the branch already exists, look at what is on it and pick a clear short variant instead of reusing it.
+- Say, briefly, what the change will do and how it will be checked, then do the routine in-scope work without stopping for approval. **Ask only when the answer is a business decision, when a credential or an access grant is needed, when an action is destructive, or when the scope would grow meaningfully.** A guess at a business decision is worse than a question.
+- Rule 5 applies: one prompt, one PR. Review findings and roadmap items the prompt did not name are reported, not folded in.
+
+### Mutations and outside services
+
+- **A form keeps what was typed when something goes wrong.** Validation error, lost connection, a rejected action: the draft stays, a plain sentence says what happened, and there is a way to try again. A form is cleared only after the server has confirmed success. The technical detail (the exception, the status code) goes to the server log, never to the screen.
+- **A retried mutation must be safe to repeat.** A disabled button does not stop a double submit, two open tabs, a flaky connection that resends, or a webhook that retries. Design each write so doing it twice gives the same end state: look up by a unique key before creating, catch the unique-constraint error (Prisma `P2002`) and retry the code rather than pre-checking, record an idempotency key where an outside service will call us.
+- **Read, decide and write in one transaction when the decision depends on the read.** Two staff members saving at once must not each describe a stale "before". When a change has a log entry, the entry and the change commit together and describe the same transition (`changeClinicWithLog()` in `lib/db/clinics.ts` is the pattern; its read still happens before the transaction opens, which is on the review checklist to fix, so move it inside rather than copying it). For any write that matters, test a forced overlap, not just the happy path.
+- **Every outside service fails sometimes.** Clerk, Stripe, Mux, Neon, Vercel, the CDN. Before claiming two systems stay in step, write down which one is the source of truth for each fact, what happens if the second write fails after the first succeeded, how a retry is made safe, and how the two are reconciled later. "It worked in the test" is not that.
+- **Webhooks.** Verify the signature against the raw request body, exactly as the sender documents. Expect the same event twice and events out of order. Do the work, or put it somewhere durable, before answering with success; an acknowledgement sent first and work done second loses the work when the process dies. Never log the body, a secret, a share code, a signed URL or a patient-facing link.
+
+### Before you say it is done
+
+- **Check the boundaries, not just the feature:** signed out, a member, an admin, a member of a different clinic, Pulse staff; invalid input; what happens when the request fails; the overlap case where two writes race; and that what already worked still works.
+- **Run lint, `tsc`, the tests and a production build** (`npm run lint`, `npx tsc --noEmit`, `npm test`, `npm run build`), and read the output. Database tests run only against a positively identified non-production target; the guard in `vitest.setup.ts` refuses anything else and that refusal is never worked around. Pure tests should not need a service secret to start.
+- **Mocks prove the logic; they do not prove the service.** Where behavior depends on Clerk, Stripe, a real browser or a real phone, a mocked test is not the end-to-end check. Say which.
+- **UI work is looked at in a browser**, on the real page, with the real field. Patient and surgeon playback is tried on real phones and tablets, and the report names the device, the browser, the network (cellular, clinic Wi-Fi), whether it was a cold or a warm start, and every failure. Claude cannot sign in to Clerk, so the signed-in click-through is a numbered list for Evan, with what he should see at each step.
+- **Never call the work complete when a required check was skipped.** The report says exactly what was run and observed, what was only simulated, what failed, and what remains for Evan to verify. "Should work" is not a result.
+
 ---
 
 ## The four surfaces
 
-The app is four different screens for four different people. Keep them separate from the start, because Phase 2 gates them by role and that is much easier if they were never mixed.
+The app is four different screens for four different people. Keep them separate from the start, because each is gated by a different role and that is much easier if they were never mixed.
 
 | Surface | Who | Device | Access |
 |---|---|---|---|
 | `app/watch/[code]` | **The patient** | Their own phone | Public, no login, ever |
 | `app/library` | **The surgeon**, in the room | Tablet or phone | Clerk sign-in, any member of an open clinic |
-| `app/admin` | **The office manager** | Desktop | Clerk sign-in, `org:admin` of an open clinic (see Roles) |
+| `app/admin` | **The office manager** | Desktop | Clerk sign-in, `org:admin` of the clinic (see Roles and the billing exception below) |
 | `app/pulse` | **Pulse 3D staff** (Evan and Van) | Desktop | Clerk sign-in plus `isPulseStaff()`. Anyone else gets not-found. |
 
-**`app/library` is the exam-room surface.** A surgeon opens it mid-consult, finds the procedure, and either plays it right there on their own device or sends the patient a link. It is used standing up, in front of a patient, under time pressure. **It obeys the same speed rule as the patient viewer** (see below): tablet-first, big touch targets, browse to playing in two taps, no dense tables.
+**`app/watch` is the patient's page, and it stays about one thing.** No account, no email, no app to install, no consent screen, no second confirmation, no cookie banner before the video plays. One procedure, the clinic's name (and logo, when branding ships), calm plain language, large controls, and nothing else: no navigation, no related videos, no sales, no link to anywhere but play. See the speed rule below.
 
-**`app/admin` is the back-office surface.** Creating and managing share links, printing pamphlets, checking what got watched. Desktop, sitting down, no hurry.
+**`app/library` is the exam-room surface.** A surgeon opens it mid-consult, finds the procedure, and either plays it right there on their own device or sends the patient a link. It is used standing up, in front of a patient, under time pressure. **It obeys the same speed rule as the patient viewer**: tablet-first, big touch targets, **browse to playing in two taps**, Play and Send as **separate one-tap actions**, no dense tables.
 
-A member sees the library; an admin sees both. **Do not merge them into one page.**
+**`app/admin` is the back-office surface**, and its pages have fixed jobs. Keep this map stable; do not move a job to another page or merge two of them:
+
+| Page | Job |
+|---|---|
+| `/admin` | The office manager's **overview**: what needs attention, a short recent list, links out to the pages below. Not the full list of anything. |
+| `/admin/links` | **Every share link and QR code**: create, search, cancel, print. The complete workspace. |
+| `/admin/people` | People and roles. Built. |
+| `/admin/billing` | Plan, categories, seats, subscription, payment method, invoices. **The only place plan or price information appears on the clinic side.** |
+| `/admin/reports` | Clinic reporting, when built. |
+
+Today `/admin` still holds the full links list, because it was built before the rest existed; the admin-dashboard work moves the list to `/admin/links` and turns `/admin` into the overview. **Once that has happened, never turn the overview back into the links list, and never put plan or billing detail on the overview or on the links page.** Until `/admin/billing` exists, plan and price information has no home on the clinic side and is not shown at all.
+
+**Billing stays reachable when the clinic is not open.** A clinic that is PENDING, PAST_DUE, PAUSED or CANCELED cannot use the library or make new links (`clinicIsOpen()` says so), but its admin must still be able to open `/admin/billing` to see why and fix it: choose a plan, update a card, restart. So **permission to view and repair billing is separate from permission to use the app**, and `/admin/billing` is never behind the `ClinicClosed` page. A clinic that is managed by Pulse (`managedByPulse`) sees its plan as read-only, with no self-serve billing controls and a line saying Pulse manages it.
 
 **`app/pulse` is the Pulse 3D master dashboard.** Used only by Pulse staff, Evan and Van. It shows every clinic, every video, and every price and rule. **Nothing on it is visible to clinics.** It is not a bigger `app/admin`: admin shows one clinic its own data, pulse sees across all of them, so the two never share a page.
 
@@ -123,13 +181,13 @@ Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[
 
 ## Phase 1 scope
 
-**In scope:** the three models below · `app/library` to browse and play · `app/admin` to create and manage share links · `app/watch/[code]` for patients · QR code generation · link expiry.
+**In scope:** the three original models (Video, Clinic, Share) · `app/library` to browse and play · `app/admin` to create and manage share links · `app/watch/[code]` for patients · QR code generation · link expiry.
 
-**Out of scope in Phase 1, and still not built unless a task asks for it:** user accounts of our own, invitations, roles, per-clinic category entitlements, subscriptions, payments, Stripe, analytics dashboards, email sending, video uploading, file storage.
+**Still not built unless a task asks for it:** per-clinic category entitlements, subscriptions, payments, Stripe, analytics dashboards, email sending, video uploading, file storage.
 
 **Do not invent a login system.** Sign-in is **Clerk** (see Auth), and its organizations feature is what models clinics and doctors. Never add a users table, a password field or a session cookie of our own.
 
-If a request seems to need something on the out-of-scope list, say so before building it.
+If a request seems to need something on the not-built list, say so before building it.
 
 ## Phase 2 scope
 
@@ -149,6 +207,7 @@ Pricing is a **ladder by number of categories, per surgeon seat**: one monthly p
 - **Solo, Clinic and Enterprise** come from the seat limits on the config (defaults 1 and 10) and the practice type the quote is asked with. A hospital is always Enterprise, with no self-serve amount, and is never guessed from a name.
 - **The founding offer is 0 by default.** A number modelled on the calculator is not an offer to a customer. A real one needs a written rule for who qualifies and for how long, before checkout is built.
 - `listSellableCategories()` decides what a NEW purchase may include. It never removes a category a clinic already has; Pulse staff can grant one early on the clinic's Plan form, where a category that cannot be bought is labelled Not for sale or Coming soon.
+- **A quote shown to a clinic is recomputed on the server** from the clinic's own plan and the pricing version the server chooses (rule 8). Nothing the browser sends decides a price.
 
 ---
 
@@ -158,12 +217,16 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 
 - **A migration only adds.** Every new column has a default or is optional. Never delete or rename.
 - **Anything shown to a person has a fallback for when its data is missing.** No logo: show the clinic name. No poster: the branded fallback. No Mux id: the CDN file.
-- **The catalogue is edited at `/pulse/videos`; the seed scripts are for a fresh database only.** Adding a video, publishing it, replacing a placeholder with the finished file, setting a poster: all of it happens on that page, through `createVideo()` and `updateVideo()` in `lib/db/videos.ts`. `prisma/seed-video.ts` and `prisma/seed-placeholders.ts` still work, but they write the address, length and published flag back to what they hold, so never run them on a database that is in use. **Unpublishing a video stops every link to it, old ones included**: the patient page shows the calm "not available right now" page, views are not counted, and the admin list greys the link and says why. Publishing it again makes them all work again.
+- **The catalogue is edited at `/pulse/videos`; the seed scripts are for a fresh database only.** Adding a video, publishing it, replacing a placeholder with the finished file, setting a poster: all of it happens on that page, through `createVideo()` and `updateVideo()` in `lib/db/videos.ts`. `prisma/seed-video.ts` and `prisma/seed-placeholders.ts` still work, but they write the address, length and published flag back to what they hold, so never run them on a database that is in use.
+- **Replacing an animation is an edit to the same `Video` row, never a new row**, so every Share and every QR code that points at it keeps working.
+- **Unpublishing a video is the one control for withdrawing content, and it stops every link to it, old ones included**: the patient page shows the calm "not available right now" page, views are not counted, `createShare()` refuses new links, and the admin list greys the link and says why. Publishing it again makes them all work again. Nothing else withdraws a video that has already been sent.
+- **Patient links already issued outlive the clinic-side changes around them.** Taking a category off a clinic's plan, pausing or closing the clinic, running out of seats, or a category no longer being for sale: none of these cancels a link a patient already has. An issued link follows its own rules only: its expiry, cancellation by the clinic, or the video being unpublished. (The patient page does not check the clinic's status, on purpose.) This policy changes only when a prompt says so in as many words, and any page copy that suggests otherwise is wrong and should be fixed to match.
+- **Sale eligibility is about new purchases.** Turning a category's `sellable` switch off, or it having no published video, changes what a new plan may include. It never silently removes a category from a clinic that already has it.
 - **A category with no published video shows "Coming soon" in the library** (a dimmed tile with no link, and the same message on its own page) and is not offered for sale. The sentence on the tile is the category's `comingSoonText` from `CategoryConfig`, or the default. A category is offered for sale only while its `sellable` switch is on; `listSellableCategories()` in `lib/db/category-config.ts` is the one list billing and the plan screens should offer.
-- **A placeholder video carries its mark everywhere it appears.** Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working. Unticking "Placeholder" on `/pulse/videos` asks for a yes first, because links already sent start playing the new file at once.
+- **A placeholder video carries its mark everywhere it appears**: the library card, the player, the Send result, the printed pamphlet, the patient page, the admin lists, and any surface added later. Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working. Unticking "Placeholder" on `/pulse/videos` asks for a yes first, because links already sent start playing the new file at once.
 - **A video with a `posterUrl` shows it on the library card**; without one, the card shows the video's own first frame, and the branded fallback if that cannot load.
 - **Settings come from `getSettings()` in `lib/db/settings.ts`, never constants.** Expiry days and limits are one AppSettings row, read at request time. Prices are not settings: they are pricing versions, read through `getActivePricing()` (see Pricing shape). `getSettings()` returns the code defaults when the row does not exist, so nothing depends on it having been saved. A clinic can carry its own override for a setting (`Clinic.viewDaysOverride` today); read the clinic's value first, then the platform's. Never put one of these numbers in a page or a constant. (`lib/expiry.ts` still holds `SHARE_EXPIRY_DAYS` from Phase 1; it moves onto the settings row when the 7-days-from-first-view expiry is built.)
-- **Access is decided in one function each.** Whether a clinic may use the app at all: `clinicIsOpen(status)` in `lib/clinic-status.ts` (today: ACTIVE only; a grace period or pausing changes that one function). Whether a person is an admin: `isClinicAdmin()`. Whether a clinic can use a video: `canUseVideo()`. Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement any check.
+- **Access is decided in one function each, on the server, and every mutation rechecks it.** Whether a clinic may use the app at all: `clinicIsOpen(status)` in `lib/clinic-status.ts` (today: ACTIVE only; a grace period or pausing changes that one function). Whether a person is an admin: `isClinicAdmin()`. Whether a clinic can use a video: `canUseVideo()`. Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement any check, and a Server Action calls the same function again rather than trusting that the page did.
 
 ---
 
@@ -174,7 +237,7 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 | Framework | **Next.js (App Router) + TypeScript + Tailwind** | Server Components by default. Add `"use client"` only when a component genuinely needs browser interactivity. |
 | Hosting | **Vercel** | |
 | Database | **Neon** (PostgreSQL) | |
-| Data access | **Prisma**, behind `lib/db` | Server-side only. See rule 1. |
+| Data access | **Prisma 6**, behind `lib/db` | Server-side only. See rule 1. Production is migrated with `prisma migrate deploy` and nothing else (rule 3). |
 | Video | **the existing Webflow CDN URL** in Phase 1 | Read it through `getPlaybackUrl()`. See below. |
 | Logins | **Clerk** (`@clerk/nextjs`) | Staff only. See Auth below. |
 | Tests | **Vitest**, against a Neon branch called `testing` | `npm test`. See Tests below. |
@@ -187,8 +250,8 @@ Clerk guards the staff surfaces. The patient surface is never behind it.
 - **`/admin`, `/library`, `/pulse` and `/onboarding`, and everything under them, need a signed-in user.** `/watch`, `/q`, `/api/webhooks`, `/sign-in`, `/sign-up` and static files are always public. The list of guarded prefixes lives in `proxy.ts` (Next.js 16's name for the middleware file).
 - **`proxy.ts` is a convenience, not the security boundary.** It sends signed-out visitors to `/sign-in` and back again. Clerk's guidance is that every page, Server Action and Route Handler that reads protected data checks for itself, so: staff pages call `requireClinicPage()` first (which calls `await auth.protect()`); actions and handlers rely on `getCurrentClinicId()` returning null. Keep both layers.
 - **A clinic is a Clerk organization, and the Clinic row is created on first use.** `getCurrentClinic()` in `lib/clinic.ts` reads the signed-in user's membership in their active organization from Clerk (one call per request, cached), then upserts the Clinic row keyed on `clerkOrgId` (`upsertClinicForClerkOrg()` in `lib/db/clinics.ts`): the first visit creates it with status PENDING, later visits copy a changed name or logo. No webhooks. It is the only place the signed-in user meets the database. **A Clerk organization id (`org_...`) is not a clinic id** and must never be passed to a `lib/db` function that takes a `clinicId`.
-- **`requireClinicPage()` is what every staff page calls first.** Signed out goes to `/sign-in`; no organization goes to `/onboarding` (Clerk's CreateOrganization form, or the list of organizations they were invited to); surgeon question unanswered goes to `/onboarding/kind`. It returns the clinic (id, name, status, logoUrl, kind, isAdmin). Each page then checks `clinicIsOpen(clinic.status)` and shows `<ClinicClosed />` if not; admin pages also check `clinic.isAdmin` and show `<AdminsOnly />` if not. Never crash, never a blank page.
-- **`getCurrentClinicId()` is for Server Actions and Route Handlers.** A database lookup, no call to Clerk. It returns the clinic id only when the clinic is open, otherwise null, and actions return a plain message on null.
+- **`requireClinicPage()` is what every staff page calls first.** Signed out goes to `/sign-in`; no organization goes to `/onboarding` (Clerk's CreateOrganization form, or the list of organizations they were invited to); surgeon question unanswered goes to `/onboarding/kind`. It returns the clinic (id, name, status, logoUrl, kind, isAdmin). Each page then checks `clinicIsOpen(clinic.status)` and shows `<ClinicClosed />` if not; admin pages also check `clinic.isAdmin` and show `<AdminsOnly />` if not. Never crash, never a blank page. **The exception is `/admin/billing`** (when built): an admin of a closed clinic must reach it, so it checks `isAdmin` but not `clinicIsOpen` (see the four surfaces).
+- **`getCurrentClinicId()` is for Server Actions and Route Handlers.** A database lookup, no call to Clerk. It returns the clinic id only when the clinic is open, otherwise null, and actions return a plain message on null. A billing action that has to work for a closed clinic will need its own lookup that checks the admin role and skips the open check; it must not loosen this one.
 - **`npm run db:link-clinic -- <clinicId> <orgId>`** still exists for a clinic created before its organization (the test clinic was). Clinics that sign themselves up never need it.
 - **`CLINIC_ID` is retired.** Nothing reads it. Remove it from `.env` and from Vercel.
 - **Clerk's provider wraps only the staff side** (`StaffClerkProvider` in the layouts of `app/library`, `app/admin`, `app/onboarding`, `app/sign-in` and `app/sign-up`). Never put it in the root layout: that would load Clerk's script on every patient's phone. `auth()` on the server works without it.
@@ -226,6 +289,8 @@ export function getPlaybackUrl(video: Video): string
 ```
 
 Phase 1 returns the stored URL. Phase 2 returns a signed, expiring URL from Mux or Cloudflare Stream. **One function changes and no page changes.**
+
+**Be honest about what that protects.** Today the CDN address is public and permanent, so a share link's expiry limits the page, not the file: never describe the media as protected, in copy or in a PR, until signed playback ships. And even then, a signed or expiring address restricts who can start a new play; it does not stop screenshots or screen recording, does not stop every form of copying, and does not pull back a video that a phone has already buffered. Say so wherever the question comes up.
 
 ---
 
@@ -398,7 +463,7 @@ model Share {
 
 **Why `Clinic` existed in Phase 1 when there was only one of them.** Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter. Adding it early cost one table and one column. This is the single most important scale decision in the project.
 
-**Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, Pulse staff switch a clinic on from its page on `/pulse`, or with `npm run db:set-status -- <clinicId> ACTIVE`. Never change a status by hand in Neon.
+**Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, Pulse staff switch a clinic on from its page on `/pulse`, or with `npm run db:set-status -- <clinicId> ACTIVE`. Never change a status by hand in Neon. A closed clinic's issued patient links keep working until they expire (see "Nothing breaks while the library fills up").
 
 **The clinic log.** `ClinicNote` is the history of a clinic as Pulse sees it: notes staff type (kind STAFF), and entries the app writes when something changes (kind STATUS, named for the first such change and shown as "Change"). **Every change staff save on a clinic's page writes an entry: status, plan, managed by Pulse, and each detail field**, saying what it was and what it became, under the staff member's name. The change and its entry go in one transaction (`changeClinicWithLog()` in `lib/db/clinics.ts`), so the current state and the history cannot disagree, and a save that changes nothing writes nothing. Entries are only ever added. When billing changes a status later, it writes the same pair under its own name. If you add a new thing staff can change about a clinic, write it through the same helper so it is logged too. Nothing in the log is ever shown to the clinic.
 
@@ -410,7 +475,9 @@ model Share {
 
 **Neon needs both URLs.** `DATABASE_URL` is the pooled connection the app uses; `DIRECT_URL` is the unpooled one Prisma needs to run migrations. Leaving `directUrl` out causes migrations to fail in ways that are hard to read.
 
-**Placeholder videos.** A video with `isPlaceholder` true carries a real procedure name but plays a sample animation, so the library can be tested before the finished animations exist. This is not the same as unpublished: placeholders are visible on purpose. The app marks them everywhere they appear (an amber "Placeholder" mark on the library card, in the player, across the top of the patient page, and in the admin lists). **If you show a video somewhere new, carry the mark with it.** Placeholders are added, edited and replaced on `/pulse/videos` like any other video; `prisma/seed-placeholders.ts` only fills a fresh database, and `prisma/seed-video.ts` (the first real animation) never touches them.
+**Placeholder videos.** A video with `isPlaceholder` true carries a real procedure name but plays a sample animation, so the library can be tested before the finished animations exist. This is not the same as unpublished: placeholders are visible on purpose. The app marks them everywhere they appear: an amber "Placeholder" mark on the library card, in the player, across the top of the patient page, and in the admin lists. The Send result and the printed pamphlet must carry it too; they do not yet (review checklist item A2), and the first task that touches either adds it. **If you show a video somewhere new, carry the mark with it.** Placeholders are added, edited and replaced on `/pulse/videos` like any other video; `prisma/seed-placeholders.ts` only fills a fresh database, and `prisma/seed-video.ts` (the first real animation) never touches them.
+
+**What `viewCount` means.** It counts play starts on the patient page, one per page load that presses play, for a published video. It is not unique patients, not completed watches, and not evidence that anyone understood anything (see Writing copy). Any number derived from it is labelled by what it actually measures.
 
 ---
 
@@ -419,7 +486,7 @@ model Share {
 ```
 app/watch/[code]     The patient viewer. Phone-first, no login, no navigation.
 app/library          The surgeon's exam-room browser. Tablet-first. Browse, play, send.
-app/admin            The office-manager console. Share links, QR codes, reporting.
+app/admin            The office-manager console. Share links today; the overview once /admin/links exists (see the four surfaces).
 app/admin/print/     The printable pamphlet for one share link.
 app/admin/qr/        The QR code image for one share link.
 app/admin/people/    The People section: everyone in the clinic, Surgeon / Staff on each, Clerk's invite and role panel. Admins only.
@@ -460,13 +527,15 @@ vitest.setup.ts      Points the tests at the testing database and refuses to run
 
 ## Tests
 
-`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; `lib/db/videos.test.ts` covers the catalogue; `app/pulse/actions.test.ts` covers the dashboard's actions; pure rules such as `lib/clinic-status.ts` and `lib/format.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it, and **refuses to run unless it can show that is not production**: the decision is in `vitest.guard.ts` (which has its own tests) and it fails closed. The test string and every production string that is set must be readable, at least one production string must be set so there is something to compare against, and the test string may not name the same Neon endpoint as `DATABASE_URL` or `DIRECT_URL`, pooled or direct (Neon's `-pooler` address and the direct address of one endpoint count as the same database).
+`npm test` runs Vitest. Tests live next to the code they cover (`lib/db/clinics.test.ts` covers `lib/db/clinics.ts`; `lib/db/videos.test.ts` covers the catalogue; `app/pulse/actions.test.ts` covers the dashboard's actions; pure rules such as `lib/clinic-status.ts` and `lib/format.ts` get a plain test with no database) and hit a real database: the Neon branch called `testing`, whose pooled connection string is `TEST_DATABASE_URL` in `.env.test` (gitignored, like `.env`). `vitest.setup.ts` points Prisma at it, and **refuses to run unless it can show that is not production**: the decision is in `vitest.guard.ts` (which has its own tests) and it fails closed. The test string and every production string that is set must be readable, at least one production string must be set so there is something to compare against, and the test string may not name the same Neon endpoint as `DATABASE_URL` or `DIRECT_URL`, pooled or direct (Neon's `-pooler` address and the direct address of one endpoint count as the same database). That refusal is never bypassed, disabled or loosened to make a test run.
 
 - Tests must pass before any pull request that touches `lib/db`.
-- Tests create their own rows and delete them by id afterwards. They never touch rows they did not make. **A table with one shared row (AppSettings) is tested against an in-memory stand-in for the Prisma client instead** (`lib/db/settings.test.ts`), because there is no row a test could call its own.
+- **Tests create their own rows and delete them by id afterwards. They never touch, reset or overwrite rows they did not make.** A table with one shared row (AppSettings) is tested against an in-memory stand-in for the Prisma client instead (`lib/db/settings.test.ts`), because there is no row a test could call its own; a test that wants to see "the defaults" never deletes the real row to get them.
+- `vitest.guard.test.ts` exercises the guard with **made-up connection strings only**. No test, log line or error message ever prints a real connection string, not even the rejected one; a refusal names the variable, never the value.
 - `lib/pricing.test.ts` is the price fixtures, pure, and carries the record of the pricing decision. `lib/db/pricing.test.ts` hits the real testing database, and because only one version can be active in the whole table, it remembers which one was active when it started and makes it active again at the end. `lib/db/pricing.defaults.test.ts` uses an in-memory stand-in for the empty-installation and damaged-active-version cases, for the same reason the settings test does.
 - Tests in `lib/db` never need Clerk. A gate or an action that reads the signed-in user (`lib/pulse.test.ts`, `app/pulse/actions.test.ts`) replaces Clerk with `vi.mock("@clerk/nextjs/server")` and plays a staff member or an ordinary user. Everything else that needs a signed-in user is tested by clicking through the preview.
-- After any schema migration, apply it to the `testing` branch with `migrate deploy` (step 2 of "How a schema change ships", under rule 3) before running the tests. Neon's **Reset from parent** also works, but it copies production's rows into the testing branch and throws away whatever the tests had there.
+- **What a test suite for a change covers:** the permission boundary (signed out, member, admin, another clinic, Pulse staff, whichever apply), tenant isolation (one clinic cannot read or change another's rows), invalid input, the failure path, a forced overlap where two writes can race, and the behavior that existed before the change.
+- After any schema migration, apply it to the `testing` branch with `migrate deploy` (step 2 of "How a schema change ships", under rule 3) before running the tests. Never reset the testing branch to catch it up: a reset copies production's rows into it and throws away whatever the tests had there. If Evan wants a reset, he does it himself.
 - Tests are not part of the Vercel build and not a required GitHub check yet.
 
 ## Design
@@ -492,11 +561,11 @@ Match the live Pulse 3D site. Do not invent a new palette.
 
 ### `app/watch`, the patient viewer
 
-- **Zero friction.** No account, no login, no password, no app to install, no cookie banner, no email capture. Scan, watch, done.
+- **Zero friction.** No account, no login, no password, no app to install, no cookie banner, no email capture, no confirmation step before the video. Scan, watch, done.
 - **The video starts in under two seconds.**
 - **Phone-first.** Assume a 65-year-old on cellular data in a waiting room, holding their own phone, possibly anxious. Large tap targets, high contrast, no small text.
-- **Nothing to click except play.** No navigation, no menu, no related videos, no footer links.
-- **The expired state is a real design job, not an error page.** Calm, plain language, tells them to ask their doctor for a new link. Never technical, never red, never the words "error", "invalid" or "403".
+- **Nothing to click except play.** No navigation, no menu, no related videos, no footer links, no sales.
+- **The expired state is a real design job, not an error page.** Calm, plain language, tells them to ask their doctor for a new link. Never technical, never red, never the words "error", "invalid" or "403". The same goes for a video that will not load: a plain sentence and a way to try again, never the exception.
 
 ### `app/library`, the surgeon in the room
 
@@ -515,9 +584,24 @@ Van's voice: plain-spoken, direct, no wind-up. Peer to peer. Simplest honest ver
 - **No em dashes.** Use commas, colons or parentheses.
 - No marketing language in the product interface.
 - Never claim the product guarantees a patient understands anything, and never say it replaces or satisfies informed consent. It **supports** the consent conversation. This wording matters legally and is not flexible.
+- **A number is labelled by what it measures.** A play start is a play start. A link that was issued is a link that was issued. Neither is a unique patient, a completed watch, proof that someone understood, or evidence of consent, and no screen, report, PR or sales page describes it as any of those. When a QR code later mints child links, an issued child link is not a proven unique scan or person either.
+- **Technical failures never reach a patient.** Exception text, status codes and stack traces go to the server log; the patient sees a calm sentence and a way to try again.
+- **Security limits are stated honestly.** An expiring link, a signed address and a cancelled link limit who can start a new play. They do not stop screenshots, do not stop all copying, and do not take back what a phone has already loaded. Never promise more than that to a clinic.
 
 ---
 
-## Commits
+## Commits and pull requests
 
-Plain English, present tense, one line. "Add expiry check to watch page." Not "feat(watch): implement TTL validation middleware."
+**Commits:** plain English, present tense, one line. "Add expiry check to watch page." Not "feat(watch): implement TTL validation middleware."
+
+**One prompt, one pull request** (rule 5), and its description is written for Evan, who cannot read the code. It says:
+
+- the problem, and the behavior once the change is in;
+- every migration and every script that changes rows, with the production order, why the old code keeps working during the minutes in between, and how it would be recovered (rule 3);
+- exactly which checks ran and what they showed: lint, `tsc`, the test count and files, the build, the browser check, and any real-device check with the device named;
+- a numbered preview walkthrough for the things only a signed-in person can try;
+- the risks, and everything that remains unverified or unfinished, in as many words.
+
+**A green summary is evidence, not a review.** Claude never merges, never migrates production, never runs a production data script, never changes a live vendor setting and never deletes an external asset. Those wait for Evan's explicit instruction after he has read the PR; reading it is not the instruction.
+
+**When behavior changes, this file changes with it**, and the desktop copy (`3 - Repo rules file.md`) is updated to match in the same PR. An old sentence that no longer holds is removed, not left beside the new one.

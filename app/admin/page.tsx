@@ -10,11 +10,8 @@ import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { formatDuration } from "@/lib/format";
-import { getClinicPlan } from "@/lib/db/clinics";
-import { getPricingForClinic } from "@/lib/db/pricing";
 import { listSharesForClinic } from "@/lib/db/shares";
 import { listPublishedVideos } from "@/lib/db/videos";
-import { PlanCard } from "./PlanCard";
 import { ShareLists } from "./ShareLists";
 
 /**
@@ -71,21 +68,10 @@ export default async function AdminPage() {
     );
   }
 
-  const [videos, shares, baseUrl, plan, pricingConfig] = await Promise.all([
+  const [videos, shares, baseUrl] = await Promise.all([
     listPublishedVideos(),
     listSharesForClinic(clinic.id),
     getBaseUrl(),
-    getClinicPlan(clinic.id),
-    // The prices this clinic is on, for the estimate on the plan card. A
-    // pricing problem (a damaged version, a bad pin) is logged for Pulse and
-    // shown to the clinic as "could not work out an estimate", never as a
-    // broken page: the console is still needed for links.
-    getPricingForClinic(clinic.id)
-      .then((pricing) => pricing.config)
-      .catch((error: unknown) => {
-        console.error(`Could not read pricing for clinic ${clinic.id}:`, error);
-        return null;
-      }),
   ]);
 
   const now = new Date();
@@ -150,9 +136,6 @@ export default async function AdminPage() {
               People
             </Link>
           </header>
-
-          {/* The plan on file and an estimate of its monthly amount. Read-only, labelled Estimated. */}
-          {plan && <PlanCard plan={plan} config={pricingConfig} />}
 
           <ShareLists procedures={procedures} links={links} baseUrl={baseUrl} />
         </div>

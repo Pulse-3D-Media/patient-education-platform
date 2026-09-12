@@ -23,12 +23,17 @@ export default async function PulsePricingPage() {
 
   const [versions, availability] = await Promise.all([listPricingVersions(), getCategoryAvailability()]);
 
-  // Which prices a quote made right now would use. A damaged active
-  // version is shown as a problem on the page rather than crashing it.
+  // Which prices a quote made right now would use, with the active config
+  // itself so the editor opens on it even when the active version is older
+  // than the bounded history shows. A damaged active version is shown as a
+  // problem on the page rather than crashing it.
   let source: EstimateSource;
   try {
     const active = await getActivePricing();
-    source = active.source.kind === "version" ? { kind: "version", version: active.source.version.version } : { kind: "estimate" };
+    source =
+      active.source.kind === "version"
+        ? { kind: "version", version: active.source.version.version, config: active.config }
+        : { kind: "estimate" };
   } catch (error) {
     if (!(error instanceof PricingError)) throw error;
     source = { kind: "problem", message: error.message };
@@ -51,10 +56,10 @@ export default async function PulsePricingPage() {
         <header>
           <h1 className="text-2xl font-semibold sm:text-3xl">Pricing</h1>
           <p className="mt-1 max-w-3xl text-[#bfbfbf]">
-            Each category&rsquo;s monthly price per surgeon seat, the discount for taking more categories, the full-library
-            offer, the yearly rate and the seat limits. Change the numbers, check them in the calculator, then save them as a
-            new version and make it active. Saving never changes an earlier version. Internal only: nothing here is shown to
-            a clinic.
+            The price ladder: one monthly price per surgeon seat for each number of categories a clinic takes, whichever
+            categories they are, plus the full-library offer, the yearly rate and the seat limits. Change the numbers, check
+            them in the calculator, then save them as a new version and make it active. Saving never changes an earlier
+            version. Internal only: nothing here is shown to a clinic.
           </p>
         </header>
         <div className="mt-8">

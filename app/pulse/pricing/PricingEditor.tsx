@@ -50,8 +50,15 @@ export type EditorVersion = {
   problem: string | null;
 };
 
-/** Which prices a quote made right now would use. */
-export type EstimateSource = { kind: "version"; version: number } | { kind: "estimate" } | { kind: "problem"; message: string };
+/**
+ * Which prices a quote made right now would use. The active version comes
+ * with its config, so the editor can open on it whether or not it is among
+ * the versions the bounded history shows.
+ */
+export type EstimateSource =
+  | { kind: "version"; version: number; config: PricingConfig }
+  | { kind: "estimate" }
+  | { kind: "problem"; message: string };
 
 /** The numbers as typed. Text, so "59." and "59.0" stay as they are while typing. */
 type Draft = {
@@ -149,10 +156,17 @@ export function PricingEditor({
   const router = useRouter();
 
   // The editor opens on the active version's numbers, or the built-in
-  // defaults when nothing is active yet.
-  const activeVersion = versions.find((version) => version.active && version.config) ?? null;
-  const [draft, setDraft] = useState<Draft>(() => draftFromConfig(activeVersion?.config ?? DEFAULT_PRICING_CONFIG));
-  const [loadedFrom, setLoadedFrom] = useState(activeVersion ? versionWords(activeVersion) : "the built-in defaults");
+  // defaults when nothing is active yet. The active config comes with the
+  // source line, not out of the history list: the history is bounded, and
+  // an active version older than what it shows must still be what the
+  // editor starts from, so the page never says one version is active while
+  // the editor holds another.
+  const opening =
+    source.kind === "version"
+      ? { config: source.config, from: `version ${source.version} (active)` }
+      : { config: DEFAULT_PRICING_CONFIG, from: "the built-in defaults" };
+  const [draft, setDraft] = useState<Draft>(() => draftFromConfig(opening.config));
+  const [loadedFrom, setLoadedFrom] = useState(opening.from);
   const [note, setNote] = useState("");
   const [saveState, setSaveState] = useState<PricingSaveResult | null>(null);
   const [saving, startSaving] = useTransition();
@@ -570,7 +584,7 @@ export function PricingEditor({
                             Load into editor
                           </button>
                         )}
-                        {version.config && !version.active && <ActivateForm versionId={version.id} />}
+                        {version.config && !version.active && <ActivateForm version={version} />}
                       </div>
                     </td>
                   </tr>
@@ -609,15 +623,57 @@ function SourceLine({ source }: { source: EstimateSource }) {
   );
 }
 
-/** One small form per history row, so each "Make active" reports under its own button. */
-function ActivateForm({ versionId }: { versionId: string }) {
+/**
+ * One small form per history row, so each "Make active" reports under its
+ * own button. Making a version active changes the prices every new quote,
+ * and every clinic not pinned to a version, will get, so the button does
+ * not send on the first click: it opens the confirmation below, which
+ * names the version and says what happens, and only the "Yes" button in
+ * it submits. That is a courtesy against a slip of the hand. The real
+ * protection is on the server (Pulse staff only) and in the database (at
+ * most one active row).
+ */
+function ActivateForm({ version }: { version: EditorVersion }) {
   const [state, action, pending] = useActionState(activatePricingVersionAction, null);
+  const [confirming, setConfirming] = useState(false);
   return (
-    <form action={action} className="flex flex-wrap items-center gap-2">
-      <input type="hidden" name="versionId" value={versionId} />
-      <SaveButton pending={pending} label="Make active" />
+    <form action={action} className="flex flex-col gap-2">
+      <input type="hidden" name="versionId" value={version.id} />
+      {confirming ? (
+        <ActivationConfirmation version={version.version} pending={pending} onCancel={() => setConfirming(false)} />
+      ) : (
+        <button type="button" onClick={() => setConfirming(true)} className={SECONDARY_BUTTON}>
+          Make active
+        </button>
+      )}
       <Outcome state={state} />
     </form>
+  );
+}
+
+/**
+ * The question asked before a version is made active. Rendered inside the
+ * row's form, so "Yes" is that form's submit button. Exported so the
+ * wording can be tested on its own.
+ */
+export function ActivationConfirmation({ version, pending, onCancel }: { version: number; pending: boolean; onCancel: () => void }) {
+  const titleId = `activate-${version}-title`;
+  return (
+    <div role="alertdialog" aria-labelledby={titleId} className="max-w-md rounded-xl border border-[#2a829b]/50 bg-[#2a829b]/10 p-4">
+      <p id={titleId} className="font-medium text-white">
+        Make version {version} active?
+      </p>
+      <p className="mt-1 text-sm text-[#bfbfbf]">
+        From then on every new quote, and every clinic not pinned to a version, uses version {version}&rsquo;s prices. A
+        clinic pinned to a version keeps the prices it signed up at.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <SaveButton pending={pending} label={`Yes, make version ${version} active`} />
+        <button type="button" onClick={onCancel} disabled={pending} className={SECONDARY_BUTTON}>
+          No, leave it as it is
+        </button>
+      </div>
+    </div>
   );
 }
 

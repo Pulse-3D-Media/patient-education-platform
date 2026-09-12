@@ -1,15 +1,16 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { CATEGORY_VALUES, DEFAULT_PRICING_CONFIG, type PricingConfig } from "@/lib/pricing";
-import { PricingEditor, type EditorVersion } from "./PricingEditor";
+import { ActivationConfirmation, PricingEditor, type EditorVersion } from "./PricingEditor";
 
 /**
  * The pricing editor rendered on the server, the way the page first paints
  * it, with no Clerk and no database: the router and the Server Actions are
  * stand-ins. This checks that the page opens on the right numbers and
  * that the calculator and the example column quote from the same engine
- * the server uses. Typing, saving and Make active need a signed-in
- * browser and are checked on the preview.
+ * the server uses. Typing, saving and the click that opens the
+ * activation confirmation need a signed-in browser and are checked on
+ * the preview; the confirmation's wording is checked here on its own.
  */
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
@@ -47,10 +48,11 @@ describe("PricingEditor", () => {
   });
 
   it("opens on the active version's numbers and lists the history with Make active on the others", () => {
-    const active = version({ id: "v_2", version: 2, note: "One category to $65", active: true, config: { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [6500, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1)] } });
+    const activeConfig = { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [6500, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1)] };
+    const active = version({ id: "v_2", version: 2, note: "One category to $65", active: true, config: activeConfig });
     const older = version({ id: "v_1", version: 1, config: DEFAULT_PRICING_CONFIG });
     const html = renderToStaticMarkup(
-      <PricingEditor versions={[active, older]} availability={ALL_SELLABLE} source={{ kind: "version", version: 2 }} />,
+      <PricingEditor versions={[active, older]} availability={ALL_SELLABLE} source={{ kind: "version", version: 2, config: activeConfig }} />,
     );
     expect(html).toContain("Version 2 is active.");
     expect(html).toContain("Loaded from version 2 (active)");
@@ -59,6 +61,42 @@ describe("PricingEditor", () => {
     // Exactly one Make active button: the older version. The active one has none.
     expect(html.match(/Make active/g)).toHaveLength(1);
     expect(html.match(/Load into editor/g)).toHaveLength(2);
+    // Nothing is sent on the first click: the confirmation is closed until the button is pressed.
+    expect(html).not.toContain("Make version 1 active?");
+    expect(html).not.toContain("Yes, make version");
+  });
+
+  it("opens on the active version's numbers even when it is older than the history shows", () => {
+    // The history is bounded. Here it holds only newer, inactive versions;
+    // the active one (version 3, one category at $65) is not in the list at
+    // all, and the editor must still start from it, not from the defaults.
+    const activeConfig = { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [6500, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1)] };
+    const newer = [
+      version({ id: "v_9", version: 9, note: "A later draft", config: DEFAULT_PRICING_CONFIG }),
+      version({ id: "v_8", version: 8, note: "Another draft", config: DEFAULT_PRICING_CONFIG }),
+    ];
+    const html = renderToStaticMarkup(
+      <PricingEditor versions={newer} availability={ALL_SELLABLE} source={{ kind: "version", version: 3, config: activeConfig }} />,
+    );
+    expect(html).toContain("Version 3 is active.");
+    expect(html).toContain("Loaded from version 3 (active)");
+    expect(html).toContain('value="65.00"');
+    expect(html).not.toContain("Loaded from the built-in defaults");
+    // Both listed versions can be made active, each after its own confirmation.
+    expect(html.match(/Make active/g)).toHaveLength(2);
+  });
+
+  it("asks before a version is made active, naming the version and what changes", () => {
+    const html = renderToStaticMarkup(<ActivationConfirmation version={7} pending={false} onCancel={() => undefined} />);
+    expect(html).toContain("Make version 7 active?");
+    // The consequence: new quotes and unpinned clinics move to it; a pinned clinic does not.
+    expect(html).toContain("every new quote, and every clinic not pinned to a version, uses version 7");
+    expect(html).toContain("keeps the prices it signed up at");
+    // The only submit button is the yes. No is a plain button that closes the question.
+    expect(html.match(/type="submit"/g)).toHaveLength(1);
+    expect(html).toContain("Yes, make version 7 active");
+    expect(html).toContain("No, leave it as it is");
+    expect(html).toContain('role="alertdialog"');
   });
 
   it("labels categories that cannot be bought and keeps them out of the calculator", () => {

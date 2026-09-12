@@ -344,10 +344,13 @@ export type PricingSaveResult =
   | { ok: string; version: number }
   | { error: string; fieldErrors?: FieldError[] };
 
-/** Tell Next.js the prices changed: the pricing page, and every admin console's plan card. */
+/**
+ * Tell Next.js the prices changed. Only the pricing page shows them today;
+ * when the clinic-facing billing page (/admin/billing, the admin-dashboard
+ * work) quotes from them, add it here.
+ */
 function refreshPricing() {
   revalidatePath("/pulse/pricing");
-  revalidatePath("/admin");
 }
 
 /**

@@ -68,7 +68,7 @@ type VersionRecord = Prisma.PricingVersionGetPayload<{ select: typeof VERSION_FI
 /** The most versions the history list shows. */
 const HISTORY_LIMIT = 100;
 
-/** "perSeatCents.KNEE: A whole number of cents..." for an error message. */
+/** "perSeatByCountCents.1: A whole number of cents..." for an error message. */
 function describeErrors(errors: FieldError[]) {
   return errors.map((error) => `${error.field}: ${error.message}`).join("; ");
 }

@@ -23,4 +23,3 @@ CREATE UNIQUE INDEX "PricingVersion_active_key" ON "PricingVersion"("active");
 
 -- AddForeignKey
 ALTER TABLE "Clinic" ADD CONSTRAINT "Clinic_pricingVersionId_fkey" FOREIGN KEY ("pricingVersionId") REFERENCES "PricingVersion"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-

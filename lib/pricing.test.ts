@@ -178,9 +178,9 @@ describe("the founding offer", () => {
     // 89000 * 0.9 = 80100: the year is charged once and the offer is taken once.
     expect(yearly.perSeatCents).toBe(80100);
 
-    // A rounding case: $109 a year is 109000 cents; 12.5% off is 95375.0, but 12.55% off is 95312.05 -> 95312.
+    // A rounding case: three categories for a year is 109000 cents; 12.55% off is 95320.5, rounded half up to 95321.
     const odd: PricingConfig = { ...DEFAULT_PRICING_CONFIG, foundingDiscountBp: 1255 };
-    expect(amountsFor(odd, { categories: firstCategories(3), founding: true, interval: "year" }).amounts.perSeatCents).toBe(95312);
+    expect(amountsFor(odd, { categories: firstCategories(3), founding: true, interval: "year" }).amounts.perSeatCents).toBe(95321);
   });
 
   it("is not applied when the quote does not ask for it", () => {

@@ -73,6 +73,60 @@ export async function listSharesForClinic(clinicId: string) {
 }
 
 /**
+ * The newest few share links this clinic has made, with the same video
+ * fields as listSharesForClinic. For the admin overview, which shows a
+ * short recent list and sends people to /admin/links for the rest. `limit`
+ * caps the rows read, so the overview never loads the whole history.
+ */
+export async function listRecentSharesForClinic(clinicId: string, limit: number) {
+  return prisma.share.findMany({
+    where: { clinicId },
+    include: { video: { select: { title: true, category: true, isPlaceholder: true, isPublished: true } } },
+    orderBy: { createdAt: "desc" },
+    take: Math.max(1, Math.min(limit, 20)),
+  });
+}
+
+/** How far back "links made recently" looks on the admin overview, and how soon "expiring soon" is. */
+export const SUMMARY_RECENT_DAYS = 30;
+export const SUMMARY_SOON_DAYS = 7;
+
+/** The numbers on the admin overview. Every one is a count or a sum done in the database. */
+export type ShareSummary = {
+  /** Links that work right now: not expired, and their video is published. */
+  working: number;
+  /** Working links that stop working within SUMMARY_SOON_DAYS. */
+  expiringSoon: number;
+  /** Links that have not expired but point at a video that is not published right now, so they do not work. */
+  notWorking: number;
+  /** Links made in the last SUMMARY_RECENT_DAYS days, whether or not they still work. */
+  madeRecently: number;
+  /** Play starts across every link this clinic has ever made. A play start is a play start: not a patient, not a completed watch. */
+  playStarts: number;
+};
+
+/**
+ * A handful of totals about one clinic's share links, for the admin
+ * overview. Counts and a sum, all worked out in the database, so the
+ * overview reads five numbers rather than the whole links table.
+ */
+export async function summarizeSharesForClinic(clinicId: string): Promise<ShareSummary> {
+  const now = new Date();
+  const soon = new Date(now.getTime() + SUMMARY_SOON_DAYS * 24 * 60 * 60 * 1000);
+  const since = new Date(now.getTime() - SUMMARY_RECENT_DAYS * 24 * 60 * 60 * 1000);
+
+  const [working, expiringSoon, notWorking, madeRecently, views] = await Promise.all([
+    prisma.share.count({ where: { clinicId, expiresAt: { gt: now }, video: { isPublished: true } } }),
+    prisma.share.count({ where: { clinicId, expiresAt: { gt: now, lte: soon }, video: { isPublished: true } } }),
+    prisma.share.count({ where: { clinicId, expiresAt: { gt: now }, video: { isPublished: false } } }),
+    prisma.share.count({ where: { clinicId, createdAt: { gte: since } } }),
+    prisma.share.aggregate({ where: { clinicId }, _sum: { viewCount: true } }),
+  ]);
+
+  return { working, expiringSoon, notWorking, madeRecently, playStarts: views._sum.viewCount ?? 0 };
+}
+
+/**
  * Look a share up by the code in its URL, with the video it plays and the
  * name of the clinic that made it. Returns null for a code that does not exist.
  *

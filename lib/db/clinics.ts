@@ -86,6 +86,27 @@ export async function upsertClinicForClerkOrg(clerkOrgId: string, details: Clerk
   });
 }
 
+/** What /admin/billing shows a clinic about its own plan. */
+export type ClinicPlan = {
+  categories: Category[];
+  surgeonSeats: number;
+  managedByPulse: boolean;
+};
+
+/**
+ * One clinic's plan as Pulse staff set it: the categories, the surgeon
+ * seats, and whether Pulse manages the plan (invoiced by agreement, no
+ * self-serve billing). Read by /admin/billing, which is the only clinic-side
+ * page that shows plan information. Null for an unknown id. Nothing internal
+ * (notes, status reasons, the pricing pin) is in here.
+ */
+export async function getClinicPlan(clinicId: string): Promise<ClinicPlan | null> {
+  return prisma.clinic.findUnique({
+    where: { id: clinicId },
+    select: { categories: true, surgeonSeats: true, managedByPulse: true },
+  });
+}
+
 /**
  * Change one clinic's status. Used by the db:set-status script now, and by
  * billing later. Throws if the clinic does not exist.

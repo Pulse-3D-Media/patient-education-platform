@@ -24,19 +24,15 @@ import {
  * categories, or is it category prices with percentage discounts, with the
  * totals allowed to differ from that ladder?
  *
- * Built: category prices with percentage discounts. That is the structure
- * Evan set on 2026-09-10 ("per category, per seat, each category has its
- * own price, count discounts optional on top"). The ladder on Van's
- * proposal page was derived from those numbers and rounded for display,
- * and Van has not approved the numbers themselves. So the fixtures below
- * are the exact cents the defaults produce ($88.97, not $89) and nothing
- * pretends otherwise.
- *
- * Still open, flagged on the pull request: Evan and Van confirming that the
- * actual totals, not the rounded ladder, are what customers will be
- * charged. If the exact ladder wins instead, the config becomes bundle
- * amounts per category count, and that change has to land before checkout
- * (prompt 11B), the first place a real customer is charged.
+ * Decided: category prices with percentage discounts, and the totals are
+ * the exact cents those numbers produce. That is the structure Evan set on
+ * 2026-09-10 ("per category, per seat, each category has its own price,
+ * count discounts optional on top"), and on 2026-09-11 he confirmed it
+ * against the alternative in so many words: "Keep the percentage model,
+ * exact cents are fine." The ladder on the proposal page was derived from
+ * these numbers and rounded for display; the fixtures below are the exact
+ * cents ($88.97, not $89) and nothing pretends otherwise. The numbers
+ * themselves are placeholders to edit on /pulse/pricing.
  */
 
 /** All six categories are for sale unless a test says otherwise. */

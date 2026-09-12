@@ -10,32 +10,37 @@ import { CATEGORIES } from "./categories";
  * live from unsaved numbers, and the server can run the very same code when
  * it comes to charging a card (prompt 11). Every amount is a whole number of
  * cents and every percentage is a whole number of basis points (hundredths
- * of a percent: 24.6% is 2460), so nothing here ever does floating-point
+ * of a percent: 10% is 1000), so nothing here ever does floating-point
  * money arithmetic.
  *
  * THE PRICING MODEL, as decided (see lib/pricing.test.ts for the record):
  *
- *   Each category has its own monthly price per surgeon seat. A clinic is
- *   charged the sum of the categories it takes, less a discount that depends
- *   on how many categories that is, times its number of surgeon seats.
+ *   A price ladder by number of categories. One monthly price per surgeon
+ *   seat for one category, another for two, and so on, whichever
+ *   categories they are. A clinic is charged the ladder price for the
+ *   number of categories it takes, times its number of surgeon seats.
  *   Yearly billing charges a set number of months for the year. Office
  *   staff are never charged.
  *
+ *   There are no per-category prices. A count-based price makes the
+ *   identity of the categories irrelevant to the amount: Knee and Hip cost
+ *   the same as Spine and Shoulder. If a category ever needs a price of its
+ *   own, that is a second pricing mode to decide on before it is built.
+ *
  * The full library: when a config names a "full library from" count and a
- * clinic takes at least that many categories, it is charged for that many
- * and gets every category. The full library has one price, whichever
- * categories were ticked: it is priced as the N dearest categories, so
- * nobody gets the dear ones free by ticking the cheap ones. It is only
- * offered while every category is for sale; until then a clinic taking N
- * categories pays for N and gets those N, and the quote says so.
+ * clinic takes at least that many categories, it is charged that count's
+ * ladder price and gets every category. The full library is only offered
+ * while every category is for sale; until then a clinic taking N
+ * categories pays the N-category price and gets those N, and the quote
+ * says so.
  *
  * THE ONE ROUNDING: the billable amount for one seat for the interval
- * (month or year) is rounded to the cent exactly once, after both discounts,
- * and the total is that times the number of seats. Stripe will be given the
- * same per-seat amount as the unit price and the seats as the quantity, so
- * what the calculator shows and what the card is charged cannot differ.
- * The "monthly equivalent" of a yearly price is for display only and is
- * never charged.
+ * (month or year) is rounded to the cent exactly once, after the founding
+ * offer if there is one, and the total is that times the number of seats.
+ * Stripe will be given the same per-seat amount as the unit price and the
+ * seats as the quantity, so what the calculator shows and what the card is
+ * charged cannot differ. The "monthly equivalent" of a yearly price is for
+ * display only and is never charged.
  */
 
 // ---------------------------------------------------------------------------
@@ -45,7 +50,7 @@ import { CATEGORIES } from "./categories";
 /** The six categories, in the order the library shows them. */
 export const CATEGORY_VALUES: Category[] = CATEGORIES.map((c) => c.value);
 
-/** How many categories there are. The discount table has one entry per count. */
+/** How many categories there are. The ladder has one price per count. */
 export const CATEGORY_COUNT = CATEGORY_VALUES.length;
 
 export type Interval = "month" | "year";
@@ -59,15 +64,13 @@ export type Band = "solo" | "clinic" | "enterprise";
 /** A saved set of prices. Stored as JSON in PricingVersion.config, validated on the way in and out. */
 export type PricingConfig = {
   currency: "usd";
-  /** Monthly price for one surgeon seat, per category, in whole cents. */
-  perSeatCents: Record<Category, number>;
   /**
-   * Discount by how many categories are charged, in basis points. The first
-   * entry is for one category, the second for two, and so on: one entry per
-   * category. 2460 means 24.6% off.
+   * The ladder: the monthly price for one surgeon seat by how many
+   * categories are taken, in whole cents. The first entry is for one
+   * category, the second for two, and so on, one entry per category.
    */
-  countDiscountBp: number[];
-  /** Taking this many categories buys the full library. Null means there is no full-library offer. */
+  perSeatByCountCents: number[];
+  /** Taking this many categories buys the full library at that count's price. Null means there is no full-library offer. */
   fullLibraryFrom: number | null;
   /** A year is charged as this many months. 10 means two months free. */
   yearlyMonths: number;
@@ -99,23 +102,21 @@ export type QuoteAmounts = {
   currency: "usd";
   interval: Interval;
   seats: number;
-  /** One line per charged category, or one "Full library" line. Per seat, for the interval, before discounts. */
+  /** One line: the categories taken (or the full library) at the ladder price. Per seat, for the interval, before the founding offer. */
   lines: QuoteLine[];
   /** The sum of the lines: what one seat lists at for the interval. */
   perSeatListCents: number;
-  /** The discount applied for the number of categories charged. */
-  countDiscountBp: number;
   /** The founding discount applied. 0 unless the quote asked for it. */
   foundingDiscountBp: number;
   /**
-   * What one seat is charged for the interval after both discounts, rounded
-   * to the cent once. This is the number Stripe will be given as the unit
-   * price. Everything else on the receipt is derived from it.
+   * What one seat is charged for the interval after the founding offer,
+   * rounded to the cent once. This is the number Stripe will be given as
+   * the unit price. Everything else on the receipt is derived from it.
    */
   perSeatCents: number;
   /** perSeatCents times seats: the amount charged for the interval. */
   totalCents: number;
-  /** What the discounts took off across all seats. */
+  /** What the founding offer took off across all seats. 0 without one. */
   savingsCents: number;
   /** For a yearly quote, the total spread over twelve months, for display only. Never charged. Null for monthly. */
   monthlyEquivalentCents: number | null;
@@ -126,7 +127,9 @@ export type Quote = {
   practiceType: PracticeType;
   /** The categories ticked, duplicates removed, in library order. */
   selectedCategories: Category[];
-  /** The categories the price is made from. Empty for Enterprise. */
+  /** How many categories the ladder price is for. Capped at the full-library count when the full library is bought. */
+  chargedCount: number;
+  /** The categories that count is made of. Empty when the full library is bought (the count, not the categories, is what is charged) and for Enterprise. */
   chargedCategories: Category[];
   /** The categories the clinic would get. Every category when the full library is bought. Empty for Enterprise. */
   entitledCategories: Category[];
@@ -140,21 +143,20 @@ export type Quote = {
 
 export type QuoteResult = { ok: true; quote: Quote } | { ok: false; error: string };
 
-/** One thing wrong with a config, and which field it is about (a path such as "perSeatCents.KNEE"). */
+/** One thing wrong with a config, and which field it is about (a path such as "perSeatByCountCents.1"). */
 export type FieldError = { field: string; message: string };
 
 export type ValidationResult = { ok: true; config: PricingConfig } | { ok: false; errors: FieldError[] };
 
 // ---------------------------------------------------------------------------
-// Limits. They bound the arithmetic as well as the business: with prices
-// under MAX_PRICE_CENTS, at most CATEGORY_COUNT categories, at most
-// MAX_YEARLY_MONTHS months and two discounts in basis points, the biggest
-// number multiplied below stays under 2^53, where JavaScript's whole-number
-// arithmetic is exact.
+// Limits. They bound the arithmetic as well as the business: with ladder
+// prices under MAX_PRICE_CENTS, at most MAX_YEARLY_MONTHS months and one
+// discount in basis points, the biggest number multiplied below stays far
+// under 2^53, where JavaScript's whole-number arithmetic is exact.
 // ---------------------------------------------------------------------------
 
-/** $5,000 per category per seat per month. Far above any real price; it is an arithmetic bound. */
-export const MAX_PRICE_CENTS = 500_000;
+/** $50,000 per seat per month. Far above any real price; it is an arithmetic bound. */
+export const MAX_PRICE_CENTS = 5_000_000;
 /** 100%. */
 export const MAX_BP = 10_000;
 export const MAX_YEARLY_MONTHS = 12;
@@ -169,23 +171,15 @@ export const MAX_QUOTE_SEATS = 10_000;
 // never a price anyone has agreed to, and checkout will refuse to use them
 // (it needs a saved, active version).
 //
-// $59 per category per seat with these count discounts gives, per seat per
-// month: $59.00, $88.97, $109.03, $125.08, $138.95 for one to five
-// categories, and the full library from five. Those are the exact cents the
-// proposal page rounded to $59 / $89 / $109 / $125 / $139.
+// Per seat per month: $59, $89, $109, $125 and $139 for one to five
+// categories, and the full library from five, exactly as the proposal page
+// shows them. The sixth entry only matters if the full-library offer is
+// turned off; it is set to the five-category price so six is never dearer.
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_PRICING_CONFIG: PricingConfig = {
   currency: "usd",
-  perSeatCents: {
-    SPINE: 5900,
-    COMPLEX_SPINE: 5900,
-    KNEE: 5900,
-    SHOULDER: 5900,
-    HIP: 5900,
-    FOOT_ANKLE: 5900,
-  },
-  countDiscountBp: [0, 2460, 3840, 4700, 5290, 5290],
+  perSeatByCountCents: [5900, 8900, 10900, 12500, 13900, 13900],
   fullLibraryFrom: 5,
   yearlyMonths: 10,
   foundingDiscountBp: 0,
@@ -208,9 +202,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Check a would-be config and return it typed, or the list of what is wrong.
- * Unknown categories, missing categories, non-whole or out-of-range numbers,
- * a currency other than USD and a full-library count outside 2 to
- * CATEGORY_COUNT are all refused.
+ * A ladder with the wrong number of entries, a price that is not a whole
+ * number of cents from 0 up to the bound, a currency other than USD and a
+ * full-library count outside 2 to CATEGORY_COUNT are all refused.
  */
 export function validatePricingConfig(value: unknown): ValidationResult {
   const errors: FieldError[] = [];
@@ -222,39 +216,19 @@ export function validatePricingConfig(value: unknown): ValidationResult {
     errors.push({ field: "currency", message: "Only USD is supported." });
   }
 
-  // Prices: exactly the six categories, each a whole number of cents from 0 up to the bound.
-  const perSeatCents = {} as Record<Category, number>;
-  if (!isPlainObject(value.perSeatCents)) {
-    errors.push({ field: "perSeatCents", message: "Every category needs a price." });
+  // The ladder: one entry per possible count, each a whole number of cents from 0 up to the bound.
+  const perSeatByCountCents: number[] = [];
+  if (!Array.isArray(value.perSeatByCountCents) || value.perSeatByCountCents.length !== CATEGORY_COUNT) {
+    errors.push({ field: "perSeatByCountCents", message: `Needs exactly ${CATEGORY_COUNT} prices, one per number of categories.` });
   } else {
-    for (const category of CATEGORY_VALUES) {
-      const cents = value.perSeatCents[category];
+    value.perSeatByCountCents.forEach((cents, index) => {
       if (!isWholeNumber(cents) || cents < 0 || cents > MAX_PRICE_CENTS) {
         errors.push({
-          field: `perSeatCents.${category}`,
+          field: `perSeatByCountCents.${index}`,
           message: `A whole number of cents from 0 to ${MAX_PRICE_CENTS.toLocaleString("en-US")}.`,
         });
       } else {
-        perSeatCents[category] = cents;
-      }
-    }
-    for (const key of Object.keys(value.perSeatCents)) {
-      if (!(CATEGORY_VALUES as string[]).includes(key)) {
-        errors.push({ field: `perSeatCents.${key}`, message: "Not one of our categories." });
-      }
-    }
-  }
-
-  // Count discounts: one entry per possible count, each 0 to 100%.
-  const countDiscountBp: number[] = [];
-  if (!Array.isArray(value.countDiscountBp) || value.countDiscountBp.length !== CATEGORY_COUNT) {
-    errors.push({ field: "countDiscountBp", message: `Needs exactly ${CATEGORY_COUNT} entries, one per number of categories.` });
-  } else {
-    value.countDiscountBp.forEach((bp, index) => {
-      if (!isWholeNumber(bp) || bp < 0 || bp > MAX_BP) {
-        errors.push({ field: `countDiscountBp.${index}`, message: "A percentage from 0 to 100, with up to two decimals." });
-      } else {
-        countDiscountBp[index] = bp;
+        perSeatByCountCents[index] = cents;
       }
     });
   }
@@ -303,8 +277,7 @@ export function validatePricingConfig(value: unknown): ValidationResult {
     ok: true,
     config: {
       currency: "usd",
-      perSeatCents,
-      countDiscountBp,
+      perSeatByCountCents,
       fullLibraryFrom,
       yearlyMonths: value.yearlyMonths as number,
       foundingDiscountBp: value.foundingDiscountBp as number,
@@ -336,6 +309,11 @@ export function categoryLabel(category: Category): string {
   return CATEGORIES.find((c) => c.value === category)?.label ?? category;
 }
 
+/** "1 category" or "3 categories". */
+function countWords(count: number) {
+  return `${count} ${count === 1 ? "category" : "categories"}`;
+}
+
 /** Solo, Clinic or Enterprise, from the practice type and the number of seats. */
 export function bandFor(config: PricingConfig, seats: number, practiceType: PracticeType): Band {
   if (practiceType === "hospital") return "enterprise";
@@ -352,19 +330,6 @@ export function bandFor(config: PricingConfig, seats: number, practiceType: Prac
 export function fullLibraryOffered(config: PricingConfig, sellable: Category[]): boolean {
   if (config.fullLibraryFrom === null) return false;
   return CATEGORY_VALUES.every((category) => sellable.includes(category));
-}
-
-/**
- * The categories the full library is priced as: the N dearest, N being the
- * full-library count. Ties keep library order. One price, whatever was
- * ticked.
- */
-function fullLibraryChargedCategories(config: PricingConfig): Category[] {
-  const count = config.fullLibraryFrom ?? CATEGORY_COUNT;
-  return [...CATEGORY_VALUES]
-    .sort((a, b) => config.perSeatCents[b] - config.perSeatCents[a])
-    .slice(0, count)
-    .sort((a, b) => CATEGORY_VALUES.indexOf(a) - CATEGORY_VALUES.indexOf(b));
 }
 
 /**
@@ -406,6 +371,7 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
         band,
         practiceType: input.practiceType,
         selectedCategories: selected,
+        chargedCount: 0,
         chargedCategories: [],
         entitledCategories: [],
         fullLibrary: false,
@@ -419,47 +385,39 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
     };
   }
 
-  // Which categories the price is made from, and which the clinic gets.
+  // How many categories the ladder price is for, and which categories the
+  // clinic gets. The full library caps the count and includes everything.
   const notes: string[] = [];
   const wantsFullLibrary = config.fullLibraryFrom !== null && selected.length >= config.fullLibraryFrom;
   const fullLibrary = wantsFullLibrary && fullLibraryOffered(config, input.sellable);
-  let charged: Category[];
-  let entitled: Category[];
+  const chargedCount = fullLibrary ? (config.fullLibraryFrom as number) : selected.length;
+  const chargedCategories = fullLibrary ? [] : selected;
+  const entitledCategories = fullLibrary ? [...CATEGORY_VALUES] : selected;
   if (fullLibrary) {
-    charged = fullLibraryChargedCategories(config);
-    entitled = [...CATEGORY_VALUES];
-    notes.push(`The full library: every category, priced as ${charged.length}.`);
-  } else {
-    charged = selected;
-    entitled = selected;
-    if (wantsFullLibrary) {
-      notes.push(
-        `The full library is not offered until every category is for sale, so this is ${selected.length} ${
-          selected.length === 1 ? "category" : "categories"
-        } charged and included, no more.`,
-      );
-    }
+    notes.push(`The full library: every category, at the ${countWords(chargedCount)} price.`);
+  } else if (wantsFullLibrary) {
+    notes.push(
+      `The full library is not offered until every category is for sale, so this is ${countWords(selected.length)} charged and included, no more.`,
+    );
   }
 
-  // The receipt lines: per seat, for the interval, before discounts. Exact.
+  // The one receipt line: the ladder price for that count, per seat, for
+  // the interval, before the founding offer. Exact.
   const months = input.interval === "year" ? config.yearlyMonths : 1;
-  const lines: QuoteLine[] = fullLibrary
-    ? [
-        {
-          label: `Full library (${charged.length} ${charged.length === 1 ? "category" : "categories"})`,
-          cents: charged.reduce((sum, category) => sum + config.perSeatCents[category], 0) * months,
-        },
-      ]
-    : charged.map((category) => ({ label: categoryLabel(category), cents: config.perSeatCents[category] * months }));
+  const ladderCents = config.perSeatByCountCents[chargedCount - 1];
+  const lines: QuoteLine[] = [
+    {
+      label: fullLibrary
+        ? `Full library (${countWords(chargedCount)})`
+        : `${countWords(chargedCount)}: ${selected.map(categoryLabel).join(", ")}`,
+      cents: ladderCents * months,
+    },
+  ];
   const perSeatListCents = lines.reduce((sum, line) => sum + line.cents, 0);
 
-  // Both discounts, then the one rounding.
-  const countDiscountBp = config.countDiscountBp[charged.length - 1] ?? 0;
+  // The founding offer, then the one rounding.
   const foundingDiscountBp = input.founding ? config.foundingDiscountBp : 0;
-  const perSeatCents = roundedDivide(
-    perSeatListCents * (MAX_BP - countDiscountBp) * (MAX_BP - foundingDiscountBp),
-    MAX_BP * MAX_BP,
-  );
+  const perSeatCents = roundedDivide(perSeatListCents * (MAX_BP - foundingDiscountBp), MAX_BP);
   const totalCents = perSeatCents * input.seats;
 
   return {
@@ -468,8 +426,9 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
       band,
       practiceType: input.practiceType,
       selectedCategories: selected,
-      chargedCategories: charged,
-      entitledCategories: entitled,
+      chargedCount,
+      chargedCategories,
+      entitledCategories,
       fullLibrary,
       notes,
       amounts: {
@@ -478,7 +437,6 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
         seats: input.seats,
         lines,
         perSeatListCents,
-        countDiscountBp,
         foundingDiscountBp,
         perSeatCents,
         totalCents,
@@ -494,7 +452,7 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
 // numbers out, and back, with no floating point in between.
 // ---------------------------------------------------------------------------
 
-/** 5900 as "$59.00"; 138945 as "$1,389.45". */
+/** 5900 as "$59.00"; 138900 as "$1,389.00". */
 export function formatCents(cents: number): string {
   const sign = cents < 0 ? "-" : "";
   const whole = Math.floor(Math.abs(cents) / 100);
@@ -502,7 +460,7 @@ export function formatCents(cents: number): string {
   return `${sign}$${whole.toLocaleString("en-US")}.${String(part).padStart(2, "0")}`;
 }
 
-/** 2460 as "24.6%"; 5290 as "52.9%"; 0 as "0%"; 4703 as "47.03%". */
+/** 1000 as "10%"; 1250 as "12.5%"; 0 as "0%"; 4703 as "47.03%". */
 export function formatBp(bp: number): string {
   const whole = Math.floor(bp / 100);
   const part = bp % 100;
@@ -516,7 +474,7 @@ export function centsToDollarsText(cents: number): string {
   return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 }
 
-/** 2460 as "24.6", the form of a percentage in an input box. */
+/** 1250 as "12.5", the form of a percentage in an input box. */
 export function bpToPercentText(bp: number): string {
   return formatBp(bp).replace("%", "");
 }
@@ -535,7 +493,7 @@ export function parseDollarsToCents(text: string): number | null {
   return dollars * 100 + cents;
 }
 
-/** "24.6", "24.60", "0" as basis points. Null when the text is not a percentage with at most two decimals. */
+/** "12.5", "12.50", "0" as basis points. Null when the text is not a percentage with at most two decimals. */
 export function parsePercentToBp(text: string): number | null {
   const cleaned = text.trim().replace(/%$/, "");
   const match = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(cleaned);

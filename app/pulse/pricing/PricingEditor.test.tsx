@@ -39,7 +39,7 @@ describe("PricingEditor", () => {
     expect(html).toContain("No version is active yet.");
     expect(html).toContain("Loaded from the built-in defaults");
     // The example column: the exact cents for one to five categories, and the full library at five and six.
-    for (const text of ["$59.00", "$88.97", "$109.03", "$125.08", "$138.95 (full library)"]) expect(html).toContain(text);
+    for (const text of ["$59.00", "$89.00", "$109.00", "$125.00", "$139.00 (full library)"]) expect(html).toContain(text);
     // The calculator starts at one seat and the first category for sale, quoted from the same engine.
     expect(html).toContain("Quoting from the built-in defaults");
     expect(html).toContain("1 seat, per month");
@@ -47,7 +47,7 @@ describe("PricingEditor", () => {
   });
 
   it("opens on the active version's numbers and lists the history with Make active on the others", () => {
-    const active = version({ id: "v_2", version: 2, note: "Knee to $65", active: true, config: { ...DEFAULT_PRICING_CONFIG, perSeatCents: { ...DEFAULT_PRICING_CONFIG.perSeatCents, KNEE: 6500 } } });
+    const active = version({ id: "v_2", version: 2, note: "One category to $65", active: true, config: { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [6500, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1)] } });
     const older = version({ id: "v_1", version: 1, config: DEFAULT_PRICING_CONFIG });
     const html = renderToStaticMarkup(
       <PricingEditor versions={[active, older]} availability={ALL_SELLABLE} source={{ kind: "version", version: 2 }} />,
@@ -55,7 +55,7 @@ describe("PricingEditor", () => {
     expect(html).toContain("Version 2 is active.");
     expect(html).toContain("Loaded from version 2 (active)");
     expect(html).toContain('value="65.00"');
-    expect(html).toContain("Knee to $65");
+    expect(html).toContain("One category to $65");
     // Exactly one Make active button: the older version. The active one has none.
     expect(html.match(/Make active/g)).toHaveLength(1);
     expect(html.match(/Load into editor/g)).toHaveLength(2);
@@ -71,7 +71,7 @@ describe("PricingEditor", () => {
   });
 
   it("shows a damaged active version as a problem, not a crash, and marks the row", () => {
-    const bad = version({ id: "v_9", version: 9, active: true, config: null, problem: "perSeatCents.KNEE: A whole number of cents" });
+    const bad = version({ id: "v_9", version: 9, active: true, config: null, problem: "perSeatByCountCents.1: A whole number of cents" });
     const html = renderToStaticMarkup(
       <PricingEditor versions={[bad]} availability={ALL_SELLABLE} source={{ kind: "problem", message: "The active version, pricing version 9 (v_9), has a stored config that is not valid." }} />,
     );

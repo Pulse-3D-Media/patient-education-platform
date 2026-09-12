@@ -55,8 +55,8 @@ export type EstimateSource = { kind: "version"; version: number } | { kind: "est
 
 /** The numbers as typed. Text, so "59." and "59.0" stay as they are while typing. */
 type Draft = {
-  perSeat: Record<Category, string>;
-  countDiscount: string[];
+  /** The ladder, one price per number of categories, as dollars text. */
+  perSeatByCount: string[];
   fullLibraryFrom: string;
   yearlyMonths: string;
   foundingDiscount: string;
@@ -74,11 +74,8 @@ type Calc = {
 };
 
 function draftFromConfig(config: PricingConfig): Draft {
-  const perSeat = {} as Record<Category, string>;
-  for (const category of CATEGORY_VALUES) perSeat[category] = centsToDollarsText(config.perSeatCents[category]);
   return {
-    perSeat,
-    countDiscount: config.countDiscountBp.map(bpToPercentText),
+    perSeatByCount: config.perSeatByCountCents.map(centsToDollarsText),
     fullLibraryFrom: config.fullLibraryFrom === null ? "" : String(config.fullLibraryFrom),
     yearlyMonths: String(config.yearlyMonths),
     foundingDiscount: bpToPercentText(config.foundingDiscountBp),
@@ -102,17 +99,10 @@ function wholeNumberOrNaN(text: string): number {
 function configFromDraft(draft: Draft): { config: PricingConfig | null; errors: FieldError[] } {
   const readingErrors: FieldError[] = [];
 
-  const perSeatCents = {} as Record<Category, number>;
-  for (const category of CATEGORY_VALUES) {
-    const cents = parseDollarsToCents(draft.perSeat[category]);
-    if (cents === null) readingErrors.push({ field: `perSeatCents.${category}`, message: "Enter a dollar amount, like 59 or 59.00." });
-    perSeatCents[category] = cents ?? Number.NaN;
-  }
-
-  const countDiscountBp = draft.countDiscount.map((text, index) => {
-    const bp = parsePercentToBp(text);
-    if (bp === null) readingErrors.push({ field: `countDiscountBp.${index}`, message: "Enter a percentage, like 24.6." });
-    return bp ?? Number.NaN;
+  const perSeatByCountCents = draft.perSeatByCount.map((text, index) => {
+    const cents = parseDollarsToCents(text);
+    if (cents === null) readingErrors.push({ field: `perSeatByCountCents.${index}`, message: "Enter a dollar amount, like 89 or 89.00." });
+    return cents ?? Number.NaN;
   });
 
   const foundingBp = parsePercentToBp(draft.foundingDiscount);
@@ -120,8 +110,7 @@ function configFromDraft(draft: Draft): { config: PricingConfig | null; errors: 
 
   const candidate = {
     currency: "usd",
-    perSeatCents,
-    countDiscountBp,
+    perSeatByCountCents,
     fullLibraryFrom: draft.fullLibraryFrom.trim() === "" ? null : wholeNumberOrNaN(draft.fullLibraryFrom),
     yearlyMonths: wholeNumberOrNaN(draft.yearlyMonths),
     foundingDiscountBp: foundingBp ?? Number.NaN,
@@ -141,6 +130,11 @@ const BAND_WORDS = { solo: "Solo", clinic: "Clinic", enterprise: "Enterprise" } 
 /** The name of a version in the "quoting from" line. */
 function versionWords(version: EditorVersion) {
   return `version ${version.version}${version.active ? " (active)" : ""}`;
+}
+
+/** "1 category" or "3 categories". */
+function countWords(count: number) {
+  return `${count} ${count === 1 ? "category" : "categories"}`;
 }
 
 export function PricingEditor({
@@ -232,58 +226,24 @@ export function PricingEditor({
         {/* The editor */}
         <div className="flex flex-col gap-6">
           <section className="rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
-            <h2 className="text-lg font-semibold">Price per surgeon seat, per month</h2>
+            <h2 className="text-lg font-semibold">Price per surgeon seat, per month, by number of categories</h2>
             <p className="mt-1 text-sm text-[#bfbfbf]">
-              Loaded from {loadedFrom}. A category marked Not for sale or Coming soon still has a price here; it is only kept
-              out of new purchases.
-            </p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {CATEGORIES.map((category) => {
-                const field = `perSeatCents.${category.value}`;
-                const label = availabilityLabel(availability[category.value]);
-                return (
-                  <div key={category.value}>
-                    <label htmlFor={field} className={LABEL}>
-                      {category.label}
-                      {label && <span className="ml-2 text-xs uppercase tracking-wide text-[#f3b94d]">{label}</span>}
-                    </label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[#667085]">$</span>
-                      <input
-                        id={field}
-                        inputMode="decimal"
-                        value={draft.perSeat[category.value]}
-                        onChange={(event) => edit((d) => ({ ...d, perSeat: { ...d.perSeat, [category.value]: event.target.value } }))}
-                        aria-invalid={Boolean(errorFor(field))}
-                        className={`${INPUT} pl-7`}
-                      />
-                    </div>
-                    <FieldNote message={errorFor(field)} />
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
-            <h2 className="text-lg font-semibold">Discount by number of categories</h2>
-            <p className="mt-1 text-sm text-[#bfbfbf]">
-              Taken off the per-seat total once, together with any founding offer, and the result rounded to the cent. The
-              example column is one seat per month for the first categories in library order, as if every category were for
-              sale.
+              Loaded from {loadedFrom}. One price for each number of categories, whichever categories they are. The example
+              column is one seat for one month, treating every category as for sale, so it shows where the full library
+              starts.
             </p>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full min-w-[420px] text-left text-[15px]">
                 <thead className="text-xs uppercase tracking-wider text-[#667085]">
                   <tr className="border-b border-white/10">
                     <th className="py-2 pr-3 font-medium">Categories</th>
-                    <th className="py-2 pr-3 font-medium">Discount</th>
+                    <th className="py-2 pr-3 font-medium">Price per seat</th>
                     <th className="py-2 font-medium">Example, per seat per month</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {draft.countDiscount.map((text, index) => {
-                    const field = `countDiscountBp.${index}`;
+                  {draft.perSeatByCount.map((text, index) => {
+                    const field = `perSeatByCountCents.${index}`;
                     const count = index + 1;
                     const example = parsed.config
                       ? quote(parsed.config, {
@@ -297,23 +257,21 @@ export function PricingEditor({
                       : null;
                     return (
                       <tr key={field} className="border-b border-white/5 last:border-b-0">
+                        <td className="py-2 pr-3">{countWords(count)}</td>
                         <td className="py-2 pr-3">
-                          {count} {count === 1 ? "category" : "categories"}
-                        </td>
-                        <td className="py-2 pr-3">
-                          <div className="relative w-32">
+                          <div className="relative w-36">
+                            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[#667085]">$</span>
                             <input
                               id={field}
                               inputMode="decimal"
-                              aria-label={`Discount for ${count} ${count === 1 ? "category" : "categories"}`}
+                              aria-label={`Price per seat for ${countWords(count)}`}
                               value={text}
                               onChange={(event) =>
-                                edit((d) => ({ ...d, countDiscount: d.countDiscount.map((t, i) => (i === index ? event.target.value : t)) }))
+                                edit((d) => ({ ...d, perSeatByCount: d.perSeatByCount.map((t, i) => (i === index ? event.target.value : t)) }))
                               }
                               aria-invalid={Boolean(errorFor(field))}
-                              className={`${INPUT} pr-8 text-right`}
+                              className={`${INPUT} pl-7 text-right`}
                             />
-                            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[#667085]">%</span>
                           </div>
                           <FieldNote message={errorFor(field)} />
                         </td>
@@ -351,8 +309,8 @@ export function PricingEditor({
                   ))}
                 </select>
                 <p className="mt-1 text-xs text-[#667085]">
-                  Taking this many buys every category, charged as the dearest ones at that count. Only offered while every
-                  category is for sale.
+                  Taking this many buys every category at that count&rsquo;s price. Only offered while every category is for
+                  sale.
                 </p>
                 <FieldNote message={errorFor("fullLibraryFrom")} />
               </div>
@@ -424,7 +382,7 @@ export function PricingEditor({
                 <p className="col-span-2 text-xs text-[#667085]">Surgeon seats. Above the Clinic limit, or any hospital, is Enterprise.</p>
               </div>
             </div>
-            <FieldNote message={errorFor("currency") ?? errorFor("config") ?? errorFor("perSeatCents") ?? errorFor("countDiscountBp") ?? errorFor("seats")} />
+            <FieldNote message={errorFor("currency") ?? errorFor("config") ?? errorFor("perSeatByCountCents") ?? errorFor("seats")} />
           </section>
 
           <section className="rounded-2xl border border-[#2a829b]/40 bg-[#0d1113] p-5 sm:p-6">
@@ -445,7 +403,7 @@ export function PricingEditor({
                   setNote(event.target.value);
                   setSaveState(null);
                 }}
-                placeholder="Knee up to $65 after the Britz meeting"
+                placeholder="Two categories up to $95 after the Britz meeting"
                 className={INPUT}
               />
             </div>
@@ -720,17 +678,6 @@ function QuoteView({ quote: q }: { quote: NonNullable<ReturnType<typeof quote> e
                 <span>{formatCents(line.cents)}</span>
               </li>
             ))}
-            <li className="flex justify-between gap-3 border-t border-white/10 pt-1">
-              <span className="text-[#bfbfbf]">Per seat, list</span>
-              <span>{formatCents(q.amounts.perSeatListCents)}</span>
-            </li>
-            {q.amounts.countDiscountBp > 0 && (
-              <li className="flex justify-between gap-3 text-[#bfbfbf]">
-                <span>
-                  {q.chargedCategories.length} {q.chargedCategories.length === 1 ? "category" : "categories"}: {formatBp(q.amounts.countDiscountBp)} off
-                </span>
-              </li>
-            )}
             {q.amounts.foundingDiscountBp > 0 && (
               <li className="flex justify-between gap-3 text-[#bfbfbf]">
                 <span>Founding offer: {formatBp(q.amounts.foundingDiscountBp)} off</span>
@@ -754,7 +701,7 @@ function QuoteView({ quote: q }: { quote: NonNullable<ReturnType<typeof quote> e
             </p>
           )}
           {q.amounts.savingsCents > 0 && (
-            <p className="text-sm text-[#667085]">Saves {formatCents(q.amounts.savingsCents)} against the list prices.</p>
+            <p className="text-sm text-[#667085]">The founding offer saves {formatCents(q.amounts.savingsCents)}.</p>
           )}
           <p className="text-sm text-[#bfbfbf]">
             Includes: {q.entitledCategories.map((category) => CATEGORIES.find((c) => c.value === category)?.label ?? category).join(", ")}.

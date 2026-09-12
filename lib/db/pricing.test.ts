@@ -30,9 +30,14 @@ const createdVersionIds: string[] = [];
 const createdClinicIds: string[] = [];
 let activeBefore: string | null = null;
 
-/** A config that is the defaults with one recognisable price, so versions can be told apart. */
+/** A config that is the defaults with one recognisable price (the one-category price), so versions can be told apart. */
 function configWithKneeAt(cents: number): PricingConfig {
-  return { ...DEFAULT_PRICING_CONFIG, perSeatCents: { ...DEFAULT_PRICING_CONFIG.perSeatCents, KNEE: cents } };
+  return { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [cents, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1)] };
+}
+
+/** The recognisable price back out of a config. */
+function firstPriceOf(config: PricingConfig | null | undefined) {
+  return config?.perSeatByCountCents[0];
 }
 
 async function makeVersion(config: PricingConfig, note = "Vitest version") {
@@ -119,7 +124,7 @@ describe("createPricingVersion", () => {
     const second = await makeVersion(configWithKneeAt(6400));
     expect(second.id).not.toBe(first.id);
     expect(second.version).toBeGreaterThan(first.version);
-    expect((await getPricingVersion(first.id))?.config?.perSeatCents.KNEE).toBe(6300);
+    expect(firstPriceOf((await getPricingVersion(first.id))?.config)).toBe(6300);
   });
 });
 
@@ -149,7 +154,7 @@ describe("activatePricingVersion", () => {
     // The history still lists the corrupt row, marked, rather than breaking.
     const listed = (await listPricingVersions()).find((row) => row.id === corrupt.id);
     expect(listed?.config).toBeNull();
-    expect(listed?.problem).toContain("perSeatCents");
+    expect(listed?.problem).toContain("perSeatByCountCents");
   });
 
   it("refuses an unknown id", async () => {
@@ -172,13 +177,13 @@ describe("activatePricingVersion", () => {
 
 describe("getActivePricing and getPricingForClinic", () => {
   it("quotes from the active version, and a clinic with no pin gets the same", async () => {
-    const version = await makeVersion(configWithKneeAt(7500), "Knee at $75");
+    const version = await makeVersion(configWithKneeAt(7500), "One category at $75");
     await activatePricingVersion(version.id);
     const clinicId = await makeClinic(null);
 
     const active = await getActivePricing();
     expect(active.source).toEqual({ kind: "version", version: expect.objectContaining({ id: version.id, active: true }), pinned: false });
-    expect(active.config.perSeatCents.KNEE).toBe(7500);
+    expect(firstPriceOf(active.config)).toBe(7500);
 
     expect(await getPricingForClinic(clinicId)).toEqual(active);
   });
@@ -191,8 +196,8 @@ describe("getActivePricing and getPricingForClinic", () => {
 
     const pricing = await getPricingForClinic(clinicId);
     expect(pricing.source).toEqual({ kind: "version", version: expect.objectContaining({ id: pinned.id, active: false }), pinned: true });
-    expect(pricing.config.perSeatCents.KNEE).toBe(8000);
-    expect((await getActivePricing()).config.perSeatCents.KNEE).toBe(9000);
+    expect(firstPriceOf(pricing.config)).toBe(8000);
+    expect(firstPriceOf((await getActivePricing()).config)).toBe(9000);
 
     const clinic = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { pricingVersionId: true } });
     expect(clinic?.pricingVersionId).toBe(pinned.id);

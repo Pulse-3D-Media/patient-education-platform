@@ -334,11 +334,11 @@ describe("savePricingVersionAction and activatePricingVersionAction", () => {
     expect(await savePricingVersionAction({ config: DEFAULT_PRICING_CONFIG, note: "   " })).toMatchObject({ error: expect.stringContaining("note") });
 
     const bad = await savePricingVersionAction({
-      config: { ...DEFAULT_PRICING_CONFIG, perSeatCents: { ...DEFAULT_PRICING_CONFIG.perSeatCents, KNEE: -1 }, yearlyMonths: 13 },
+      config: { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [-1, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1)], yearlyMonths: 13 },
       note: "Bad numbers",
     });
     expect(bad).toMatchObject({ error: expect.any(String) });
-    expect("fieldErrors" in bad ? bad.fieldErrors?.map((e) => e.field).sort() : []).toEqual(["perSeatCents.KNEE", "yearlyMonths"]);
+    expect("fieldErrors" in bad ? bad.fieldErrors?.map((e) => e.field).sort() : []).toEqual(["perSeatByCountCents.0", "yearlyMonths"]);
 
     expect(await prisma.pricingVersion.count()).toBe(before);
   });
@@ -346,15 +346,15 @@ describe("savePricingVersionAction and activatePricingVersionAction", () => {
   it("saves a version under the staff member's id and name, then makes it active on request", async () => {
     signInAs("user_staff", { pulseStaff: true });
 
-    const config = { ...DEFAULT_PRICING_CONFIG, perSeatCents: { ...DEFAULT_PRICING_CONFIG.perSeatCents, HIP: 6900 } };
-    const saved = await savePricingVersionAction({ config, note: "  Hip to $69  " });
+    const config = { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [5900, 9500, 10900, 12500, 13900, 13900] };
+    const saved = await savePricingVersionAction({ config, note: "  Two categories to $95  " });
     expect(saved).toMatchObject({ ok: expect.stringContaining("Saved as version"), version: expect.any(Number) });
     if (!("version" in saved)) return;
 
     const row = await prisma.pricingVersion.findUnique({ where: { version: saved.version } });
     expect(row).not.toBeNull();
     createdVersionIds.push(row!.id);
-    expect(row).toMatchObject({ note: "Hip to $69", createdBy: "user_staff", createdByName: "Evan Miller", active: null });
+    expect(row).toMatchObject({ note: "Two categories to $95", createdBy: "user_staff", createdByName: "Evan Miller", active: null });
     expect(row!.config).toEqual(config);
 
     // Saving does not activate. Activating does, and says so.

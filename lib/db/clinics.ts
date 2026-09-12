@@ -87,6 +87,19 @@ export async function upsertClinicForClerkOrg(clerkOrgId: string, details: Clerk
 }
 
 /**
+ * The plan on file for one clinic, for the read-only card on its admin
+ * console: the categories it has, the surgeon seats it pays for, and
+ * whether Pulse manages it. Nothing internal (no notes, no pricing
+ * version). Null for an unknown id.
+ */
+export async function getClinicPlan(clinicId: string) {
+  return prisma.clinic.findUnique({
+    where: { id: clinicId },
+    select: { categories: true, surgeonSeats: true, managedByPulse: true },
+  });
+}
+
+/**
  * Change one clinic's status. Used by the db:set-status script now, and by
  * billing later. Throws if the clinic does not exist.
  */

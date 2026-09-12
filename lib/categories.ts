@@ -72,6 +72,22 @@ export const CATEGORIES: { value: Category; label: string; slug: string; image: 
   },
 ];
 
+/**
+ * Whether a category can be bought right now, and if not, why not:
+ * "not-for-sale" when its switch on /pulse/videos is off, "coming-soon"
+ * when nothing is published in it yet. Worked out on the server by
+ * getCategoryAvailability() in lib/db/category-config.ts; the type lives
+ * here so the forms can name it without reaching into lib/db.
+ */
+export type CategoryAvailability = "sellable" | "not-for-sale" | "coming-soon";
+
+/** The short label a form shows beside a category that cannot be bought right now, or null when it can. */
+export function availabilityLabel(availability: CategoryAvailability): string | null {
+  if (availability === "not-for-sale") return "Not for sale";
+  if (availability === "coming-soon") return "Coming soon";
+  return null;
+}
+
 /** Look a category up by its URL slug. Returns undefined for an unknown slug. */
 export function categoryFromSlug(slug: string) {
   return CATEGORIES.find((c) => c.slug === slug);

@@ -1,4 +1,5 @@
 import { Category } from "@prisma/client";
+import type { CategoryAvailability } from "../categories";
 import { prisma } from "./client";
 
 /**
@@ -76,15 +77,32 @@ export async function saveCategoryConfig(category: Category, config: CategoryCon
 }
 
 /**
- * The categories that may be offered for sale: sellable is on, and at least
- * one video is published in it. This is the list billing and the plan
- * screens will offer; nothing sells a category that has nothing in it.
+ * Whether each category can be bought right now, and if not, why not:
+ * "not-for-sale" when its switch is off, "coming-soon" when nothing is
+ * published in it yet. This is what the labels on the clinic Plan form and
+ * the calculator's category chips say. It is about NEW purchases only: a
+ * category a clinic already has is never taken away by this.
  */
-export async function listSellableCategories(): Promise<Category[]> {
+export async function getCategoryAvailability(): Promise<Record<Category, CategoryAvailability>> {
   const [configs, published] = await Promise.all([
     getCategoryConfigs(),
     prisma.video.groupBy({ by: ["category"], where: { isPublished: true }, _count: { _all: true } }),
   ]);
   const hasVideos = new Set(published.map((row) => row.category));
-  return ALL_CATEGORIES.filter((category) => configs[category].sellable && hasVideos.has(category));
+
+  const availability = {} as Record<Category, CategoryAvailability>;
+  for (const category of ALL_CATEGORIES) {
+    availability[category] = !configs[category].sellable ? "not-for-sale" : hasVideos.has(category) ? "sellable" : "coming-soon";
+  }
+  return availability;
+}
+
+/**
+ * The categories that may be offered for sale: sellable is on, and at least
+ * one video is published in it. This is the list billing and the plan
+ * screens will offer; nothing sells a category that has nothing in it.
+ */
+export async function listSellableCategories(): Promise<Category[]> {
+  const availability = await getCategoryAvailability();
+  return ALL_CATEGORIES.filter((category) => availability[category] === "sellable");
 }

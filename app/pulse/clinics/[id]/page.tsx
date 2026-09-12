@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
+import { getCategoryAvailability } from "@/lib/db/category-config";
 import { getClinicForPulse } from "@/lib/db/clinics";
 import { listNotesForClinic } from "@/lib/db/notes";
 import { getSettings } from "@/lib/db/settings";
@@ -37,11 +38,12 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   const clinic = await getClinicForPulse(id);
   if (!clinic) notFound();
 
-  const [settings, shares, notes, people] = await Promise.all([
+  const [settings, shares, notes, people, availability] = await Promise.all([
     getSettings(),
     listSharesForClinic(clinic.id),
     listNotesForClinic(clinic.id),
     clinic.clerkOrgId ? listPeople(clinic.clerkOrgId).catch(() => null) : Promise.resolve(null),
+    getCategoryAvailability(),
   ]);
   const now = new Date();
   const surgeons = people?.filter((person) => person.kind === "surgeon").length;
@@ -70,9 +72,9 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   const plan = (
     <Section
       title="Plan"
-      blurb="Which categories the clinic can use and how many surgeon seats it pays for. Once billing exists, self-serve clinics set this themselves and it becomes read-only here unless the clinic is managed by Pulse."
+      blurb="Which categories the clinic can use and how many surgeon seats it pays for. A category marked Not for sale or Coming soon can still be ticked (an enterprise or comped clinic may get one early); the label makes it a choice, not an accident. Once billing exists, self-serve clinics set this themselves and it becomes read-only here unless the clinic is managed by Pulse."
     >
-      <PlanForm clinicId={clinic.id} categories={clinic.categories} surgeonSeats={clinic.surgeonSeats} />
+      <PlanForm clinicId={clinic.id} categories={clinic.categories} surgeonSeats={clinic.surgeonSeats} availability={availability} />
     </Section>
   );
 

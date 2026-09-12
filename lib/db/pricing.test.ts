@@ -30,9 +30,17 @@ const createdVersionIds: string[] = [];
 const createdClinicIds: string[] = [];
 let activeBefore: string | null = null;
 
-/** A config that is the defaults with one recognisable price (the one-category price), so versions can be told apart. */
+/**
+ * A config that is the defaults with one recognisable price (the
+ * one-category price), so versions can be told apart. Later rungs are
+ * lifted to at least that price where needed, because the ladder may
+ * never go down and a version must be valid to be saved.
+ */
 function configWithKneeAt(cents: number): PricingConfig {
-  return { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [cents, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1)] };
+  return {
+    ...DEFAULT_PRICING_CONFIG,
+    perSeatByCountCents: [cents, ...DEFAULT_PRICING_CONFIG.perSeatByCountCents.slice(1).map((rung) => Math.max(rung, cents))],
+  };
 }
 
 /** The recognisable price back out of a config. */

@@ -33,6 +33,11 @@ import {
  * a category price of its own would be a second pricing mode to decide on
  * before it is built. The numbers themselves are placeholders to edit on
  * /pulse/pricing.
+ *
+ * A second decision, by Evan on 2026-09-12, when asked rather than assumed:
+ * the ladder never goes down. Each rung is at least the rung before it, so
+ * more categories can never cost less per seat; equal rungs are allowed. A
+ * $0 rung is still allowed. The validator enforces this (see below).
  */
 
 /** All six categories are for sale unless a test says otherwise. */
@@ -328,6 +333,38 @@ describe("validatePricingConfig", () => {
     expect(fieldsOf(broken((c) => (c.perSeatByCountCents[1] = Number.POSITIVE_INFINITY)))).toEqual(["perSeatByCountCents.1"]);
     expect(fieldsOf(broken((c) => (c.perSeatByCountCents[1] = 5_000_001)))).toEqual(["perSeatByCountCents.1"]);
     expect(broken((c) => (c.perSeatByCountCents[0] = 0)).ok).toBe(true);
+  });
+
+  it("refuses a ladder that goes down: each rung is at least the rung before it (decided 2026-09-12)", () => {
+    // Two categories priced below one category: the two-category rung is the one at fault.
+    const down = broken((c) => (c.perSeatByCountCents[1] = 5800));
+    expect(fieldsOf(down)).toEqual(["perSeatByCountCents.1"]);
+    if (!down.ok) expect(down.errors[0].message).toContain("1 category");
+    // A dip in the middle is reported on the rung that dips, and only there.
+    expect(fieldsOf(broken((c) => (c.perSeatByCountCents[3] = 10899)))).toEqual(["perSeatByCountCents.3"]);
+    // The sixth rung below the fifth is refused too: the full library is never dearer than the rung after it.
+    expect(fieldsOf(broken((c) => (c.perSeatByCountCents[5] = 13899)))).toEqual(["perSeatByCountCents.5"]);
+    // A ladder that falls twice reports both rungs.
+    expect(fieldsOf(broken((c) => ((c.perSeatByCountCents[1] = 5000), (c.perSeatByCountCents[4] = 12000))))).toEqual([
+      "perSeatByCountCents.1",
+      "perSeatByCountCents.4",
+    ]);
+  });
+
+  it("allows equal rungs, a flat ladder and a rise straight after a dip is fixed", () => {
+    expect(broken((c) => (c.perSeatByCountCents[1] = 5900)).ok).toBe(true);
+    expect(broken((c) => (c.perSeatByCountCents = [5900, 5900, 5900, 5900, 5900, 5900])).ok).toBe(true);
+    expect(broken((c) => (c.perSeatByCountCents = [0, 0, 100, 100, 200, 200])).ok).toBe(true);
+  });
+
+  it("does not add a second message to a rung that is not a price, and skips comparing across it", () => {
+    // Rung 2 is unreadable; rung 3 is compared with nothing, so only rung 2 is reported.
+    expect(fieldsOf(broken((c) => (c.perSeatByCountCents[1] = "eighty-nine")))).toEqual(["perSeatByCountCents.1"]);
+    // The rung after a bad one is compared with nothing, so a dip there waits
+    // until the bad rung is fixed: one thing at a time, on the field at fault.
+    expect(fieldsOf(broken((c) => ((c.perSeatByCountCents[1] = -1), (c.perSeatByCountCents[2] = 5000))))).toEqual(["perSeatByCountCents.1"]);
+    // Once it is fixed, the dip is reported where it is.
+    expect(fieldsOf(broken((c) => ((c.perSeatByCountCents[1] = 8900), (c.perSeatByCountCents[2] = 5000))))).toEqual(["perSeatByCountCents.2"]);
   });
 
   it("needs the full-library count to be from 2 to 6, or none", () => {

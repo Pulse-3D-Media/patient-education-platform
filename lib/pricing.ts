@@ -27,6 +27,11 @@ import { CATEGORIES } from "./categories";
  *   the same as Spine and Shoulder. If a category ever needs a price of its
  *   own, that is a second pricing mode to decide on before it is built.
  *
+ *   The ladder never goes down (decided by Evan on 2026-09-12): each rung
+ *   is at least the rung before it, so taking more categories can never
+ *   cost less per seat. Equal rungs are allowed. The validator refuses a
+ *   ladder that breaks this, so it can be neither saved nor activated.
+ *
  * The full library: when a config names a "full library from" count and a
  * clinic takes at least that many categories, it is charged that count's
  * ladder price and gets every category. The full library is only offered
@@ -203,8 +208,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * Check a would-be config and return it typed, or the list of what is wrong.
  * A ladder with the wrong number of entries, a price that is not a whole
- * number of cents from 0 up to the bound, a currency other than USD and a
- * full-library count outside 2 to CATEGORY_COUNT are all refused.
+ * number of cents from 0 up to the bound, a rung below the rung before it,
+ * a currency other than USD and a full-library count outside 2 to
+ * CATEGORY_COUNT are all refused.
  */
 export function validatePricingConfig(value: unknown): ValidationResult {
   const errors: FieldError[] = [];
@@ -229,6 +235,19 @@ export function validatePricingConfig(value: unknown): ValidationResult {
         });
       } else {
         perSeatByCountCents[index] = cents;
+      }
+    });
+
+    // The ladder never goes down: each rung is at least the one before it.
+    // Only rungs that read as prices are compared, so a rung that is not a
+    // price gets its one message above and no second one here.
+    perSeatByCountCents.forEach((cents, index) => {
+      const previous = perSeatByCountCents[index - 1];
+      if (index > 0 && previous !== undefined && cents < previous) {
+        errors.push({
+          field: `perSeatByCountCents.${index}`,
+          message: `Cannot be below the price for ${countWords(index)}: the ladder never goes down.`,
+        });
       }
     });
   }

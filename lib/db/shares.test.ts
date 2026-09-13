@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "./client";
-import { createShare, listRecentSharesForClinic, summarizeSharesForClinic } from "./shares";
+import { createShare, deleteShareForClinic, listRecentSharesForClinic, summarizeSharesForClinic } from "./shares";
 
 /**
  * The two reads the admin overview makes: a handful of totals and the
@@ -79,6 +79,19 @@ describe("summarizeSharesForClinic", () => {
       madeRecently: 4,
       playStarts: 14,
     });
+  });
+
+  it("drops a cancelled link out of every number, play starts included, because cancelling deletes the row", async () => {
+    const clinic = await makeClinic("Vitest overview clinic cancel");
+    const kept = await makeShare(clinic, publishedVideo, 60, 2);
+    const cancelled = await makeShare(clinic, publishedVideo, 60, 5);
+    expect(await summarizeSharesForClinic(clinic)).toEqual({ working: 2, expiringSoon: 0, notWorking: 0, madeRecently: 2, playStarts: 7 });
+
+    expect(await deleteShareForClinic(clinic, cancelled.code)).toBe(true);
+
+    // The cancelled link's five play starts are gone with it: these are not lifetime totals.
+    expect(await summarizeSharesForClinic(clinic)).toEqual({ working: 1, expiringSoon: 0, notWorking: 0, madeRecently: 1, playStarts: 2 });
+    expect((await listRecentSharesForClinic(clinic, 5)).map((share) => share.id)).toEqual([kept.id]);
   });
 
   it("gives another clinic its own numbers, and an empty clinic zeros", async () => {

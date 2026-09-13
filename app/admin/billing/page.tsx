@@ -72,7 +72,7 @@ export default async function BillingPage() {
                 ))}
               </ul>
               {view.estimate?.fullLibrary && (
-                <p className="mt-2 text-sm text-[#bfbfbf]">That is the full library: every category, including ones added later.</p>
+                <p className="mt-2 text-sm text-[#bfbfbf]">That is the full library: all current categories.</p>
               )}
             </div>
             <div>

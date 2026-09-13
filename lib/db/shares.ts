@@ -91,7 +91,13 @@ export async function listRecentSharesForClinic(clinicId: string, limit: number)
 export const SUMMARY_RECENT_DAYS = 30;
 export const SUMMARY_SOON_DAYS = 7;
 
-/** The numbers on the admin overview. Every one is a count or a sum done in the database. */
+/**
+ * The numbers on the admin overview. Every one is a count or a sum done in
+ * the database, over the links that are on the list right now. Cancelling
+ * a link deletes its row (deleteShareForClinic), so a cancelled link drops
+ * out of every number here, its play starts included. None of these is a
+ * lifetime total, and the overview says so beside them.
+ */
 export type ShareSummary = {
   /** Links that work right now: not expired, and their video is published. */
   working: number;
@@ -99,16 +105,22 @@ export type ShareSummary = {
   expiringSoon: number;
   /** Links that have not expired but point at a video that is not published right now, so they do not work. */
   notWorking: number;
-  /** Links made in the last SUMMARY_RECENT_DAYS days, whether or not they still work. */
+  /** Links made in the last SUMMARY_RECENT_DAYS days that are still on the list, whether or not they still work. */
   madeRecently: number;
-  /** Play starts across every link this clinic has ever made. A play start is a play start: not a patient, not a completed watch. */
+  /**
+   * Play starts across the links still on the list. A play start is counted
+   * once per page load, the first time play is pressed (recordShareView, called
+   * from the patient page): not a patient, not a completed watch, not every
+   * press of play.
+   */
   playStarts: number;
 };
 
 /**
  * A handful of totals about one clinic's share links, for the admin
  * overview. Counts and a sum, all worked out in the database, so the
- * overview reads five numbers rather than the whole links table.
+ * overview reads five numbers rather than the whole links table. Cancelled
+ * links are gone from the table, so they are not in these numbers.
  */
 export async function summarizeSharesForClinic(clinicId: string): Promise<ShareSummary> {
   const now = new Date();

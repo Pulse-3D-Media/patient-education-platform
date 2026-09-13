@@ -33,8 +33,11 @@ export function ClinicClosed({
   inFrame?: boolean;
 }) {
   const { heading, body } = COPY[status];
+  // On its own this is the page's main landmark. Inside an admin page the
+  // frame already has one, and a page must not have two, so a plain div.
+  const Wrapper = inFrame ? "div" : "main";
   return (
-    <main className={inFrame ? "" : "px-5 py-6 sm:px-8"}>
+    <Wrapper className={inFrame ? "" : "px-5 py-6 sm:px-8"}>
       <div className={inFrame ? "max-w-xl py-4" : "mx-auto max-w-xl py-10"}>
         {!inFrame && <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">{clinicName}</p>}
         {inFrame ? (
@@ -61,7 +64,7 @@ export function ClinicClosed({
           </button>
         </SignOutButton>
       </div>
-    </main>
+    </Wrapper>
   );
 }
 

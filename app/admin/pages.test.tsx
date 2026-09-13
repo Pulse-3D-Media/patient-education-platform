@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db/client";
 import BillingPage from "./billing/page";
 import LinksPage from "./links/page";
 import AdminOverviewPage from "./page";
+import PeoplePage from "./people/page";
 
 /**
  * The admin routes rendered on the server, the way a request would render
@@ -154,10 +155,11 @@ describe("an admin of a PENDING clinic", () => {
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/billing"/);
   });
 
-  it("gets the closed-clinic page on the overview and on Shared links, with a way to Billing and no links workspace", async () => {
+  it("gets the closed-clinic page on the overview, Shared links and People, with a way to Billing, no links workspace, and one main landmark", async () => {
     for (const [page, path] of [
       [AdminOverviewPage, "/admin"],
       [LinksPage, "/admin/links"],
+      [PeoplePage, "/admin/people"],
     ] as const) {
       signInAs(orgPending, "admin", "Vitest pages clinic (pending)");
       const html = await render(page, path);
@@ -166,6 +168,8 @@ describe("an admin of a PENDING clinic", () => {
       expect(html).toContain("Go to billing");
       expect(html).not.toContain("Create share link");
       expect(html).not.toContain("Surgeon seats");
+      // The frame is the page's main landmark; the closed-clinic message inside it must not add a second one.
+      expect(html.match(/<main\b/g)).toHaveLength(1);
     }
   });
 });
@@ -177,7 +181,9 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).toContain("Overview");
     expect(html).toContain("Needs a look");
     expect(html).toContain("Working right now");
-    expect(html).toContain("Play starts, all links");
+    expect(html).toContain("Play starts, current links");
+    expect(html).toContain("not counting links you have cancelled");
+    expect(html).not.toContain("all links");
     for (const href of ["/admin/links", "/admin/people", "/admin/billing"]) expect(html).toContain(`href="${href}"`);
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin"/);
     expect(html).not.toContain("Create share link");

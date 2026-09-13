@@ -108,10 +108,15 @@ export default async function AdminOverviewPage() {
         <h2 id="numbers-heading" className="text-lg font-semibold">
           Your links
         </h2>
+        {/* A cancelled link is deleted (see lib/db/shares.ts), so these count the links still on the list, not everything ever made. */}
         <dl className="mt-3 grid gap-3 sm:grid-cols-3">
           <Fact label="Working right now" value={summary.working} />
-          <Fact label={`Made in the last ${SUMMARY_RECENT_DAYS} days`} value={summary.madeRecently} />
-          <Fact label="Play starts, all links" value={summary.playStarts} note="One per press of play. Not a count of patients." />
+          <Fact label={`Made in the last ${SUMMARY_RECENT_DAYS} days`} value={summary.madeRecently} note="Links you have cancelled are not counted." />
+          <Fact
+            label="Play starts, current links"
+            value={summary.playStarts}
+            note="Counted once per page load, the first time play is pressed. Not a count of patients, and not counting links you have cancelled."
+          />
         </dl>
       </section>
 

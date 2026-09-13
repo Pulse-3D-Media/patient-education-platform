@@ -1,6 +1,6 @@
 import { randomInt } from "crypto";
 import { accessRefusalMessage, decideVideoAccess, type AccessDecision, type AccessReason } from "../access";
-import { readClinicAccess, readVideoFacts } from "./access";
+import { lockClinicAccess, lockVideoFacts } from "./access";
 import { prisma } from "./client";
 
 /**
@@ -54,19 +54,26 @@ function randomCode() {
  * Send button both land here, so a hidden button or a filtered list is
  * never the only thing standing between a clinic and a link.
  *
- * The check and the write happen inside one transaction, reading the
- * clinic and the video as they are at that moment, not as they were when
- * the page was drawn. A form rendered while a video was on the plan, and
+ * The check and the write happen inside one transaction, and the clinic
+ * and video rows are read with a share lock (lockClinicAccess and
+ * lockVideoFacts in lib/db/access.ts), which holds them against change
+ * until the transaction ends. So the facts are as they are at that moment,
+ * not as they were when the page was drawn, and a change cannot slip in
+ * between the check and the write either: a plan removal, a pause, a
+ * placeholder-setting change or an unpublish that arrives during this
+ * transaction waits for it to finish (the link is issued, and stays
+ * usable, as issued links do), or landed first and is seen here (the link
+ * is refused). A form rendered while a video was on the plan, and
  * submitted after the plan changed, is refused.
  */
 export async function createShare(clinicId: string, videoId: string, days: number) {
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
   return prisma.$transaction(async (tx) => {
-    const access = await readClinicAccess(tx, clinicId);
+    const access = await lockClinicAccess(tx, clinicId);
     // An unknown clinic id has nothing to grant, so it answers as closed.
     const decision: AccessDecision = access
-      ? decideVideoAccess(access, await readVideoFacts(tx, videoId))
+      ? decideVideoAccess(access, await lockVideoFacts(tx, videoId))
       : { allowed: false, reason: "clinic-closed" };
     if (!decision.allowed) throw new ShareRefusedError(decision.reason);
 

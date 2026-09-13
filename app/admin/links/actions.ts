@@ -7,7 +7,7 @@ import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { isClinicAdmin } from "@/lib/roles";
 
 /**
- * Server Actions for the admin console.
+ * Server Actions for the Shared links page (/admin/links).
  *
  * A Server Action is a function that runs on the server but can be called
  * from a form in the browser, so the database work stays on the server
@@ -58,7 +58,8 @@ export async function createShareAction(
 
   try {
     const share = await createShare(clinicId, videoId, SHARE_EXPIRY_DAYS);
-    // Tell Next.js the admin page's data changed so the links list refreshes.
+    // Tell Next.js the links page and the overview changed, so the list and the counts refresh.
+    revalidatePath("/admin/links");
     revalidatePath("/admin");
     return { code: share.code };
   } catch (error) {
@@ -89,7 +90,8 @@ export async function cancelShareAction(code: string): Promise<CancelShareState>
     // not (someone cancelled it moments ago in another tab), the end result is
     // the same, the link is gone, so that still counts as success here.
     await deleteShareForClinic(clinicId, trimmed);
-    // Tell Next.js the admin page's data changed so the links list refreshes.
+    // Tell Next.js the links page and the overview changed, so the list and the counts refresh.
+    revalidatePath("/admin/links");
     revalidatePath("/admin");
     return {};
   } catch (error) {

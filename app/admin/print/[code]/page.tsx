@@ -60,8 +60,8 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
 
       {/* Toolbar: on screen only, never on paper */}
       <div className="mx-auto flex w-[8.5in] items-center justify-between py-4 print:hidden">
-        <Link href="/admin" className="text-sm font-medium text-[#1e5668] hover:underline">
-          Back to share links
+        <Link href="/admin/links" className="text-sm font-medium text-[#1e5668] hover:underline">
+          Back to shared links
         </Link>
         <PrintButton />
       </div>

@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { cancelShareAction } from "./actions";
 
 /**
- * The "Cancel link" button beside each share link on the admin page, and the
+ * The "Cancel link" button beside each share link on the Shared links page, and the
  * "Are you sure?" popup it opens.
  *
  * Nothing happens until Yes is pressed. No, the dark backdrop and Escape all

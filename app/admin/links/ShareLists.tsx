@@ -11,7 +11,7 @@ import { qrFileName, watchLink } from "@/lib/share-link";
 import { CancelShareButton } from "./CancelShareButton";
 import { CreateShareForm } from "./CreateShareForm";
 
-/** One published video, as the admin page shows it. */
+/** One published video, as the Shared links page shows it. */
 export type ProcedureItem = {
   id: string;
   title: string;
@@ -21,7 +21,7 @@ export type ProcedureItem = {
   isPlaceholder: boolean;
 };
 
-/** One share link this clinic has made, as the admin page shows it. */
+/** One share link this clinic has made, as the Shared links page shows it. */
 export type LinkItem = {
   id: string;
   code: string;
@@ -38,7 +38,7 @@ export type LinkItem = {
 type Filter = Category | "ALL";
 
 /**
- * The two lists on the Share links page, and the controls that narrow them.
+ * The two lists on the Shared links page, and the controls that narrow them.
  *
  * At the top sits a row of category pills (All, then every category from
  * lib/categories in its usual order) and a search box. Both apply to both

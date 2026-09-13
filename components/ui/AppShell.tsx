@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { CATEGORIES, CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_URL } from "@/lib/brand";
-import { BooksIcon, CloseIcon, HomeIcon, ShareIcon } from "./icons";
+import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
 
 /**
  * The frame around every staff-facing page: the library and the admin
@@ -17,9 +17,9 @@ import { BooksIcon, CloseIcon, HomeIcon, ShareIcon } from "./icons";
  *     Clerk's user button (the signed-in person's avatar; Sign out lives in
  *     its menu)
  *   - an icon rail down the left: the books icon opens the category drawer,
- *     and the share icon right below it opens the admin console, where share
- *     links are made (on phones both icons sit in the banner instead, so
- *     nothing permanent eats the narrow width)
+ *     and the admin icon right below it opens the clinic admin area (the
+ *     overview, shared links, people and billing; on phones both icons sit
+ *     in the banner instead, so nothing permanent eats the narrow width)
  *   - the category drawer, listing Home and every category from
  *     lib/categories. It floats over the content rather than pushing it, and
  *     closes on outside click, Escape, or choosing a category.
@@ -27,7 +27,7 @@ import { BooksIcon, CloseIcon, HomeIcon, ShareIcon } from "./icons";
  * It is a client component only because the drawer needs open/closed state.
  * The page content arrives as children and stays server-rendered.
  *
- * The share icon that opens the admin console is shown only when showAdmin
+ * The admin icon that opens the admin area is shown only when showAdmin
  * is true, which the server sets for clinic admins. That is a courtesy so
  * members are not offered a page they cannot use; the admin pages check
  * for themselves.
@@ -58,7 +58,7 @@ export function AppShell({ children, showAdmin = false }: { children: ReactNode;
         </Link>
         <div className="ml-auto flex items-center gap-2">
           <span className="hidden text-sm text-[#667085] sm:inline">
-            {onAdmin ? "Admin" : "Patient Education Library"}
+            {onAdmin ? "Clinic admin" : "Patient Education Library"}
           </span>
           {showAdmin && <AdminLink active={onAdmin} className="md:hidden" />}
           {/* Clerk's user button: the signed-in person's avatar, with Sign out in its menu. */}
@@ -113,19 +113,19 @@ function LibraryButton({ open, onClick, className = "" }: { open: boolean; onCli
   );
 }
 
-/** The share icon that opens the admin console. Same size as the books button so the rail lines up. */
+/** The icon that opens the clinic admin area (its overview). Same size as the books button so the rail lines up. */
 function AdminLink({ active, className = "" }: { active: boolean; className?: string }) {
   return (
     <Link
       href="/admin"
-      title="Share links"
-      aria-label="Open the admin console"
+      title="Clinic admin"
+      aria-label="Open clinic admin"
       aria-current={active ? "page" : undefined}
       className={`flex h-11 w-11 items-center justify-center rounded-xl transition ${
         active ? "bg-[#2a829b]/20 text-[#5fb8d4]" : "text-[#bfbfbf] hover:bg-white/5 hover:text-white"
       } ${className}`}
     >
-      <ShareIcon className="h-6 w-6" />
+      <AdminIcon className="h-6 w-6" />
     </Link>
   );
 }

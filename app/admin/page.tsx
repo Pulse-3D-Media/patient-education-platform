@@ -1,56 +1,39 @@
-import type { Category } from "@prisma/client";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { AppShell } from "@/components/ui/AppShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
-import { SECONDARY_BUTTON } from "@/components/ui/styles";
-import { getBaseUrl } from "@/lib/base-url";
-import { CATEGORIES } from "@/lib/categories";
+import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
+import { ADMIN_SECTIONS } from "@/lib/admin-nav";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
-import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
-import { formatDuration } from "@/lib/format";
-import { listSharesForClinic } from "@/lib/db/shares";
-import { listPublishedVideos } from "@/lib/db/videos";
-import { ShareLists } from "./ShareLists";
+import { listRecentSharesForClinic, summarizeSharesForClinic, SUMMARY_RECENT_DAYS, SUMMARY_SOON_DAYS } from "@/lib/db/shares";
+import { AdminFrame } from "./AdminFrame";
 
 /**
- * The office-manager console, inside the same shell (banner, icon rail,
- * category drawer) as the library, so a surgeon can reach it from the rail.
+ * The clinic admin overview, at /admin: the first thing an office manager
+ * sees. It is not the full list of anything. It shows what needs a look,
+ * a few totals about the clinic's links, the newest few links, and a card
+ * for each section, so Shared links, People and Billing are one tap away.
  *
- * Two things on the page, both drawn by ShareLists:
- *   1. Every published video, each with a "Create share link" form.
- *   2. Every share link this clinic has made, with its expiry and view count,
- *      and buttons to copy the link, download its QR code as a picture,
- *      open a printable pamphlet, or cancel it (after a yes/no popup).
+ * Everything on it is bounded: five counts done in the database, and the
+ * newest RECENT_LINKS links. The whole history lives on /admin/links.
  *
- * Above both lists sit category pills and a search box, so the desk can find
- * one procedure (or its links) without reading the whole list.
+ * Plan and price information is not here on purpose; it lives on
+ * /admin/billing and nowhere else on the clinic side.
  *
- * A placeholder video (a sample animation under a real procedure name) is
- * marked with an amber "Placeholder" badge in both lists, so whoever is at
- * the desk can see at a glance which links play a sample.
- *
- * This file fetches the data on the server (rule 1) and turns it into plain
- * text for the browser: dates become the words the page shows, so the
- * client side has no date maths and no time zone to get wrong.
- *
- * Admins only (org:admin, see lib/roles.ts). A member who opens it sees a
- * short note saying so; the check is on the server, not a hidden icon.
- *
- * Always rendered fresh (never cached): someone who just made a link needs
- * to see it in the list straight away.
+ * Admins only (org:admin). A member sees the plain admins-only note. An
+ * admin of a clinic that is not open sees why, with a button to Billing,
+ * which is the one page that stays open for them.
  */
 export const dynamic = "force-dynamic";
 
-export default async function AdminPage() {
-  // Signed out, no clinic, or the surgeon question unanswered: sent to the
-  // right step (proxy.ts already sends signed-out visitors away, but Clerk's
-  // guidance is that every page reading protected data keeps its own check).
+/** How many of the newest links the overview shows. */
+const RECENT_LINKS = 5;
+
+export default async function AdminOverviewPage() {
   const clinic = await requireClinicPage();
 
-  // A member, not an admin: say so. The shell hides the admin icon for them
-  // too, but this is the check that counts.
   if (!clinic.isAdmin) {
     return (
       <AppShell>
@@ -59,109 +42,176 @@ export default async function AdminPage() {
     );
   }
 
-  // A clinic that is not open (not on a plan yet): a calm page, not the console.
   if (!clinicIsOpen(clinic.status)) {
     return (
-      <AppShell showAdmin>
-        <ClinicClosed status={clinic.status} clinicName={clinic.name} />
-      </AppShell>
+      <AdminFrame clinicName={clinic.name} title="Overview">
+        <Notice text={clinic.noticeText} />
+        <div className="mt-6">
+          <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink inFrame />
+        </div>
+        <SectionCards />
+      </AdminFrame>
     );
   }
 
-  const [videos, shares, baseUrl] = await Promise.all([
-    listPublishedVideos(),
-    listSharesForClinic(clinic.id),
-    getBaseUrl(),
+  const [summary, recent] = await Promise.all([
+    summarizeSharesForClinic(clinic.id),
+    listRecentSharesForClinic(clinic.id, RECENT_LINKS),
   ]);
-
   const now = new Date();
 
-  const procedures = videos.map((video) => ({
-    id: video.id,
-    title: video.title,
-    category: video.category,
-    categoryLabel: categoryLabel(video.category),
-    durationText: video.durationSeconds == null ? null : formatDuration(video.durationSeconds),
-    isPlaceholder: video.isPlaceholder,
-  }));
-
-  const links = shares.map((share) => {
-    const expired = share.expiresAt < now;
-    // A link to a video that has been unpublished (on /pulse/videos) does not
-    // work either. It is shown greyed like an expired one, and the words say
-    // why. It starts working again if the video is published again.
-    const takenDown = !share.video.isPublished;
-    return {
-      id: share.id,
-      code: share.code,
-      title: share.video.title,
-      category: share.video.category,
-      categoryLabel: categoryLabel(share.video.category),
-      isPlaceholder: share.video.isPlaceholder,
-      expired: expired || takenDown,
-      whenText: expired
-        ? `Expired ${formatDate(share.expiresAt)}`
-        : takenDown
-          ? "Not working: this video is not published right now"
-          : `Expires ${formatDate(share.expiresAt)} · ${daysLeft(share.expiresAt, now)}`,
-      viewCount: share.viewCount,
-    };
-  });
+  // What needs a look. Each line is one sentence and one link.
+  const attention: { text: string; href: string; label: string }[] = [];
+  if (summary.notWorking > 0) {
+    attention.push({
+      text: `${summary.notWorking} ${summary.notWorking === 1 ? "link points" : "links point"} at a video that is not published right now, so ${summary.notWorking === 1 ? "it does" : "they do"} not work.`,
+      href: "/admin/links",
+      label: "See the links",
+    });
+  }
+  if (summary.expiringSoon > 0) {
+    attention.push({
+      text: `${summary.expiringSoon} ${summary.expiringSoon === 1 ? "link stops" : "links stop"} working within ${SUMMARY_SOON_DAYS} days.`,
+      href: "/admin/links",
+      label: "See the links",
+    });
+  }
 
   return (
-    <AppShell showAdmin>
-      <main className="px-5 py-6 sm:px-8">
-        <div className="mx-auto max-w-6xl">
-          {/* A line from Pulse 3D for this clinic, set on /pulse. Nothing shows when there is none. */}
-          {clinic.noticeText && (
-            <p
-              role="status"
-              className="mb-5 rounded-xl border border-[#2a829b]/50 bg-[#2a829b]/15 px-4 py-3 text-[15px] text-white"
-            >
-              <span className="mr-2 font-semibold text-[#5fb8d4]">From Pulse 3D:</span>
-              {clinic.noticeText}
-            </p>
-          )}
-          <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">{clinic.name}</p>
-              <h1 className="mt-1 text-2xl font-semibold sm:text-3xl">Share links</h1>
-              <p className="mt-1 max-w-2xl text-[#bfbfbf]">
-                Create a link for a procedure and copy it to send to a patient. The link stops working after{" "}
-                {SHARE_EXPIRY_DAYS} days.
-              </p>
-            </div>
-            {/* The other admin page: who is in the clinic, and who is a surgeon. */}
-            <Link href="/admin/people" className={SECONDARY_BUTTON}>
-              People
-            </Link>
-          </header>
+    <AdminFrame clinicName={clinic.name} title="Overview" intro="What needs a look, how your links are doing, and the way into each section.">
+      <Notice text={clinic.noticeText} />
 
-          <ShareLists procedures={procedures} links={links} baseUrl={baseUrl} />
+      <section aria-labelledby="attention-heading" className="mt-6">
+        <h2 id="attention-heading" className="text-lg font-semibold">
+          Needs a look
+        </h2>
+        {attention.length === 0 ? (
+          <p className="mt-2 text-[#bfbfbf]">Nothing right now.</p>
+        ) : (
+          <ul className="mt-3 flex flex-col gap-3">
+            {attention.map((item) => (
+              <li
+                key={item.text}
+                className="flex flex-col gap-3 rounded-2xl border border-[#f3b94d]/40 bg-[#f3b94d]/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <p className="text-[15px] text-white">{item.text}</p>
+                <Link href={item.href} className={SECONDARY_BUTTON}>
+                  {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="numbers-heading" className="mt-8">
+        <h2 id="numbers-heading" className="text-lg font-semibold">
+          Your links
+        </h2>
+        {/* A cancelled link is deleted (see lib/db/shares.ts), so these count the links still on the list, not everything ever made. */}
+        <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+          <Fact label="Working right now" value={summary.working} />
+          <Fact label={`Made in the last ${SUMMARY_RECENT_DAYS} days`} value={summary.madeRecently} note="Links you have cancelled are not counted." />
+          <Fact
+            label="Play starts, current links"
+            value={summary.playStarts}
+            note="Counted once per page load, the first time play is pressed. Not a count of patients, and not counting links you have cancelled."
+          />
+        </dl>
+      </section>
+
+      <section aria-labelledby="recent-heading" className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 id="recent-heading" className="text-lg font-semibold">
+            Newest links
+          </h2>
+          <Link href="/admin/links" className="text-sm text-[#5fb8d4] hover:text-white">
+            All shared links
+          </Link>
         </div>
-      </main>
-    </AppShell>
+        {recent.length === 0 ? (
+          <p className="mt-2 text-[#bfbfbf]">
+            No links yet.{" "}
+            <Link href="/admin/links" className="text-[#5fb8d4] hover:text-white">
+              Create the first one.
+            </Link>
+          </p>
+        ) : (
+          <ul className="mt-3 divide-y divide-white/10 rounded-2xl border border-white/10 bg-[#0d1113]">
+            {recent.map((share) => {
+              const works = share.expiresAt > now && share.video.isPublished;
+              return (
+                <li key={share.id} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className={`flex flex-wrap items-center gap-2 text-[15px] ${works ? "" : "text-[#667085]"}`}>
+                    {share.video.title}
+                    {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
+                  </p>
+                  <p className="text-sm text-[#667085]">
+                    {works ? `Works until ${formatDate(share.expiresAt)}` : share.video.isPublished ? "Expired" : "Not working"} &middot;{" "}
+                    {share.viewCount} {share.viewCount === 1 ? "play start" : "play starts"}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <SectionCards />
+    </AdminFrame>
   );
 }
 
-/** "KNEE" becomes "Knee". */
-function categoryLabel(value: Category) {
-  return CATEGORIES.find((c) => c.value === value)?.label ?? value;
+/** A line from Pulse 3D for this clinic, set on /pulse. Nothing shows when there is none. */
+function Notice({ text }: { text: string | null }) {
+  if (!text) return null;
+  return (
+    <p role="status" className="mt-6 rounded-xl border border-[#2a829b]/50 bg-[#2a829b]/15 px-4 py-3 text-[15px] text-white">
+      <span className="mr-2 font-semibold text-[#5fb8d4]">From Pulse 3D:</span>
+      {text}
+    </p>
+  );
 }
 
-/** Shown in Utah time for now, since the one Phase 1 clinic is ours. */
+/** One number with its label. The label says exactly what is counted. */
+function Fact({ label, value, note }: { label: string; value: number; note?: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0d1113] px-5 py-4">
+      <dt className="text-sm text-[#667085]">{label}</dt>
+      <dd className="mt-1 text-2xl font-semibold text-white">{value.toLocaleString("en-US")}</dd>
+      {note && <dd className="mt-1 text-xs text-[#667085]">{note}</dd>}
+    </div>
+  );
+}
+
+/** A card for every section other than the overview itself, so each is one tap away. */
+function SectionCards(): ReactNode {
+  return (
+    <section aria-labelledby="sections-heading" className="mt-8">
+      <h2 id="sections-heading" className="text-lg font-semibold">
+        Sections
+      </h2>
+      <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+        {ADMIN_SECTIONS.filter((section) => section.href !== "/admin").map((section) => (
+          <li key={section.href}>
+            <Link
+              href={section.href}
+              className="flex h-full flex-col rounded-2xl border border-white/10 bg-[#0d1113] p-5 transition hover:border-[#2a829b]/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#5fb8d4]"
+            >
+              <span className="flex items-center gap-2 text-lg font-semibold text-white">
+                {section.label}
+                {section.coming && <span className="text-xs font-normal uppercase tracking-wider text-[#667085]">Coming</span>}
+              </span>
+              <span className="mt-1 text-sm text-[#bfbfbf]">{section.blurb}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** "Sep 19, 2026". Utah time, like the rest of the admin area. */
 function formatDate(date: Date) {
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "America/Denver",
-  });
-}
-
-/** "14 days left", "1 day left", or "Less than a day left". Rounded to the nearest day. */
-function daysLeft(expiresAt: Date, now: Date) {
-  const days = Math.round((expiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-  if (days < 1) return "Less than a day left";
-  return `${days} ${days === 1 ? "day" : "days"} left`;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Denver" });
 }

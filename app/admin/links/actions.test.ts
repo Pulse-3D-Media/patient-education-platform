@@ -52,12 +52,26 @@ const createdShareIds: string[] = [];
 const orgActive = fakeOrgId();
 const orgOther = fakeOrgId();
 const orgPending = fakeOrgId();
+const orgKneeOnly = fakeOrgId();
+const orgFinishedOnly = fakeOrgId();
 let activeClinic = "";
 let otherClinic = "";
+let kneeOnlyClinic = "";
+let finishedOnlyClinic = "";
+/** A published Hip placeholder. */
 let videoId = "";
 
-async function makeClinic(name: string, clerkOrgId: string, status: "ACTIVE" | "PENDING") {
-  const clinic = await prisma.clinic.create({ data: { name, clerkOrgId, status }, select: { id: true } });
+/** A clinic with Hip on its plan (the test video is a Hip video), unless told otherwise. */
+async function makeClinic(
+  name: string,
+  clerkOrgId: string,
+  status: "ACTIVE" | "PENDING",
+  extra: { categories?: ("HIP" | "KNEE")[]; showPlaceholders?: boolean } = {},
+) {
+  const clinic = await prisma.clinic.create({
+    data: { name, clerkOrgId, status, categories: extra.categories ?? ["HIP"], showPlaceholders: extra.showPlaceholders ?? true },
+    select: { id: true },
+  });
   createdClinicIds.push(clinic.id);
   return clinic.id;
 }
@@ -66,6 +80,8 @@ beforeAll(async () => {
   activeClinic = await makeClinic("Vitest links clinic (active)", orgActive, "ACTIVE");
   otherClinic = await makeClinic("Vitest links clinic (other)", orgOther, "ACTIVE");
   await makeClinic("Vitest links clinic (pending)", orgPending, "PENDING");
+  kneeOnlyClinic = await makeClinic("Vitest links clinic (knee only)", orgKneeOnly, "ACTIVE", { categories: ["KNEE"] });
+  finishedOnlyClinic = await makeClinic("Vitest links clinic (finished only)", orgFinishedOnly, "ACTIVE", { showPlaceholders: false });
 
   const video = await prisma.video.create({
     data: { title: "Vitest links video", category: "HIP", videoUrl: "https://example.com/vitest.mp4", isPublished: true, isPlaceholder: true },
@@ -158,5 +174,79 @@ describe("cancelShareAction", () => {
     signInAs(orgActive, "admin");
     expect(await cancelShareAction(code)).toEqual({});
     expect(await prisma.share.findUnique({ where: { code } })).toBeNull();
+  });
+});
+
+describe("createShareAction and the clinic's plan", () => {
+  it("refuses a video whose category is not on the clinic's plan, with a plain message, and writes nothing", async () => {
+    signInAs(orgKneeOnly, "admin");
+    const before = await linksFor(kneeOnlyClinic);
+
+    const result = await createShareAction(null, form({ videoId }));
+
+    expect(result).toMatchObject({ error: expect.stringContaining("plan") });
+    expect(result?.error).not.toMatch(/error|invalid|403/i);
+    expect(await linksFor(kneeOnlyClinic)).toBe(before);
+  });
+
+  it("ignores a clinic id in the form: a forged one cannot borrow another clinic's plan", async () => {
+    // The Knee-only admin sends the Hip video with the Hip clinic's id in the form.
+    signInAs(orgKneeOnly, "admin");
+    const kneeBefore = await linksFor(kneeOnlyClinic);
+    const hipBefore = await linksFor(activeClinic);
+
+    const result = await createShareAction(null, form({ videoId, clinicId: activeClinic }));
+
+    expect(result).toMatchObject({ error: expect.stringContaining("plan") });
+    expect(await linksFor(kneeOnlyClinic)).toBe(kneeBefore);
+    expect(await linksFor(activeClinic)).toBe(hipBefore);
+  });
+
+  it("refuses a placeholder for a clinic shown finished animations only, and writes nothing", async () => {
+    signInAs(orgFinishedOnly, "admin");
+    const before = await linksFor(finishedOnlyClinic);
+
+    const result = await createShareAction(null, form({ videoId }));
+
+    expect(result).toMatchObject({ error: expect.stringContaining("placeholder") });
+    expect(await linksFor(finishedOnlyClinic)).toBe(before);
+  });
+
+  it("refuses a video that no longer exists, and an unpublished one", async () => {
+    signInAs(orgActive, "admin");
+    expect(await createShareAction(null, form({ videoId: "video_that_does_not_exist" }))).toMatchObject({ error: expect.stringContaining("no longer exists") });
+
+    const unpublished = await prisma.video.create({
+      data: { title: "Vitest links video (unpublished)", category: "HIP", videoUrl: "https://example.com/vitest.mp4", isPublished: false },
+      select: { id: true },
+    });
+    createdVideoIds.push(unpublished.id);
+    expect(await createShareAction(null, form({ videoId: unpublished.id }))).toMatchObject({ error: expect.stringContaining("not published") });
+  });
+
+  it("refuses the same form once the category has left the plan: the check happens when the form is sent, not when it was drawn", async () => {
+    signInAs(orgActive, "admin");
+    const stale = form({ videoId });
+
+    // Works while Hip is on the plan.
+    const first = await createShareAction(null, stale);
+    expect(first).toMatchObject({ code: expect.any(String) });
+    const share = await prisma.share.findUnique({ where: { code: first!.code! }, select: { id: true } });
+    createdShareIds.push(share!.id);
+    const after = await linksFor(activeClinic);
+
+    try {
+      // Hip comes off the plan; the very same form is sent again.
+      await prisma.clinic.update({ where: { id: activeClinic }, data: { categories: ["KNEE"] } });
+      expect(await createShareAction(null, stale)).toMatchObject({ error: expect.stringContaining("plan") });
+      expect(await linksFor(activeClinic)).toBe(after);
+
+      // The link already made keeps working: it is still there, unexpired, and its video still published.
+      const kept = await prisma.share.findUnique({ where: { id: share!.id }, include: { video: { select: { isPublished: true } } } });
+      expect(kept?.expiresAt.getTime()).toBeGreaterThan(Date.now());
+      expect(kept?.video.isPublished).toBe(true);
+    } finally {
+      await prisma.clinic.update({ where: { id: activeClinic }, data: { categories: ["HIP"] } });
+    }
   });
 });

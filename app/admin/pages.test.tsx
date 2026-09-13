@@ -78,20 +78,31 @@ function fakeOrgId() {
 }
 
 const createdClinicIds: string[] = [];
+const createdVideoIds: string[] = [];
 const orgActive = fakeOrgId();
 const orgPending = fakeOrgId();
 const orgManaged = fakeOrgId();
+const orgHip = fakeOrgId();
+/** A published Hip video made here, so the procedure picker has one thing whose category is known. */
+const hipVideoTitle = `Vitest pages hip video ${randomBytes(4).toString("hex")}`;
 
 beforeAll(async () => {
   const clinics: Prisma.ClinicCreateInput[] = [
     { name: "Vitest pages clinic (active)", clerkOrgId: orgActive, status: "ACTIVE", categories: ["KNEE"], surgeonSeats: 2 },
     { name: "Vitest pages clinic (pending)", clerkOrgId: orgPending, status: "PENDING", categories: ["KNEE", "SHOULDER"], surgeonSeats: 1 },
     { name: "Vitest pages clinic (managed)", clerkOrgId: orgManaged, status: "ACTIVE", categories: ["SPINE"], surgeonSeats: 4, managedByPulse: true },
+    { name: "Vitest pages clinic (hip)", clerkOrgId: orgHip, status: "ACTIVE", categories: ["HIP"], surgeonSeats: 1 },
   ];
   for (const data of clinics) {
     const clinic = await prisma.clinic.create({ data, select: { id: true } });
     createdClinicIds.push(clinic.id);
   }
+
+  const video = await prisma.video.create({
+    data: { title: hipVideoTitle, category: "HIP", videoUrl: "https://example.com/vitest.mp4", isPublished: true, isPlaceholder: true },
+    select: { id: true },
+  });
+  createdVideoIds.push(video.id);
 });
 
 beforeEach(() => {
@@ -99,7 +110,8 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
-  await prisma.share.deleteMany({ where: { clinicId: { in: createdClinicIds } } });
+  await prisma.share.deleteMany({ where: { OR: [{ clinicId: { in: createdClinicIds } }, { videoId: { in: createdVideoIds } }] } });
+  await prisma.video.deleteMany({ where: { id: { in: createdVideoIds } } });
   await prisma.clinic.deleteMany({ where: { id: { in: createdClinicIds } } });
   await prisma.$disconnect();
 });
@@ -201,6 +213,21 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/links"/);
     for (const word of PLAN_WORDS) expect(html).not.toContain(word);
     expect(showsAnAmount(html)).toBe(false);
+  });
+
+  it("is offered only the procedures in the categories on its plan in the picker", async () => {
+    // Knee-only clinic: the Hip video made above is not offered.
+    signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+    const kneeHtml = await render(LinksPage, "/admin/links");
+    expect(kneeHtml).not.toContain(hipVideoTitle);
+    expect(kneeHtml).toContain("categories on your clinic");
+
+    // Hip clinic: it is, with its placeholder mark and its Create button.
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    const hipHtml = await render(LinksPage, "/admin/links");
+    expect(hipHtml).toContain(hipVideoTitle);
+    expect(hipHtml).toContain("Placeholder");
+    expect(hipHtml).toContain("Create share link");
   });
 
   it("sees an estimate on Billing that is labelled as one", async () => {

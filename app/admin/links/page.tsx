@@ -8,8 +8,9 @@ import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { formatDuration } from "@/lib/format";
+import { getClinicAccess } from "@/lib/db/access";
 import { listSharesForClinic } from "@/lib/db/shares";
-import { listPublishedVideos } from "@/lib/db/videos";
+import { listUsableVideos } from "@/lib/db/videos";
 import { AdminFrame } from "../AdminFrame";
 import { ShareLists } from "./ShareLists";
 
@@ -19,7 +20,9 @@ import { ShareLists } from "./ShareLists";
  * overview, and this page is what it links to.)
  *
  * Two things on the page, both drawn by ShareLists:
- *   1. Every published video, each with a "Create share link" form.
+ *   1. Every video this clinic may share (published, in a category on its
+ *      plan, placeholders only while the clinic is shown them), each with a
+ *      "Create share link" form.
  *   2. Every share link this clinic has made, with its expiry and view count,
  *      and buttons to copy the link, download its QR code as a picture,
  *      open a printable pamphlet, or cancel it (after a yes/no popup).
@@ -71,11 +74,22 @@ export default async function LinksPage() {
     );
   }
 
+  // The procedure picker lists only what this clinic may share: published,
+  // in a category on its plan, and placeholders only while the clinic is
+  // shown them. The same rule createShare() applies when the form is sent
+  // (lib/access.ts), so the list and the button can never disagree.
+  const access = await getClinicAccess(clinic.id);
   const [videos, shares, baseUrl] = await Promise.all([
-    listPublishedVideos(),
+    access ? listUsableVideos(access) : [],
     listSharesForClinic(clinic.id),
     getBaseUrl(),
   ]);
+
+  // What the Procedures list says when there is nothing to pick from.
+  const emptyProceduresText =
+    !access || access.categories.length === 0
+      ? "No procedures to list yet: your clinic's plan has no categories on it. See Billing."
+      : "Nothing to list right now: the categories on your clinic's plan have no animations you can share yet.";
 
   const now = new Date();
 
@@ -117,13 +131,13 @@ export default async function LinksPage() {
       title="Shared links"
       intro={
         <>
-          Create a link for a procedure and copy it to send to a patient. The link stops working after {SHARE_EXPIRY_DAYS}{" "}
-          days.
+          Create a link for a procedure and copy it to send to a patient. Only the procedures in the categories on your clinic&rsquo;s
+          plan are listed. The link stops working after {SHARE_EXPIRY_DAYS} days.
         </>
       }
       wide
     >
-      <ShareLists procedures={procedures} links={links} baseUrl={baseUrl} />
+      <ShareLists procedures={procedures} links={links} baseUrl={baseUrl} emptyProceduresText={emptyProceduresText} />
     </AdminFrame>
   );
 }

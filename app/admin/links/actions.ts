@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getCurrentClinicId } from "@/lib/clinic";
-import { createShare, deleteShareForClinic } from "@/lib/db/shares";
+import { createShare, deleteShareForClinic, ShareRefusedError } from "@/lib/db/shares";
 import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { isClinicAdmin } from "@/lib/roles";
 
@@ -63,6 +63,11 @@ export async function createShareAction(
     revalidatePath("/admin");
     return { code: share.code };
   } catch (error) {
+    // createShare said no: the video is not on the clinic's plan, is a
+    // placeholder this clinic is not shown, is unpublished, or is gone. Its
+    // message is written for the person at the desk, so it is shown as is.
+    // A form drawn before a plan change lands here too.
+    if (error instanceof ShareRefusedError) return { error: error.message };
     return { error: error instanceof Error ? error.message : "Could not create the link." };
   }
 }

@@ -1,14 +1,29 @@
 import Link from "next/link";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
+import { categoryState, visibleCount } from "@/lib/access";
 import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
+import { getClinicAccess } from "@/lib/db/access";
 import { getCategoryConfigs } from "@/lib/db/category-config";
-import { countPublishedVideosByCategory } from "@/lib/db/videos";
+import { countPublishedVideosByKind } from "@/lib/db/videos";
+import { EmptyTile, LockedTile } from "./CategoryStates";
 import { ComingSoonTile } from "./ComingSoon";
 
 /**
  * The library home: every category as a visual tile. This is tap one of two.
+ *
+ * Each tile is in one of four states, decided by categoryState() in
+ * lib/access.ts from this clinic's plan and what is published:
+ *
+ *   available    a link to the category, with how many procedures it holds
+ *   coming soon  nothing published in it yet, for anyone
+ *   locked       published, but not on this clinic's plan
+ *   nothing yet  on the plan, but only placeholders, which this clinic is
+ *                not shown
+ *
+ * Three reads, once each: the clinic's access, the published counts for
+ * every category, and the category sentences. Nothing is read per tile.
  *
  * Rendered fresh on every request, because what it shows depends on who is
  * signed in (proxy.ts sends signed-out visitors to the sign-in page first,
@@ -23,12 +38,11 @@ export default async function LibraryPage() {
   const clinic = await requireClinicPage();
   if (!clinicIsOpen(clinic.status)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
 
-  // Placeholder videos are counted only when this clinic is shown them (a
-  // setting Pulse staff control per clinic).
-  const [counts, configs] = await Promise.all([
-    countPublishedVideosByCategory({ includePlaceholders: clinic.showPlaceholders }),
-    getCategoryConfigs(),
-  ]);
+  const [access, counts, configs] = await Promise.all([getClinicAccess(clinic.id), countPublishedVideosByKind(), getCategoryConfigs()]);
+
+  // The clinic was read a moment ago, so it exists; this covers it having
+  // been closed since, or removed, without a crash.
+  if (!access || !access.open) return <ClinicClosed status={access?.status ?? clinic.status} clinicName={clinic.name} />;
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -39,11 +53,9 @@ export default async function LibraryPage() {
 
       <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {CATEGORIES.map((category) => {
-          const count = counts[category.value] ?? 0;
+          const state = categoryState(access, category.value, counts[category.value]);
 
-          // Nothing published in it yet (for this clinic): a dimmed tile with
-          // no link, saying so, instead of a page with nothing on it.
-          if (count === 0) {
+          if (state === "coming-soon") {
             return (
               <li key={category.value}>
                 <ComingSoonTile label={category.label} image={category.image} config={configs[category.value]} />
@@ -51,6 +63,23 @@ export default async function LibraryPage() {
             );
           }
 
+          if (state === "locked") {
+            return (
+              <li key={category.value}>
+                <LockedTile label={category.label} image={category.image} />
+              </li>
+            );
+          }
+
+          if (state === "empty") {
+            return (
+              <li key={category.value}>
+                <EmptyTile label={category.label} image={category.image} />
+              </li>
+            );
+          }
+
+          const count = visibleCount(access, counts[category.value]);
           return (
             <li key={category.value}>
               <Link

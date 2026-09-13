@@ -1,4 +1,6 @@
 import { randomInt } from "crypto";
+import { accessRefusalMessage, decideVideoAccess, type AccessDecision, type AccessReason } from "../access";
+import { lockClinicAccess, lockVideoFacts } from "./access";
 import { prisma } from "./client";
 
 /**
@@ -10,6 +12,21 @@ import { prisma } from "./client";
  * ever seeing another clinic's links. The two exceptions, getShareByCode and
  * recordShareView, serve the public patient page, where there is no clinic.
  */
+
+/**
+ * createShare() said no. The message is the plain sentence to show the
+ * person who asked (see accessRefusalMessage in lib/access.ts); `reason`
+ * says which check failed, for tests and logs.
+ */
+export class ShareRefusedError extends Error {
+  readonly reason: AccessReason;
+
+  constructor(reason: AccessReason) {
+    super(accessRefusalMessage(reason));
+    this.name = "ShareRefusedError";
+    this.reason = reason;
+  }
+}
 
 /** The characters a share code is made from: lowercase letters and digits. */
 const CODE_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -27,34 +44,54 @@ function randomCode() {
 /**
  * Create a share link for one video that stops working after `days` days.
  * Returns the new Share row, including its code.
+ *
+ * This is the one place a share is written, and it is where access is
+ * enforced: the clinic must be open, the video published and in a
+ * category on the clinic's plan, and a placeholder video only while the
+ * clinic is shown placeholders (the rule is decideVideoAccess in
+ * lib/access.ts). Anything else throws a ShareRefusedError carrying a
+ * plain message, and nothing is written. The admin form and the library's
+ * Send button both land here, so a hidden button or a filtered list is
+ * never the only thing standing between a clinic and a link.
+ *
+ * The check and the write happen inside one transaction, and the clinic
+ * and video rows are read with a share lock (lockClinicAccess and
+ * lockVideoFacts in lib/db/access.ts), which holds them against change
+ * until the transaction ends. So the facts are as they are at that moment,
+ * not as they were when the page was drawn, and a change cannot slip in
+ * between the check and the write either: a plan removal, a pause, a
+ * placeholder-setting change or an unpublish that arrives during this
+ * transaction waits for it to finish (the link is issued, and stays
+ * usable, as issued links do), or landed first and is seen here (the link
+ * is refused). A form rendered while a video was on the plan, and
+ * submitted after the plan changed, is refused.
  */
 export async function createShare(clinicId: string, videoId: string, days: number) {
-  // Only published videos can be shared. Unpublished ones are Van's staging
-  // area and must never reach a patient.
-  const video = await prisma.video.findFirst({
-    where: { id: videoId, isPublished: true },
-    select: { id: true },
-  });
-  if (!video) {
-    throw new Error("That video is not published, so it cannot be shared.");
-  }
-
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-  // There are about two billion possible codes, so a clash is very unlikely,
-  // but the code column is unique, so check before saving and try again if
-  // the code is already taken.
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const code = randomCode();
-    const taken = await prisma.share.findUnique({ where: { code }, select: { id: true } });
-    if (taken) continue;
+  return prisma.$transaction(async (tx) => {
+    const access = await lockClinicAccess(tx, clinicId);
+    // An unknown clinic id has nothing to grant, so it answers as closed.
+    const decision: AccessDecision = access
+      ? decideVideoAccess(access, await lockVideoFacts(tx, videoId))
+      : { allowed: false, reason: "clinic-closed" };
+    if (!decision.allowed) throw new ShareRefusedError(decision.reason);
 
-    return prisma.share.create({
-      data: { code, clinicId, videoId, expiresAt },
-    });
-  }
+    // There are about two billion possible codes, so a clash is very unlikely,
+    // but the code column is unique, so check before saving and try again if
+    // the code is already taken.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = randomCode();
+      const taken = await tx.share.findUnique({ where: { code }, select: { id: true } });
+      if (taken) continue;
 
-  throw new Error("Could not find an unused share code. Please try again.");
+      return tx.share.create({
+        data: { code, clinicId, videoId, expiresAt },
+      });
+    }
+
+    throw new Error("Could not find an unused share code. Please try again.");
+  });
 }
 
 /**

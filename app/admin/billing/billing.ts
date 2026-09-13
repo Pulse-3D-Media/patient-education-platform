@@ -1,6 +1,6 @@
 import type { Category } from "@prisma/client";
 import { getClinicPlan, type ClinicPlan } from "@/lib/db/clinics";
-import { getPricingForClinic, PricingError } from "@/lib/db/pricing";
+import { getPricingForClinic } from "@/lib/db/pricing";
 import { quote, type Band } from "@/lib/pricing";
 
 /**
@@ -54,15 +54,18 @@ export async function getBillingView(clinicId: string): Promise<BillingView | nu
   const hasPlan = plan.categories.length > 0 && plan.surgeonSeats > 0;
   if (!hasPlan) return { plan, hasPlan, estimate: null, problem: null };
 
+  // The estimate is the secondary thing on the page: the plan still shows
+  // when the prices cannot be read. A PricingError (a damaged version, a
+  // pin that points nowhere) and a database error (for instance a preview
+  // whose database is behind on migrations) both become the same plain
+  // sentence, with the detail in the server log.
   let pricing;
   try {
     pricing = await getPricingForClinic(clinicId);
   } catch (error) {
-    if (error instanceof PricingError) {
-      console.error(`Billing estimate for clinic ${clinicId}: ${error.message}`);
-      return { plan, hasPlan, estimate: null, problem: "We could not work out an estimate right now. Your plan is unchanged." };
-    }
-    throw error;
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(`Billing estimate for clinic ${clinicId}: ${detail}`);
+    return { plan, hasPlan, estimate: null, problem: "We could not work out an estimate right now. Your plan is unchanged." };
   }
 
   // The clinic's own categories are what it may be quoted for here: this is

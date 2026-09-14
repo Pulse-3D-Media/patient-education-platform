@@ -1,13 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
+import { accessFromClinic } from "../access";
 import { prisma } from "./client";
 import { createShare, getShareByCode, recordShareView } from "./shares";
 import {
   countPublishedVideosByCategory,
+  countPublishedVideosByKind,
   createVideo,
   getVideoForPulse,
   listPublishedVideos,
   listPublishedVideosByCategory,
+  listUsableVideos,
+  listUsableVideosInCategory,
   listVideosForPulse,
   updateVideo,
   type VideoInput,
@@ -48,10 +52,20 @@ async function makeVideo(overrides: Partial<VideoInput> = {}) {
   return video;
 }
 
-async function makeClinic() {
-  const clinic = await prisma.clinic.create({ data: { name: `Vitest videos clinic ${tag()}` }, select: { id: true } });
+/** An open clinic with Knee and Hip on its plan, so createShare lets it share the videos made here. */
+async function makeClinic(data: Partial<Parameters<typeof prisma.clinic.create>[0]["data"]> = {}) {
+  const clinic = await prisma.clinic.create({
+    data: { name: `Vitest videos clinic ${tag()}`, status: "ACTIVE", categories: ["KNEE", "HIP"], ...data },
+    select: { id: true },
+  });
   createdClinicIds.push(clinic.id);
   return clinic.id;
+}
+
+/** The access facts for a clinic made here, the way getClinicAccess() would read them. */
+async function accessOf(clinicId: string) {
+  const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { id: true, status: true, categories: true, showPlaceholders: true } });
+  return accessFromClinic(clinic);
 }
 
 afterAll(async () => {
@@ -164,5 +178,78 @@ describe("unpublishing a video", () => {
     await updateVideo(video.id, { ...input({ category: "HIP" }), title: video.title, isPublished: true });
     await recordShareView(share.code);
     expect((await getShareByCode(share.code))?.viewCount).toBe(2);
+  });
+});
+
+describe("what one clinic may use", () => {
+  it("lists only the categories on the clinic's plan, and leaves out placeholders when the clinic is not shown them", async () => {
+    const kneeFinished = await makeVideo({ category: "KNEE", isPlaceholder: false });
+    const kneePlaceholder = await makeVideo({ category: "KNEE", isPlaceholder: true });
+    const hipPlaceholder = await makeVideo({ category: "HIP", isPlaceholder: true });
+    const unpublishedKnee = await makeVideo({ category: "KNEE", isPublished: false });
+    const ids = (videos: { id: string }[]) => videos.map((v) => v.id);
+
+    // Knee only, placeholders shown: both knee videos, nothing from hip, nothing unpublished.
+    const kneeClinic = await accessOf(await makeClinic({ categories: ["KNEE"] }));
+    const kneeList = ids(await listUsableVideos(kneeClinic));
+    expect(kneeList).toContain(kneeFinished.id);
+    expect(kneeList).toContain(kneePlaceholder.id);
+    expect(kneeList).not.toContain(hipPlaceholder.id);
+    expect(kneeList).not.toContain(unpublishedKnee.id);
+    expect((await listUsableVideos(kneeClinic)).every((v) => v.category === "KNEE" && v.isPublished)).toBe(true);
+
+    // Knee only, finished animations only: the placeholder drops out.
+    const finishedOnly = await accessOf(await makeClinic({ categories: ["KNEE"], showPlaceholders: false }));
+    const finishedList = ids(await listUsableVideos(finishedOnly));
+    expect(finishedList).toContain(kneeFinished.id);
+    expect(finishedList).not.toContain(kneePlaceholder.id);
+
+    // The category page's list obeys the same rule, and is empty for a category off the plan.
+    expect(ids(await listUsableVideosInCategory(kneeClinic, "KNEE"))).toContain(kneePlaceholder.id);
+    expect(ids(await listUsableVideosInCategory(finishedOnly, "KNEE"))).not.toContain(kneePlaceholder.id);
+    expect(await listUsableVideosInCategory(kneeClinic, "HIP")).toEqual([]);
+  });
+
+  it("lists nothing for a clinic with no plan, or one that is not open, without asking the database", async () => {
+    const noPlan = await accessOf(await makeClinic({ categories: [] }));
+    expect(await listUsableVideos(noPlan)).toEqual([]);
+    expect(await listUsableVideosInCategory(noPlan, "KNEE")).toEqual([]);
+
+    const paused = await accessOf(await makeClinic({ status: "PAUSED" }));
+    expect(await listUsableVideos(paused)).toEqual([]);
+    expect(await listUsableVideosInCategory(paused, "KNEE")).toEqual([]);
+  });
+
+  it("orders the picker by category as the library shows them, then by title", async () => {
+    const clinic = await accessOf(await makeClinic({ categories: ["KNEE", "HIP", "SPINE"] }));
+    const videos = await listUsableVideos(clinic);
+    const order = ["SPINE", "KNEE", "HIP"];
+    const positions = videos.map((v) => order.indexOf(v.category));
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+});
+
+describe("countPublishedVideosByKind", () => {
+  it("counts finished animations and placeholders separately, published only, and matches the database", async () => {
+    const before = await countPublishedVideosByKind();
+    const finished = await makeVideo({ category: "FOOT_ANKLE", isPlaceholder: false });
+    const placeholder = await makeVideo({ category: "FOOT_ANKLE", isPlaceholder: true });
+    await makeVideo({ category: "FOOT_ANKLE", isPlaceholder: false, isPublished: false });
+
+    const after = await countPublishedVideosByKind();
+    expect(after.FOOT_ANKLE?.real ?? 0).toBe((before.FOOT_ANKLE?.real ?? 0) + 1);
+    expect(after.FOOT_ANKLE?.placeholder ?? 0).toBe((before.FOOT_ANKLE?.placeholder ?? 0) + 1);
+
+    // Asked for one category, it answers for that one only.
+    const one = await countPublishedVideosByKind("FOOT_ANKLE");
+    expect(Object.keys(one)).toEqual(["FOOT_ANKLE"]);
+    expect(one.FOOT_ANKLE).toEqual(after.FOOT_ANKLE);
+
+    // Every number is a real count of published rows.
+    for (const [category, counts] of Object.entries(after)) {
+      expect(counts.real).toBe(await prisma.video.count({ where: { category: category as never, isPublished: true, isPlaceholder: false } }));
+      expect(counts.placeholder).toBe(await prisma.video.count({ where: { category: category as never, isPublished: true, isPlaceholder: true } }));
+    }
+    expect([finished.id, placeholder.id]).toHaveLength(2);
   });
 });

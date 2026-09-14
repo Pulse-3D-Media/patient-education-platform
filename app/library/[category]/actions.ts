@@ -2,7 +2,7 @@
 
 import { getBaseUrl } from "@/lib/base-url";
 import { getCurrentClinicId } from "@/lib/clinic";
-import { createShare } from "@/lib/db/shares";
+import { createShare, ShareRefusedError } from "@/lib/db/shares";
 import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { qrSvg } from "@/lib/qr";
 import { watchLink } from "@/lib/share-link";
@@ -70,6 +70,10 @@ export async function sendShareAction(videoId: string): Promise<SendResult> {
       days: SHARE_EXPIRY_DAYS,
     };
   } catch (error) {
+    // createShare said no: the video is not on the clinic's plan, is a
+    // placeholder this clinic is not shown, is unpublished, or is gone. Its
+    // message is written for the person who tapped, so it is shown as is.
+    if (error instanceof ShareRefusedError) return { ok: false, error: error.message };
     return { ok: false, error: error instanceof Error ? error.message : "Could not create the link." };
   }
 }

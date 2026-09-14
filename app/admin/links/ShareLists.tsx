@@ -54,7 +54,18 @@ type Filter = Category | "ALL";
  * changes. Filtering is instant and happens in the browser: this is a client
  * component because the pressed pill and the typed words are state.
  */
-export function ShareLists({ procedures, links, baseUrl }: { procedures: ProcedureItem[]; links: LinkItem[]; baseUrl: string }) {
+export function ShareLists({
+  procedures,
+  links,
+  baseUrl,
+  emptyProceduresText,
+}: {
+  procedures: ProcedureItem[];
+  links: LinkItem[];
+  baseUrl: string;
+  /** What the Procedures list says when the clinic has nothing to pick from, worked out by the page from the clinic's plan. */
+  emptyProceduresText: string;
+}) {
   const [filter, setFilter] = useState<Filter>("ALL");
   const [query, setQuery] = useState("");
 
@@ -116,7 +127,7 @@ export function ShareLists({ procedures, links, baseUrl }: { procedures: Procedu
         </h2>
 
         {procedures.length === 0 ? (
-          <p className="mt-3 text-[#bfbfbf]">No published videos yet.</p>
+          <p className="mt-3 text-[#bfbfbf]">{emptyProceduresText}</p>
         ) : shownProcedures === 0 ? (
           <NothingMatches what="procedures" query={query} onShowAll={showAll} />
         ) : null}

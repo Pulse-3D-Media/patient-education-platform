@@ -190,6 +190,10 @@ describe("isolation between clinics created on first use", () => {
     const clinicB = await upsertClinicForClerkOrg(fakeOrgId(), { name: "Vitest clinic B", logoUrl: null });
     createdClinicIds.push(clinicA.id, clinicB.id);
 
+    // A new clinic is PENDING with no plan, and createShare refuses that
+    // (lib/db/shares.test.ts covers it). Open both with Knee on the plan.
+    await prisma.clinic.updateMany({ where: { id: { in: [clinicA.id, clinicB.id] } }, data: { status: "ACTIVE", categories: ["KNEE"] } });
+
     const shareA = await createShare(clinicA.id, videoId, 7);
     const shareB = await createShare(clinicB.id, videoId, 7);
     createdShareIds.push(shareA.id, shareB.id);

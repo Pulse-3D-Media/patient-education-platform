@@ -3,7 +3,7 @@ import { accessRefusalMessage, decideVideoAccess, type AccessDecision, type Acce
 import { addDays, canClaimFirstPlay, expiryAfterFirstPlay, isExpired, resolveShareTerms, type ShareTerms } from "../expiry";
 import { lockClinicAccess, lockVideoFacts } from "./access";
 import { prisma } from "./client";
-import { getSettings } from "./settings";
+import { getSettings, lockSettings } from "./settings";
 
 /**
  * Queries for the Share table. A share is one link a clinic gives a patient:
@@ -73,9 +73,15 @@ export async function getShareTerms(clinicId: string): Promise<ShareTerms | null
  * The link is made under the first-play rule (lib/expiry.ts): it stops
  * after the platform's unclaimed days if nobody plays it, and the days it
  * gets after its first play are copied onto it here, from the settings as
- * they are at this moment. A settings edit later changes links made from
- * then on, never this one. `now` is the server's clock unless a test hands
- * in its own.
+ * they are at this moment. The settings are read inside the transaction
+ * with the settings lock held (lockSettings in lib/db/settings.ts), so a
+ * save that lands at the same moment either came first and is what the
+ * link gets, or waits until the link is written: a link never carries
+ * numbers that were already out of date when it was made. A settings edit
+ * later changes links made from then on, never this one. Both numbers are
+ * checked before they become dates (resolveShareTerms), and a value outside
+ * the limits throws a ShareTermsError with nothing written. `now` is the
+ * server's clock unless a test hands in its own.
  *
  * This is the one place a share is written, and it is where access is
  * enforced: the clinic must be open, the video published and in a
@@ -100,9 +106,6 @@ export async function getShareTerms(clinicId: string): Promise<ShareTerms | null
  */
 export async function createShare(clinicId: string, videoId: string, options: { now?: Date } = {}) {
   const now = options.now ?? new Date();
-  // The platform's numbers. The clinic's own number is read inside the
-  // transaction below, while its row is held.
-  const settings = await getSettings();
 
   return prisma.$transaction(async (tx) => {
     const access = await lockClinicAccess(tx, clinicId);
@@ -112,9 +115,12 @@ export async function createShare(clinicId: string, videoId: string, options: { 
       : { allowed: false, reason: "clinic-closed" };
     if (!decision.allowed) throw new ShareRefusedError(decision.reason);
 
-    // The clinic row is held by the lock above, so this is the same moment
-    // the check saw. What is copied onto the link here is what it carries
-    // for good.
+    // The platform's numbers, read here inside the transaction with the
+    // settings lock held, and the clinic's own number, whose row is held by
+    // the lock above. Both are as they are at this moment, and neither can
+    // change until the link is written. What is copied onto the link here
+    // is what it carries for good.
+    const settings = await lockSettings(tx);
     const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { viewDaysOverride: true } });
     const terms = resolveShareTerms(settings, clinic);
 

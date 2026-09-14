@@ -2,6 +2,8 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
+import { saveSettings } from "@/lib/db/settings";
+import { MAX_LINK_DAYS } from "@/lib/expiry";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
   activatePricingVersionAction,
@@ -9,6 +11,7 @@ import {
   saveCategoryConfigAction,
   saveDetailsAction,
   savePricingVersionAction,
+  saveSettingsAction,
   saveVideoAction,
   setManagedAction,
   setPlanAction,
@@ -31,6 +34,14 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
+
+// The settings row is shared by the whole app and belongs to no test, so the
+// save itself is a stand-in here: the tests check what the action refuses and
+// what it hands to the save, never the row.
+vi.mock("@/lib/db/settings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/settings")>();
+  return { ...actual, saveSettings: vi.fn() };
+});
 
 function signInAs(userId: string, publicMetadata: Record<string, unknown>) {
   vi.mocked(auth).mockResolvedValue({ userId } as never);
@@ -162,6 +173,51 @@ describe("setManagedAction and saveDetailsAction", () => {
     expect(notes[1].body).toContain("phone set to (801) 555-0123");
     expect(notes[1].body).toContain('notice set to "Welcome"');
     expect(notes[1].body).toContain("placeholder videos hidden");
+  });
+
+  it("accepts a clinic override of exactly a year and refuses one past it, or of zero, without saving", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+    const details = (viewDaysOverride: string) => form({ clinicId, name: "Vitest limits clinic", phone: "", logoUrl: "", noticeText: "", viewDaysOverride });
+
+    expect(await saveDetailsAction(null, details(String(MAX_LINK_DAYS)))).toEqual({ ok: "Details saved." });
+    expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId } })).viewDaysOverride).toBe(MAX_LINK_DAYS);
+
+    for (const bad of [String(MAX_LINK_DAYS + 1), "0", "7.5", "abc"]) {
+      expect(await saveDetailsAction(null, details(bad))).toMatchObject({ error: expect.stringContaining("1 to 365") });
+    }
+    expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId } })).viewDaysOverride).toBe(MAX_LINK_DAYS);
+  });
+});
+
+describe("saveSettingsAction", () => {
+  const typed = (over: Partial<Record<"unclaimedDays" | "viewDays" | "graceDays" | "qrDailyFlag", string>> = {}) =>
+    form({ unclaimedDays: "90", viewDays: "7", graceDays: "14", qrDailyFlag: "200", ...over });
+
+  it("refuses a user who is not Pulse staff with not-found, and saves nothing", async () => {
+    signInAs("user_clinic_admin", { kind: "staff" });
+    await expect(saveSettingsAction(null, typed())).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+  });
+
+  it("accepts a year for both link day counts, the limit itself, and hands the save exactly what was typed", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await saveSettingsAction(null, typed({ unclaimedDays: String(MAX_LINK_DAYS), viewDays: String(MAX_LINK_DAYS) }))).toEqual({ ok: "Settings saved." });
+    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 200 });
+  });
+
+  it("refuses a day count past a year, or of zero, for either link setting, naming the field, without saving", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+
+    expect(await saveSettingsAction(null, typed({ unclaimedDays: String(MAX_LINK_DAYS + 1) }))).toEqual({
+      error: "Unclaimed link days must be a whole number of days from 1 to 365.",
+    });
+    expect(await saveSettingsAction(null, typed({ viewDays: String(MAX_LINK_DAYS + 1) }))).toEqual({
+      error: "Days after first play must be a whole number of days from 1 to 365.",
+    });
+    expect(await saveSettingsAction(null, typed({ viewDays: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
+    expect(await saveSettingsAction(null, typed({ unclaimedDays: "1.5" }))).toMatchObject({ error: expect.stringContaining("whole number") });
+    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
   });
 });
 

@@ -15,6 +15,7 @@ import { addClinicNote } from "@/lib/db/notes";
 import { PricingError, activatePricingVersion, createPricingVersion } from "@/lib/db/pricing";
 import { saveSettings, type Settings } from "@/lib/db/settings";
 import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/lib/db/videos";
+import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
 import { parseDuration } from "@/lib/format";
 import { renameClerkOrganization } from "@/lib/organization";
 import { normalizeUsPhone } from "@/lib/phone";
@@ -149,8 +150,8 @@ export async function saveDetailsAction(_previous: FormState, formData: FormData
   let viewDaysOverride: number | null = null;
   if (overrideText) {
     viewDaysOverride = wholeNumber(overrideText);
-    if (viewDaysOverride === null || viewDaysOverride < 1 || viewDaysOverride > 365) {
-      return { error: "View days must be a whole number from 1 to 365, or left empty to use the platform setting." };
+    if (viewDaysOverride === null || viewDaysOverride < MIN_LINK_DAYS || viewDaysOverride > MAX_LINK_DAYS) {
+      return { error: `View days must be a whole number from ${MIN_LINK_DAYS} to ${MAX_LINK_DAYS}, or left empty to use the platform setting.` };
     }
   }
 
@@ -197,7 +198,10 @@ export async function addNoteAction(_previous: FormState, formData: FormData): P
   return { ok: "Note added." };
 }
 
-/** Save the four platform settings. Each must be a whole number, at least 1. */
+/** The two settings that become link deadlines. They may not exceed a year (MAX_LINK_DAYS), the limit the clinic override already has. */
+const DAY_LIMITED: (keyof Settings)[] = ["unclaimedDays", "viewDays"];
+
+/** Save the four platform settings. Each must be a whole number, at least 1; the two day counts no more than a year. */
 export async function saveSettingsAction(_previous: FormState, formData: FormData): Promise<FormState> {
   await requirePulseStaff();
 
@@ -206,6 +210,9 @@ export async function saveSettingsAction(_previous: FormState, formData: FormDat
   for (const field of fields) {
     const value = wholeNumber(formData.get(field));
     if (value === null || value < 1) return { error: `${LABELS[field]} must be a whole number, at least 1.` };
+    if (DAY_LIMITED.includes(field) && value > MAX_LINK_DAYS) {
+      return { error: `${LABELS[field]} must be a whole number of days from ${MIN_LINK_DAYS} to ${MAX_LINK_DAYS}.` };
+    }
     values[field] = value;
   }
 

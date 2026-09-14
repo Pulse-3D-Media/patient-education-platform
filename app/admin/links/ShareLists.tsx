@@ -66,8 +66,8 @@ export function ShareLists({
   baseUrl: string;
   /** What the Procedures list says when the clinic has nothing to pick from, worked out by the page from the clinic's plan. */
   emptyProceduresText: string;
-  /** Days a new link works after the patient first plays it, as resolved for this clinic by the page. Shown beside every Create button. */
-  daysAfterFirstPlay: number;
+  /** Days a new link works after the patient first plays it, as resolved for this clinic by the page. Shown beside every Create button. Null when a setting is out of range, so no link can be made. */
+  daysAfterFirstPlay: number | null;
 }) {
   const [filter, setFilter] = useState<Filter>("ALL");
   const [query, setQuery] = useState("");

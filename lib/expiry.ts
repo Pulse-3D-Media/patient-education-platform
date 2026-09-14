@@ -40,6 +40,36 @@ export function addDays(from: Date, days: number): Date {
 }
 
 /**
+ * The smallest and largest number of days any link setting may hold: one
+ * day to one year. The same limit the clinic's own number already had on
+ * /pulse; the platform settings form and the override form both refuse
+ * anything outside it, and resolveShareTerms() below refuses it again
+ * before any date arithmetic, so a number that slipped past the forms (a
+ * hand edit in Neon) can never become a deadline.
+ */
+export const MIN_LINK_DAYS = 1;
+export const MAX_LINK_DAYS = 365;
+
+/** True for a whole number of days from MIN_LINK_DAYS to MAX_LINK_DAYS. Anything else never reaches the date arithmetic. */
+export function isValidLinkDays(days: unknown): days is number {
+  return typeof days === "number" && Number.isInteger(days) && days >= MIN_LINK_DAYS && days <= MAX_LINK_DAYS;
+}
+
+/**
+ * A settings value that is not a usable number of days, found when a link
+ * was about to be made. Nothing is written when this is thrown; the message
+ * is the plain sentence for the person who tried.
+ */
+export class ShareTermsError extends Error {
+  constructor(setting: string) {
+    super(
+      `Links cannot be made right now: the "${setting}" setting is not a whole number of days from ${MIN_LINK_DAYS} to ${MAX_LINK_DAYS}. Ask Pulse 3D to check the platform settings.`,
+    );
+    this.name = "ShareTermsError";
+  }
+}
+
+/**
  * The two numbers a new link is made with: how long it lasts if nobody
  * plays it, and how long it lasts after the first play. Resolved from the
  * settings at the moment the link is made and copied onto it.
@@ -54,17 +84,25 @@ export type ShareTerms = {
 /**
  * Work out a clinic's share terms from the platform settings and the
  * clinic's own override. The clinic's number wins when it has one; there is
- * no clinic override for the unclaimed days. getShareTerms() in
- * lib/db/shares.ts does the reading and calls this.
+ * no clinic override for the unclaimed days. getShareTerms() and
+ * createShare() in lib/db/shares.ts both call this.
+ *
+ * Both numbers are checked here, right before they are used to set a date:
+ * a value that is not a whole number of days from MIN_LINK_DAYS to
+ * MAX_LINK_DAYS throws a ShareTermsError and no link is made. The forms
+ * refuse such values too; this is the check that holds even if they did not.
  */
 export function resolveShareTerms(
   settings: { unclaimedDays: number; viewDays: number },
   clinic: { viewDaysOverride: number | null },
 ): ShareTerms {
-  return {
-    unclaimedDays: settings.unclaimedDays,
-    daysAfterFirstPlay: clinic.viewDaysOverride ?? settings.viewDays,
-  };
+  const unclaimedDays = settings.unclaimedDays;
+  const daysAfterFirstPlay = clinic.viewDaysOverride ?? settings.viewDays;
+  if (!isValidLinkDays(unclaimedDays)) throw new ShareTermsError("Unclaimed link days");
+  if (!isValidLinkDays(daysAfterFirstPlay)) {
+    throw new ShareTermsError(clinic.viewDaysOverride === null ? "Days after first play" : "Days a link works after the first play (this clinic)");
+  }
+  return { unclaimedDays, daysAfterFirstPlay };
 }
 
 /** The fields of a share the rule reads. A Share row from Prisma satisfies this as it is. */
@@ -90,14 +128,16 @@ export type ClaimableShare = ShareExpiryFacts & { expiryPolicy: "FIRST_PLAY"; fi
 
 /**
  * May the next real play move this link's deadline? Only a FIRST_PLAY link
- * that has never been played and carries its days-after-first-play number.
- * The policy and firstPlayedAt decide this, never the view count: a FIXED
- * link with no plays is still a FIXED link. A FIRST_PLAY link with no
- * number copied onto it (nothing in the app makes one) behaves as FIXED,
- * which keeps whatever date it has rather than guessing a new one.
+ * that has never been played and carries a usable days-after-first-play
+ * number (a whole number from MIN_LINK_DAYS to MAX_LINK_DAYS, which is all
+ * createShare ever writes). The policy and firstPlayedAt decide this, never
+ * the view count: a FIXED link with no plays is still a FIXED link. A
+ * FIRST_PLAY link with no number copied onto it, or a number outside the
+ * limits (nothing in the app makes either), behaves as FIXED, which keeps
+ * whatever date it has rather than turning a bad number into a deadline.
  */
 export function canClaimFirstPlay(share: ShareExpiryFacts): share is ClaimableShare {
-  return share.expiryPolicy === "FIRST_PLAY" && share.firstPlayedAt === null && share.daysAfterFirstPlay !== null;
+  return share.expiryPolicy === "FIRST_PLAY" && share.firstPlayedAt === null && isValidLinkDays(share.daysAfterFirstPlay);
 }
 
 /**

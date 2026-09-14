@@ -1,7 +1,9 @@
+import type { Prisma } from "@prisma/client";
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as access from "./access";
 import { prisma } from "./client";
+import * as settingsDb from "./settings";
 import { createShare, getShareByCode, recordSharePlay, ShareRefusedError } from "./shares";
 
 /**
@@ -20,10 +22,16 @@ import { createShare, getShareByCode, recordSharePlay, ShareRefusedError } from 
  * shares.test.ts changes the plan BEFORE createShare() starts; this one
  * changes it in the middle, which is the case the locks exist for.
  *
- * The last test is the control: the same overlap with a plain (unlocked)
- * read lets the change through, and the link is made under revoked
- * access. That is what the locks prevent, and it proves the detector would
- * fire if they were removed.
+ * The control in each group is the same overlap with a plain (unlocked)
+ * read: the change gets through, and the link is made under revoked
+ * access, or with settings that were already replaced. That is what the
+ * locks prevent, and it proves the detector would fire if they were
+ * removed.
+ *
+ * The second group does the same for the settings: a save that lands
+ * while a link is being made has to wait for the link (the settings lock
+ * in lib/db/settings.ts), so the link never carries numbers that were
+ * already out of date when it was written.
  */
 
 vi.mock("./access", async (importOriginal) => {
@@ -32,7 +40,13 @@ vi.mock("./access", async (importOriginal) => {
   return { ...actual, lockVideoFacts: vi.fn(actual.lockVideoFacts) };
 });
 
+vi.mock("./settings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./settings")>();
+  return { ...actual, lockSettings: vi.fn(actual.lockSettings) };
+});
+
 const real = await vi.importActual<typeof import("./access")>("./access");
+const realSettings = await vi.importActual<typeof import("./settings")>("./settings");
 
 /** How long the wrapper waits for the change to finish. A change that is not blocked finishes in tens of milliseconds. */
 const WAIT_MS = 600;
@@ -195,5 +209,115 @@ describe("a change that arrives while a link is being made", () => {
     const error = await createShare(clinic, placeholderVideo).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ShareRefusedError);
     expect((error as ShareRefusedError).reason).toBe("not-on-plan");
+  });
+});
+
+/** The four settings as a row, or null when the row has never been saved. */
+const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true } as const;
+
+async function readSettingsRow() {
+  return prisma.appSettings.findUnique({ where: { id: realSettings.SETTINGS_ID }, select: SETTINGS_SELECT });
+}
+
+/** A plain read of the settings with no lock at all, for the control. What createShare did before the settings lock existed. */
+async function readSettingsPlain(tx: Prisma.TransactionClient): Promise<settingsDb.Settings> {
+  const row = await tx.appSettings.findUnique({ where: { id: realSettings.SETTINGS_ID }, select: SETTINGS_SELECT });
+  return row ?? realSettings.SETTINGS_DEFAULTS;
+}
+
+/**
+ * Make a link while a settings `change` lands in the middle of
+ * createShare(): after it has read the settings and before it inserts.
+ * Uses the read given (the real locking one, or the plain one for the
+ * control), after which the change is started. Returns the share, and
+ * whether the change had already finished by the time createShare() went
+ * on to insert.
+ */
+async function createWhileSettingsChange(
+  clinicId: string,
+  videoId: string,
+  change: () => Promise<unknown>,
+  read: (tx: Prisma.TransactionClient) => Promise<settingsDb.Settings> = realSettings.lockSettings,
+) {
+  let changeFinishedDuringWait = false;
+  let pending: Promise<unknown> = Promise.resolve();
+
+  vi.mocked(settingsDb.lockSettings).mockImplementationOnce(async (tx) => {
+    const values = await read(tx);
+    let done = false;
+    pending = change().then(() => {
+      done = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, WAIT_MS));
+    changeFinishedDuringWait = done;
+    return values;
+  });
+
+  const share = await createShare(clinicId, videoId);
+  await pending;
+  return { share, changeFinishedDuringWait };
+}
+
+describe("a settings save that arrives while a link is being made", () => {
+  // The settings row is shared by the whole app, so these tests put it back
+  // exactly as they found it: saved again with its old values, or removed if
+  // it did not exist before and a save here created it.
+  let before: settingsDb.Settings | null = null;
+
+  beforeEach(async () => {
+    before = await readSettingsRow();
+  });
+
+  afterEach(async () => {
+    if (before) await realSettings.saveSettings(before);
+    else await prisma.appSettings.deleteMany({ where: { id: realSettings.SETTINGS_ID } });
+  });
+
+  /** The current numbers, and a save that changes the days after the first play to something else. */
+  async function planChange() {
+    const current = await realSettings.getSettings();
+    const changed = { ...current, viewDays: current.viewDays === 3 ? 4 : 3 };
+    return { current, changed };
+  }
+
+  it("waits: the link carries the numbers it read, the save lands only after the link is written, and the next link carries the new numbers", async () => {
+    const clinic = await makeClinic();
+    const { current, changed } = await planChange();
+
+    const { share, changeFinishedDuringWait } = await createWhileSettingsChange(clinic, placeholderVideo, () => realSettings.saveSettings(changed));
+
+    // The save could not finish while the link was being made.
+    expect(changeFinishedDuringWait).toBe(false);
+    // The link carries the numbers that were current when it was written.
+    expect(share.daysAfterFirstPlay).toBe(current.viewDays);
+    expect((await getShareByCode(share.code))?.daysAfterFirstPlay).toBe(current.viewDays);
+    // The save landed afterwards, and a link made now carries the new number.
+    expect((await realSettings.getSettings()).viewDays).toBe(changed.viewDays);
+    expect((await createShare(clinic, placeholderVideo)).daysAfterFirstPlay).toBe(changed.viewDays);
+  });
+
+  it("uses the new numbers when the save landed before the link read them", async () => {
+    const clinic = await makeClinic();
+    const { changed } = await planChange();
+    await realSettings.saveSettings(changed);
+    expect((await createShare(clinic, placeholderVideo)).daysAfterFirstPlay).toBe(changed.viewDays);
+  });
+
+  it("control: with a plain read instead of the locked one, the save gets through and the link is written with numbers that were already replaced", async () => {
+    const clinic = await makeClinic();
+    const { current, changed } = await planChange();
+
+    const { share, changeFinishedDuringWait } = await createWhileSettingsChange(
+      clinic,
+      placeholderVideo,
+      () => realSettings.saveSettings(changed),
+      readSettingsPlain,
+    );
+
+    // This is the race: the save finished in the gap, so by the time the
+    // link was written the settings already said something else.
+    expect(changeFinishedDuringWait).toBe(true);
+    expect(share.daysAfterFirstPlay).toBe(current.viewDays);
+    expect((await realSettings.getSettings()).viewDays).toBe(changed.viewDays);
   });
 });

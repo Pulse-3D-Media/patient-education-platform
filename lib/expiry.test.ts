@@ -6,8 +6,12 @@ import {
   daysLeftText,
   expiryAfterFirstPlay,
   isExpired,
+  isValidLinkDays,
+  MAX_LINK_DAYS,
+  MIN_LINK_DAYS,
   resolveShareTerms,
   shareExpiryState,
+  ShareTermsError,
   type ShareExpiryFacts,
 } from "./expiry";
 
@@ -42,6 +46,46 @@ describe("resolveShareTerms", () => {
     const after = resolveShareTerms({ unclaimedDays: 60, viewDays: 3 }, { viewDaysOverride: null });
     expect(before).toEqual({ unclaimedDays: 90, daysAfterFirstPlay: 7 });
     expect(after).toEqual({ unclaimedDays: 60, daysAfterFirstPlay: 3 });
+  });
+
+  it("accepts the limits themselves: one day and one year, for both numbers and for the override", () => {
+    expect(resolveShareTerms({ unclaimedDays: MIN_LINK_DAYS, viewDays: MIN_LINK_DAYS }, { viewDaysOverride: null })).toEqual({ unclaimedDays: 1, daysAfterFirstPlay: 1 });
+    expect(resolveShareTerms({ unclaimedDays: MAX_LINK_DAYS, viewDays: MAX_LINK_DAYS }, { viewDaysOverride: null })).toEqual({ unclaimedDays: 365, daysAfterFirstPlay: 365 });
+    expect(resolveShareTerms(platform, { viewDaysOverride: MAX_LINK_DAYS })).toEqual({ unclaimedDays: 90, daysAfterFirstPlay: 365 });
+    expect(resolveShareTerms(platform, { viewDaysOverride: MIN_LINK_DAYS })).toEqual({ unclaimedDays: 90, daysAfterFirstPlay: 1 });
+  });
+
+  it("refuses a number just past either limit, or not a whole number of days, before it can become a date", () => {
+    /** The call must throw a ShareTermsError whose message names the setting at fault and the limits. */
+    const refused = (settings: { unclaimedDays: number; viewDays: number }, clinic: { viewDaysOverride: number | null }, setting: string) => {
+      expect(() => resolveShareTerms(settings, clinic)).toThrow(ShareTermsError);
+      expect(() => resolveShareTerms(settings, clinic)).toThrow(setting);
+      expect(() => resolveShareTerms(settings, clinic)).toThrow(/from 1 to 365/);
+    };
+    refused({ unclaimedDays: MAX_LINK_DAYS + 1, viewDays: 7 }, { viewDaysOverride: null }, "Unclaimed link days");
+    refused({ unclaimedDays: MIN_LINK_DAYS - 1, viewDays: 7 }, { viewDaysOverride: null }, "Unclaimed link days");
+    refused({ unclaimedDays: 90, viewDays: MAX_LINK_DAYS + 1 }, { viewDaysOverride: null }, "Days after first play");
+    refused({ unclaimedDays: 90, viewDays: 0 }, { viewDaysOverride: null }, "Days after first play");
+    refused({ unclaimedDays: 90, viewDays: 7 }, { viewDaysOverride: MAX_LINK_DAYS + 1 }, "this clinic");
+    refused({ unclaimedDays: 90, viewDays: 7 }, { viewDaysOverride: 0 }, "this clinic");
+    refused({ unclaimedDays: 90.5, viewDays: 7 }, { viewDaysOverride: null }, "Unclaimed link days");
+    refused({ unclaimedDays: 90, viewDays: Number.NaN }, { viewDaysOverride: null }, "Days after first play");
+    refused({ unclaimedDays: Number.POSITIVE_INFINITY, viewDays: 7 }, { viewDaysOverride: null }, "Unclaimed link days");
+    // A bad platform number is not rescued by a good clinic number: both must hold.
+    refused({ unclaimedDays: MAX_LINK_DAYS + 1, viewDays: 7 }, { viewDaysOverride: 10 }, "Unclaimed link days");
+    // The message is the plain sentence for the person who tried, not a technical one.
+    expect(() => resolveShareTerms({ unclaimedDays: 400, viewDays: 7 }, { viewDaysOverride: null })).toThrow(/Ask Pulse 3D/);
+  });
+});
+
+describe("isValidLinkDays", () => {
+  it("is true only for a whole number of days from one to a year", () => {
+    expect(MIN_LINK_DAYS).toBe(1);
+    expect(MAX_LINK_DAYS).toBe(365);
+    for (const good of [1, 2, 7, 90, 364, 365]) expect(isValidLinkDays(good)).toBe(true);
+    for (const bad of [0, -1, 366, 1000, 1.5, 364.999, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, null, undefined, "7"]) {
+      expect(isValidLinkDays(bad)).toBe(false);
+    }
   });
 });
 
@@ -79,6 +123,14 @@ describe("canClaimFirstPlay", () => {
 
   it("is false for a first-play link with no number copied onto it, which then behaves as fixed", () => {
     expect(canClaimFirstPlay(facts({ daysAfterFirstPlay: null }))).toBe(false);
+  });
+
+  it("is false for a stored number outside the limits, so a bad number never becomes a deadline, and true at the limits", () => {
+    for (const bad of [0, MAX_LINK_DAYS + 1, 1.5, -7]) expect(canClaimFirstPlay(facts({ daysAfterFirstPlay: bad }))).toBe(false);
+    expect(canClaimFirstPlay(facts({ daysAfterFirstPlay: MIN_LINK_DAYS }))).toBe(true);
+    expect(canClaimFirstPlay(facts({ daysAfterFirstPlay: MAX_LINK_DAYS }))).toBe(true);
+    // And the state such a link shows is "fixed", not "awaiting".
+    expect(shareExpiryState(facts({ daysAfterFirstPlay: MAX_LINK_DAYS + 1 }), T).kind).toBe("fixed");
   });
 });
 

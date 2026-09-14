@@ -6,7 +6,7 @@ import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
-import { daysLeftText, shareExpiryState } from "@/lib/expiry";
+import { daysLeftText, shareExpiryState, ShareTermsError, type ShareTerms } from "@/lib/expiry";
 import { formatDuration } from "@/lib/format";
 import { getClinicAccess } from "@/lib/db/access";
 import { getShareTerms, listSharesForClinic } from "@/lib/db/shares";
@@ -91,10 +91,8 @@ export default async function LinksPage() {
     access ? listUsableVideos(access) : [],
     listSharesForClinic(clinic.id),
     getBaseUrl(),
-    getShareTerms(clinic.id),
+    readShareTerms(clinic.id),
   ]);
-  // getShareTerms is null only for a clinic id that does not exist, and this one was just found.
-  if (!terms) throw new Error("The clinic's share terms could not be read.");
 
   // What the Procedures list says when there is nothing to pick from.
   const emptyProceduresText =
@@ -133,7 +131,7 @@ export default async function LinksPage() {
     };
   });
 
-  const afterFirstPlay = `${terms.daysAfterFirstPlay} ${terms.daysAfterFirstPlay === 1 ? "day" : "days"}`;
+  const afterFirstPlay = terms ? `${terms.daysAfterFirstPlay} ${terms.daysAfterFirstPlay === 1 ? "day" : "days"}` : null;
 
   return (
     <AdminFrame
@@ -142,8 +140,15 @@ export default async function LinksPage() {
       intro={
         <>
           Create a link for a procedure and copy it to send to a patient. Only the procedures in the categories on your clinic&rsquo;s
-          plan are listed. A link works for {afterFirstPlay} after the patient first plays it. If nobody plays it, it stops on its own
-          after {terms.unclaimedDays} days.
+          plan are listed.{" "}
+          {terms ? (
+            <>
+              A link works for {afterFirstPlay} after the patient first plays it. If nobody plays it, it stops on its own after{" "}
+              {terms.unclaimedDays} days.
+            </>
+          ) : (
+            TERMS_PROBLEM
+          )}
         </>
       }
       wide
@@ -153,10 +158,29 @@ export default async function LinksPage() {
         links={links}
         baseUrl={baseUrl}
         emptyProceduresText={emptyProceduresText}
-        daysAfterFirstPlay={terms.daysAfterFirstPlay}
+        daysAfterFirstPlay={terms?.daysAfterFirstPlay ?? null}
       />
     </AdminFrame>
   );
+}
+
+/** What the page says instead of the numbers when a link setting is out of range. createShare refuses for the same reason, so no link can be made. */
+const TERMS_PROBLEM = "Links cannot be made right now: a link setting is out of range. Ask Pulse 3D to check the platform settings.";
+
+/**
+ * The clinic's share terms, or null when they cannot be worked out: a
+ * setting outside the limits in lib/expiry.ts (only a hand edit can do
+ * that). The page then says so in place of the numbers instead of failing,
+ * and the detail goes to the server log.
+ */
+async function readShareTerms(clinicId: string): Promise<ShareTerms | null> {
+  try {
+    return await getShareTerms(clinicId);
+  } catch (error) {
+    if (!(error instanceof ShareTermsError)) throw error;
+    console.error("Shared links could not read the clinic's share terms.", error);
+    return null;
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { addDays, DAY_MS } from "../expiry";
+import { addDays, DAY_MS, MAX_LINK_DAYS, ShareTermsError } from "../expiry";
 import { prisma } from "./client";
 import { getSettings } from "./settings";
 import { createShare, deleteShareForClinic, getShareTerms, recordSharePlay } from "./shares";
@@ -133,6 +133,31 @@ describe("what a new link carries", () => {
 
   it("has no terms for a clinic that does not exist", async () => {
     expect(await getShareTerms("clinic_that_does_not_exist")).toBeNull();
+  });
+
+  it("accepts a clinic number of exactly a year, the limit itself", async () => {
+    const aYear = await makeClinic({ viewDaysOverride: MAX_LINK_DAYS });
+    const share = await createShare(aYear, video, { now: T });
+    expect((await read(share.code)).daysAfterFirstPlay).toBe(MAX_LINK_DAYS);
+    expect((await getShareTerms(aYear))?.daysAfterFirstPlay).toBe(MAX_LINK_DAYS);
+  });
+
+  it("refuses a clinic number past a year with a plain sentence, and writes nothing", async () => {
+    // The forms refuse this; a hand edit could still store it. The column allows any whole number.
+    const pastAYear = await makeClinic({ viewDaysOverride: MAX_LINK_DAYS + 1 });
+    const before = await prisma.share.count({ where: { clinicId: pastAYear } });
+
+    await expect(createShare(pastAYear, video, { now: T })).rejects.toMatchObject({ name: "ShareTermsError" });
+    await expect(createShare(pastAYear, video, { now: T })).rejects.toThrow(/from 1 to 365/);
+    await expect(createShare(pastAYear, video, { now: T })).rejects.toThrow(/Ask Pulse 3D/);
+    expect(await prisma.share.count({ where: { clinicId: pastAYear } })).toBe(before);
+
+    // The pages read the same rule, so they cannot promise a number the link would refuse.
+    await expect(getShareTerms(pastAYear)).rejects.toBeInstanceOf(ShareTermsError);
+
+    // Set right, the same clinic can make links again.
+    await prisma.clinic.update({ where: { id: pastAYear }, data: { viewDaysOverride: 30 } });
+    expect((await read((await createShare(pastAYear, video, { now: T })).code)).daysAfterFirstPlay).toBe(30);
   });
 });
 

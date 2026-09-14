@@ -258,6 +258,28 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).not.toContain("Not opened");
   });
 
+  it("says links cannot be made, and turns the Create buttons off, when a link setting is out of range, instead of failing", async () => {
+    // A number past the limit can only get there by a hand edit; the page must still draw.
+    const hipClinic = createdClinicIds[3];
+    await prisma.clinic.update({ where: { id: hipClinic }, data: { viewDaysOverride: 366 } });
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+      const html = await render(LinksPage, "/admin/links");
+      expect(html).toContain("Links cannot be made right now");
+      expect(html).toContain("Ask Pulse 3D");
+      expect(html).not.toContain("after the patient first plays it");
+      expect(html).toMatch(/<button[^>]*disabled[^>]*>Create share link/);
+      // The rest of the page is still there: the procedure, and the existing links with their words.
+      expect(html).toContain(hipVideoTitle);
+      expect(html).toContain("2 play starts");
+      expect(quiet).toHaveBeenCalled();
+    } finally {
+      quiet.mockRestore();
+      await prisma.clinic.update({ where: { id: hipClinic }, data: { viewDaysOverride: null } });
+    }
+  });
+
   it("gets the same honest words on the overview's newest links", async () => {
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
     const html = await render(AdminOverviewPage, "/admin");

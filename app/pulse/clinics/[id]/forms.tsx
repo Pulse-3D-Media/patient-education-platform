@@ -4,6 +4,7 @@ import type { Category, ClinicStatus } from "@prisma/client";
 import { useActionState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
+import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
 import { formatUsPhone } from "@/lib/phone";
 import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction } from "../../actions";
 import { Outcome, SaveButton } from "../../FormBits";
@@ -187,8 +188,8 @@ export function DetailsForm({ clinicId, values }: { clinicId: string; values: De
             id="viewDaysOverride"
             name="viewDaysOverride"
             type="number"
-            min={1}
-            max={365}
+            min={MIN_LINK_DAYS}
+            max={MAX_LINK_DAYS}
             step={1}
             defaultValue={values.viewDaysOverride ?? ""}
             placeholder={`Platform setting: ${values.platformViewDays}`}

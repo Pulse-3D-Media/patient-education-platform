@@ -24,8 +24,8 @@ export function CreateShareForm({
 }: {
   videoId: string;
   baseUrl: string;
-  /** Days a new link works after the patient first plays it, as resolved for this clinic. */
-  daysAfterFirstPlay: number;
+  /** Days a new link works after the patient first plays it, as resolved for this clinic. Null when a setting is out of range: the button is off and the text says so. */
+  daysAfterFirstPlay: number | null;
 }) {
   // useActionState runs the Server Action when the form is submitted and
   // hands back whatever it returned (the new code, or an error message).
@@ -39,12 +39,15 @@ export function CreateShareForm({
         <input type="hidden" name="videoId" value={videoId} />
 
         <p className="text-sm text-[#bfbfbf]">
-          Works for {daysAfterFirstPlay} {daysAfterFirstPlay === 1 ? "day" : "days"} after the first play
+          {daysAfterFirstPlay === null
+            ? "Links cannot be made right now. Ask Pulse 3D."
+            : `Works for ${daysAfterFirstPlay} ${daysAfterFirstPlay === 1 ? "day" : "days"} after the first play`}
         </p>
 
+        {/* The disabled button is a courtesy; createShare refuses for the same reason (rule 8). */}
         <button
           type="submit"
-          disabled={pending}
+          disabled={pending || daysAfterFirstPlay === null}
           className="h-10 rounded-lg bg-[#2a829b] px-4 text-sm font-medium text-white transition hover:bg-[#1e5668] disabled:cursor-wait disabled:opacity-60"
         >
           {pending ? "Creating..." : "Create share link"}

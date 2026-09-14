@@ -30,8 +30,8 @@ export type LinkItem = {
   categoryLabel: string;
   isPlaceholder: boolean;
   expired: boolean;
-  whenText: string; // "Expires Dec 4, 2026 · 89 days left" or "Expired Sep 1, 2026"
-  viewCount: number;
+  whenText: string; // what the link is doing: "Stops Dec 13, 2026 if never played · ...", "First played ... · 6 days left", "Expired Sep 1, 2026"
+  playText: string; // "Not played yet", "1 play start", "4 play starts"
 };
 
 /** Which category pill is pressed. "ALL" is the first pill. */
@@ -59,12 +59,15 @@ export function ShareLists({
   links,
   baseUrl,
   emptyProceduresText,
+  daysAfterFirstPlay,
 }: {
   procedures: ProcedureItem[];
   links: LinkItem[];
   baseUrl: string;
   /** What the Procedures list says when the clinic has nothing to pick from, worked out by the page from the clinic's plan. */
   emptyProceduresText: string;
+  /** Days a new link works after the patient first plays it, as resolved for this clinic by the page. Shown beside every Create button. Null when a setting is out of range, so no link can be made. */
+  daysAfterFirstPlay: number | null;
 }) {
   const [filter, setFilter] = useState<Filter>("ALL");
   const [query, setQuery] = useState("");
@@ -152,7 +155,7 @@ export function ShareLists({
                   {video.durationText && <> &middot; {video.durationText}</>}
                 </p>
               </div>
-              <CreateShareForm videoId={video.id} baseUrl={baseUrl} />
+              <CreateShareForm videoId={video.id} baseUrl={baseUrl} daysAfterFirstPlay={daysAfterFirstPlay} />
             </li>
           ))}
         </ul>
@@ -192,8 +195,7 @@ export function ShareLists({
                   {/* break-all lets a long address wrap anywhere instead of widening the page */}
                   <p className="mt-1 break-all text-sm text-[#bfbfbf]">{link}</p>
                   <p className="mt-2 text-sm text-[#667085]">
-                    {share.categoryLabel} &middot; {share.whenText}&nbsp;&middot; {share.viewCount}{" "}
-                    {share.viewCount === 1 ? "view" : "views"}
+                    {share.categoryLabel} &middot; {share.whenText}&nbsp;&middot; {share.playText}
                   </p>
                 </div>
 

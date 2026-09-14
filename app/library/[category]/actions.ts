@@ -3,7 +3,6 @@
 import { getBaseUrl } from "@/lib/base-url";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { createShare, ShareRefusedError } from "@/lib/db/shares";
-import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { qrSvg } from "@/lib/qr";
 import { watchLink } from "@/lib/share-link";
 
@@ -14,10 +13,11 @@ import { watchLink } from "@/lib/share-link";
  * from a button in the browser, so the database work stays on the server
  * (rule 1) while the surgeon just taps.
  *
- * It uses the very same createShare as the admin console, and the same
- * SHARE_EXPIRY_DAYS, so a link made in the exam room and a link made at the
- * front desk are the same kind of link, work for the same number of days,
- * and both show up in the admin list.
+ * It uses the very same createShare as the admin console, which reads the
+ * settings (and the clinic's own number, when Pulse staff have set one) and
+ * copies them onto the link. So a link made in the exam room and a link
+ * made at the front desk are the same kind of link, work for the same
+ * number of days, and both show up in the admin list.
  */
 
 /** What the Send panel gets back: everything it shows, or a message. */
@@ -29,9 +29,10 @@ export type SendResult =
       link: string;
       /** The QR code as an image address the browser can show straight away. */
       qrImage: string;
-      /** When the link stops working, as an ISO date string. */
-      expiresAt: string;
-      days: number;
+      /** When the link stops working if nobody ever plays it, as an ISO date string. */
+      unclaimedUntil: string;
+      /** How many days the link works after the patient first plays it. Copied onto the link, so this is what it will do. */
+      daysAfterFirstPlay: number;
     }
   | { ok: false; error: string };
 
@@ -54,7 +55,7 @@ export async function sendShareAction(videoId: string): Promise<SendResult> {
   }
 
   try {
-    const share = await createShare(clinicId, videoId.trim(), SHARE_EXPIRY_DAYS);
+    const share = await createShare(clinicId, videoId.trim());
     const link = watchLink(await getBaseUrl(), share.code);
 
     // The QR code as SVG, packed into a data address, the same way the
@@ -66,8 +67,9 @@ export async function sendShareAction(videoId: string): Promise<SendResult> {
       code: share.code,
       link,
       qrImage,
-      expiresAt: share.expiresAt.toISOString(),
-      days: SHARE_EXPIRY_DAYS,
+      unclaimedUntil: share.expiresAt.toISOString(),
+      // createShare always copies a number onto a new link; the fallback is only for the type.
+      daysAfterFirstPlay: share.daysAfterFirstPlay ?? 0,
     };
   } catch (error) {
     // createShare said no: the video is not on the clinic's plan, is a

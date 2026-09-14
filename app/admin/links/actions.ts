@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { createShare, deleteShareForClinic, ShareRefusedError } from "@/lib/db/shares";
-import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
 import { isClinicAdmin } from "@/lib/roles";
 
 /**
@@ -38,7 +37,8 @@ type CreateShareState = { code?: string; error?: string } | null;
 /**
  * Handles the "Create share link" form for one video.
  * The form sends one field, videoId (hidden). How long the link works is
- * not chosen on the form: every link gets SHARE_EXPIRY_DAYS.
+ * not chosen on the form: createShare reads the settings (and the clinic's
+ * own number, when Pulse staff have set one) and copies them onto the link.
  */
 export async function createShareAction(
   _previous: CreateShareState,
@@ -57,7 +57,7 @@ export async function createShareAction(
   }
 
   try {
-    const share = await createShare(clinicId, videoId, SHARE_EXPIRY_DAYS);
+    const share = await createShare(clinicId, videoId);
     // Tell Next.js the links page and the overview changed, so the list and the counts refresh.
     revalidatePath("/admin/links");
     revalidatePath("/admin");

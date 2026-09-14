@@ -29,8 +29,8 @@ function pick(row: Row, select: Record<string, boolean> | undefined) {
   return Object.fromEntries(Object.keys(select).filter((key) => select[key]).map((key) => [key, row[key]]));
 }
 
-vi.mock("./client", () => ({
-  prisma: {
+vi.mock("./client", () => {
+  const client = {
     appSettings: {
       findUnique: async ({ where, select }: { where: { id: string }; select?: Record<string, boolean> }) =>
         table.row && table.row.id === where.id ? pick(table.row, select) : null,
@@ -50,8 +50,15 @@ vi.mock("./client", () => ({
       },
       count: async () => (table.row ? 1 : 0),
     },
-  },
-}));
+    // saveSettings runs inside a transaction and takes the settings lock first
+    // (see lib/db/settings.ts). Here the "transaction" is the same stand-in and
+    // the lock statement does nothing; the real lock is proved against the
+    // database in lib/db/shares.race.test.ts.
+    $transaction: async (work: (tx: unknown) => Promise<unknown>) => work(client),
+    $executeRaw: async () => 0,
+  };
+  return { prisma: client };
+});
 
 beforeEach(() => {
   table.row = null;

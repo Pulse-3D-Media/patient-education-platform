@@ -102,7 +102,7 @@ describe("addClinicNote and listNotesForClinic", () => {
       "Evan Miller",
     );
     expect(first.logged).toBe(
-      'Details changed: name changed from "Vitest notes details" to "Vitest notes renamed"; phone set to (801) 555-0123; placeholder videos hidden; days a link works after first view changed from the platform setting to 10.',
+      'Details changed: name changed from "Vitest notes details" to "Vitest notes renamed"; phone set to (801) 555-0123; placeholder videos hidden; days a link works after the first play changed from the platform setting to 10.',
     );
 
     // Saving the form untouched writes nothing.
@@ -120,7 +120,7 @@ describe("addClinicNote and listNotesForClinic", () => {
       "Evan Miller",
     );
     expect(cleared.logged).toBe(
-      'Details changed: phone removed (was (801) 555-0123); notice set to "Welcome to the pilot"; days a link works after first view changed from 10 to the platform setting.',
+      'Details changed: phone removed (was (801) 555-0123); notice set to "Welcome to the pilot"; days a link works after the first play changed from 10 to the platform setting.',
     );
 
     expect(await listNotesForClinic(clinicId)).toHaveLength(2);

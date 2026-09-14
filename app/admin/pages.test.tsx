@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
+import { createShare } from "@/lib/db/shares";
 import BillingPage from "./billing/page";
 import LinksPage from "./links/page";
 import AdminOverviewPage from "./page";
@@ -103,6 +104,16 @@ beforeAll(async () => {
     select: { id: true },
   });
   createdVideoIds.push(video.id);
+
+  // Two links for the Hip clinic: one written the way every link was before the
+  // first-play rule (no policy, so the database makes it FIXED), played twice,
+  // and one made now, not yet played. The links page has to describe each by
+  // the rule it was made under.
+  const hipClinic = createdClinicIds[3];
+  await prisma.share.create({
+    data: { code: `p${randomBytes(3).toString("hex").slice(0, 5)}`, clinicId: hipClinic, videoId: video.id, expiresAt: new Date(Date.now() + 60 * 86_400_000), viewCount: 2 },
+  });
+  await createShare(hipClinic, video.id);
 });
 
 beforeEach(() => {
@@ -228,6 +239,53 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(hipHtml).toContain(hipVideoTitle);
     expect(hipHtml).toContain("Placeholder");
     expect(hipHtml).toContain("Create share link");
+  });
+
+  it("describes each link by the rule it was made under, and says how long a new link works, in the words createShare uses", async () => {
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    const html = await render(LinksPage, "/admin/links");
+    // The intro and the helper text beside Create: how a new link works.
+    expect(html).toContain("after the patient first plays it");
+    expect(html).toMatch(/Works for \d+ days after the first play/);
+    // The legacy link: its fixed date, why it will not shorten, and its two play starts.
+    expect(html).toContain("date set when the link was made, playing does not change it");
+    expect(html).toContain("2 play starts");
+    // The new link: not played yet, stops on its unclaimed date unless played first.
+    expect(html).toContain("if never played");
+    expect(html).toContain("Not played yet");
+    // Playback is what is counted, so nothing is called a view or an opening.
+    expect(html).not.toMatch(/\d+ views?\b/);
+    expect(html).not.toContain("Not opened");
+  });
+
+  it("says links cannot be made, and turns the Create buttons off, when a link setting is out of range, instead of failing", async () => {
+    // A number past the limit can only get there by a hand edit; the page must still draw.
+    const hipClinic = createdClinicIds[3];
+    await prisma.clinic.update({ where: { id: hipClinic }, data: { viewDaysOverride: 366 } });
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+      const html = await render(LinksPage, "/admin/links");
+      expect(html).toContain("Links cannot be made right now");
+      expect(html).toContain("Ask Pulse 3D");
+      expect(html).not.toContain("after the patient first plays it");
+      expect(html).toMatch(/<button[^>]*disabled[^>]*>Create share link/);
+      // The rest of the page is still there: the procedure, and the existing links with their words.
+      expect(html).toContain(hipVideoTitle);
+      expect(html).toContain("2 play starts");
+      expect(quiet).toHaveBeenCalled();
+    } finally {
+      quiet.mockRestore();
+      await prisma.clinic.update({ where: { id: hipClinic }, data: { viewDaysOverride: null } });
+    }
+  });
+
+  it("gets the same honest words on the overview's newest links", async () => {
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    const html = await render(AdminOverviewPage, "/admin");
+    expect(html).toContain("if never played");
+    expect(html).toContain("Not played yet");
+    expect(html).toContain("2 play starts");
   });
 
   it("sees an estimate on Billing that is labelled as one", async () => {

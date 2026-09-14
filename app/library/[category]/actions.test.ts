@@ -104,7 +104,8 @@ describe("sendShareAction", () => {
     if (!result.ok) return;
     expect(result.link).toBe(`http://localhost:3000/watch/${result.code}`);
     expect(result.qrImage.startsWith("data:image/svg+xml")).toBe(true);
-    expect(result.days).toBeGreaterThan(0);
+    expect(result.daysAfterFirstPlay).toBeGreaterThan(0);
+    expect(new Date(result.unclaimedUntil).getTime()).toBeGreaterThan(Date.now());
 
     const share = await prisma.share.findUnique({ where: { code: result.code }, select: { clinicId: true, videoId: true } });
     expect(share).toEqual({ clinicId: kneeClinic, videoId: placeholderId });

@@ -6,10 +6,10 @@ import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
-import { SHARE_EXPIRY_DAYS } from "@/lib/expiry";
+import { daysLeftText, shareExpiryState, ShareTermsError, type ShareTerms } from "@/lib/expiry";
 import { formatDuration } from "@/lib/format";
 import { getClinicAccess } from "@/lib/db/access";
-import { listSharesForClinic } from "@/lib/db/shares";
+import { getShareTerms, listSharesForClinic } from "@/lib/db/shares";
 import { listUsableVideos } from "@/lib/db/videos";
 import { AdminFrame } from "../AdminFrame";
 import { ShareLists } from "./ShareLists";
@@ -23,9 +23,17 @@ import { ShareLists } from "./ShareLists";
  *   1. Every video this clinic may share (published, in a category on its
  *      plan, placeholders only while the clinic is shown them), each with a
  *      "Create share link" form.
- *   2. Every share link this clinic has made, with its expiry and view count,
- *      and buttons to copy the link, download its QR code as a picture,
- *      open a printable pamphlet, or cancel it (after a yes/no popup).
+ *   2. Every share link this clinic has made, with what it is doing right
+ *      now (not played yet, played and counting down, or expired), how many
+ *      play starts it has had, and buttons to copy the link, download its
+ *      QR code as a picture, open a printable pamphlet, or cancel it (after
+ *      a yes/no popup).
+ *
+ * How long a link works is described in the same words the link was made
+ * with: the page reads the clinic's share terms (getShareTerms) from the
+ * same settings createShare copies onto a new link, and describes each
+ * existing link with the rule in lib/expiry.ts. A link made before the
+ * first-play rule shows its fixed date and says so.
  *
  * Above both lists sit category pills and a search box, so the desk can find
  * one procedure (or its links) without reading the whole list.
@@ -79,10 +87,11 @@ export default async function LinksPage() {
   // shown them. The same rule createShare() applies when the form is sent
   // (lib/access.ts), so the list and the button can never disagree.
   const access = await getClinicAccess(clinic.id);
-  const [videos, shares, baseUrl] = await Promise.all([
+  const [videos, shares, baseUrl, terms] = await Promise.all([
     access ? listUsableVideos(access) : [],
     listSharesForClinic(clinic.id),
     getBaseUrl(),
+    readShareTerms(clinic.id),
   ]);
 
   // What the Procedures list says when there is nothing to pick from.
@@ -103,7 +112,8 @@ export default async function LinksPage() {
   }));
 
   const links = shares.map((share) => {
-    const expired = share.expiresAt < now;
+    const state = shareExpiryState(share, now);
+    const expired = state.kind === "expired";
     // A link to a video that has been unpublished (on /pulse/videos) does not
     // work either. It is shown greyed like an expired one, and the words say
     // why. It starts working again if the video is published again.
@@ -116,14 +126,12 @@ export default async function LinksPage() {
       categoryLabel: categoryLabel(share.video.category),
       isPlaceholder: share.video.isPlaceholder,
       expired: expired || takenDown,
-      whenText: expired
-        ? `Expired ${formatDate(share.expiresAt)}`
-        : takenDown
-          ? "Not working: this video is not published right now"
-          : `Expires ${formatDate(share.expiresAt)} · ${daysLeft(share.expiresAt, now)}`,
-      viewCount: share.viewCount,
+      whenText: takenDown && !expired ? "Not working: this video is not published right now" : whenWords(state, now),
+      playText: playWords(share.viewCount),
     };
   });
+
+  const afterFirstPlay = terms ? `${terms.daysAfterFirstPlay} ${terms.daysAfterFirstPlay === 1 ? "day" : "days"}` : null;
 
   return (
     <AdminFrame
@@ -132,14 +140,78 @@ export default async function LinksPage() {
       intro={
         <>
           Create a link for a procedure and copy it to send to a patient. Only the procedures in the categories on your clinic&rsquo;s
-          plan are listed. The link stops working after {SHARE_EXPIRY_DAYS} days.
+          plan are listed.{" "}
+          {terms ? (
+            <>
+              A link works for {afterFirstPlay} after the patient first plays it. If nobody plays it, it stops on its own after{" "}
+              {terms.unclaimedDays} days.
+            </>
+          ) : (
+            TERMS_PROBLEM
+          )}
         </>
       }
       wide
     >
-      <ShareLists procedures={procedures} links={links} baseUrl={baseUrl} emptyProceduresText={emptyProceduresText} />
+      <ShareLists
+        procedures={procedures}
+        links={links}
+        baseUrl={baseUrl}
+        emptyProceduresText={emptyProceduresText}
+        daysAfterFirstPlay={terms?.daysAfterFirstPlay ?? null}
+      />
     </AdminFrame>
   );
+}
+
+/** What the page says instead of the numbers when a link setting is out of range. createShare refuses for the same reason, so no link can be made. */
+const TERMS_PROBLEM = "Links cannot be made right now: a link setting is out of range. Ask Pulse 3D to check the platform settings.";
+
+/**
+ * The clinic's share terms, or null when they cannot be worked out: a
+ * setting outside the limits in lib/expiry.ts (only a hand edit can do
+ * that). The page then says so in place of the numbers instead of failing,
+ * and the detail goes to the server log.
+ */
+async function readShareTerms(clinicId: string): Promise<ShareTerms | null> {
+  try {
+    return await getShareTerms(clinicId);
+  } catch (error) {
+    if (!(error instanceof ShareTermsError)) throw error;
+    console.error("Shared links could not read the clinic's share terms.", error);
+    return null;
+  }
+}
+
+/**
+ * What a link is doing, in the words the desk reads beside it. Each state
+ * from lib/expiry.ts gets one line:
+ *   expired    "Expired Sep 21, 2026"
+ *   awaiting   "Stops Dec 13, 2026 if never played · works 7 days after the first play"
+ *   played     "First played Sep 14, 2026 · expires Sep 21, 2026 · 6 days left"
+ *   fixed      "Expires Dec 4, 2026 · 81 days left · date set when the link was made, playing does not change it"
+ * The last one is a link made before the first-play rule; its date is shown
+ * as it is and the reader is told why it will not shorten when played.
+ */
+function whenWords(state: ReturnType<typeof shareExpiryState>, now: Date) {
+  switch (state.kind) {
+    case "expired":
+      return `Expired ${formatDate(state.expiresAt)}`;
+    case "awaiting":
+      return `Stops ${formatDate(state.unclaimedUntil)} if never played · works ${state.daysAfterFirstPlay} ${
+        state.daysAfterFirstPlay === 1 ? "day" : "days"
+      } after the first play`;
+    case "played":
+      return `First played ${formatDate(state.firstPlayedAt)} · expires ${formatDate(state.expiresAt)} · ${daysLeftText(state.expiresAt, now)}`;
+    case "fixed":
+      return `Expires ${formatDate(state.expiresAt)} · ${daysLeftText(state.expiresAt, now)} · date set when the link was made, playing does not change it`;
+  }
+}
+
+/** "Not played yet", "1 play start", "4 play starts". A play start is counted once per page load, the first time the video really plays. */
+function playWords(viewCount: number) {
+  if (viewCount === 0) return "Not played yet";
+  return `${viewCount} ${viewCount === 1 ? "play start" : "play starts"}`;
 }
 
 /** "KNEE" becomes "Knee". */
@@ -155,11 +227,4 @@ function formatDate(date: Date) {
     year: "numeric",
     timeZone: "America/Denver",
   });
-}
-
-/** "14 days left", "1 day left", or "Less than a day left". Rounded to the nearest day. */
-function daysLeft(expiresAt: Date, now: Date) {
-  const days = Math.round((expiresAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-  if (days < 1) return "Less than a day left";
-  return `${days} ${days === 1 ? "day" : "days"} left`;
 }

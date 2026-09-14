@@ -77,7 +77,7 @@ model Clinic {
   notes            String? // the old single notes box. Superseded by ClinicNote (its text was copied over); kept, never read (rule 4)
   noticeText       String? // a line shown at the top of that clinic's /admin
   showPlaceholders Boolean      @default(true) // false hides placeholder videos from this clinic's library
-  viewDaysOverride Int? // days a patient link works after first view, instead of AppSettings.viewDays
+  viewDaysOverride Int? // days a patient link works after the first play, instead of AppSettings.viewDays; copied onto each new link when it is made
   phone            String? // the clinic's phone, stored as digits only; see lib/phone.ts
   categories       Category[]   @default([]) // the categories on the clinic's plan; empty means none yet
   surgeonSeats     Int          @default(0) // surgeon seats the clinic pays for
@@ -137,11 +137,25 @@ model ClinicNote {
 /// row does not exist yet, so nothing depends on it having been created.
 model AppSettings {
   id            String   @id @default("default")
-  unclaimedDays Int      @default(90) // days a patient link works if nobody ever opens it
-  viewDays      Int      @default(7) // days a patient link keeps working after the first view
+  unclaimedDays Int      @default(90) // days a patient link works if nobody ever plays it
+  viewDays      Int      @default(7) // days a patient link keeps working after the first play; copied onto each new link as Share.daysAfterFirstPlay
   graceDays     Int      @default(14) // days a clinic keeps access after a missed payment
   qrDailyFlag   Int      @default(200) // scans of one QR code in a day that get flagged for a look
   updatedAt     DateTime @updatedAt
+}
+
+/// How a share link's expiry date is worked out (see lib/expiry.ts).
+///   FIXED       the Phase 1 rule: expiresAt was set when the link was made
+///               and never moves, played or not. Every link made before the
+///               first-play rule shipped is FIXED, and so is any link an
+///               older copy of the app makes, because FIXED is the database
+///               default. Their dates are never changed.
+///   FIRST_PLAY  the rule from September 2026 on: the link stops after
+///               unclaimedDays if nobody plays it, and the first real play
+///               moves expiresAt to that moment plus daysAfterFirstPlay.
+enum ExpiryPolicy {
+  FIXED
+  FIRST_PLAY
 }
 
 model Share {
@@ -151,10 +165,15 @@ model Share {
   clinic       Clinic    @relation(fields: [clinicId], references: [id])
   videoId      String
   video        Video     @relation(fields: [videoId], references: [id])
-  expiresAt    DateTime
+  expiresAt    DateTime // when the link stops working. Under FIRST_PLAY it moves once, at the first play
   createdAt    DateTime  @default(now())
-  viewCount    Int       @default(0)
+  viewCount    Int       @default(0) // play starts on the patient page: one per page load, the first time the video actually plays
   lastViewedAt DateTime?
+
+  // The expiry rule this link was made under, and what it needs (see the enum above).
+  expiryPolicy       ExpiryPolicy @default(FIXED) // FIXED by default so a link written without it (older code, a hand insert) is a legacy link
+  firstPlayedAt      DateTime? // set once, by the first real play of a FIRST_PLAY link; the deadline moved at that moment and never again
+  daysAfterFirstPlay Int? // copied from the settings (the clinic's override, else the platform's viewDays) when the link was made, so a later settings edit never changes a link already issued
 
   @@index([clinicId])
 }

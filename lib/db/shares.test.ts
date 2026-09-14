@@ -6,7 +6,7 @@ import {
   deleteShareForClinic,
   getShareByCode,
   listRecentSharesForClinic,
-  recordShareView,
+  recordSharePlay,
   ShareRefusedError,
   summarizeSharesForClinic,
 } from "./shares";
@@ -49,7 +49,7 @@ async function makeVideo(isPublished: boolean) {
 
 /** A link with a chosen expiry and view count, the way real ones end up after use. */
 async function makeShare(clinicId: string, videoId: string, expiresInDays: number, viewCount = 0) {
-  const share = await createShare(clinicId, videoId, 90);
+  const share = await createShare(clinicId, videoId);
   createdShareIds.push(share.id);
   await prisma.share.update({
     where: { id: share.id },
@@ -150,7 +150,7 @@ async function makeVideoOf(data: { category: "KNEE" | "HIP"; isPlaceholder: bool
 /** Ask createShare and expect it to say no for this reason, writing nothing. */
 async function expectRefused(clinicId: string, videoId: string, reason: string) {
   const before = await prisma.share.count({ where: { clinicId } });
-  await expect(createShare(clinicId, videoId, 90)).rejects.toMatchObject({ name: "ShareRefusedError", reason });
+  await expect(createShare(clinicId, videoId)).rejects.toMatchObject({ name: "ShareRefusedError", reason });
   expect(await prisma.share.count({ where: { clinicId } })).toBe(before);
 }
 
@@ -161,7 +161,7 @@ describe("createShare enforces what the clinic may use", () => {
 
     await expectRefused(hipClinic, publishedVideo, "not-on-plan");
 
-    const share = await createShare(kneeClinic, publishedVideo, 90);
+    const share = await createShare(kneeClinic, publishedVideo);
     createdShareIds.push(share.id);
     expect(share.clinicId).toBe(kneeClinic);
   });
@@ -176,7 +176,7 @@ describe("createShare enforces what the clinic may use", () => {
       const clinic = await makeClinic(`Vitest access clinic ${status}`, { status });
       await expectRefused(clinic, publishedVideo, "clinic-closed");
     }
-    await expect(createShare("clinic_that_does_not_exist", publishedVideo, 90)).rejects.toMatchObject({ reason: "clinic-closed" });
+    await expect(createShare("clinic_that_does_not_exist", publishedVideo)).rejects.toMatchObject({ reason: "clinic-closed" });
   });
 
   it("refuses an unpublished video and a video that does not exist", async () => {
@@ -193,7 +193,7 @@ describe("createShare enforces what the clinic may use", () => {
     // publishedVideo is a placeholder (see makeVideo above).
     await expectRefused(clinic, publishedVideo, "placeholder-hidden");
 
-    const share = await createShare(clinic, finished, 90);
+    const share = await createShare(clinic, finished);
     createdShareIds.push(share.id);
     expect(share.videoId).toBe(finished);
   });
@@ -208,7 +208,7 @@ describe("createShare enforces what the clinic may use", () => {
 
   it("carries a plain sentence for the person who asked", async () => {
     const hipClinic = await makeClinic("Vitest access clinic hip words", { categories: ["HIP"] });
-    const error = await createShare(hipClinic, publishedVideo, 90).catch((e: unknown) => e);
+    const error = await createShare(hipClinic, publishedVideo).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ShareRefusedError);
     expect((error as Error).message).toMatch(/not in a category on your clinic's plan/);
   });
@@ -217,14 +217,14 @@ describe("createShare enforces what the clinic may use", () => {
 describe("a link already issued outlives the plan change that would stop a new one", () => {
   it("keeps playing after its category leaves the plan, while a new link is refused", async () => {
     const clinic = await makeClinic("Vitest access clinic plan removed");
-    const issued = await createShare(clinic, publishedVideo, 90);
+    const issued = await createShare(clinic, publishedVideo);
     createdShareIds.push(issued.id);
 
     // Knee comes off the plan.
     await prisma.clinic.update({ where: { id: clinic }, data: { categories: [] } });
 
     // The patient page looks the link up by its code and counts a play, plan or no plan.
-    await recordShareView(issued.code);
+    await recordSharePlay(issued.code);
     const after = await getShareByCode(issued.code);
     expect(after?.id).toBe(issued.id);
     expect(after?.viewCount).toBe(1);
@@ -235,12 +235,12 @@ describe("a link already issued outlives the plan change that would stop a new o
 
   it("keeps playing after the clinic is paused, while a new link is refused", async () => {
     const clinic = await makeClinic("Vitest access clinic paused later");
-    const issued = await createShare(clinic, publishedVideo, 90);
+    const issued = await createShare(clinic, publishedVideo);
     createdShareIds.push(issued.id);
 
     await prisma.clinic.update({ where: { id: clinic }, data: { status: "PAUSED" } });
 
-    await recordShareView(issued.code);
+    await recordSharePlay(issued.code);
     expect((await getShareByCode(issued.code))?.viewCount).toBe(1);
     await expectRefused(clinic, publishedVideo, "clinic-closed");
   });
@@ -248,13 +248,13 @@ describe("a link already issued outlives the plan change that would stop a new o
   it("is stopped by the video being unpublished, which also stops a new link", async () => {
     const clinic = await makeClinic("Vitest access clinic unpublished later");
     const video = await makeVideoOf({ category: "KNEE", isPlaceholder: true });
-    const issued = await createShare(clinic, video, 90);
+    const issued = await createShare(clinic, video);
     createdShareIds.push(issued.id);
 
     await prisma.video.update({ where: { id: video }, data: { isPublished: false } });
 
     // The patient page shows the "not available" page for this link and a play is not counted.
-    await recordShareView(issued.code);
+    await recordSharePlay(issued.code);
     const after = await getShareByCode(issued.code);
     expect(after?.video.isPublished).toBe(false);
     expect(after?.viewCount).toBe(0);

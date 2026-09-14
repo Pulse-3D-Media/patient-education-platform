@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as access from "./access";
 import { prisma } from "./client";
-import { createShare, getShareByCode, recordShareView, ShareRefusedError } from "./shares";
+import { createShare, getShareByCode, recordSharePlay, ShareRefusedError } from "./shares";
 
 /**
  * The forced overlap: a change to what the clinic may use arrives AFTER
@@ -102,13 +102,13 @@ async function createWhile(
     return facts;
   });
 
-  const share = await createShare(clinicId, videoId, 90);
+  const share = await createShare(clinicId, videoId);
   await pending;
   return { share, changeFinishedDuringWait };
 }
 
 async function expectRefused(clinicId: string, videoId: string, reason: string) {
-  await expect(createShare(clinicId, videoId, 90)).rejects.toMatchObject({ name: "ShareRefusedError", reason });
+  await expect(createShare(clinicId, videoId)).rejects.toMatchObject({ name: "ShareRefusedError", reason });
 }
 
 describe("a change that arrives while a link is being made", () => {
@@ -155,7 +155,7 @@ describe("a change that arrives while a link is being made", () => {
 
     expect(changeFinishedDuringWait).toBe(false);
     // The link exists, and because its video is now unpublished a play is not counted.
-    await recordShareView(share.code);
+    await recordSharePlay(share.code);
     const after = await getShareByCode(share.code);
     expect(after?.id).toBe(share.id);
     expect(after?.video.isPublished).toBe(false);
@@ -166,7 +166,7 @@ describe("a change that arrives while a link is being made", () => {
   it("two links being made at once for the same clinic do not block each other", async () => {
     const clinic = await makeClinic();
     const started = Date.now();
-    const [a, b] = await Promise.all([createShare(clinic, placeholderVideo, 90), createShare(clinic, placeholderVideo, 90)]);
+    const [a, b] = await Promise.all([createShare(clinic, placeholderVideo), createShare(clinic, placeholderVideo)]);
     expect(a.code).not.toBe(b.code);
     expect(a.clinicId).toBe(clinic);
     expect(b.clinicId).toBe(clinic);
@@ -192,7 +192,7 @@ describe("a change that arrives while a link is being made", () => {
   it("still refuses when the change lands before the locked read", async () => {
     const clinic = await makeClinic();
     await prisma.clinic.update({ where: { id: clinic }, data: { categories: [] } });
-    const error = await createShare(clinic, placeholderVideo, 90).catch((e: unknown) => e);
+    const error = await createShare(clinic, placeholderVideo).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ShareRefusedError);
     expect((error as ShareRefusedError).reason).toBe("not-on-plan");
   });

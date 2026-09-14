@@ -8,6 +8,7 @@ import { ADMIN_SECTIONS } from "@/lib/admin-nav";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { listRecentSharesForClinic, summarizeSharesForClinic, SUMMARY_RECENT_DAYS, SUMMARY_SOON_DAYS } from "@/lib/db/shares";
+import { shareExpiryState } from "@/lib/expiry";
 import { AdminFrame } from "./AdminFrame";
 
 /**
@@ -139,7 +140,18 @@ export default async function AdminOverviewPage() {
         ) : (
           <ul className="mt-3 divide-y divide-white/10 rounded-2xl border border-white/10 bg-[#0d1113]">
             {recent.map((share) => {
-              const works = share.expiresAt > now && share.video.isPublished;
+              const state = shareExpiryState(share, now);
+              const works = state.kind !== "expired" && share.video.isPublished;
+              // One short line per link; the full wording is on /admin/links. A link nobody has
+              // played yet shows the date it stops on if that stays true, since its deadline
+              // moves at the first play (lib/expiry.ts).
+              const when = !works
+                ? share.video.isPublished
+                  ? "Expired"
+                  : "Not working"
+                : state.kind === "awaiting"
+                  ? `Open until ${formatDate(state.unclaimedUntil)} if never played`
+                  : `Works until ${formatDate(share.expiresAt)}`;
               return (
                 <li key={share.id} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <p className={`flex flex-wrap items-center gap-2 text-[15px] ${works ? "" : "text-[#667085]"}`}>
@@ -147,8 +159,8 @@ export default async function AdminOverviewPage() {
                     {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
                   </p>
                   <p className="text-sm text-[#667085]">
-                    {works ? `Works until ${formatDate(share.expiresAt)}` : share.video.isPublished ? "Expired" : "Not working"} &middot;{" "}
-                    {share.viewCount} {share.viewCount === 1 ? "play start" : "play starts"}
+                    {when} &middot;{" "}
+                    {share.viewCount === 0 ? "Not played yet" : `${share.viewCount} ${share.viewCount === 1 ? "play start" : "play starts"}`}
                   </p>
                 </li>
               );

@@ -217,7 +217,7 @@ export async function saveSettingsAction(_previous: FormState, formData: FormDat
 /** The names the settings form uses, for its error messages. */
 const LABELS: Record<keyof Settings, string> = {
   unclaimedDays: "Unclaimed link days",
-  viewDays: "Days after first view",
+  viewDays: "Days after first play",
   graceDays: "Grace days",
   qrDailyFlag: "QR scans per day to flag",
 };

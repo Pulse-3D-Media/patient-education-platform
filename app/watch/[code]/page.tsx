@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ClockIcon, SearchIcon } from "@/components/ui/icons";
 import { LOGO_URL } from "@/lib/brand";
 import { getShareByCode } from "@/lib/db/shares";
+import { isExpired } from "@/lib/expiry";
 import { describeDuration } from "@/lib/format";
 import { getPlaybackUrl } from "@/lib/video";
 import { WatchPlayer } from "./WatchPlayer";
@@ -35,6 +36,11 @@ import { WatchPlayer } from "./WatchPlayer";
  * (unpublished on /pulse/videos), the patient sees a calm page asking them
  * to get a new link from the practice.
  *
+ * Opening the page changes nothing about the link. Its deadline can only
+ * move when the video actually starts playing (WatchPlayer, recordPlay),
+ * and only once, so a text message previewing the link, a browser
+ * fetching the poster, or a page left open does not start the clock.
+ *
  * Always rendered fresh, so the expiry check is never a stale, cached answer.
  */
 export const dynamic = "force-dynamic";
@@ -56,7 +62,8 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
     );
   }
 
-  if (share.expiresAt < new Date()) {
+  // At the deadline itself the link is over (lib/expiry.ts draws that line, and the play recording draws it in the same place).
+  if (isExpired(share, new Date())) {
     return (
       <Unavailable
         icon={<ClockIcon className="h-8 w-8" />}

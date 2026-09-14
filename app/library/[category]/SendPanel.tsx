@@ -74,7 +74,7 @@ export function SendPanel({
         {result === null ? (
           <Creating />
         ) : result.ok ? (
-          <Ready link={result.link} qrImage={result.qrImage} expiresAt={result.expiresAt} days={result.days} />
+          <Ready link={result.link} qrImage={result.qrImage} unclaimedUntil={result.unclaimedUntil} daysAfterFirstPlay={result.daysAfterFirstPlay} />
         ) : (
           <Failed error={result.error} onRetry={onRetry} />
         )}
@@ -107,9 +107,19 @@ function Creating() {
 }
 
 /** The link, its Copy button and the QR code, side by side on wide screens. */
-function Ready({ link, qrImage, expiresAt, days }: { link: string; qrImage: string; expiresAt: string; days: number }) {
+function Ready({
+  link,
+  qrImage,
+  unclaimedUntil,
+  daysAfterFirstPlay,
+}: {
+  link: string;
+  qrImage: string;
+  unclaimedUntil: string;
+  daysAfterFirstPlay: number;
+}) {
   // With the year, because a link made in the autumn runs into the next one.
-  const until = new Date(expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const until = new Date(unclaimedUntil).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   return (
     <div className="mt-6 flex flex-col items-center gap-6 sm:flex-row sm:items-start">
@@ -136,8 +146,10 @@ function Ready({ link, qrImage, expiresAt, days }: { link: string; qrImage: stri
           <CopyButton text={link} label="Copy link" />
         </div>
 
+        {/* The same numbers createShare copied onto this link, so this says what the link will actually do. */}
         <p className="mt-5 text-sm text-[#667085]">
-          Works for {days} days, until {until}. The office can print a pamphlet for it from Share links.
+          Once the patient plays it, it works for {daysAfterFirstPlay} {daysAfterFirstPlay === 1 ? "day" : "days"}. If nobody plays it,
+          it stops on {until}. The office can print a pamphlet for it from Shared links.
         </p>
       </div>
     </div>

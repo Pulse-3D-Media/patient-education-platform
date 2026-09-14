@@ -394,7 +394,7 @@ export async function updateClinicDetails(clinicId: string, details: ClinicDetai
           ? null
           : `placeholder videos ${details.showPlaceholders ? "shown" : "hidden"}`,
         changeWords(
-          "days a link works after first view",
+          "days a link works after the first play",
           before.viewDaysOverride === null ? platform : String(before.viewDaysOverride),
           details.viewDaysOverride === null ? platform : String(details.viewDaysOverride),
         ),

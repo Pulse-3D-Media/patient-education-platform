@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { PlayIcon } from "@/components/ui/icons";
-import { recordView } from "./actions";
+import { recordPlay } from "./actions";
 
 /**
  * The patient's player: the video with one big Play button over it.
@@ -19,7 +19,17 @@ import { recordView } from "./actions";
  *
  * Client component because the tap itself has to start playback (browsers
  * only allow sound when the person has just tapped), and because the first
- * play is what counts as a view.
+ * real play is what counts as a play start.
+ *
+ * What counts as a play start, and why it is tied to the `playing` event:
+ * the browser fires `play` the moment play is asked for, and `playing` only
+ * once frames are actually being shown. Loading the page, a text message
+ * previewing it, the poster or the first bytes being fetched (preload), and
+ * pausing and resuming fire neither one in a way that reaches the server:
+ * the count is sent once per page load, the first time `playing` fires, and
+ * never again on that page (`counted`), whatever happens after. That one
+ * call is also what may move a first-play link's deadline, so nothing but
+ * real playback can start the clock.
  */
 export function WatchPlayer({ src, title, code }: { src: string; title: string; code: string }) {
   const video = useRef<HTMLVideoElement>(null);
@@ -33,12 +43,18 @@ export function WatchPlayer({ src, title, code }: { src: string; title: string; 
     });
   }
 
+  /** Play was asked for: hand the patient the browser's own controls. */
   function onPlay() {
     setStarted(true);
+  }
+
+  /** Frames are actually showing: count the play start, once per page load. */
+  function onPlaying() {
     if (counted.current) return;
     counted.current = true;
-    // Count the view in the background. If it fails, the video still plays.
-    recordView(code).catch(() => {});
+    // Recorded in the background, one attempt. If it does not get through,
+    // the video still plays; the play is just not counted (see actions.ts).
+    recordPlay(code).catch(() => {});
   }
 
   return (
@@ -52,6 +68,7 @@ export function WatchPlayer({ src, title, code }: { src: string; title: string; 
         controls={started}
         controlsList="nodownload"
         onPlay={onPlay}
+        onPlaying={onPlaying}
         aria-label={title}
         className="h-full w-full object-contain"
       />

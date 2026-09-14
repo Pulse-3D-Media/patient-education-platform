@@ -181,7 +181,7 @@ export function DetailsForm({ clinicId, values }: { clinicId: string; values: De
         </div>
         <div>
           <label htmlFor="viewDaysOverride" className={LABEL}>
-            Days a link works after first view
+            Days a link works after the first play
           </label>
           <input
             id="viewDaysOverride"
@@ -194,7 +194,10 @@ export function DetailsForm({ clinicId, values }: { clinicId: string; values: De
             placeholder={`Platform setting: ${values.platformViewDays}`}
             className={INPUT}
           />
-          <p className="mt-1 text-xs text-[#667085]">Empty means the platform setting ({values.platformViewDays} days).</p>
+          <p className="mt-1 text-xs text-[#667085]">
+            Empty means the platform setting ({values.platformViewDays} days). Applies to links made from now on; a link already sent keeps
+            its number.
+          </p>
         </div>
         <label className="flex min-h-12 cursor-pointer items-start gap-3 md:pt-6">
           <input type="checkbox" name="showPlaceholders" defaultChecked={values.showPlaceholders} className="mt-1 h-5 w-5 accent-[#2a829b]" />

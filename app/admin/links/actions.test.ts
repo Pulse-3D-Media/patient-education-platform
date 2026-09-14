@@ -134,9 +134,16 @@ describe("createShareAction", () => {
     const result = await createShareAction(null, form({ videoId }));
 
     expect(result).toMatchObject({ code: expect.stringMatching(/^[a-z0-9]{6}$/) });
-    const share = await prisma.share.findUnique({ where: { code: result!.code! }, select: { id: true, clinicId: true } });
+    const share = await prisma.share.findUnique({
+      where: { code: result!.code! },
+      select: { id: true, clinicId: true, expiryPolicy: true, firstPlayedAt: true, daysAfterFirstPlay: true },
+    });
     createdShareIds.push(share!.id);
     expect(share?.clinicId).toBe(activeClinic);
+    // Made under the first-play rule, with the number of days copied onto it; the form chose none of this.
+    expect(share?.expiryPolicy).toBe("FIRST_PLAY");
+    expect(share?.firstPlayedAt).toBeNull();
+    expect(share?.daysAfterFirstPlay).toBeGreaterThan(0);
   });
 
   it("refuses a form with no video", async () => {

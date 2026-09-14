@@ -2,7 +2,7 @@
 
 Surgical patient education animations, delivered to patients on their own phones.
 
-A clinic creates a share link. The patient scans a QR code or opens the link, watches an animation explaining their upcoming procedure, and the link expires after a set number of days. No account, no app to install.
+A clinic creates a share link. The patient scans a QR code or opens the link, watches an animation explaining their upcoming procedure, and the link stops working seven days after the patient first plays it (or after ninety days if nobody ever does). No account, no app to install.
 
 Built by [Pulse 3D Media](https://www.pulse3dmedia.com).
 

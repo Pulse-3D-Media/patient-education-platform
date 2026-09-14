@@ -14,9 +14,9 @@ import { prisma } from "./client";
 
 /** The settings, as the rest of the app reads them. */
 export type Settings = {
-  /** Days a patient link works if nobody ever opens it. */
+  /** Days a patient link works if nobody ever plays it. */
   unclaimedDays: number;
-  /** Days a patient link keeps working after the first view. */
+  /** Days a patient link keeps working after the first play. Copied onto each new link when it is made (lib/expiry.ts). */
   viewDays: number;
   /** Days a clinic keeps access after a missed payment. */
   graceDays: number;
@@ -37,8 +37,9 @@ export const SETTINGS_DEFAULTS: Settings = {
 
 /** The one line a staff member reads beside each setting on /pulse/settings. */
 export const SETTINGS_HELP: Record<keyof Settings, string> = {
-  unclaimedDays: "How many days a patient link stays open if nobody ever taps it. After that it stops working.",
-  viewDays: "Once a patient opens their link, how many more days it keeps working. A clinic can be given its own number.",
+  unclaimedDays: "How many days a patient link stays open if nobody ever plays it. After that it stops working. Applies to links made from now on.",
+  viewDays:
+    "Once a patient first plays their video, how many more days the link keeps working. A clinic can be given its own number. Applies to links made from now on; a link already sent keeps the number it was made with.",
   graceDays: "How many days a clinic keeps using the library after a payment fails, before it is switched off.",
   qrDailyFlag: "If one QR code is scanned more than this many times in a day, it is flagged on the reports for a look.",
 };

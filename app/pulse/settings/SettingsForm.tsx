@@ -13,7 +13,7 @@ import { saveSettingsAction } from "../actions";
 
 const FIELDS: { name: keyof Settings; label: string; unit: string }[] = [
   { name: "unclaimedDays", label: "Unclaimed link days", unit: "days" },
-  { name: "viewDays", label: "Days after first view", unit: "days" },
+  { name: "viewDays", label: "Days after first play", unit: "days" },
   { name: "graceDays", label: "Grace days", unit: "days" },
   { name: "qrDailyFlag", label: "QR scans per day to flag", unit: "scans" },
 ];

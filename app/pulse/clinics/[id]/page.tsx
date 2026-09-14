@@ -7,6 +7,7 @@ import { getClinicForPulse } from "@/lib/db/clinics";
 import { listNotesForClinic } from "@/lib/db/notes";
 import { getSettings } from "@/lib/db/settings";
 import { listSharesForClinic } from "@/lib/db/shares";
+import { shareExpiryState } from "@/lib/expiry";
 import { listPeople, type Person } from "@/lib/people";
 import { formatUsPhone } from "@/lib/phone";
 import { requirePulseStaff } from "@/lib/pulse";
@@ -124,13 +125,25 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
                 <th className="px-3 py-2 font-medium">Procedure</th>
                 <th className="px-3 py-2 font-medium">Category</th>
                 <th className="px-3 py-2 font-medium">Expires</th>
-                <th className="px-3 py-2 text-right font-medium">Views</th>
+                <th className="px-3 py-2 text-right font-medium">Play starts</th>
                 <th className="px-3 py-2 font-medium">Created</th>
               </tr>
             </thead>
             <tbody>
               {shares.slice(0, RECENT_LINK_LIMIT).map((share) => {
-                const expired = share.expiresAt < now;
+                const state = shareExpiryState(share, now);
+                const expired = state.kind === "expired";
+                // Expires: the date, plus how it got there (lib/expiry.ts). A link
+                // nobody has played yet stops on its unclaimed date unless it is
+                // played first; a legacy link's date is fixed and says so.
+                const expires =
+                  state.kind === "expired"
+                    ? `Expired ${formatDate(state.expiresAt)}`
+                    : state.kind === "awaiting"
+                      ? `${formatDate(state.unclaimedUntil)} if never played; ${state.daysAfterFirstPlay} days after the first play`
+                      : state.kind === "played"
+                        ? `${formatDate(state.expiresAt)} (first played ${formatDate(state.firstPlayedAt)})`
+                        : `${formatDate(state.expiresAt)} (fixed date, made before the first-play rule)`;
                 return (
                   <tr key={share.id} className="border-b border-white/5 last:border-b-0">
                     <td className="px-3 py-2 text-[#bfbfbf]">{share.code}</td>
@@ -141,9 +154,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
                       </span>
                     </td>
                     <td className="px-3 py-2 text-[#bfbfbf]">{categoryLabel(share.video.category)}</td>
-                    <td className={`px-3 py-2 ${expired ? "text-[#667085]" : "text-[#bfbfbf]"}`}>
-                      {expired ? `Expired ${formatDate(share.expiresAt)}` : formatDate(share.expiresAt)}
-                    </td>
+                    <td className={`px-3 py-2 ${expired ? "text-[#667085]" : "text-[#bfbfbf]"}`}>{expires}</td>
                     <td className="px-3 py-2 text-right text-[#bfbfbf]">{share.viewCount}</td>
                     <td className="px-3 py-2 text-[#bfbfbf]">{formatDate(share.createdAt)}</td>
                   </tr>

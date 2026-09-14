@@ -194,8 +194,8 @@ describe("isolation between clinics created on first use", () => {
     // (lib/db/shares.test.ts covers it). Open both with Knee on the plan.
     await prisma.clinic.updateMany({ where: { id: { in: [clinicA.id, clinicB.id] } }, data: { status: "ACTIVE", categories: ["KNEE"] } });
 
-    const shareA = await createShare(clinicA.id, videoId, 7);
-    const shareB = await createShare(clinicB.id, videoId, 7);
+    const shareA = await createShare(clinicA.id, videoId);
+    const shareB = await createShare(clinicB.id, videoId);
     createdShareIds.push(shareA.id, shareB.id);
 
     const listA = await listSharesForClinic(clinicA.id);

@@ -52,7 +52,7 @@ function Option({ label, active, pending, onClick }: { label: string; active: bo
       disabled={pending}
       onClick={onClick}
       className={`h-10 px-4 text-sm font-medium transition disabled:opacity-60 ${
-        active ? "bg-[#2a829b] text-white" : "text-[#bfbfbf] hover:bg-white/5 hover:text-white"
+        active ? "bg-brand text-on-brand" : "text-[#bfbfbf] hover:bg-white/5 hover:text-white"
       }`}
     >
       {label}

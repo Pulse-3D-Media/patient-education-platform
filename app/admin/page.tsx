@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
-import { AppShell } from "@/components/ui/AppShell";
+import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { ADMIN_SECTIONS } from "@/lib/admin-nav";
@@ -37,15 +37,15 @@ export default async function AdminOverviewPage() {
 
   if (!clinic.isAdmin) {
     return (
-      <AppShell>
+      <ClinicShell clinic={clinic}>
         <AdminsOnly />
-      </AppShell>
+      </ClinicShell>
     );
   }
 
   if (!clinicIsOpen(clinic.status)) {
     return (
-      <AdminFrame clinicName={clinic.name} title="Overview">
+      <AdminFrame clinic={clinic} title="Overview">
         <Notice text={clinic.noticeText} />
         <div className="mt-6">
           <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink inFrame />
@@ -79,7 +79,7 @@ export default async function AdminOverviewPage() {
   }
 
   return (
-    <AdminFrame clinicName={clinic.name} title="Overview" intro="What needs a look, how your links are doing, and the way into each section.">
+    <AdminFrame clinic={clinic} title="Overview" intro="What needs a look, how your links are doing, and the way into each section.">
       <Notice text={clinic.noticeText} />
 
       <section aria-labelledby="attention-heading" className="mt-6">
@@ -126,14 +126,14 @@ export default async function AdminOverviewPage() {
           <h2 id="recent-heading" className="text-lg font-semibold">
             Newest links
           </h2>
-          <Link href="/admin/links" className="text-sm text-[#5fb8d4] hover:text-white">
+          <Link href="/admin/links" className="text-sm text-brand-bright hover:text-white">
             All shared links
           </Link>
         </div>
         {recent.length === 0 ? (
           <p className="mt-2 text-[#bfbfbf]">
             No links yet.{" "}
-            <Link href="/admin/links" className="text-[#5fb8d4] hover:text-white">
+            <Link href="/admin/links" className="text-brand-bright hover:text-white">
               Create the first one.
             </Link>
           </p>
@@ -178,8 +178,8 @@ export default async function AdminOverviewPage() {
 function Notice({ text }: { text: string | null }) {
   if (!text) return null;
   return (
-    <p role="status" className="mt-6 rounded-xl border border-[#2a829b]/50 bg-[#2a829b]/15 px-4 py-3 text-[15px] text-white">
-      <span className="mr-2 font-semibold text-[#5fb8d4]">From Pulse 3D:</span>
+    <p role="status" className="mt-6 rounded-xl border border-brand/50 bg-brand/15 px-4 py-3 text-[15px] text-white">
+      <span className="mr-2 font-semibold text-brand-bright">From Pulse 3D:</span>
       {text}
     </p>
   );
@@ -208,7 +208,7 @@ function SectionCards(): ReactNode {
           <li key={section.href}>
             <Link
               href={section.href}
-              className="flex h-full flex-col rounded-2xl border border-white/10 bg-[#0d1113] p-5 transition hover:border-[#2a829b]/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#5fb8d4]"
+              className="flex h-full flex-col rounded-2xl border border-white/10 bg-[#0d1113] p-5 transition hover:border-brand/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-bright"
             >
               <span className="flex items-center gap-2 text-lg font-semibold text-white">
                 {section.label}

@@ -1,6 +1,6 @@
 import type { ClinicStatus } from "@prisma/client";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
-import { AppShell } from "@/components/ui/AppShell";
+import { ClinicShell } from "@/components/ui/ClinicShell";
 import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -35,9 +35,9 @@ export default async function BillingPage() {
   // Members never see billing; it is an admin page.
   if (!clinic.isAdmin) {
     return (
-      <AppShell>
+      <ClinicShell clinic={clinic}>
         <AdminsOnly />
-      </AppShell>
+      </ClinicShell>
     );
   }
 
@@ -49,7 +49,7 @@ export default async function BillingPage() {
   const managed = view?.plan.managedByPulse ?? false;
 
   return (
-    <AdminFrame clinicName={clinic.name} title="Billing" intro="Your plan, and what it comes to. Nothing here is an invoice.">
+    <AdminFrame clinic={clinic} title="Billing" intro="Your plan, and what it comes to. Nothing here is an invoice.">
       <StatusCard status={clinic.status} managed={managed} />
 
       <section aria-labelledby="plan-heading" className="mt-6 rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
@@ -108,11 +108,11 @@ export default async function BillingPage() {
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
                 <p className="text-sm text-[#667085]">Per month</p>
-                <p className="mt-1 text-2xl font-semibold text-[#5fb8d4]">{formatCents(view.estimate.monthlyCents ?? 0)}</p>
+                <p className="mt-1 text-2xl font-semibold text-brand-bright">{formatCents(view.estimate.monthlyCents ?? 0)}</p>
               </div>
               <div>
                 <p className="text-sm text-[#667085]">Per year</p>
-                <p className="mt-1 text-2xl font-semibold text-[#5fb8d4]">{formatCents(view.estimate.yearlyCents ?? 0)}</p>
+                <p className="mt-1 text-2xl font-semibold text-brand-bright">{formatCents(view.estimate.yearlyCents ?? 0)}</p>
               </div>
             </div>
           ) : null}
@@ -152,7 +152,7 @@ function StatusCard({ status, managed }: { status: ClinicStatus; managed: boolea
         Status
         <span
           className={`rounded-md px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide ${
-            open ? "bg-[#2a829b]/20 text-[#5fb8d4]" : "bg-[#f3b94d]/20 text-[#f3b94d]"
+            open ? "bg-brand/20 text-brand-bright" : "bg-[#f3b94d]/20 text-[#f3b94d]"
           }`}
         >
           {label}

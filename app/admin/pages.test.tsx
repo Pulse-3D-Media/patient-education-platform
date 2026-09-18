@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { prisma } from "@/lib/db/client";
 import { createShare } from "@/lib/db/shares";
 import BillingPage from "./billing/page";
+import BrandingPage from "./branding/page";
 import LinksPage from "./links/page";
 import AdminOverviewPage from "./page";
 import PeoplePage from "./people/page";
@@ -147,12 +148,14 @@ describe("a member", () => {
       [AdminOverviewPage, "/admin"],
       [LinksPage, "/admin/links"],
       [BillingPage, "/admin/billing"],
+      [BrandingPage, "/admin/branding"],
     ] as const) {
       signInAs(orgActive, "member", "Vitest pages clinic (active)");
       const html = await render(page, path);
       expect(html).toContain("This page is for your clinic");
       expect(html).not.toContain('aria-label="Clinic admin"');
       expect(html).not.toContain("Create share link");
+      expect(html).not.toContain("Save branding");
       for (const word of PLAN_WORDS) expect(html).not.toContain(word);
       expect(showsAnAmount(html)).toBe(false);
     }
@@ -183,6 +186,7 @@ describe("an admin of a PENDING clinic", () => {
       [AdminOverviewPage, "/admin"],
       [LinksPage, "/admin/links"],
       [PeoplePage, "/admin/people"],
+      [BrandingPage, "/admin/branding"],
     ] as const) {
       signInAs(orgPending, "admin", "Vitest pages clinic (pending)");
       const html = await render(page, path);
@@ -190,6 +194,7 @@ describe("an admin of a PENDING clinic", () => {
       expect(html).toContain('href="/admin/billing"');
       expect(html).toContain("Go to billing");
       expect(html).not.toContain("Create share link");
+      expect(html).not.toContain("Save branding");
       expect(html).not.toContain("Surgeon seats");
       // The frame is the page's main landmark; the closed-clinic message inside it must not add a second one.
       expect(html.match(/<main\b/g)).toHaveLength(1);
@@ -297,6 +302,62 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(showsAnAmount(html)).toBe(true);
     expect(html).toContain("not an invoice");
     expect(html).not.toContain("managed by Pulse 3D");
+  });
+
+  it("gets the Branding page: where the logo is changed, the colour, font and phone form, and no box to type a logo address", async () => {
+    signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+    const html = await render(BrandingPage, "/admin/branding");
+
+    expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/branding"/);
+    // The logo is explained, not uploaded here: it lives on the Clerk organization.
+    expect(html).toContain("No logo yet");
+    expect(html).toContain("General, then Update profile");
+    expect(html).toContain('href="/admin/people"');
+    // The form: one colour, the six fonts, the phone.
+    expect(html).toContain('name="brandColor"');
+    expect(html.match(/name="brandFont"/g)).toHaveLength(6);
+    expect(html).toContain('name="phone"');
+    expect(html).toContain("Save branding");
+    // Only Pulse staff can type a logo address, and the clinic never sends its own id.
+    expect(html).not.toContain('name="logoUrl"');
+    expect(html).not.toContain('name="clinicId"');
+    // No plan or price words here either.
+    for (const word of PLAN_WORDS) expect(html).not.toContain(word);
+    expect(html.match(/<main\b/g)).toHaveLength(1);
+  });
+
+  it("wears its own branding on every admin page: colour and font on the shell, its name in the banner", async () => {
+    await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandColor: "#7a1f2b", brandFont: "montserrat", phone: "8015550123" } });
+    try {
+      for (const [page, path] of [
+        [AdminOverviewPage, "/admin"],
+        [LinksPage, "/admin/links"],
+        [BrandingPage, "/admin/branding"],
+      ] as const) {
+        signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+        const html = await render(page, path);
+        // A dark red is too dark to see on the near-black screens, so the shell gets a lightened shade of it, never the raw value.
+        expect(html).toMatch(/--brand-accent:#[0-9a-f]{6}/);
+        expect(html).not.toContain("--brand-accent:#2a829b");
+        expect(html).toContain("font-montserrat");
+        expect(html).toContain('aria-label="Vitest pages clinic (active), library home"');
+      }
+      // The Branding form opens on what is saved.
+      signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+      const branding = await render(BrandingPage, "/admin/branding");
+      expect(branding).toContain('value="#7a1f2b"');
+      expect(branding).toContain('value="(801) 555-0123"');
+    } finally {
+      await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandColor: null, brandFont: null, phone: null } });
+    }
+  });
+
+  it("with no branding set, looks exactly as it did: the Pulse colours and Inter", async () => {
+    signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+    const html = await render(AdminOverviewPage, "/admin");
+    expect(html).toContain("--brand-accent:#2a829b");
+    expect(html).toContain("--brand-accent-bright:#5fb8d4");
+    expect(html).not.toMatch(/font-(merriweather|open-sans|source-sans|montserrat|nunito-sans)/);
   });
 });
 

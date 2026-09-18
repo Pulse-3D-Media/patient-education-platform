@@ -3,9 +3,10 @@
 import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { CATEGORIES, CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_URL } from "@/lib/brand";
+import { ClinicLogo } from "./ClinicLogo";
 import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
 
 /**
@@ -13,7 +14,8 @@ import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
  * console. (The patient page at /watch has no frame at all, on purpose.)
  * One navigation model on every screen:
  *
- *   - a thin banner across the top with the Pulse 3D mark and, on the right,
+ *   - a thin banner across the top with the clinic's own logo (or its name,
+ *     when it has no logo or the logo does not load) and, on the right,
  *     Clerk's user button (the signed-in person's avatar; Sign out lives in
  *     its menu)
  *   - an icon rail down the left: the books icon opens the category drawer,
@@ -31,9 +33,27 @@ import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
  * is true, which the server sets for clinic admins. That is a courtesy so
  * members are not offered a page they cannot use; the admin pages check
  * for themselves.
+ *
+ * THE CLINIC'S BRANDING arrives as `brand`, already worked out and checked
+ * on the server (ClinicShell, app/brand-look.ts): the colours as CSS
+ * variables and the font's class, both set on the outermost element so
+ * every page inside picks them up, plus the clinic's name and logo for the
+ * banner. Without it (a page drawn before the clinic is known) the shell is
+ * the plain Pulse 3D one. Pulse 3D's own mark moves to the foot of the
+ * category drawer, small, as "Powered by".
  */
 
-export function AppShell({ children, showAdmin = false }: { children: ReactNode; showAdmin?: boolean }) {
+/** One clinic's look, as plain values the server has already checked. */
+export type ShellBrand = {
+  /** The brand colours, as CSS variables. */
+  style: CSSProperties;
+  /** The class that sets the clinic's font. Empty for Inter. */
+  fontClass: string;
+  clinicName: string;
+  logoUrl: string | null;
+};
+
+export function AppShell({ children, showAdmin = false, brand }: { children: ReactNode; showAdmin?: boolean; brand?: ShellBrand }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
 
@@ -48,14 +68,32 @@ export function AppShell({ children, showAdmin = false }: { children: ReactNode;
   const onAdmin = pathname.startsWith("/admin");
 
   return (
-    <div className="flex min-h-screen flex-col bg-black text-white">
+    <div className={`flex min-h-screen flex-col bg-black text-white ${brand?.fontClass ?? ""}`} style={brand?.style}>
       {/* Banner */}
       <header className="sticky top-0 z-30 flex h-12 items-center gap-3 border-b border-white/10 bg-black px-3 sm:px-4">
         <LibraryButton open={open} onClick={toggle} className="md:hidden" />
-        <Link href="/library" className="flex items-center" aria-label="Pulse 3D, library home">
-          {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-          <img src={LOGO_URL} alt="Pulse 3D" className="h-7 w-auto" />
-        </Link>
+        {brand ? (
+          <Link href="/library" className="flex min-w-0 items-center" aria-label={`${brand.clinicName}, library home`}>
+            {brand.logoUrl ? (
+              // On a white chip, because most logos are drawn for a white page and would vanish on this black banner. The box is a fixed size, so a slow or broken logo moves nothing; the name stands in until the picture loads, and for good if it does not.
+              <span className="flex items-center rounded-md bg-white px-2 py-1">
+                <ClinicLogo
+                  src={brand.logoUrl}
+                  name={brand.clinicName}
+                  boxClassName="h-6 w-[116px]"
+                  nameClassName="text-[13px] font-semibold text-[#12202a]"
+                />
+              </span>
+            ) : (
+              <span className="max-w-[46vw] truncate text-[15px] font-semibold text-white sm:max-w-xs">{brand.clinicName}</span>
+            )}
+          </Link>
+        ) : (
+          <Link href="/library" className="flex items-center" aria-label="Pulse 3D, library home">
+            {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
+            <img src={LOGO_URL} alt="Pulse 3D" className="h-7 w-auto" />
+          </Link>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <span className="hidden text-sm text-[#667085] sm:inline">
             {onAdmin ? "Clinic admin" : "Patient Education Library"}
@@ -85,7 +123,7 @@ export function AppShell({ children, showAdmin = false }: { children: ReactNode;
               onClick={() => setOpen(false)}
               className="fixed inset-0 z-40 bg-black/60 md:top-12 md:left-16 lg:bg-black/25"
             />
-            <CategoryDrawer pathname={pathname} onClose={() => setOpen(false)} />
+            <CategoryDrawer pathname={pathname} onClose={() => setOpen(false)} poweredBy={Boolean(brand)} />
           </>
         )}
 
@@ -105,7 +143,7 @@ function LibraryButton({ open, onClick, className = "" }: { open: boolean; onCli
       aria-label={open ? "Close the library menu" : "Open the library menu"}
       title="Procedure Library"
       className={`flex h-11 w-11 items-center justify-center rounded-xl transition ${
-        open ? "bg-[#2a829b]/20 text-[#5fb8d4]" : "text-[#bfbfbf] hover:bg-white/5 hover:text-white"
+        open ? "bg-brand/20 text-brand-bright" : "text-[#bfbfbf] hover:bg-white/5 hover:text-white"
       } ${className}`}
     >
       <BooksIcon className="h-6 w-6" />
@@ -122,7 +160,7 @@ function AdminLink({ active, className = "" }: { active: boolean; className?: st
       aria-label="Open clinic admin"
       aria-current={active ? "page" : undefined}
       className={`flex h-11 w-11 items-center justify-center rounded-xl transition ${
-        active ? "bg-[#2a829b]/20 text-[#5fb8d4]" : "text-[#bfbfbf] hover:bg-white/5 hover:text-white"
+        active ? "bg-brand/20 text-brand-bright" : "text-[#bfbfbf] hover:bg-white/5 hover:text-white"
       } ${className}`}
     >
       <AdminIcon className="h-6 w-6" />
@@ -130,11 +168,11 @@ function AdminLink({ active, className = "" }: { active: boolean; className?: st
   );
 }
 
-function CategoryDrawer({ pathname, onClose }: { pathname: string; onClose: () => void }) {
+function CategoryDrawer({ pathname, onClose, poweredBy }: { pathname: string; onClose: () => void; poweredBy: boolean }) {
   const onHome = pathname === "/library";
   const itemBase = "flex h-12 items-center gap-3 rounded-lg border-l-2 px-3 text-base transition";
   const idle = "border-transparent text-[#bfbfbf] hover:bg-white/5 hover:text-white";
-  const active = "border-[#5fb8d4] bg-[#2a829b]/15 font-medium text-white";
+  const active = "border-brand-bright bg-brand/15 font-medium text-white";
 
   return (
     <aside
@@ -174,6 +212,15 @@ function CategoryDrawer({ pathname, onClose }: { pathname: string; onClose: () =
           })}
         </ul>
       </nav>
+
+      {/* When the banner carries the clinic's logo, Pulse 3D's own mark lives here, small. */}
+      {poweredBy && (
+        <p className="flex items-center gap-2 border-t border-white/10 px-4 py-3 text-xs text-[#667085]">
+          Powered by
+          {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
+          <img src={LOGO_URL} alt="Pulse 3D" className="h-4 w-auto" />
+        </p>
+      )}
     </aside>
   );
 }

@@ -12,6 +12,7 @@ describe("activeAdminSection", () => {
     expect(activeAdminSection("/admin/links")).toBe("/admin/links");
     expect(activeAdminSection("/admin/people")).toBe("/admin/people");
     expect(activeAdminSection("/admin/people/anything")).toBe("/admin/people");
+    expect(activeAdminSection("/admin/branding")).toBe("/admin/branding");
     expect(activeAdminSection("/admin/billing")).toBe("/admin/billing");
     expect(activeAdminSection("/admin/reports")).toBe("/admin/reports");
   });
@@ -24,6 +25,12 @@ describe("activeAdminSection", () => {
   it("does not confuse a longer name for a section", () => {
     expect(activeAdminSection("/admin/peoples")).toBeNull();
     expect(activeAdminSection("/library")).toBeNull();
+  });
+
+  it("has Branding between People and Billing, and it is not marked as coming", () => {
+    const labels = ADMIN_SECTIONS.map((section) => section.label);
+    expect(labels).toEqual(["Overview", "Shared links", "People", "Branding", "Billing", "Reports"]);
+    expect(ADMIN_SECTIONS.find((section) => section.href === "/admin/branding")?.coming).toBeUndefined();
   });
 
   it("lists every section with an address under /admin", () => {

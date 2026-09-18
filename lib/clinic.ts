@@ -1,6 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { readBranding, type Branding } from "./branding";
 import { clinicIsOpen } from "./clinic-status";
 import { getClinicByClerkOrgId, upsertClinicForClerkOrg } from "./db/clinics";
 import { ADMIN_ROLE, kindFromMetadata, type Kind } from "./roles";
@@ -25,6 +26,12 @@ export type CurrentClinic = {
   noticeText: string | null;
   /** False when Pulse staff have hidden placeholder videos from this clinic's library. */
   showPlaceholders: boolean;
+  /** The clinic's phone as ten digits, or null. Shown to patients as a tap-to-call link. */
+  phone: string | null;
+  /** The clinic's brand colour and font, already checked (lib/branding.ts). A clinic that set nothing has the Pulse look. */
+  branding: Branding;
+  /** True when the logo is the one uploaded to the clinic's Clerk organization, false when Pulse staff set it (or there is none). */
+  logoIsFromClerk: boolean;
   /** Surgeon or staff, or null if this person has not been asked yet. See lib/roles.ts. */
   kind: Kind | null;
   /** Is this person an org:admin of the clinic? */
@@ -76,6 +83,9 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     logoUrl: clinic.logoUrl,
     noticeText: clinic.noticeText,
     showPlaceholders: clinic.showPlaceholders,
+    phone: clinic.phone,
+    branding: readBranding(clinic),
+    logoIsFromClerk: organization.hasImage,
     kind: kindFromMetadata(membership.publicMetadata),
     isAdmin: has({ role: ADMIN_ROLE }),
   };

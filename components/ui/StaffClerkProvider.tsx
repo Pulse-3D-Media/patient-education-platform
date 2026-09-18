@@ -13,8 +13,14 @@ import type { ReactNode } from "react";
  *
  * The publishable key comes from NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in .env;
  * Clerk reads it itself.
+ *
+ * `accent` is the clinic's brand colour for Clerk's own pieces (the user
+ * menu, the People panel), so they match the screens around them. It is a
+ * plain hex colour the server has already checked and adjusted to be
+ * readable (staffTheme in lib/branding.ts). Left out, on the sign-in and
+ * onboarding pages where there is no clinic yet, it is the Pulse teal.
  */
-export function StaffClerkProvider({ children }: { children: ReactNode }) {
+export function StaffClerkProvider({ children, accent = "#2a829b", fontFamily = "var(--font-inter), Inter, sans-serif" }: { children: ReactNode; accent?: string; fontFamily?: string }) {
   return (
     <ClerkProvider
       // Where the sign-in page lives. Must match proxy.ts and the <SignIn /> path.
@@ -25,8 +31,8 @@ export function StaffClerkProvider({ children }: { children: ReactNode }) {
       afterSignOutUrl="/sign-in"
       appearance={{
         variables: {
-          colorPrimary: "#2a829b",
-          fontFamily: "var(--font-inter), Inter, sans-serif",
+          colorPrimary: accent,
+          fontFamily,
           borderRadius: "0.625rem",
         },
       }}

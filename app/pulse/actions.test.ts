@@ -8,6 +8,7 @@ import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
   activatePricingVersionAction,
   addNoteAction,
+  saveBrandingAction,
   saveCategoryConfigAction,
   saveDetailsAction,
   savePricingVersionAction,
@@ -170,7 +171,6 @@ describe("setManagedAction and saveDetailsAction", () => {
     expect(notes.map((note) => note.authorName)).toEqual(["Evan Miller", "Evan Miller"]);
     expect(notes[0].body).toBe("Managed by Pulse turned on.");
     expect(notes[1].body).toContain('name changed from "Vitest pulse clinic');
-    expect(notes[1].body).toContain("phone set to (801) 555-0123");
     expect(notes[1].body).toContain('notice set to "Welcome"');
     expect(notes[1].body).toContain("placeholder videos hidden");
   });
@@ -187,6 +187,97 @@ describe("setManagedAction and saveDetailsAction", () => {
       expect(await saveDetailsAction(null, details(bad))).toMatchObject({ error: expect.stringContaining("1 to 365") });
     }
     expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId } })).viewDaysOverride).toBe(MAX_LINK_DAYS);
+  });
+});
+
+describe("saveDetailsAction and the clinic's branding", () => {
+  it("does not touch the logo or the phone, even when a form sends them: those are saved by the Branding tab only", async () => {
+    const clinicId = await makeClinic();
+    await prisma.clinic.update({ where: { id: clinicId }, data: { logoUrl: "https://example.com/kept.png", phone: "8015550123" } });
+    signInAs("user_staff", { pulseStaff: true });
+
+    // An old copy of the form, still open in a tab, sends the two fields it used to have.
+    const result = await saveDetailsAction(
+      null,
+      form({ clinicId, name: "Vitest details-only clinic", phone: "", logoUrl: "", noticeText: "", viewDaysOverride: "", showPlaceholders: "on" }),
+    );
+    expect(result).toEqual({ ok: "Details saved." });
+
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: "https://example.com/kept.png", phone: "8015550123" });
+  });
+});
+
+describe("saveBrandingAction", () => {
+  const good = { logoUrl: "https://example.com/logo.png", brandColor: "#7A1F2B", brandFont: "merriweather", phone: "801-555-0123" };
+
+  it("refuses a user who is not Pulse staff with not-found, and writes nothing", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_clinic_admin", { kind: "staff" });
+
+    await expect(saveBrandingAction(null, form({ clinicId, ...good }))).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, phone: null });
+    expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(0);
+  });
+
+  it("saves the logo, colour, font and phone for staff, tidied up, and logs it under their name", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+
+    expect(await saveBrandingAction(null, form({ clinicId, ...good }))).toMatchObject({ ok: expect.stringContaining("Branding saved") });
+
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: "https://example.com/logo.png", brandColor: "#7a1f2b", brandFont: "merriweather", phone: "8015550123" });
+
+    const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { body: true, authorName: true, kind: true } });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ authorName: "Evan Miller", kind: "STATUS" });
+    expect(notes[0].body).toBe(
+      "Branding changed: logo set to https://example.com/logo.png; colour set to #7a1f2b; font changed from Inter to Merriweather; phone set to (801) 555-0123.",
+    );
+
+    // The same form again changes nothing and logs nothing.
+    expect(await saveBrandingAction(null, form({ clinicId, ...good }))).toEqual({ ok: "Nothing changed, so nothing was saved." });
+    expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(1);
+  });
+
+  it("stores the default font and an empty colour as nothing set", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+    await saveBrandingAction(null, form({ clinicId, ...good }));
+
+    await saveBrandingAction(null, form({ clinicId, logoUrl: "", brandColor: "", brandFont: "inter", phone: "" }));
+
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, phone: null });
+  });
+
+  it("refuses a bad colour, a font not on the list, a bad phone and a logo that is not https, saving none of the form", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+
+    const bad: [Record<string, string>, string][] = [
+      [{ ...good, brandColor: "teal" }, "hex colour"],
+      [{ ...good, brandColor: "red; background:url(x)" }, "hex colour"],
+      [{ ...good, brandFont: "papyrus" }, "fonts on the list"],
+      [{ ...good, phone: "555-0123" }, "US phone number"],
+      [{ ...good, logoUrl: "http://example.com/logo.png" }, "https://"],
+      [{ ...good, logoUrl: "javascript:alert(1)" }, "https://"],
+    ];
+    for (const [fields, words] of bad) {
+      expect(await saveBrandingAction(null, form({ clinicId, ...fields }))).toMatchObject({ error: expect.stringContaining(words) });
+    }
+
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, phone: null });
+    expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(0);
+  });
+
+  it("answers a plain sentence for a clinic id that does not exist", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await saveBrandingAction(null, form({ clinicId: "no-such-clinic", ...good }))).toEqual({ error: "That clinic no longer exists." });
   });
 });
 

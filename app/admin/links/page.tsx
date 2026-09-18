@@ -1,6 +1,6 @@
 import type { Category } from "@prisma/client";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
-import { AppShell } from "@/components/ui/AppShell";
+import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { getBaseUrl } from "@/lib/base-url";
 import { CATEGORIES } from "@/lib/categories";
@@ -64,9 +64,9 @@ export default async function LinksPage() {
   // too, but this is the check that counts.
   if (!clinic.isAdmin) {
     return (
-      <AppShell>
+      <ClinicShell clinic={clinic}>
         <AdminsOnly />
-      </AppShell>
+      </ClinicShell>
     );
   }
 
@@ -74,7 +74,7 @@ export default async function LinksPage() {
   // managed. The frame and its navigation stay, so Billing is one tap away.
   if (!clinicIsOpen(clinic.status)) {
     return (
-      <AdminFrame clinicName={clinic.name} title="Shared links">
+      <AdminFrame clinic={clinic} title="Shared links">
         <div className="mt-6">
           <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink inFrame />
         </div>
@@ -135,7 +135,7 @@ export default async function LinksPage() {
 
   return (
     <AdminFrame
-      clinicName={clinic.name}
+      clinic={clinic}
       title="Shared links"
       intro={
         <>

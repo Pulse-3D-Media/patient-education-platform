@@ -3,12 +3,34 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /*
+   * The brand colours, as four values. These are the Pulse 3D defaults.
+   * A clinic's screens (/library, /admin, the patient page) set their own
+   * values for the same four names on the element that wraps them, worked
+   * out from the clinic's one brand colour by lib/branding.ts. Anything
+   * that sets nothing, such as /pulse and the sign-in page, gets these.
+   */
+  --brand-accent: #2a829b; /* filled buttons, the active pill, borders on hover */
+  --brand-accent-hover: #1e5668; /* the same fill while hovered */
+  --brand-accent-bright: #5fb8d4; /* the shade used as text and icons on the dark screens */
+  --brand-on-accent: #ffffff; /* text on top of the accent */
 }
 
+/*
+ * "inline" makes each Tailwind class use the variable itself rather than a
+ * copy of its value, which is what lets a wrapping element change it. The
+ * classes this gives: bg-brand, border-brand, text-brand-bright,
+ * hover:bg-brand-hover, text-on-brand, and the faded forms (bg-brand/20).
+ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-inter);
+  --color-brand: var(--brand-accent);
+  --color-brand-hover: var(--brand-accent-hover);
+  --color-brand-bright: var(--brand-accent-bright);
+  --color-on-brand: var(--brand-on-accent);
 }
 
 @media (prefers-color-scheme: dark) {

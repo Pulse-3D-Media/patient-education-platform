@@ -16,7 +16,7 @@ export function AdminsOnly() {
         </p>
         <Link
           href="/library"
-          className="mt-6 inline-flex h-11 items-center rounded-lg bg-[#2a829b] px-5 text-sm font-medium text-white transition hover:bg-[#1e5668]"
+          className="mt-6 inline-flex h-11 items-center rounded-lg bg-brand px-5 text-sm font-medium text-on-brand transition hover:bg-brand-hover"
         >
           Back to the library
         </Link>

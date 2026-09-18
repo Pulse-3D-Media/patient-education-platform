@@ -117,7 +117,7 @@ export function ShareLists({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search procedures..."
-            className="h-11 w-full rounded-full border border-white/15 bg-[#0d1113] pl-12 pr-5 text-base text-white placeholder:text-[#667085] focus:border-[#2a829b] focus:outline-none"
+            className="h-11 w-full rounded-full border border-white/15 bg-[#0d1113] pl-12 pr-5 text-base text-white placeholder:text-[#667085] focus:border-brand focus:outline-none"
           />
         </div>
       </div>
@@ -227,7 +227,7 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
       aria-pressed={active}
       onClick={onClick}
       className={`h-10 rounded-full border px-4 text-sm font-medium transition ${
-        active ? "border-[#2a829b] bg-[#2a829b] text-white" : "border-white/15 text-[#bfbfbf] hover:border-[#2a829b] hover:text-white"
+        active ? "border-brand bg-brand text-on-brand" : "border-white/15 text-[#bfbfbf] hover:border-brand hover:text-white"
       }`}
     >
       {children}

@@ -11,11 +11,17 @@ import { defineConfig } from "vitest/config";
  * otherwise.
  */
 export default defineConfig({
-  // "@/lib/..." means the repo root, the same as in tsconfig.json.
-  resolve: { alias: { "@": fileURLToPath(new URL(".", import.meta.url)) } },
+  resolve: {
+    alias: {
+      // "@/lib/..." means the repo root, the same as in tsconfig.json.
+      "@": fileURLToPath(new URL(".", import.meta.url)),
+      // Next.js's font loader only works inside its own compiler; the tests get a stand-in (see vitest.fonts.ts).
+      "next/font/google": fileURLToPath(new URL("./vitest.fonts.ts", import.meta.url)),
+    },
+  },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "app/**/*.test.tsx", "vitest.guard.test.ts"],
+    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "app/**/*.test.tsx", "components/**/*.test.tsx", "vitest.guard.test.ts"],
     setupFiles: ["./vitest.setup.ts"],
     // One test file at a time. They share one database, so running files side
     // by side would only make failures harder to read.

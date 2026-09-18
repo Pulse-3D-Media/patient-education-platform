@@ -49,7 +49,7 @@ export function ClinicClosed({
         {billingLink && (
           <Link
             href="/admin/billing"
-            className="mt-5 inline-flex h-11 items-center rounded-lg bg-[#2a829b] px-5 text-sm font-medium text-white transition hover:bg-[#1e5668]"
+            className="mt-5 inline-flex h-11 items-center rounded-lg bg-brand px-5 text-sm font-medium text-on-brand transition hover:bg-brand-hover"
           >
             Go to billing
           </Link>
@@ -58,7 +58,7 @@ export function ClinicClosed({
         <SignOutButton>
           <button
             type="button"
-            className="mt-6 inline-flex h-11 items-center rounded-lg border border-white/15 px-5 text-sm font-medium text-[#bfbfbf] transition hover:border-[#2a829b] hover:text-white"
+            className="mt-6 inline-flex h-11 items-center rounded-lg border border-white/15 px-5 text-sm font-medium text-[#bfbfbf] transition hover:border-brand hover:text-white"
           >
             Sign out
           </button>

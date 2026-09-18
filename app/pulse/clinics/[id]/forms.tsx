@@ -5,7 +5,6 @@ import { useActionState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
-import { formatUsPhone } from "@/lib/phone";
 import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction } from "../../actions";
 import { Outcome, SaveButton } from "../../FormBits";
 
@@ -136,11 +135,9 @@ export function ManagedForm({ clinicId, managedByPulse }: { clinicId: string; ma
   );
 }
 
+/** The clinic's logo and phone are not here: they are on the Branding tab, which is the one form that saves them. */
 export type DetailsValues = {
   name: string;
-  logoUrl: string | null;
-  /** Digits only, as stored. Shown formatted. */
-  phone: string | null;
   noticeText: string | null;
   showPlaceholders: boolean;
   viewDaysOverride: number | null;
@@ -160,19 +157,6 @@ export function DetailsForm({ clinicId, values }: { clinicId: string; values: De
           </label>
           <input id="name" name="name" required defaultValue={values.name} className={INPUT} />
           <p className="mt-1 text-xs text-[#667085]">Renames the clinic in Clerk too, so it stays renamed.</p>
-        </div>
-        <div>
-          <label htmlFor="phone" className={LABEL}>
-            Phone
-          </label>
-          <input id="phone" name="phone" type="tel" defaultValue={formatUsPhone(values.phone)} placeholder="(801) 555-0123" className={INPUT} />
-        </div>
-        <div className="md:col-span-2">
-          <label htmlFor="logoUrl" className={LABEL}>
-            Logo address
-          </label>
-          <input id="logoUrl" name="logoUrl" type="url" defaultValue={values.logoUrl ?? ""} placeholder="https://" className={INPUT} />
-          <p className="mt-1 text-xs text-[#667085]">A logo uploaded to the clinic&rsquo;s Clerk organization replaces this on their next sign-in.</p>
         </div>
         <div className="md:col-span-2">
           <label htmlFor="noticeText" className={LABEL}>

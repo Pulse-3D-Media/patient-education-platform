@@ -231,8 +231,17 @@ export async function summarizeSharesForClinic(clinicId: string): Promise<ShareS
 }
 
 /**
+ * What the patient page may know about the clinic that sent the link: its
+ * name and its branding (logo, phone, brand colour, font). Every one of
+ * these is meant to be seen by the patient. Nothing else about the clinic
+ * is read here: not its status, its plan, its notes or its notice.
+ */
+const PATIENT_CLINIC_FIELDS = { name: true, logoUrl: true, phone: true, brandColor: true, brandFont: true } as const;
+
+/**
  * Look a share up by the code in its URL, with the video it plays and the
- * name of the clinic that made it. Returns null for a code that does not exist.
+ * name and branding of the clinic that made it. Returns null for a code
+ * that does not exist.
  *
  * Public on purpose: the patient is not signed in and belongs to no clinic,
  * so this is the one function here that does not take a clinicId. The rules
@@ -241,7 +250,7 @@ export async function summarizeSharesForClinic(clinicId: string): Promise<ShareS
 export async function getShareByCode(code: string) {
   return prisma.share.findUnique({
     where: { code },
-    include: { video: true, clinic: { select: { name: true } } },
+    include: { video: true, clinic: { select: PATIENT_CLINIC_FIELDS } },
   });
 }
 

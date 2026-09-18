@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { useModalFocus } from "@/components/ui/useModalFocus";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CloseIcon } from "@/components/ui/icons";
 import type { SendResult } from "./actions";
@@ -22,38 +23,36 @@ import type { SendResult } from "./actions";
  */
 export function SendPanel({
   title,
+  placeholder = false,
   result,
   onRetry,
   onClose,
 }: {
   title: string;
+  placeholder?: boolean;
   /** null while the link is still being created. */
   result: SendResult | null;
   onRetry: () => void;
   onClose: () => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-
-  // Move keyboard focus into the panel when it opens, so Escape and Tab
-  // work from here and a screen reader reads the heading.
-  useEffect(() => {
-    panel.current?.focus();
-  }, []);
+  useModalFocus(panel, true);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 sm:items-center sm:p-6"
+      ref={panel}
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/70 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-6"
       // A tap on the dark backdrop (not on the panel itself) closes it.
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        ref={panel}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="send-panel-title"
         className="w-full max-w-2xl rounded-t-3xl border border-white/10 bg-[#0d1113] p-6 shadow-[0_24px_80px_rgba(0,0,0,.7)] outline-none sm:rounded-2xl sm:p-8"
       >
+        {placeholder && <p role="note" className="mb-4 text-base text-[#ffd783]">Placeholder animation. This plays a sample, not this procedure.</p>}
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">Send to a patient</p>
@@ -83,7 +82,7 @@ export function SendPanel({
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-12 items-center rounded-lg bg-[#2a829b] px-6 text-base font-medium text-white transition hover:bg-[#1e5668]"
+            className="inline-flex h-12 items-center rounded-lg bg-brand px-6 text-base font-medium text-on-brand transition hover:bg-brand-hover"
           >
             Done
           </button>
@@ -99,7 +98,7 @@ function Creating() {
     <div className="mt-8 flex flex-col items-center gap-4 py-10" role="status" aria-live="polite">
       <span
         aria-hidden="true"
-        className="h-10 w-10 animate-spin rounded-full border-4 border-white/15 border-t-[#5fb8d4]"
+        className="h-10 w-10 animate-spin rounded-full border-4 border-white/15 border-t-brand-bright"
       />
       <p className="text-lg text-[#bfbfbf]">Creating link...</p>
     </div>
@@ -136,7 +135,7 @@ function Ready({
 
         {/* break-all lets the address wrap anywhere instead of widening the panel */}
         <p
-          className="mt-4 break-all rounded-lg border border-[#2a829b]/50 bg-[#2a829b]/10 px-4 py-3 text-base text-white"
+          className="mt-4 break-all rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 text-base text-white"
           aria-label="Patient link"
         >
           {link}
@@ -164,7 +163,7 @@ function Failed({ error, onRetry }: { error: string; onRetry: () => void }) {
       <button
         type="button"
         onClick={onRetry}
-        className="mt-5 inline-flex h-12 items-center rounded-lg border border-white/15 px-6 text-base font-medium text-[#bfbfbf] transition hover:border-[#2a829b] hover:text-white"
+        className="mt-5 inline-flex h-12 items-center rounded-lg border border-white/15 px-6 text-base font-medium text-[#bfbfbf] transition hover:border-brand hover:text-white"
       >
         Try again
       </button>

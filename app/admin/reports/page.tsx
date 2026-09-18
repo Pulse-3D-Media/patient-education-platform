@@ -1,5 +1,5 @@
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
-import { AppShell } from "@/components/ui/AppShell";
+import { ClinicShell } from "@/components/ui/ClinicShell";
 import { requireClinicPage } from "@/lib/clinic";
 import { AdminFrame } from "../AdminFrame";
 
@@ -15,14 +15,14 @@ export default async function ReportsPage() {
 
   if (!clinic.isAdmin) {
     return (
-      <AppShell>
+      <ClinicShell clinic={clinic}>
         <AdminsOnly />
-      </AppShell>
+      </ClinicShell>
     );
   }
 
   return (
-    <AdminFrame clinicName={clinic.name} title="Reports" intro="Coming later.">
+    <AdminFrame clinic={clinic} title="Reports" intro="Coming later.">
       <p className="mt-6 max-w-xl text-[#bfbfbf]">
         How your links get used: links made and play starts per procedure, and which categories see the most use. Totals
         only, never anything about a patient. Until then, each link&rsquo;s play starts are on the Shared links page.

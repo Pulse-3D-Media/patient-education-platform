@@ -84,7 +84,7 @@ export default async function LibraryPage() {
             <li key={category.value}>
               <Link
                 href={`/library/${category.slug}`}
-                className="group relative block aspect-[16/9] overflow-hidden rounded-2xl border border-white/10 bg-[#0d1113] transition hover:border-[#2a829b]/70 active:scale-[0.985]"
+                className="group relative block aspect-[16/9] overflow-hidden rounded-2xl border border-white/10 bg-[#0d1113] transition hover:border-brand/70 active:scale-[0.985]"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- CDN still, no resizing needed */}
                 <img

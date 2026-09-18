@@ -35,6 +35,33 @@ Environment: the Codex in-app Chromium browser on this Windows workstation, loca
 
 No cold/warm first-frame timings are claimed from the synthetic local clip. The two-second target still needs representative clinical media and real network/device measurements.
 
+## Second pass: independent audit, September 18, 2026 (evening)
+
+A second review of the committed branch, by Claude, reading the code and re-running everything rather than relying on the record above.
+
+Checks, all in one uninterrupted run each: `npm run lint` passed; `npx tsc --noEmit` passed; `npm test` passed **385 tests in 36 files** (no file skipped, no retry needed this time); `npm run build` passed and lists `/admin/branding`, with no temporary route. These were run again after the fixes below, with the same result.
+
+Browser: headless Microsoft Edge on the same Windows workstation, driven over the DevTools protocol with real mouse and key events, against the local development server reading the Neon **testing** branch (never production). Eight made-up clinics with made-up names and the 555 phone number were created for it and removed afterwards. The video was the finished knee animation that is already public on the site's CDN. This is a desktop browser with phone-sized windows, not a phone.
+
+What was seen on the patient page, at 390 by 844 unless said otherwise:
+
+- Body copy 20px, smallest text 15px, no sideways scrolling. With a logo held back for five seconds, the video started playing first (108ms from tap to first frame, local machine, not a real-network figure) and the player did not move by a pixel when the logo arrived. A broken logo showed the clinic's name in the same box; no broken-image icon.
+- The clinic mark sits in the 40px strip above the picture (strip 383 to 423px down the page, picture starting at 423px). Nothing is drawn over the picture except the "still loading" note, which only shows while the picture is stuck.
+- Missing video file: the calm panel, "Try again" 48px tall, "Still stuck? Call" 48px tall with the right `tel:` link, no alarming words. A dropped connection followed by Try again played the video.
+- A 104-character clinic name at 375px wide: no sideways scrolling, the mark shortened with an ellipsis.
+- Keyboard only, with element full screen switched off to force the overlay: Tab reaches Play first, Enter plays, the overlay opens as a labelled modal dialog filling the window, focus lands on a 112 by 48 Close button, everything behind it is inert (nothing outside the dialog can be reached), turning the window sideways re-fits it, Escape closes it, focus returns to "Make the video bigger", the page returns to where it was scrolled, and the video never restarted.
+- With element full screen available: the whole player goes full screen with Close and the clinic mark inside it, and comes back with focus restored and the video still playing.
+
+Three defects found in the committed version and fixed in this pass:
+
+1. The browser's control bar was showing through underneath "Tap to play" before the first tap (the video had its controls on from the start, where `main` turns them on at the first play). It also made the video, not the Play button, the first Tab stop. Restored: controls arrive with the first play.
+2. The library player, which now uses the browser's controls, had gained a Download entry in Chrome's menu that the old player never had. Removed with `controlsList="nodownload"`, the same as the patient player. Tidiness, not protection.
+3. The library player's placeholder mark was plain tinted text instead of the shared amber chip the rules file describes. It uses the shared chip again.
+
+One limit found and written down rather than fixed, because it comes with the browser's own controls: in Chrome and Edge, while keyboard focus is inside the video's controls (after a click on the timeline, or tabbing into them), the page receives no key presses at all, so Escape does not close the patient overlay or the library player from there. Escape works from the Close button and from the video element itself, Tab reaches Close, and Close always works. In the library this is new with the move to the browser's controls; the old custom controls did not have it.
+
+Not covered by this pass either: anything signed in (Clerk), the deployed preview, real phones and tablets, VoiceOver and TalkBack, captions, and real-network first-frame times. The table below still stands.
+
 ## Signed-in preview walkthrough for Evan
 
 1. Open the PR's Vercel preview as Pulse staff. Open a synthetic clinic, then its **Branding** tab. Set an approved HTTPS logo, one colour, a font and a US phone number. Save, reload and inspect Notes for the correct actor and old/new values.

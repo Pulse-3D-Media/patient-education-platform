@@ -70,6 +70,13 @@ import { recordPlay } from "./actions";
  * where it was. Nothing locks the screen's rotation; turning the phone just
  * re-fits the picture, and nobody has to turn it to watch.
  *
+ * One honest limit on Escape (measured in Chrome and Edge): while the
+ * keyboard's focus is INSIDE the browser's own video controls (on the
+ * timeline, say), the browser keeps every key press to itself and the page
+ * never hears Escape. Tab still reaches Close from there, and Escape works
+ * from Close and from the video itself. Keeping the browser's controls is
+ * worth that; see the top of this note.
+ *
  * The browser's own full-screen button (in its controls) and
  * picture-in-picture still work. They hand the video to the phone's own
  * player, which shows the video alone, without the clinic mark or our Close
@@ -88,7 +95,7 @@ export function WatchPlayer({
   title: string;
   code: string;
   clinicName: string;
-  /** The clinic's logo for the mark over the picture, or null to use its name. */
+  /** The clinic's logo for the mark in the strip above the picture, or null to use its name. */
   logoUrl: string | null;
   /** The clinic's phone as a tap-to-call link, when it has a valid one. Offered only if the video will not load. */
   call: { href: string; label: string } | null;
@@ -348,8 +355,11 @@ export function WatchPlayer({
               src={src}
               preload="auto"
               playsInline
-              controls={!failed}
-              tabIndex={failed ? -1 : 0}
+              // The browser's controls arrive with the first play, as they always have here: before it, the big
+              // Play button is the only thing on the picture, and a control bar showing through under "Tap to play"
+              // would be a second, smaller play button to aim at.
+              controls={started && !failed}
+              tabIndex={started && !failed ? 0 : -1}
               controlsList="nodownload"
               onPlay={onPlay}
               onPlaying={onPlaying}
@@ -366,12 +376,12 @@ export function WatchPlayer({
 
             {/* Branding occupies the strip above, never the clinical picture. */}
 
-            {/* Said only when the wait has gone on a while, so a tap on a weak signal never looks ignored. It sits below the clinic mark's corner, and only while there is nothing to watch anyway. The element is always here so a screen reader hears the words when they arrive. */}
+            {/* Said only when the wait has gone on a while, so a tap on a weak signal never looks ignored. It is the one thing ever laid over the picture, and only while the picture is stuck, so there is nothing to watch under it. The element is always here so a screen reader hears the words when they arrive. */}
             <p
               role="status"
               className={
                 slow && !failed
-                  ? "absolute left-3 top-14 z-10 max-w-[80%] rounded-xl bg-white/90 px-3 py-1.5 text-[15px] leading-[1.35] font-medium text-[#12333f]"
+                  ? "absolute left-3 top-3 z-10 max-w-[80%] rounded-xl bg-white/90 px-3 py-1.5 text-[15px] leading-[1.35] font-medium text-[#12333f]"
                   : "sr-only"
               }
             >

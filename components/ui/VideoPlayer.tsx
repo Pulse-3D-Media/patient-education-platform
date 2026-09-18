@@ -3,12 +3,38 @@
 import { useEffect, useRef, useState } from "react";
 import { ClinicMark } from "./ClinicMark";
 import { CloseIcon, FullscreenIcon } from "./icons";
-import { PRIMARY_BUTTON } from "./styles";
+import { PLACEHOLDER_CHIP, PRIMARY_BUTTON } from "./styles";
 import { playRefusalIsFailure, resumePoint, SLOW_AFTER_MS } from "@/lib/playback";
 
-/** The library's expanded player keeps native controls, including captions
- * when the media supplies them. Branding and the title occupy their own rows;
- * neither can obscure a frame, anatomy label or native control.
+/**
+ * The library's full-screen procedure player.
+ *
+ * It uses the BROWSER'S OWN video controls (play, seek, sound, captions
+ * when the file has them). Until the branding work it drew its own; the
+ * browser's were chosen because they are the most dependable on a tablet,
+ * a screen reader already knows them, and a captions button comes with them
+ * the day a video gets captions.
+ *
+ * Nothing is ever laid over the picture. The Close button, the title, the
+ * "Placeholder animation" chip and the clinic's mark each sit in a row of
+ * their own above it, because an anatomy label can be anywhere in a frame.
+ *
+ * Playback starts as soon as the player opens (autoPlay), which is inside
+ * the tap that opened it, so sound is allowed. There is no Download entry
+ * in the browser's menu (controlsList). That is tidiness, not protection.
+ *
+ * WHEN THE VIDEO WILL NOT LOAD: a calm panel with Try again, which reloads
+ * the file and carries on from where it stopped. The check one frame after
+ * opening catches a file that failed before this component was listening.
+ *
+ * The square button asks the browser to put the whole player full screen,
+ * where the browser can; where it cannot, the player already fills the
+ * screen, so nothing is lost.
+ *
+ * One honest limit (measured in Chrome and Edge): while the keyboard's
+ * focus is inside the browser's controls, after a click on the timeline
+ * say, the browser keeps key presses to itself and the library never hears
+ * Escape. The Close button always works, and Tab reaches it.
  */
 export function VideoPlayer({ src, title, subtitle, placeholder, poster, clinicName, logoUrl = null, onClose }: {
   src: string; title: string; subtitle?: string; placeholder?: boolean; poster?: string;
@@ -77,11 +103,11 @@ export function VideoPlayer({ src, title, subtitle, placeholder, poster, clinicN
         </button>
       </header>
       <div className="relative flex min-h-10 shrink-0 items-center px-4">
-        {placeholder && <span className="max-w-[50%] text-[15px] text-[#ffd783]">Placeholder animation</span>}
+        {placeholder && <span className={PLACEHOLDER_CHIP}>Placeholder animation</span>}
         {clinicName && <ClinicMark logoUrl={logoUrl} name={clinicName} size="patient" className="right-4 top-1" />}
       </div>
       <div className="relative min-h-48 flex-1">
-        <video ref={video} src={src} poster={poster} autoPlay playsInline controls={!failed}
+        <video ref={video} src={src} poster={poster} autoPlay playsInline controls={!failed} controlsList="nodownload"
           aria-label={title} aria-hidden={failed || undefined} tabIndex={failed ? -1 : 0}
           className={`absolute inset-0 h-full w-full object-contain ${failed ? "invisible" : ""}`}
           onError={fail} onPlaying={ready} onCanPlay={ready}

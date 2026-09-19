@@ -62,6 +62,26 @@ One limit found and written down rather than fixed, because it comes with the br
 
 Not covered by this pass either: anything signed in (Clerk), the deployed preview, real phones and tablets, VoiceOver and TalkBack, captions, and real-network first-frame times. The table below still stands.
 
+## Third pass: the library player's own controls restored, September 18, 2026 (night)
+
+Evan looked at both library players side by side and chose the one he had approved: our own controls (scrub bar, play and start over, sound, full screen, keyboard shortcuts). The version with the browser's controls, described in the two passes above, is gone. So items 2 and 3 of the second pass, and its note about Escape in the library, no longer describe the code: the library player has no browser menu to hold a Download entry (`controlsList="nodownload"` is still set, as it was on `main`), and Escape closes it from anywhere because its controls are ordinary buttons. The Escape limit still applies to the patient page's enlarged view, which keeps the browser's controls on purpose.
+
+What this PR still adds to that player: a 40px strip above the picture holding the amber placeholder chip and the clinic mark, so nothing that stays on screen is laid over the animation (on `main` the chip sat on the picture); the "did not load" panel with Try again, which carries on from where it stopped; the quiet "still loading" note; Space on a focused button now presses that button instead of pausing the video; and the scrub bar and volume take the clinic's colour.
+
+The preview and production state also changed that day, on Evan's instruction: PR #22's owed migration was applied to production from `main`, and both pending migrations were applied to the `preview/branding` database. This PR's migration is still not on production.
+
+Checks after the change, one uninterrupted run each: lint passed, `tsc` passed, `npm test` 385 passed in 36 files, build passed with no temporary route.
+
+Browser (same set-up as the second pass: headless Edge over the DevTools protocol, a throwaway route since deleted, the public knee animation, windows not devices):
+
+- Tablet landscape (1180 by 820): picture 1180 by 780 (820 on `main`, 714 with the browser's controls), strip 40px, neither the chip nor the mark over the picture, all five buttons 48 by 48, no sideways scroll. Phone (390 by 844): the same, picture 390 by 804.
+- Keyboard, with focus on the player as it opens: Space pauses, K plays, the right arrow moves ten seconds, M mutes. Space on the focused Unmute button unmuted and did not pause. After a mouse click on the scrub bar, Escape closed the player, nothing was left inert and the page's scroll lock was released.
+- A file that does not exist: "This video did not load.", Try again 94 by 48 with the keyboard's focus on it, Close still showing, the controls gone, no alarming words.
+- The connection down when the player opens: the panel, then Try again plays. A failure sent at 0:40: Try again carried on at 0:41, and focus went back to the player.
+- The connection dropping part-way did NOT reach the panel in Edge: the browser kept retrying by itself, the "still loading" note showed after eight seconds, and playback resumed on its own when the connection returned. That is the browser's behaviour, and the better outcome.
+
+Still not covered: anything signed in, the deployed preview, real phones and tablets, screen readers, captions.
+
 ## Signed-in preview walkthrough for Evan
 
 1. Open the PR's Vercel preview as Pulse staff. Open a synthetic clinic, then its **Branding** tab. Set an approved HTTPS logo, one colour, a font and a US phone number. Save, reload and inspect Notes for the correct actor and old/new values.

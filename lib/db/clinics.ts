@@ -1,6 +1,8 @@
 import type { Category, ClinicStatus, Prisma } from "@prisma/client";
+import { DEFAULT_BRAND_FONT, brandFontLabel, parseBrandFont } from "../branding";
 import { CATEGORIES } from "../categories";
 import { formatUsPhone } from "../phone";
+import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
 
 /**
@@ -20,6 +22,9 @@ import { prisma } from "./client";
 /**
  * The fields the clinic side of the app reads about a clinic. noticeText and
  * showPlaceholders are set by Pulse staff and change what the clinic sees.
+ * The phone, brand colour and brand font are the clinic's branding, which
+ * its own admin can edit too (/admin/branding). Nothing internal (notes,
+ * status reasons, the pricing pin) is in here.
  */
 const CLINIC_FIELDS = {
   id: true,
@@ -29,6 +34,9 @@ const CLINIC_FIELDS = {
   logoUrl: true,
   noticeText: true,
   showPlaceholders: true,
+  phone: true,
+  brandColor: true,
+  brandFont: true,
 } as const;
 
 /** What Clerk tells us about an organization that we keep a copy of. */
@@ -81,7 +89,9 @@ export async function upsertClinicForClerkOrg(clerkOrgId: string, details: Clerk
   return prisma.clinic.upsert({
     where: { clerkOrgId },
     create: { clerkOrgId, name: details.name, logoUrl, status: "PENDING" },
-    update: { name: details.name, logoUrl },
+    // When Clerk has no image, omit the column entirely. Writing the logo
+    // from the earlier read could overwrite a concurrent Pulse branding save.
+    update: { name: details.name, ...(details.logoUrl !== null ? { logoUrl: details.logoUrl } : {}) },
     select: CLINIC_FIELDS,
   });
 }
@@ -152,7 +162,6 @@ const PULSE_CLINIC_FIELDS = {
   statusChangedBy: true,
   statusChangedAt: true,
   viewDaysOverride: true,
-  phone: true,
   categories: true,
   surgeonSeats: true,
 } as const;
@@ -241,10 +250,11 @@ export async function getClinicForPulse(clinicId: string) {
 type PulseClinic = NonNullable<Awaited<ReturnType<typeof getClinicForPulse>>>;
 
 // ---------------------------------------------------------------------------
-// Changes staff make to a clinic. Every one of them is written together with
-// an entry in the clinic's log (a ClinicNote of kind STATUS, the kind for
-// entries the app writes itself), in one transaction, so the change and its
-// history cannot disagree. A save that changes nothing writes nothing.
+// Changes to a clinic, by Pulse staff on /pulse or by the clinic's own admin
+// on /admin/branding. Every one of them is written together with an entry
+// in the clinic's log (a ClinicNote of kind STATUS, the kind for entries the
+// app writes itself), in one transaction, so the change and its history
+// cannot disagree. A save that changes nothing writes nothing.
 // ---------------------------------------------------------------------------
 
 /**
@@ -254,8 +264,15 @@ type PulseClinic = NonNullable<Awaited<ReturnType<typeof getClinicForPulse>>>;
  * the log, or null when the new values are the same as the old ones, in
  * which case nothing at all is written. Throws if the clinic does not exist.
  *
+ * The read, the decision and the two writes are one transaction, and the
+ * read takes a lock on the clinic's row first (readClinicLocked). So when two
+ * people save at the same moment, the second one waits for the first, then
+ * reads what the first one wrote: its log entry says "changed from" the
+ * value that was really there, never a value that had already been
+ * replaced.
+ *
  * Returns the clinic as it now is, and the sentence that went in the log
- * (null when nothing changed) so the caller can tell the staff member.
+ * (null when nothing changed) so the caller can tell the person who saved.
  */
 async function changeClinicWithLog(
   clinicId: string,
@@ -263,17 +280,17 @@ async function changeClinicWithLog(
   describe: (before: PulseClinic) => string | null,
   changedBy: string,
 ) {
-  const before = await getClinicForPulse(clinicId);
-  if (!before) throw new Error(`No clinic has the id "${clinicId}".`);
+  return prisma.$transaction(async (tx) => {
+    const before = await readClinicLocked(tx, clinicId, PULSE_CLINIC_FIELDS);
+    if (!before) throw new Error(`No clinic has the id "${clinicId}".`);
 
-  const body = describe(before);
-  if (body === null) return { clinic: before, logged: null };
+    const body = describe(before);
+    if (body === null) return { clinic: before, logged: null };
 
-  const [clinic] = await prisma.$transaction([
-    prisma.clinic.update({ where: { id: clinicId }, data, select: PULSE_CLINIC_FIELDS }),
-    prisma.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: changedBy }, select: { id: true } }),
-  ]);
-  return { clinic, logged: body };
+    const clinic = await tx.clinic.update({ where: { id: clinicId }, data, select: PULSE_CLINIC_FIELDS });
+    await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: changedBy }, select: { id: true } });
+    return { clinic, logged: body };
+  });
 }
 
 /** How each status reads in a log entry. */
@@ -349,11 +366,13 @@ export async function setClinicManagedByPulse(clinicId: string, managedByPulse: 
   );
 }
 
-/** The details a staff member can edit on one clinic. Phone is digits only (see lib/phone.ts). */
+/**
+ * The details a staff member can edit on one clinic. The logo and the phone
+ * are not here: they are part of the clinic's branding (see below), so one
+ * form, and only one, saves each of them.
+ */
 export type ClinicDetails = {
   name: string;
-  logoUrl: string | null;
-  phone: string | null;
   noticeText: string | null;
   showPlaceholders: boolean;
   viewDaysOverride: number | null;
@@ -387,8 +406,6 @@ export async function updateClinicDetails(clinicId: string, details: ClinicDetai
       const platform = "the platform setting";
       const parts = [
         changeWords("name", quoted(before.name), quoted(details.name)),
-        changeWords("phone", formatUsPhone(before.phone) || null, formatUsPhone(details.phone) || null),
-        changeWords("logo", before.logoUrl, details.logoUrl),
         changeWords("notice", quoted(before.noticeText), quoted(details.noticeText)),
         before.showPlaceholders === details.showPlaceholders
           ? null
@@ -400,6 +417,72 @@ export async function updateClinicDetails(clinicId: string, details: ClinicDetai
         ),
       ].filter((part): part is string => part !== null);
       return parts.length > 0 ? `Details changed: ${parts.join("; ")}.` : null;
+    },
+    changedBy,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Branding: the clinic's logo, phone, brand colour and font. Edited by the
+// clinic's own admin on /admin/branding and by Pulse staff on the Branding
+// tab of /pulse. Both go through the one function below, so both are logged
+// the same way and the last save wins.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a branding save carries. Callers check every value first (the
+ * actions use lib/branding.ts and lib/phone.ts).
+ *
+ * `logoUrl` is optional on purpose. Pulse staff can set a logo address;
+ * the clinic's own admin cannot (their logo is the one they upload to
+ * their Clerk organization), so the admin's save leaves it out and the
+ * stored logo is not touched. There is one logo column and no second store:
+ * a logo uploaded in Clerk is copied over it on the clinic's next sign-in
+ * (upsertClinicForClerkOrg above), and a Pulse-set one stays only while the
+ * organization has none of its own.
+ */
+export type ClinicBrandingInput = {
+  /** Ten digits, or null for no phone. */
+  phone: string | null;
+  /** "#rrggbb", or null for the Pulse colour. */
+  brandColor: string | null;
+  /** A font key from lib/branding.ts, or null for the default. */
+  brandFont: string | null;
+  /** A full https address, null to remove it, or left out to leave the logo alone. */
+  logoUrl?: string | null;
+};
+
+/** "Inter" for nothing stored, otherwise the font's name as the forms show it. */
+function fontWords(key: string | null) {
+  return brandFontLabel(parseBrandFont(key) ?? DEFAULT_BRAND_FONT);
+}
+
+/**
+ * Save one clinic's branding and log every part that changed, under the
+ * name given (a Pulse staff member, or "<name> (clinic admin)"). A save
+ * that changes nothing writes nothing. Throws if the clinic does not exist.
+ */
+export async function updateClinicBranding(clinicId: string, branding: ClinicBrandingInput, changedBy: string) {
+  const data: Prisma.ClinicUncheckedUpdateInput = {
+    phone: branding.phone,
+    brandColor: branding.brandColor,
+    brandFont: branding.brandFont,
+    ...(branding.logoUrl !== undefined ? { logoUrl: branding.logoUrl } : {}),
+  };
+
+  return changeClinicWithLog(
+    clinicId,
+    data,
+    (before) => {
+      const parts = [
+        branding.logoUrl !== undefined ? changeWords("logo", before.logoUrl, branding.logoUrl) : null,
+        changeWords("colour", before.brandColor, branding.brandColor),
+        fontWords(before.brandFont) === fontWords(branding.brandFont)
+          ? null
+          : `font changed from ${fontWords(before.brandFont)} to ${fontWords(branding.brandFont)}`,
+        changeWords("phone", formatUsPhone(before.phone) || null, formatUsPhone(branding.phone) || null),
+      ].filter((part): part is string => part !== null);
+      return parts.length > 0 ? `Branding changed: ${parts.join("; ")}.` : null;
     },
     changedBy,
   );

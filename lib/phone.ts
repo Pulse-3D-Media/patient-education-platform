@@ -25,3 +25,14 @@ export function formatUsPhone(digits: string | null | undefined): string {
   if (!/^\d{10}$/.test(digits)) return digits;
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
+
+/**
+ * The address behind a tap-to-call link, "tel:+18015550123", or null when
+ * the stored value is not exactly ten digits. The patient page only offers
+ * a call link when this returns one, so a half-typed or hand-edited number
+ * never becomes a link that dials the wrong place.
+ */
+export function telHref(digits: string | null | undefined): string | null {
+  if (!digits || !/^\d{10}$/.test(digits)) return null;
+  return `tel:+1${digits}`;
+}

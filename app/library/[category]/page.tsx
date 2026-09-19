@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { categoryState } from "@/lib/access";
+import { parseLogoUrl } from "@/lib/branding";
 import { categoryFromSlug } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -80,7 +81,7 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
       </header>
 
       {items.length > 0 ? (
-        <VideoGrid videos={items} categoryLabel={category.label} />
+        <VideoGrid videos={items} categoryLabel={category.label} clinicName={clinic.name} logoUrl={parseLogoUrl(clinic.logoUrl)} />
       ) : configs ? (
         <ComingSoon label={category.label} config={configs[category.value]} />
       ) : state === "locked" ? (

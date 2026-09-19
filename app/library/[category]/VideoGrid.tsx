@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { VideoPlayer } from "@/components/ui/VideoPlayer";
+import { useModalFocus } from "@/components/ui/useModalFocus";
 import { PlayIcon, ShareIcon } from "@/components/ui/icons";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { formatDuration } from "@/lib/format";
@@ -48,10 +49,23 @@ type Sending = { video: Item; result: SendResult | null };
  * and the player shows the same mark the whole time it plays, so it cannot
  * be mistaken for finished work.
  */
-export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryLabel: string }) {
+export function VideoGrid({
+  videos,
+  categoryLabel,
+  clinicName,
+  logoUrl,
+}: {
+  videos: Item[];
+  categoryLabel: string;
+  /** The clinic's name and checked logo address, for the strip above the picture. */
+  clinicName: string;
+  logoUrl: string | null;
+}) {
   const [playing, setPlaying] = useState<Item | null>(null);
   const [sending, setSending] = useState<Sending | null>(null);
   const [query, setQuery] = useState("");
+  const playerDialog = useRef<HTMLDivElement>(null);
+  useModalFocus(playerDialog, playing !== null);
 
   // Counts Send taps. A server answer is only shown if it belongs to the
   // latest tap, so closing the panel early (or tapping Try again) can never
@@ -89,10 +103,8 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
       setSending(null);
     };
     window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
     };
   }, [overlayOpen]);
 
@@ -109,7 +121,7 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search procedures..."
-            className="h-11 w-full rounded-full border border-white/15 bg-[#0d1113] px-5 text-base text-white placeholder:text-[#667085] focus:border-[#2a829b] focus:outline-none"
+            className="h-11 w-full rounded-full border border-white/15 bg-[#0d1113] px-5 text-base text-white placeholder:text-[#667085] focus:border-brand focus:outline-none"
           />
         </div>
       )}
@@ -127,7 +139,7 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
       )}
 
       {playing && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-black" role="dialog" aria-label={playing.title}>
+        <div ref={playerDialog} tabIndex={-1} className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-black pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]" role="dialog" aria-modal="true" aria-label={`${playing.title}, from ${clinicName}`}>
           <VideoPlayer
             key={playing.id}
             src={playing.src}
@@ -135,6 +147,8 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
             subtitle={categoryLabel}
             placeholder={playing.isPlaceholder}
             poster={playing.posterUrl ?? undefined}
+            clinicName={clinicName}
+            logoUrl={logoUrl}
             onClose={() => setPlaying(null)}
           />
         </div>
@@ -144,6 +158,7 @@ export function VideoGrid({ videos, categoryLabel }: { videos: Item[]; categoryL
         <SendPanel
           key={sending.video.id}
           title={sending.video.title}
+          placeholder={sending.video.isPlaceholder}
           result={sending.result}
           onRetry={() => send(sending.video)}
           onClose={closeSend}
@@ -157,7 +172,7 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
   const [thumbFailed, setThumbFailed] = useState(false);
 
   return (
-    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0d1113] transition hover:-translate-y-0.5 hover:border-[#2a829b]/70 hover:shadow-[0_12px_32px_rgba(0,0,0,.5)]">
+    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0d1113] transition hover:-translate-y-0.5 hover:border-brand/70 hover:shadow-[0_12px_32px_rgba(0,0,0,.5)]">
       {/* The thumbnail is itself a Play button, so the big circle in the middle does what it looks like. */}
       <button
         type="button"
@@ -188,7 +203,7 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
           />
         )}
         <span className="absolute inset-0 flex items-center justify-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/30 backdrop-blur transition group-hover:bg-[#2a829b] group-hover:ring-[#5fb8d4]">
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/30 backdrop-blur transition group-hover:bg-brand group-hover:text-on-brand group-hover:ring-brand-bright">
             <PlayIcon className="ml-1 h-7 w-7" />
           </span>
         </span>
@@ -210,7 +225,7 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
           onClick={onSend}
           aria-label={`Send ${video.title} to a patient`}
           title="Send to a patient"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/15 text-[#bfbfbf] transition hover:border-[#2a829b] hover:text-white active:scale-[0.95]"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/15 text-[#bfbfbf] transition hover:border-brand hover:text-white active:scale-[0.95]"
         >
           <ShareIcon className="h-5 w-5" />
         </button>
@@ -222,8 +237,8 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
 /** Shown when a thumbnail cannot load. Quiet, on-brand, never a broken image. */
 function BrandedFallback() {
   return (
-    <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#0d1113] to-[#1e5668]/40">
-      <span className="rounded-lg bg-[#2a829b] px-3 py-1.5 text-lg font-bold text-white">P3</span>
+    <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#0d1113] to-brand-hover/40">
+      <span className="rounded-lg bg-brand px-3 py-1.5 text-lg font-bold text-on-brand">P3</span>
     </span>
   );
 }

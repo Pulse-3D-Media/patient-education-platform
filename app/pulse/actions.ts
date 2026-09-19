@@ -4,11 +4,13 @@ import { Category, ClinicStatus } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { saveCategoryConfig } from "@/lib/db/category-config";
+import { readBrandingForm, readLogoField } from "@/lib/branding-form";
 import {
   getClinicForPulse,
   setClinicManagedByPulse,
   setClinicPlan,
   setClinicStatusByStaff,
+  updateClinicBranding,
   updateClinicDetails,
 } from "@/lib/db/clinics";
 import { addClinicNote } from "@/lib/db/notes";
@@ -18,7 +20,6 @@ import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/l
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
 import { parseDuration } from "@/lib/format";
 import { renameClerkOrganization } from "@/lib/organization";
-import { normalizeUsPhone } from "@/lib/phone";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 
@@ -60,6 +61,17 @@ async function clinicFromForm(formData: FormData) {
 function refreshClinic(clinicId: string) {
   revalidatePath(`/pulse/clinics/${clinicId}`);
   revalidatePath("/pulse");
+}
+
+/**
+ * Tell Next.js that what a clinic's own screens look like has changed. The
+ * library's frame is a layout, which the browser otherwise keeps between
+ * pages, so it is named as one. The patient page is always drawn fresh and
+ * needs no telling.
+ */
+function refreshClinicScreens() {
+  revalidatePath("/library", "layout");
+  revalidatePath("/admin", "layout");
 }
 
 /** A whole number from a form field, or null when it is not one. */
@@ -126,7 +138,7 @@ export async function setManagedAction(_previous: FormState, formData: FormData)
   return { ok: managed ? "This clinic is now managed by Pulse." : "This clinic now manages itself." };
 }
 
-/** Save a clinic's name, logo, phone, notice, placeholder setting and view-days override. */
+/** Save a clinic's name, notice, placeholder setting and view-days override. (Its logo and phone are branding: see saveBrandingAction.) */
 export async function saveDetailsAction(_previous: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePulseStaff();
 
@@ -135,13 +147,6 @@ export async function saveDetailsAction(_previous: FormState, formData: FormData
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "The clinic needs a name." };
-
-  const logoText = String(formData.get("logoUrl") ?? "").trim();
-  if (logoText && !logoText.startsWith("https://")) return { error: "The logo address must start with https://." };
-
-  const phoneText = String(formData.get("phone") ?? "").trim();
-  const phone = phoneText ? normalizeUsPhone(phoneText) : null;
-  if (phoneText && !phone) return { error: "That does not look like a US phone number. Ten digits, any format." };
 
   const notice = String(formData.get("noticeText") ?? "").trim();
   if (notice.length > SHORT_TEXT_LIMIT) return { error: `Keep the notice under ${SHORT_TEXT_LIMIT} characters.` };
@@ -169,8 +174,6 @@ export async function saveDetailsAction(_previous: FormState, formData: FormData
     clinic.id,
     {
       name,
-      logoUrl: logoText || null,
-      phone,
       noticeText: notice || null,
       showPlaceholders: formData.get("showPlaceholders") === "on",
       viewDaysOverride,
@@ -180,6 +183,32 @@ export async function saveDetailsAction(_previous: FormState, formData: FormData
   if (!logged) return { ok: NOTHING_CHANGED };
   refreshClinic(clinic.id);
   return { ok: "Details saved." };
+}
+
+/**
+ * Save a clinic's branding from the Branding tab: its logo address, phone,
+ * brand colour and font. The clinic's own admin can change the last three
+ * too (app/admin/branding); both saves go through updateClinicBranding, so
+ * both are logged and the last one wins. Only this one can set a logo
+ * address, because a Pulse-set logo is an address Pulse staff have looked at
+ * and approved; a clinic's own logo is the one it uploads to Clerk.
+ */
+export async function saveBrandingAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePulseStaff();
+
+  const clinic = await clinicFromForm(formData);
+  if (!clinic) return { error: "That clinic no longer exists." };
+
+  const checked = readBrandingForm(formData);
+  if ("error" in checked) return checked;
+  const logo = readLogoField(formData);
+  if ("error" in logo) return logo;
+
+  const { logged } = await updateClinicBranding(clinic.id, { ...checked.values, logoUrl: logo.logoUrl }, staff.name);
+  if (!logged) return { ok: NOTHING_CHANGED };
+  refreshClinic(clinic.id);
+  refreshClinicScreens();
+  return { ok: "Branding saved. The clinic and its patients see it from their next page load." };
 }
 
 /** Add one entry to a clinic's log, under the signed-in staff member's name. */

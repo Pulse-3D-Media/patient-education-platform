@@ -39,7 +39,7 @@ export function ComingSoon({ label, config }: { label: string; config: CategoryC
       <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">Coming soon</p>
       <p className="mt-2 text-xl font-medium">Nothing in {label} yet.</p>
       <p className="mx-auto mt-2 max-w-md text-base text-[#bfbfbf]">{comingSoonSentence(config)}</p>
-      <Link href="/library" className="mt-6 inline-flex h-11 items-center rounded-lg border border-white/15 px-4 text-sm font-medium text-[#bfbfbf] hover:border-[#2a829b] hover:text-white">
+      <Link href="/library" className="mt-6 inline-flex h-11 items-center rounded-lg border border-white/15 px-4 text-sm font-medium text-[#bfbfbf] hover:border-brand hover:text-white">
         Back to the library
       </Link>
     </div>

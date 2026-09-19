@@ -1,15 +1,16 @@
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "./client";
 import {
   getClinicByClerkOrgId,
   linkClinicToClerkOrg,
   setClinicPlan,
   setClinicStatus,
-  updateClinicDetails,
+  updateClinicBranding,
   upsertClinicForClerkOrg,
 } from "./clinics";
-import { createShare, getShareForClinic, listSharesForClinic } from "./shares";
+import { listNotesForClinic } from "./notes";
+import { createShare, getShareByCode, getShareForClinic, listSharesForClinic } from "./shares";
 
 /**
  * The organization-to-clinic lookup and the first-use upsert, against the
@@ -74,6 +75,21 @@ describe("getClinicByClerkOrgId", () => {
 });
 
 describe("upsertClinicForClerkOrg", () => {
+  it("a name sync without a Clerk image preserves a Pulse logo saved after its read", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest before sync", logoUrl: null });
+    createdClinicIds.push(clinic.id);
+    const original = prisma.clinic.upsert.bind(prisma.clinic);
+    const paused = vi.spyOn(prisma.clinic, "upsert").mockImplementationOnce((async (args: Parameters<typeof original>[0]) => {
+      await updateClinicBranding(clinic.id, { logoUrl: "https://example.com/new-logo.png", phone: null, brandColor: null, brandFont: null }, "Vitest Pulse staff");
+      return original(args);
+    }) as unknown as typeof original);
+    try {
+      const synced = await upsertClinicForClerkOrg(orgId, { name: "Vitest after sync", logoUrl: null });
+      expect(synced.logoUrl).toBe("https://example.com/new-logo.png");
+      expect(synced.name).toBe("Vitest after sync");
+    } finally { paused.mockRestore(); }
+  });
   it("creates a PENDING clinic the first time an organization is seen", async () => {
     const orgId = fakeOrgId();
     const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest new clinic", logoUrl: null });
@@ -123,18 +139,7 @@ describe("upsertClinicForClerkOrg and a logo set by Pulse staff", () => {
     const created = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: null });
     createdClinicIds.push(created.id);
 
-    await updateClinicDetails(
-      created.id,
-      {
-        name: created.name,
-        logoUrl: "https://example.com/staff-logo.png",
-        phone: null,
-        noticeText: null,
-        showPlaceholders: true,
-        viewDaysOverride: null,
-      },
-      "Evan Miller",
-    );
+    await updateClinicBranding(created.id, { logoUrl: "https://example.com/staff-logo.png", phone: null, brandColor: null, brandFont: null }, "Evan Miller");
 
     // The clinic signs in again; its organization still has no logo of its own.
     const afterSignIn = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: null });
@@ -225,5 +230,113 @@ describe("linkClinicToClerkOrg", () => {
 
     const found = await getClinicByClerkOrgId(orgId);
     expect(found?.id).toBe(unlinked.id);
+  });
+});
+
+describe("updateClinicBranding", () => {
+  async function makeClinic(label: string) {
+    const clinic = await prisma.clinic.create({ data: { name: `Vitest branding clinic (${label})`, status: "ACTIVE", categories: ["KNEE"] }, select: { id: true } });
+    createdClinicIds.push(clinic.id);
+    return clinic.id;
+  }
+
+  it("saves the colour, font and phone, and logs what changed under the name given", async () => {
+    const clinicId = await makeClinic("save");
+
+    const { clinic, logged } = await updateClinicBranding(
+      clinicId,
+      { phone: "8015550123", brandColor: "#7a1f2b", brandFont: "merriweather" },
+      "Jane Smith (clinic admin)",
+    );
+
+    expect(clinic.phone).toBe("8015550123");
+    expect(clinic.brandColor).toBe("#7a1f2b");
+    expect(clinic.brandFont).toBe("merriweather");
+    expect(logged).toBe("Branding changed: colour set to #7a1f2b; font changed from Inter to Merriweather; phone set to (801) 555-0123.");
+
+    const notes = await listNotesForClinic(clinicId);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ kind: "STATUS", authorName: "Jane Smith (clinic admin)", body: logged });
+  });
+
+  it("leaves the logo alone when the save does not carry one, and sets or removes it when it does", async () => {
+    const clinicId = await makeClinic("logo");
+    await updateClinicBranding(clinicId, { logoUrl: "https://example.com/pulse-set.png", phone: null, brandColor: null, brandFont: null }, "Evan Miller");
+
+    // The clinic's own admin saves: no logo in the save, so the stored logo stays.
+    const byAdmin = await updateClinicBranding(clinicId, { phone: null, brandColor: "#112233", brandFont: null }, "Jane Smith (clinic admin)");
+    expect(byAdmin.clinic.logoUrl).toBe("https://example.com/pulse-set.png");
+    expect(byAdmin.logged).toBe("Branding changed: colour set to #112233.");
+
+    // Pulse staff remove it.
+    const removed = await updateClinicBranding(clinicId, { logoUrl: null, phone: null, brandColor: "#112233", brandFont: null }, "Evan Miller");
+    expect(removed.clinic.logoUrl).toBeNull();
+    expect(removed.logged).toBe("Branding changed: logo removed (was https://example.com/pulse-set.png).");
+  });
+
+  it("writes nothing, and logs nothing, when nothing changed", async () => {
+    const clinicId = await makeClinic("same");
+    await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "lato-not-checked-here" }, "Evan Miller");
+
+    const again = await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "lato-not-checked-here" }, "Evan Miller");
+    expect(again.logged).toBeNull();
+    expect(await listNotesForClinic(clinicId)).toHaveLength(1);
+  });
+
+  it("going back to the Pulse look reads as removed, and Inter is the word for no font", async () => {
+    const clinicId = await makeClinic("reset");
+    await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "montserrat" }, "Evan Miller");
+
+    const { logged } = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null }, "Evan Miller");
+    expect(logged).toBe("Branding changed: colour removed (was #112233); font changed from Montserrat to Inter; phone removed (was (801) 555-0123).");
+  });
+
+  it("changes only the clinic it was asked to change", async () => {
+    const mine = await makeClinic("mine");
+    const theirs = await makeClinic("theirs");
+
+    await updateClinicBranding(mine, { phone: "8015550123", brandColor: "#7a1f2b", brandFont: "open-sans" }, "Jane Smith (clinic admin)");
+
+    const other = await prisma.clinic.findUnique({ where: { id: theirs }, select: { phone: true, brandColor: true, brandFont: true, logoUrl: true } });
+    expect(other).toEqual({ phone: null, brandColor: null, brandFont: null, logoUrl: null });
+    expect(await listNotesForClinic(theirs)).toHaveLength(0);
+  });
+
+  it("throws for a clinic that does not exist, and writes nothing", async () => {
+    await expect(updateClinicBranding("no-such-clinic", { phone: null, brandColor: "#112233", brandFont: null }, "Evan Miller")).rejects.toThrow(/No clinic/);
+  });
+});
+
+describe("what the patient page may read about a clinic", () => {
+  it("gets the name and the branding through the share code, and nothing internal", async () => {
+    if (!videoId) throw new Error("the test video was not created");
+    const clinic = await prisma.clinic.create({
+      data: {
+        name: "Vitest patient-facing clinic",
+        status: "ACTIVE",
+        categories: ["KNEE"],
+        logoUrl: "https://example.com/logo.png",
+        phone: "8015550123",
+        brandColor: "#7a1f2b",
+        brandFont: "nunito-sans",
+        noticeText: "An internal notice",
+        statusReason: "An internal reason",
+        notes: "Internal notes",
+      },
+      select: { id: true },
+    });
+    createdClinicIds.push(clinic.id);
+    const share = await createShare(clinic.id, videoId);
+    createdShareIds.push(share.id);
+
+    const found = await getShareByCode(share.code);
+
+    expect(found?.clinic).toEqual({
+      name: "Vitest patient-facing clinic",
+      logoUrl: "https://example.com/logo.png",
+      phone: "8015550123",
+      brandColor: "#7a1f2b",
+      brandFont: "nunito-sans",
+    });
   });
 });

@@ -81,6 +81,13 @@ model Clinic {
   phone            String? // the clinic's phone, stored as digits only; see lib/phone.ts
   categories       Category[]   @default([]) // the categories on the clinic's plan; empty means none yet
   surgeonSeats     Int          @default(0) // surgeon seats the clinic pays for
+  // The clinic's own look, on its /admin, /library and patient pages. Set by
+  // the clinic's admin on /admin/branding or by Pulse staff on /pulse; the
+  // last save wins and every change is logged. Both are checked by
+  // lib/branding.ts before they are saved and again when they are read, so a
+  // value that is not understood falls back to the Pulse look.
+  brandColor       String? // one brand colour as "#rrggbb"; empty means the Pulse teal. The readable shades are worked out from it, never stored
+  brandFont        String? // the key of one font from the short list in lib/branding.ts; empty means Inter
   shares           Share[]
   clinicNotes      ClinicNote[]
 

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { ClockIcon, SearchIcon } from "@/components/ui/icons";
+import { patientLook, type Look } from "@/app/brand-look";
+import { ClinicLogo } from "@/components/ui/ClinicLogo";
+import { ClockIcon, PhoneIcon, SearchIcon } from "@/components/ui/icons";
 import { LOGO_URL } from "@/lib/brand";
 import { getShareByCode } from "@/lib/db/shares";
 import { isExpired } from "@/lib/expiry";
@@ -26,6 +28,28 @@ import { WatchPlayer } from "./WatchPlayer";
  * Top to bottom it answers the questions an anxious person has, in order: who
  * sent me this, what is it, why, how long will it take. The Pulse 3D logo sits
  * at the very bottom, small, because the practice sent this, not us.
+ *
+ * THE CLINIC'S OWN LOOK. The page belongs to the practice that sent it, so
+ * it carries the practice's branding (lib/branding.ts), within limits that
+ * protect the reader:
+ *
+ *   - the logo, in a row of fixed height at the top, so a logo that is slow,
+ *     broken or missing moves nothing (see ClinicLogo). The practice's name
+ *     is always written out right under it, so the name never depends on a
+ *     picture loading;
+ *   - one brand colour, as a thin band across the very top and as the call
+ *     button. Never as text colour or background: the page's dark-on-light
+ *     text is the same for every clinic, and the band and button colours are
+ *     adjusted until they are readable, whatever the clinic picked;
+ *   - the clinic's font from the short list, which shows the moment it
+ *     arrives and never holds up the text or the video (app/brand-fonts.ts).
+ *
+ * A clinic that set nothing gets the page exactly as it was.
+ *
+ * When the link cannot be played (expired, or the video taken down) and the
+ * clinic has a valid phone number on file, the page offers one large
+ * tap-to-call button, because "ask the office for a new link" is the only
+ * thing left to do and a phone is already in their hand.
  *
  * A placeholder link (a sample animation standing in for the named
  * procedure) gets an amber bar above everything else saying so. The patient
@@ -53,8 +77,10 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   const share = await getShareByCode(code);
 
   if (!share) {
+    // No link, so no clinic: the page keeps the Pulse look and offers no number to call.
     return (
       <Unavailable
+        look={patientLook(null)}
         icon={<SearchIcon className="h-8 w-8" />}
         heading="We couldn't find this link"
         body="Please check the address you were given, or ask your doctor's office for a new link."
@@ -62,10 +88,14 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
     );
   }
 
+  // The clinic's logo, colour, font and phone, each checked on the way in (app/brand-look.ts).
+  const look = patientLook(share.clinic);
+
   // At the deadline itself the link is over (lib/expiry.ts draws that line, and the play recording draws it in the same place).
   if (isExpired(share, new Date())) {
     return (
       <Unavailable
+        look={look}
         icon={<ClockIcon className="h-8 w-8" />}
         heading="This link has expired"
         body={`Links stay open for a set time. ${share.clinic.name} can send you a fresh one whenever you need it.`}
@@ -79,6 +109,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   if (!share.video.isPublished) {
     return (
       <Unavailable
+        look={look}
         icon={<ClockIcon className="h-8 w-8" />}
         heading="This video isn't available right now"
         body={`It has been taken down for now. ${share.clinic.name} can send you a new link when it is back.`}
@@ -90,20 +121,35 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   const length = describeDuration(share.video.durationSeconds);
 
   return (
-    <main className="flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a]">
+    <main className={`flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a] ${look.fontClass}`} style={look.style}>
+      <BrandBand />
       {share.video.isPlaceholder && <PlaceholderBar />}
 
       {/* 46px at the top keeps the first line clear of a phone's notch and status bar. When the placeholder bar is there, it carries that clearance instead. */}
       <div className={`mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-10 sm:px-8 ${share.video.isPlaceholder ? "pt-6" : "pt-[46px]"}`}>
-        {/* Who sent it comes first: it is the first thing an anxious person wants to know. */}
-        <p className="text-[15px] font-semibold tracking-[.01em] text-[#46555e]">From {share.clinic.name}</p>
+        {/* The logo's row is a fixed 44px tall whether the picture loads, loads late, or never loads, so nothing under it moves. */}
+        {look.logoUrl && (
+          <div className="mb-3">
+            <ClinicLogo src={look.logoUrl} name={share.clinic.name} boxClassName="h-11 w-[220px] max-w-full" fallback="blank" />
+          </div>
+        )}
+
+        {/* Who sent it comes first: it is the first thing an anxious person wants to know. Always written out, so it never depends on the logo. */}
+        <p className="text-[15px] font-semibold tracking-[.01em] break-words text-[#46555e]">From {share.clinic.name}</p>
         <h1 className="mt-1.5 text-[29px] leading-[1.15] font-bold tracking-[-.022em]">{share.video.title}</h1>
         <p className="mt-2.5 text-[20px] leading-[1.5] text-[#3a4c56]">
           Your surgeon shared this so you can see what happens during your operation.
         </p>
 
         <div className="mt-6">
-          <WatchPlayer src={getPlaybackUrl(share.video)} title={share.video.title} code={share.code} />
+          <WatchPlayer
+            src={getPlaybackUrl(share.video)}
+            title={share.video.title}
+            code={share.code}
+            clinicName={share.clinic.name}
+            logoUrl={look.logoUrl}
+            call={look.call}
+          />
         </div>
 
         {/* "About 2 minutes", so nobody has to decide whether they have time to start it. */}
@@ -129,21 +175,42 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   );
 }
 
+/** The thin band of the clinic's colour across the very top of the page. Decoration only. */
+function BrandBand() {
+  return <div aria-hidden="true" className="h-1.5 shrink-0 bg-brand" />;
+}
+
 /**
  * The calm page for a link that is expired, taken down or does not exist. Same warm
  * ground, a soft circular icon, plain words, nothing that reads as an alarm,
  * and nothing to do but ask the practice. Never the words "error" or
  * "invalid", and nothing red.
+ *
+ * When the clinic is known and has a valid phone number, the one thing left
+ * to do gets one large button: call the office. It is a plain tel: link, so
+ * the phone asks before it dials.
  */
-function Unavailable({ icon, heading, body, note }: { icon: ReactNode; heading: string; body: string; note?: string }) {
+function Unavailable({ look, icon, heading, body, note }: { look: Look; icon: ReactNode; heading: string; body: string; note?: string }) {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-[#fbfaf7] px-8 pb-10 pt-[46px] text-center text-[#12202a]">
-      <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#f0ece3] text-[#74664c]">{icon}</div>
-      <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
-      <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] text-[#3a4c56]">{body}</p>
-      {note && <p className="mt-3 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">{note}</p>}
-      {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-      <img src={LOGO_URL} alt="Pulse 3D" className="mt-12 h-6 w-auto" />
+    <main className={`flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a] ${look.fontClass}`} style={look.style}>
+      <BrandBand />
+      <div className="flex flex-1 flex-col items-center justify-center px-8 pb-10 pt-[46px] text-center">
+        <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#f0ece3] text-[#74664c]">{icon}</div>
+        <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
+        <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">{body}</p>
+        {note && <p className="mt-3 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">{note}</p>}
+        {look.call && (
+          <a
+            href={look.call.href}
+            className="mt-7 flex min-h-14 items-center gap-3 rounded-full bg-brand px-8 text-[19px] font-semibold text-on-brand shadow-[0_6px_18px_-8px_rgba(18,32,42,.45)] transition active:scale-[0.98] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#12202a]"
+          >
+            <PhoneIcon className="h-6 w-6 shrink-0" />
+            Call {look.call.label}
+          </a>
+        )}
+        {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
+        <img src={LOGO_URL} alt="Pulse 3D" className="mt-12 h-6 w-auto" />
+      </div>
     </main>
   );
 }

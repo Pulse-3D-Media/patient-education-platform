@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { allFontClasses } from "@/app/brand-look";
+import { BrandingForm } from "@/components/ui/BrandingForm";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
+import { parseLogoUrl, readBranding } from "@/lib/branding";
 import { CATEGORIES } from "@/lib/categories";
 import { getCategoryAvailability } from "@/lib/db/category-config";
 import { getClinicForPulse } from "@/lib/db/clinics";
@@ -11,14 +14,15 @@ import { shareExpiryState } from "@/lib/expiry";
 import { listPeople, type Person } from "@/lib/people";
 import { formatUsPhone } from "@/lib/phone";
 import { requirePulseStaff } from "@/lib/pulse";
+import { saveBrandingAction } from "../../actions";
 import { Section, StatusBadge, formatDate, formatDateTime } from "../../ui";
 import { ClinicTabs } from "./ClinicTabs";
 import { DetailsForm, ManagedForm, NoteForm, PlanForm, StatusForm } from "./forms";
 
 /**
- * One clinic, everything Pulse staff can see and change about it, in six
+ * One clinic, everything Pulse staff can see and change about it, in seven
  * sections behind a row of pills (ClinicTabs): Overview (status, managed by
- * Pulse), Plan, Details, People, Links, Notes.
+ * Pulse), Plan, Details, Branding, People, Links, Notes.
  *
  * The editable sections are forms in forms.tsx, each saving through its own
  * Server Action. People come from Clerk; links are the same list the
@@ -85,13 +89,31 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
         clinicId={clinic.id}
         values={{
           name: clinic.name,
-          logoUrl: clinic.logoUrl,
-          phone: clinic.phone,
           noticeText: clinic.noticeText,
           showPlaceholders: clinic.showPlaceholders,
           viewDaysOverride: clinic.viewDaysOverride,
           platformViewDays: settings.viewDays,
         }}
+      />
+    </Section>
+  );
+
+  // The clinic's look: logo, colour, font, phone. The clinic's own admin can change the last
+  // three as well (/admin/branding); both saves are logged and the last one wins. Stored values
+  // are checked on the way out, so the form opens on what the clinic's screens really show.
+  const stored = readBranding(clinic);
+  const branding = (
+    <Section
+      title="Branding"
+      blurb="The clinic's logo, brand colour, font and office phone, as they show on its admin screens, in its library and on every patient page it sends. The clinic's own admin can change the colour, font and phone too, from their Branding page; whoever saves last wins, and every change is logged in Notes with who made it. The logo is the one exception: the clinic sets its own by uploading it to its Clerk organization, and the address typed here is used only while it has not."
+    >
+      <BrandingForm
+        action={saveBrandingAction}
+        clinicId={clinic.id}
+        clinicName={clinic.name}
+        values={{ logoUrl: parseLogoUrl(clinic.logoUrl), phone: clinic.phone, brandColor: stored.color, brandFont: stored.font }}
+        showLogoField
+        fontClasses={allFontClasses()}
       />
     </Section>
   );
@@ -170,7 +192,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   const notesSection = (
     <Section
       title="Notes"
-      blurb="Internal, and the clinic never sees this. Every entry stays: a note is added, never edited or deleted, and every change made on this page (status, plan, details, managed by Pulse) writes one on its own."
+      blurb="Internal, and the clinic never sees this. Every entry stays: a note is added, never edited or deleted, and every change made on this page (status, plan, details, branding, managed by Pulse) writes one on its own. So does a branding change the clinic's own admin makes, marked (clinic admin)."
     >
       <NoteForm clinicId={clinic.id} />
       {notes.length === 0 ? (
@@ -230,6 +252,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
             { id: "overview", label: "Overview", content: overview },
             { id: "plan", label: "Plan", content: plan },
             { id: "details", label: "Details", content: details },
+            { id: "branding", label: "Branding", content: branding },
             { id: "people", label: "People", content: peopleSection },
             { id: "links", label: "Links", content: links },
             { id: "notes", label: `Notes${notes.length ? ` (${notes.length})` : ""}`, content: notesSection },

@@ -48,7 +48,7 @@ export function CreateShareForm({
         <button
           type="submit"
           disabled={pending || daysAfterFirstPlay === null}
-          className="h-10 rounded-lg bg-[#2a829b] px-4 text-sm font-medium text-white transition hover:bg-[#1e5668] disabled:cursor-wait disabled:opacity-60"
+          className="h-10 rounded-lg bg-brand px-4 text-sm font-medium text-on-brand transition hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
         >
           {pending ? "Creating..." : "Create share link"}
         </button>
@@ -57,7 +57,7 @@ export function CreateShareForm({
       {state?.error && <p className="text-sm text-[#f0b06a]">{state.error}</p>}
 
       {link && (
-        <div className="flex w-full max-w-xl items-center gap-3 rounded-lg border border-[#2a829b]/50 bg-[#2a829b]/10 px-4 py-3">
+        <div className="flex w-full max-w-xl items-center gap-3 rounded-lg border border-brand/50 bg-brand/10 px-4 py-3">
           <span className="min-w-0 flex-1 truncate text-sm text-white" title={link}>
             {link}
           </span>

@@ -90,7 +90,7 @@ export function CancelShareButton({ code, title, expired }: { code: string; titl
                 type="button"
                 onClick={() => setOpen(false)}
                 disabled={pending}
-                className="inline-flex h-11 items-center rounded-lg border border-white/15 px-5 text-base font-medium text-[#bfbfbf] transition hover:border-[#2a829b] hover:text-white disabled:opacity-60"
+                className="inline-flex h-11 items-center rounded-lg border border-white/15 px-5 text-base font-medium text-[#bfbfbf] transition hover:border-brand hover:text-white disabled:opacity-60"
               >
                 No, keep it
               </button>

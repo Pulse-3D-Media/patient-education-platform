@@ -30,8 +30,8 @@ export function AdminNav() {
               <Link
                 href={section.href}
                 aria-current={isActive ? "page" : undefined}
-                className={`-mb-px flex h-12 items-center gap-2 whitespace-nowrap border-b-2 px-3 text-[15px] transition focus-visible:rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#5fb8d4] ${
-                  isActive ? "border-[#5fb8d4] font-medium text-white" : "border-transparent text-[#bfbfbf] hover:border-white/30 hover:text-white"
+                className={`-mb-px flex h-12 items-center gap-2 whitespace-nowrap border-b-2 px-3 text-[15px] transition focus-visible:rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-bright ${
+                  isActive ? "border-brand-bright font-medium text-white" : "border-transparent text-[#bfbfbf] hover:border-white/30 hover:text-white"
                 }`}
               >
                 {section.label}

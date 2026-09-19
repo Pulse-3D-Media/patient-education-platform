@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { OrganizationProfile } from "@clerk/nextjs";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
-import { AppShell } from "@/components/ui/AppShell";
+import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -34,9 +34,9 @@ export default async function PeoplePage() {
 
   if (!clinic.isAdmin) {
     return (
-      <AppShell>
+      <ClinicShell clinic={clinic}>
         <AdminsOnly />
-      </AppShell>
+      </ClinicShell>
     );
   }
 
@@ -44,7 +44,7 @@ export default async function PeoplePage() {
   // is one tap away, but there is nothing to manage here until it opens.
   if (!clinicIsOpen(clinic.status)) {
     return (
-      <AdminFrame clinicName={clinic.name} title="People">
+      <AdminFrame clinic={clinic} title="People">
         <div className="mt-6">
           <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink inFrame />
         </div>
@@ -62,7 +62,7 @@ export default async function PeoplePage() {
 
   return (
     <AdminFrame
-      clinicName={clinic.name}
+      clinic={clinic}
       title="People"
       intro={
         <>
@@ -102,7 +102,7 @@ export default async function PeoplePage() {
                     {person.userId === userId && <span className="text-sm font-normal text-[#667085]">(you)</span>}
                     <span
                       className={`rounded-md px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide ${
-                        person.role === "admin" ? "bg-[#2a829b]/20 text-[#5fb8d4]" : "bg-white/10 text-[#bfbfbf]"
+                        person.role === "admin" ? "bg-brand/20 text-brand-bright" : "bg-white/10 text-[#bfbfbf]"
                       }`}
                     >
                       {person.role}

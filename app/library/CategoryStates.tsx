@@ -90,7 +90,7 @@ function QuietBlock({ eyebrow, heading, children }: { eyebrow: string; heading: 
       <p className="mx-auto mt-2 max-w-md text-base text-[#bfbfbf]">{children}</p>
       <Link
         href="/library"
-        className="mt-6 inline-flex h-11 items-center rounded-lg border border-white/15 px-4 text-sm font-medium text-[#bfbfbf] hover:border-[#2a829b] hover:text-white"
+        className="mt-6 inline-flex h-11 items-center rounded-lg border border-white/15 px-4 text-sm font-medium text-[#bfbfbf] hover:border-brand hover:text-white"
       >
         Back to the library
       </Link>

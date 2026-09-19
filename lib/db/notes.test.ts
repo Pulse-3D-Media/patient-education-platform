@@ -94,21 +94,21 @@ describe("addClinicNote and listNotesForClinic", () => {
 
   it("a details save lists each field that changed, and only those", async () => {
     const clinicId = await makeClinic("details");
-    const unchanged = { logoUrl: null, noticeText: null, showPlaceholders: true, viewDaysOverride: null };
+    const unchanged = { noticeText: null, showPlaceholders: true, viewDaysOverride: null };
 
     const first = await updateClinicDetails(
       clinicId,
-      { ...unchanged, name: "Vitest notes renamed", phone: "8015550123", showPlaceholders: false, viewDaysOverride: 10 },
+      { ...unchanged, name: "Vitest notes renamed", showPlaceholders: false, viewDaysOverride: 10 },
       "Evan Miller",
     );
     expect(first.logged).toBe(
-      'Details changed: name changed from "Vitest notes details" to "Vitest notes renamed"; phone set to (801) 555-0123; placeholder videos hidden; days a link works after the first play changed from the platform setting to 10.',
+      'Details changed: name changed from "Vitest notes details" to "Vitest notes renamed"; placeholder videos hidden; days a link works after the first play changed from the platform setting to 10.',
     );
 
     // Saving the form untouched writes nothing.
     const same = await updateClinicDetails(
       clinicId,
-      { ...unchanged, name: "Vitest notes renamed", phone: "8015550123", showPlaceholders: false, viewDaysOverride: 10 },
+      { ...unchanged, name: "Vitest notes renamed", showPlaceholders: false, viewDaysOverride: 10 },
       "Evan Miller",
     );
     expect(same.logged).toBeNull();
@@ -116,11 +116,11 @@ describe("addClinicNote and listNotesForClinic", () => {
     // Taking things away reads as removed or back to the platform setting.
     const cleared = await updateClinicDetails(
       clinicId,
-      { ...unchanged, name: "Vitest notes renamed", phone: null, noticeText: "Welcome to the pilot", showPlaceholders: false, viewDaysOverride: null },
+      { ...unchanged, name: "Vitest notes renamed", noticeText: "Welcome to the pilot", showPlaceholders: false, viewDaysOverride: null },
       "Evan Miller",
     );
     expect(cleared.logged).toBe(
-      'Details changed: phone removed (was (801) 555-0123); notice set to "Welcome to the pilot"; days a link works after the first play changed from 10 to the platform setting.',
+      'Details changed: notice set to "Welcome to the pilot"; days a link works after the first play changed from 10 to the platform setting.',
     );
 
     expect(await listNotesForClinic(clinicId)).toHaveLength(2);

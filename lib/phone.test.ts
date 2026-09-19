@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatUsPhone, normalizeUsPhone } from "./phone";
+import { formatUsPhone, normalizeUsPhone, telHref } from "./phone";
 
 /** Phone numbers in, digits out, and back again. Pure, no database. */
 describe("normalizeUsPhone", () => {
@@ -25,5 +25,17 @@ describe("formatUsPhone", () => {
     expect(formatUsPhone(null)).toBe("");
     expect(formatUsPhone("")).toBe("");
     expect(formatUsPhone("12345")).toBe("12345");
+  });
+});
+
+describe("telHref", () => {
+  it("turns ten stored digits into a tap-to-call address with the US country code", () => {
+    expect(telHref("8015550123")).toBe("tel:+18015550123");
+  });
+
+  it("gives no link for no phone or anything that is not exactly ten digits", () => {
+    for (const stored of [null, undefined, "", "555-0123", "(801) 555-0123", "80155501234", "8015550123; ext"]) {
+      expect(telHref(stored)).toBeNull();
+    }
   });
 });

@@ -117,3 +117,100 @@ Checked in headless Edge through a throwaway route since deleted (signed out, so
 Narrated pilot content needs usable, reviewed captions. This PR preserves native caption controls but does not add a caption asset store or prove that narrated catalogue videos contain captions. Record the actual clip and caption check before pilot release. The silent synthetic clip is not evidence for that acceptance requirement.
 
 The printed pamphlet's pre-existing missing placeholder label and the Send request's pre-existing unhandled network rejection remain separate review items. This PR adds the placeholder label and modal focus handling to the Send panel because its styling is affected; it does not redesign link delivery.
+
+## Light and dark staff screens, September 19, 2026
+
+A separate PR (`light-mode`), built on the merged branding work. A clinic chooses Dark or Light on its Branding form; it applies to `/library` and `/admin` only. This section records what was actually checked. It is not a claim that light mode has been seen on a real tablet or phone, or signed in.
+
+### Migration
+
+`20260919212810_add_clinic_brand_theme` adds one nullable text column, `Clinic.brandTheme`. The SQL was produced by diffing two schema files with no database connection (`prisma migrate diff --from-schema-datamodel ... --script`) and read before use: `ALTER TABLE "Clinic" ADD COLUMN "brandTheme" TEXT;`. It was applied to the Neon `testing` branch only, with `migrate deploy`, after a script confirmed that endpoint differs from both production strings. Production and the preview database were not touched. `prisma format` was not run; the column was placed by hand next to `brandFont`. Old code ignores the column, so production can be migrated before the merge in the usual order.
+
+### Checks, one uninterrupted run each
+
+`npm run lint` passed. `npx tsc --noEmit` passed. `npm test` passed **402 tests in 36 files** (385 before this work). `npm run build` passed, lists `/admin/branding`, and contains no temporary route.
+
+New or extended tests: the 216-colour sweep now covers the staff screens in light mode on every light surface (accent 3:1, text on the accent 4.5:1 at rest and hovered, the link shade 7:1 and dark rather than pale, the link shade and the page's ink on the accent's own 20% tint 4.5:1) and the dark-ground shades kept for the video player; a test that reads the light block of `app/globals.css` itself and measures every text token (4.5:1) and every edge token (3:1) on every light surface, plain and under both hover washes, plus amber on its own chip and the dimmed library tile's words; `parseBrandTheme`; the form reader (one text value, on the list, files and duplicates refused, dark stored as nothing); `updateClinicBranding` (mode logged, nothing-stored and dark treated as the same, nothing written when nothing changed, other clinics untouched); the forced overlap of two saves, now carrying the mode, with its unlocked control; both save actions (signed out, member, admin, closed clinic, another clinic with a forged id, Pulse staff, bad values including a mode that is not one of the two, repeat saves); and rendered pages (a light clinic's shell carries `data-theme="light"` for its admin and for a member, another clinic asked straight after is dark, a stored mode that is not understood reads as dark and never reaches the page, the form opens on what is saved). Clerk is mocked in the action and page tests; those are not signed-in checks.
+
+### How the screens were looked at
+
+Headless Microsoft Edge on the Windows workstation, driven over the DevTools protocol with real mouse events, against a local development server reading the Neon **testing** branch, never production. Claude cannot sign in to Clerk, so for this check only, the server was started with a throwaway stand-in for Clerk's server and browser packages (an alias in `next.config.ts` behind an environment variable, a stub folder, and one throwaway route for the library states the data could not produce). The stand-in chose the person by a cookie: admin, member or Pulse staff of one of eight made-up clinics (dark and light, each with no colour, a pale yellow `#ffe9a8` and a navy `#0a1433`, plus a paused clinic in each mode). **All of it was deleted before the commit**: the alias, the stubs, the route, the launch entry and the eight clinics with their links. The consequence is stated plainly: Clerk's real user menu and People panel were **not seen** in either mode. Only the colours handed to Clerk's provider were read back.
+
+### Dark mode, before and after the token sweep
+
+Nineteen screenshots at 1280 wide were taken on the code as merged (before any colour was changed) and again on the finished branch, with the same made-up data, and compared pixel by pixel by a script. The pages: library home, the category drawer open, a category page, the Send panel open, the player open, the admin overview, the admin menu open, Shared links, the cancel popup open, a link just made, People, Billing, Branding, Reports, the admins-only page, a member's library, a closed clinic's library, a closed clinic's Billing, and the coming-soon, locked and nothing-yet tiles and pages.
+
+- **Identical, every pixel:** category page, player, admin overview, admin menu, People, Billing, Reports, admins-only, member's library, closed library, closed Billing, the library states. 12 of 19.
+- **Differ only where a random share code is drawn:** the Send panel (the QR picture and the link, inside x 353 to 912, y 325 to 540), Shared links and the cancel popup (one line of link text, 431 pixels), a link just made (the new code in two places). Each run makes new links, so these cannot match. Everything around them matches.
+- **Branding is 200px taller,** because it has a new Light or dark field. Expected.
+- **Library home and the drawer over it differed in one of three runs,** by at most 3 out of 255 per channel, inside the pictures of two tiles only. The member's copy of the same page in the same run was identical, and an earlier run of the finished code was identical for this page too. It is the first page a fresh browser loads, and the difference is in how two large pictures were decoded, not in any colour this work touched. Reported because it moved, not because it matters.
+
+Two things found by the comparison and fixed: the dialog backdrop had to be written as `color-mix(in oklab, #000 70%, transparent)` to match what Tailwind's `bg-black/70` produced (as `rgba(0,0,0,.7)` one row came out a single shade off), while the hairlines matched as `rgba()` and did not match as `color-mix`. Both are as measured, not as reasoned.
+
+### Light mode
+
+The same nineteen pages at **1280, 820 and 390 wide** for the light clinic, and at 1280 for the pale and navy clinics in both modes. These are browser windows of those sizes, not a tablet and not a phone. No sideways scrolling was seen at any width.
+
+Contrast was measured in the browser by a script that reads each piece of text's real colour and everything really painted behind it (tints and hover washes composited, Tailwind's oklab tints converted), and the edge of every button, link-button and text box against what surrounds it. Words that sit on a picture (tile labels, the duration chip on a thumbnail) are listed by the script but not judged, since what is behind them is the picture. Result: **43 distinct pairs for the default light clinic, 45 each for the pale and the navy one, none below AA.** The lowest of each kind, default light clinic:
+
+| What | Colour on ground | Measured | Needs |
+| --- | --- | --- | --- |
+| Button edge on the amber "needs a look" box | `#7f796c` on `#ece8de` | 3.53:1 | 3 |
+| Button edge on the tinted link box | `#7f796c` on `#e9eef0` | 3.70:1 | 3 |
+| Text-box and button edge on the page | `#7f796c` on `#fbfaf7` | 4.14:1 | 3 |
+| Button edge on a white card | `#7f796c` on `#ffffff` | 4.33:1 | 3 |
+| Amber "Paused" on its amber chip | `#684400` on `#d2c7b2` | 5.20:1 | 4.5 |
+| Lit rail icon on its tint | `#1e5668` on `#c9d2d0` | 5.27:1 | 3 |
+| "admin" badge on its tint | `#1e5668` on `#d2dde1` | 5.87:1 | 4.5 |
+| Muted text on the page | `#52616a` on `#fbfaf7` | 6.14:1 | 4.5 |
+| Muted text on a white card | `#52616a` on `#ffffff` | 6.41:1 | 4.5 |
+| White on the red "Yes, cancel it" | `#ffffff` on `#a33a3a` | 6.51:1 | 4.5 |
+| Body text on a selected radio card | `#3a4c56` on `#dde6e8` | 7.04:1 | 4.5 |
+| Links | `#1e5668` on `#fbfaf7` | 7.78:1 | 4.5 |
+| White on a filled button | `#ffffff` on `#1e5668` | 8.12:1 | 4.5 |
+| Body text on the page | `#3a4c56` on `#fbfaf7` | 8.57:1 | 4.5 |
+| Headings on the page | `#12202a` on `#fbfaf7` | 15.89:1 | 3 |
+
+Pale yellow in light mode becomes an olive (`#948761`) with black words on it: button edge 3.41:1 on the page, black on the fill 5.9:1, lit icon `#574f39` 5.93:1. Navy is used as picked (it already stands out from a light page), with white words. The first measurement found one failure, amber on its chip at 4.31:1; the light amber was darkened from `#7a5200` to `#684400`. The unit test that reads the stylesheet then found three more that the pages happened not to show (muted text and the button edge on the rail colour under the stronger wash, and the dimmed tile's sentence over a black picture); those greys were darkened too.
+
+Not measured by the script: hover and focus states (hover only adds a 6% wash, which the unit test covers for every text token; focus rings are the browser's own, or the link shade, which is 7:1 or better on every light surface by test), placeholder text inside a text box (muted on white, 6.41:1 by the table), and disabled buttons (exempt, and drawn at 50 to 60% on purpose).
+
+### Behaviour, 23 checks, all passed
+
+- The server's HTML already carries `data-theme` for a light admin, a dark admin and a light member, before any script runs. Nothing sets it afterwards.
+- In the navy light clinic the player overlay is `data-theme="dark"`, black, with white words, and its scrub bar is `rgb(157,161,173)`, the dark-ground shade, not the navy `#0a1433` used on the light page.
+- On a dark clinic's Branding page, choosing Light turned the "What your team sees" card white with dark ink at once; the patient card and the page itself did not change. A colour of "teal" was refused with its sentence and the form kept Light and "teal". With the colour fixed it saved; clicking Overview and then the logo showed `/admin` and `/library` in light **in the same document, with no reload**. A different clinic stayed dark. Reopened, the form was on Light; set back to Dark and saved twice, the second save said nothing changed.
+- A member of the light clinic saw a light library, and on `/admin/branding` the admins-only page, in light, with no form.
+- Clerk's provider was handed a white background, `#12202a` text and the light-ground accent with its text colour in a light clinic, and exactly the three values it had before (`colorPrimary`, `fontFamily`, `borderRadius`) in a dark one.
+- As Pulse staff on the light clinic's Branding tab, the only `data-theme` on the page was the preview card's, the form opened on Light, and a text box measured `rgb(7,9,11)` with white text and a `rgba(255,255,255,.15)` edge, its old colours exactly.
+
+### Seen along the way, not part of this work
+
+The Send panel showed a raw database error once ("Invalid `prisma.$executeRaw()` invocation... transaction already closed") when the testing database was slow to wake and the five-second transaction ran out. The timeout is the environment; the sentence reaching the screen is review checklist item A1 (`app/library/[category]/actions.ts` returns `error.message`), already on `main`, and its own PR.
+
+### What I am not happy with, or did not check
+
+- Nothing signed in, nothing on the Vercel preview, no real iPad, iPhone or Android device, no screen reader. Clerk's real components in light mode are the biggest unknown: the variable names are the ones Clerk 7.9 documents in its types, but their effect was not seen.
+- The amber "needs a look" box in light mode is a dull tan rather than a clear amber, because its tint is made from the (dark) amber text colour. Readable, not pretty.
+- A pale brand colour becomes olive on light screens. That is the rule doing its job (a pale yellow button cannot be seen on a white page), but a clinic with a pale brand will like Dark better, and nothing on the form says so beyond the existing "we use a slightly darker shade" line and the live preview.
+- The logo preview box on the Branding page is still white in both modes, as before, so in light mode it is a white box on a white card and shows the banner's look less honestly than it could. Left alone, because changing it would have moved pixels in dark mode.
+- The page behind the app shell (`body`) still follows the computer's own dark-mode setting, as it did before this work. The shell covers the whole window, so it only shows if a browser lets the page be pulled past its edge.
+
+### Signed-in walkthrough for Evan, on the Vercel preview
+
+Before it works: apply the migration to the preview database with `node "Desktop\\Pulse 3D Patient Education App\\tools\\migrate-preview.mjs"` (it reads the connection string from the clipboard).
+
+1. Sign in as the admin of a test clinic. Everything looks exactly as it does today (dark).
+2. Open the admin menu, Branding. There is a new **Light or dark** field at the top of the form, with Dark selected.
+3. Choose **Light** and do not save. The "What your team sees" card on the right turns white. The patient card above it and the page itself do not change.
+4. Press Save branding. "Saved." appears. Click **Overview** in the row of tabs: the page is light, straight away, without a reload.
+5. Click the logo (or clinic name) in the banner: the library is light. Picture tiles keep white labels; a locked or coming-soon tile is pale with dark words and a dashed edge.
+6. Open a category and press Play: the player is black with white controls, as before, and the scrub bar is visible. Close it.
+7. Press Send on a card: the panel is white, the QR code sits on white, the link box is tinted in your colour.
+8. Open the admin menu, Shared links. Make a link, then press Cancel link on one: the popup is white with a red "Yes, cancel it". Press "No, keep it".
+9. **Click your avatar in the rail, and open People and scroll to Clerk's panel.** These are the two things I could not see. They should be white panels with dark text and buttons in your colour, with nothing unreadable. Tell me what is wrong if anything is.
+10. Try a pale brand colour and then a very dark one, saving each: buttons, the active tab's line, links and the player's scrub bar should all stay readable.
+11. Sign in as a **member** of the same clinic: the library is light, and `/admin/branding` says the page is for office admins.
+12. Sign in to a **second clinic**: it is still dark.
+13. As Pulse staff, open `/pulse`, the first clinic, Branding: `/pulse` is dark, the form shows Light, and only the "What your team sees" card is light. Open Notes: "Branding changed: mode changed from Dark to Light." under the admin's name.
+14. Set the first clinic back to Dark if you want it dark.

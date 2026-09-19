@@ -3,6 +3,7 @@
 import { useActionState, useState, type CSSProperties } from "react";
 import {
   BRAND_FONTS,
+  BRAND_THEMES,
   PULSE_STAFF_THEME,
   parseBrandColor,
   parseLogoUrl,
@@ -10,6 +11,7 @@ import {
   staffTheme,
   themeVars,
   type BrandFontKey,
+  type BrandTheme,
 } from "@/lib/branding";
 import { formatUsPhone, normalizeUsPhone } from "@/lib/phone";
 import { ClinicLogo } from "./ClinicLogo";
@@ -17,8 +19,8 @@ import { PhoneIcon } from "./icons";
 import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
 
 /**
- * The branding form: brand colour, font and phone, with a live preview of
- * the patient page and of the staff screens beside it. One form for both
+ * The branding form: light or dark, brand colour, font and phone, with a
+ * live preview of the patient page and of the staff screens beside it. One form for both
  * places that edit branding, so they cannot look or behave differently:
  *
  *   - the clinic's own admin, on /admin/branding (no logo address box: a
@@ -36,6 +38,11 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
  * The preview is worked out in the browser by the same functions the server
  * uses (lib/branding.ts): pick a pale yellow and the preview shows the
  * darker shade the patient page would really use, with a line saying so.
+ * The "What your team sees" card also switches between dark and light as
+ * the mode is chosen, before anything is saved: it carries its own
+ * data-theme attribute, so the colour tokens inside it take that mode's
+ * values whatever the page around the form looks like (on /pulse the page
+ * is always dark). The patient card never changes with the mode.
  * It is a preview only. The server checks every value again when the form
  * is sent, and what the browser thinks is never what gets saved.
  *
@@ -52,6 +59,8 @@ export type BrandingFormValues = {
   /** "#rrggbb" as stored, or null for the Pulse colour. */
   brandColor: string | null;
   brandFont: BrandFontKey;
+  /** Light or dark staff screens, as stored and checked. */
+  brandTheme: BrandTheme;
 };
 
 export function BrandingForm({
@@ -85,6 +94,7 @@ export function BrandingForm({
 
   const [color, setColor] = useState(values.brandColor ?? "");
   const [font, setFont] = useState<BrandFontKey>(values.brandFont);
+  const [mode, setMode] = useState<BrandTheme>(values.brandTheme);
   const [phone, setPhone] = useState(formatUsPhone(values.phone));
   const [logoUrl, setLogoUrl] = useState(values.logoUrl ?? "");
 
@@ -97,8 +107,10 @@ export function BrandingForm({
   const previewPhone = normalizeUsPhone(phone);
 
   const patient = patientTheme(checkedColor);
-  const staff = staffTheme(checkedColor);
+  const staff = staffTheme(checkedColor, mode);
   const adjusted = checkedColor !== null && (patient.accent !== checkedColor || staff.accent !== checkedColor);
+  // On dark screens a hard-to-see colour is lightened; on light screens, and on the patient page, it is darkened.
+  const adjustedWord = staff.accent !== checkedColor && mode === "dark" ? "lighter" : "darker";
 
   return (
     <form action={formAction} onReset={(event) => event.preventDefault()} className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -122,13 +134,53 @@ export function BrandingForm({
               aria-describedby="brand-logo-help"
               className={INPUT}
             />
-            <p id="brand-logo-help" className="mt-1 text-xs text-[#667085]">
+            <p id="brand-logo-help" className="mt-1 text-xs text-ink-muted">
               A full https:// address to a PNG, JPG, SVG or WebP you have looked at. Patients&rsquo; phones load it straight from there. A logo
               the clinic uploads to its own Clerk organization replaces this one on their next sign-in.
             </p>
-            {logoIsBad && <p className="mt-1 text-sm text-[#f3b94d]">That is not a full https:// address yet.</p>}
+            {logoIsBad && <p className="mt-1 text-sm text-warn">That is not a full https:// address yet.</p>}
           </div>
         )}
+
+        <fieldset>
+          <legend className={LABEL}>Light or dark</legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {BRAND_THEMES.map((choice) => (
+              <label
+                key={choice.key}
+                className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg border border-line-strong px-3 py-2 has-[:checked]:border-brand has-[:checked]:bg-brand/15"
+              >
+                <input
+                  type="radio"
+                  name="brandTheme"
+                  value={choice.key}
+                  checked={mode === choice.key}
+                  onChange={() => setMode(choice.key)}
+                  className="h-5 w-5 shrink-0 accent-brand"
+                />
+                {/* A small picture of the mode: its page colour, a card, and two lines of its text. Fixed colours, because it has to show the OTHER mode too. */}
+                <span
+                  aria-hidden="true"
+                  className={`flex h-10 w-14 shrink-0 flex-col justify-center gap-1 rounded-md border px-2 ${
+                    choice.key === "light" ? "border-[#7f796c] bg-[#fbfaf7]" : "border-white/30 bg-black"
+                  }`}
+                >
+                  <span className={`h-1.5 w-8 rounded-full ${choice.key === "light" ? "bg-[#12202a]" : "bg-white"}`} />
+                  <span className={`h-1.5 w-5 rounded-full ${choice.key === "light" ? "bg-[#52616a]" : "bg-[#bfbfbf]"}`} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[17px] font-semibold leading-tight">{choice.label}</span>
+                  <span className="block text-sm text-ink-soft">{choice.note}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-ink-muted">
+            For your team&rsquo;s screens: the library and this admin area. It is the clinic&rsquo;s setting, the same for everyone who signs
+            in. The patient page is always light, and a video always plays on black. Your logo sits straight on the banner with nothing
+            behind it, so a dark logo suits Light and a white or pale logo suits Dark.
+          </p>
+        </fieldset>
 
         <fieldset>
           <legend className={LABEL}>Brand colour</legend>
@@ -139,7 +191,7 @@ export function BrandingForm({
               aria-label="Pick the brand colour"
               value={checkedColor ?? PULSE_STAFF_THEME.accent}
               onChange={(event) => setColor(event.target.value)}
-              className="h-11 w-14 cursor-pointer rounded-lg border border-white/15 bg-[#07090b] p-1"
+              className="h-11 w-14 cursor-pointer rounded-lg border border-line-strong bg-field p-1"
             />
             <input
               name="brandColor"
@@ -156,14 +208,14 @@ export function BrandingForm({
               Use the Pulse 3D colour
             </button>
           </div>
-          <p className="mt-2 text-xs text-[#667085]">
+          <p className="mt-2 text-xs text-ink-muted">
             One colour. It shows on buttons, highlights and the active tab for your team, and as the band at the top of the patient page
             and its call button. The page&rsquo;s text stays dark on light for every clinic, so patients can always read it.
           </p>
-          {colorIsBad && <p className="mt-1 text-sm text-[#f3b94d]">That is not a hex colour yet. It looks like #2a829b.</p>}
+          {colorIsBad && <p className="mt-1 text-sm text-warn">That is not a hex colour yet. It looks like #2a829b.</p>}
           {adjusted && (
-            <p className="mt-1 text-sm text-[#bfbfbf]">
-              We use a slightly {staff.accent !== checkedColor ? "lighter" : "darker"} shade of this where your own would be hard to see, so
+            <p className="mt-1 text-sm text-ink-soft">
+              We use a slightly {adjustedWord} shade of this where your own would be hard to see, so
               buttons and their words stay readable. The preview shows the real result.
             </p>
           )}
@@ -175,7 +227,7 @@ export function BrandingForm({
             {BRAND_FONTS.map((choice) => (
               <label
                 key={choice.key}
-                className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg border border-white/15 px-3 py-2 has-[:checked]:border-brand has-[:checked]:bg-brand/15"
+                className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg border border-line-strong px-3 py-2 has-[:checked]:border-brand has-[:checked]:bg-brand/15"
               >
                 <input
                   type="radio"
@@ -187,12 +239,12 @@ export function BrandingForm({
                 />
                 <span className={`min-w-0 ${fontClasses[choice.key]}`}>
                   <span className="block text-[17px] font-semibold leading-tight">{choice.label}</span>
-                  <span className="block text-sm text-[#bfbfbf]">{choice.note}</span>
+                  <span className="block text-sm text-ink-soft">{choice.note}</span>
                 </span>
               </label>
             ))}
           </div>
-          <p className="mt-2 text-xs text-[#667085]">
+          <p className="mt-2 text-xs text-ink-muted">
             Every font here is easy to read at the size the patient page uses. The video never waits for a font to arrive.
           </p>
         </fieldset>
@@ -214,11 +266,11 @@ export function BrandingForm({
             aria-describedby="brand-phone-help"
             className={`${INPUT} max-w-xs`}
           />
-          <p id="brand-phone-help" className="mt-1 text-xs text-[#667085]">
+          <p id="brand-phone-help" className="mt-1 text-xs text-ink-muted">
             Patients get a tap-to-call button with this number when their link has expired or the video will not load. Leave it empty
             for no button.
           </p>
-          {phoneIsBad && <p className="mt-1 text-sm text-[#f3b94d]">A US number has ten digits. Any format is fine.</p>}
+          {phoneIsBad && <p className="mt-1 text-sm text-warn">A US number has ten digits. Any format is fine.</p>}
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -226,7 +278,7 @@ export function BrandingForm({
             {pending ? "Saving..." : "Save branding"}
           </button>
           {state?.error && (
-            <p role="alert" className="text-sm text-[#f3b94d]">
+            <p role="alert" className="text-sm text-warn">
               {state.error}
             </p>
           )}
@@ -240,7 +292,7 @@ export function BrandingForm({
 
       {/* The preview. Decoration for the person choosing: screen readers skip it, since it repeats the choices above. */}
       <div aria-hidden="true" className="flex flex-col gap-4">
-        <p className="text-sm font-medium text-[#bfbfbf]">Preview</p>
+        <p className="text-sm font-medium text-ink-soft">Preview</p>
 
         <div className={`overflow-hidden rounded-2xl bg-[#fbfaf7] text-[#12202a] ${fontClasses[font]}`} style={themeVars(patient) as CSSProperties}>
           <div className="h-1.5 bg-brand" />
@@ -266,11 +318,12 @@ export function BrandingForm({
           </div>
         </div>
 
-        <div className={`rounded-2xl border border-white/10 bg-[#0d1113] p-5 ${fontClasses[font]}`} style={themeVars(staff) as CSSProperties}>
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#667085]">What your team sees</p>
+        {/* data-theme gives the tokens inside this card the chosen mode's values, whatever the page around the form is. text-ink is set here, not inherited, for the same reason. */}
+        <div data-theme={mode} className={`rounded-2xl border border-line bg-surface p-5 text-ink ${fontClasses[font]}`} style={themeVars(staff) as CSSProperties}>
+          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">What your team sees</p>
           <div className="flex flex-wrap items-center gap-3">
             <span className={`${PRIMARY_BUTTON} h-11`}>Create link</span>
-            <span className="inline-flex h-11 items-center rounded-full border border-brand bg-brand/20 px-5 text-[15px] font-medium text-white">Knee</span>
+            <span className="inline-flex h-11 items-center rounded-full border border-brand bg-brand/20 px-5 text-[15px] font-medium text-ink">Knee</span>
             <span className="text-[15px] text-brand-bright">All shared links</span>
           </div>
         </div>

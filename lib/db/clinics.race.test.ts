@@ -77,8 +77,8 @@ async function readWithoutLock(tx: Prisma.TransactionClient, clinicId: string, s
 }
 
 /**
- * Save A (red to green) and, between A's read and A's write, save B (to
- * blue). `read` is how A reads: the real locking read, or the plain one for
+ * Save A (red to green, and dark to light) and, between A's read and A's
+ * write, save B (to blue, in dark). `read` is how A reads: the real locking read, or the plain one for
  * the control. Returns whether B had already finished by the time A went
  * on to write.
  */
@@ -90,7 +90,7 @@ async function saveBothAtOnce(clinicId: string, read: (tx: Prisma.TransactionCli
     const before = await read(tx, id, select);
     let done = false;
     // Save B always uses the real locking read: the wrapper is for one call only.
-    other = updateClinicBranding(clinicId, { phone: null, brandColor: BLUE, brandFont: null }, "Staff B").then(() => {
+    other = updateClinicBranding(clinicId, { phone: null, brandColor: BLUE, brandFont: null, brandTheme: null }, "Staff B").then(() => {
       done = true;
     });
     await new Promise((resolve) => setTimeout(resolve, WAIT_MS));
@@ -98,7 +98,7 @@ async function saveBothAtOnce(clinicId: string, read: (tx: Prisma.TransactionCli
     return before;
   }) as never);
 
-  await updateClinicBranding(clinicId, { phone: null, brandColor: GREEN, brandFont: null }, "Admin A");
+  await updateClinicBranding(clinicId, { phone: null, brandColor: GREEN, brandFont: null, brandTheme: "light" }, "Admin A");
   await other;
   return otherFinishedDuringWait;
 }
@@ -118,15 +118,15 @@ describe("two saves to one clinic at the same moment", () => {
     // B could not get through while A held the row.
     expect(otherFinishedDuringWait).toBe(false);
 
-    // A went first (red to green). B then read A's green, and changed that to blue.
+    // A went first (red to green, dark to light). B then read A's green and A's light, and changed those.
     expect(await logOf(clinicId)).toEqual([
-      `Admin A: Branding changed: colour changed from ${RED} to ${GREEN}.`,
-      `Staff B: Branding changed: colour changed from ${GREEN} to ${BLUE}.`,
+      `Admin A: Branding changed: colour changed from ${RED} to ${GREEN}; mode changed from Dark to Light.`,
+      `Staff B: Branding changed: colour changed from ${GREEN} to ${BLUE}; mode changed from Light to Dark.`,
     ]);
 
     // The last save won, and the log's last line agrees with the row.
-    const row = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { brandColor: true } });
-    expect(row?.brandColor).toBe(BLUE);
+    const row = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { brandColor: true, brandTheme: true } });
+    expect(row).toEqual({ brandColor: BLUE, brandTheme: null });
   });
 
   it("control: without the lock, the second save slips into the gap and the first one logs a value that was already gone", async () => {
@@ -142,9 +142,9 @@ describe("two saves to one clinic at the same moment", () => {
     // overwritten with nothing in the log to show it happened in between.
     const log = await logOf(clinicId);
     expect(log).toContain(`Staff B: Branding changed: colour changed from ${RED} to ${BLUE}.`);
-    expect(log).toContain(`Admin A: Branding changed: colour changed from ${RED} to ${GREEN}.`);
+    expect(log).toContain(`Admin A: Branding changed: colour changed from ${RED} to ${GREEN}; mode changed from Dark to Light.`);
 
-    const row = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { brandColor: true } });
-    expect(row?.brandColor).toBe(GREEN);
+    const row = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { brandColor: true, brandTheme: true } });
+    expect(row).toEqual({ brandColor: GREEN, brandTheme: "light" });
   });
 });

@@ -111,7 +111,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
         action={saveBrandingAction}
         clinicId={clinic.id}
         clinicName={clinic.name}
-        values={{ logoUrl: parseLogoUrl(clinic.logoUrl), phone: clinic.phone, brandColor: stored.color, brandFont: stored.font }}
+        values={{ logoUrl: parseLogoUrl(clinic.logoUrl), phone: clinic.phone, brandColor: stored.color, brandFont: stored.font, brandTheme: stored.theme }}
         showLogoField
         fontClasses={allFontClasses()}
       />

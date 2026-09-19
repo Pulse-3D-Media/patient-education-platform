@@ -1,15 +1,24 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BRAND_FONTS,
+  BRAND_THEMES,
   DEFAULT_BRAND_FONT,
+  DEFAULT_BRAND_THEME,
   PATIENT_GROUND,
   PULSE_PATIENT_THEME,
+  PULSE_STAFF_LIGHT_THEME,
   PULSE_STAFF_THEME,
   STAFF_GROUND,
+  STAFF_LIGHT_GROUND,
   brandFontLabel,
+  brandThemeLabel,
   contrastRatio,
+  darkGroundVars,
   parseBrandColor,
   parseBrandFont,
+  parseBrandTheme,
   parseLogoUrl,
   patientTheme,
   readBranding,
@@ -27,6 +36,38 @@ import {
  * pale yellow, navy, everything between) and the contrast promises are
  * checked for each one.
  */
+
+/**
+ * The colour tokens one block of app/globals.css defines, by name. The light
+ * mode tests read the stylesheet itself, so the colours that are measured
+ * are the colours that ship: change a value there and these tests say
+ * whether something stopped being readable.
+ */
+function tokensIn(selector: string): Record<string, string> {
+  const css = readFileSync(path.join(process.cwd(), "app", "globals.css"), "utf8").replace(/\r\n/g, "\n"); // a Windows checkout has CRLF line ends
+  const start = css.indexOf(`${selector} {`);
+  if (start < 0) throw new Error(`No "${selector} {" block in app/globals.css`);
+  const block = css.slice(start, css.indexOf("}", start));
+  const tokens: Record<string, string> = {};
+  for (const match of block.matchAll(/(--ui-[a-z-]+):\s*([^;]+);/g)) tokens[match[1]] = match[2].trim();
+  return tokens;
+}
+const lightTokens = () => tokensIn('[data-theme="light"]');
+const darkTokens = () => tokensIn(':root,\n[data-theme="dark"]');
+
+/** "#rrggbb" laid over "#rrggbb" at `amount` (0 to 1): what a see-through tint ends up as. */
+function blend(top: string, under: string, amount: number): string {
+  const part = (hex: string, i: number) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+  return `#${[0, 1, 2].map((i) => Math.round(part(top, i) * amount + part(under, i) * (1 - amount)).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** The same for a token written as rgba(r, g, b, a). */
+function over(rgba: string, under: string): string {
+  const parts = rgba.match(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/);
+  if (!parts) throw new Error(`Not an rgba() colour: ${rgba}`);
+  const top = `#${[1, 2, 3].map((i) => Number(parts[i]).toString(16).padStart(2, "0")).join("")}`;
+  return blend(top, under, Number(parts[4]));
+}
 
 /** Every colour on a 6 x 6 x 6 grid across the cube, 216 in all, from black to white. */
 function everyColour(): string[] {
@@ -130,6 +171,105 @@ describe("the staff screens, for every colour a clinic could pick", () => {
   });
 });
 
+describe("the LIGHT staff screens, for every colour a clinic could pick", () => {
+  // The light surfaces an accent can sit on, read from the stylesheet so this cannot drift from what ships.
+  const light = lightTokens();
+  const surfaces = [light["--ui-ground"], light["--ui-surface"], light["--ui-sunken"], light["--ui-overlay"], light["--ui-field"]];
+
+  it("uses the darkest light surface as the ground the accent is worked out against", () => {
+    expect(STAFF_LIGHT_GROUND).toBe(light["--ui-sunken"]);
+    for (const surface of surfaces) expect(relativeLuminance(surface), surface).toBeGreaterThanOrEqual(relativeLuminance(STAFF_LIGHT_GROUND));
+  });
+
+  it("keeps buttons visible, their text readable, and the link shade readable as text, on every light surface", () => {
+    for (const colour of [...everyColour(), null]) {
+      const theme = staffTheme(colour, "light");
+      for (const surface of surfaces) {
+        expect(contrastRatio(theme.accent, surface), `${colour} accent on ${surface}`).toBeGreaterThanOrEqual(3);
+        // The shade used for links, the active tab's line and focus rings: a DARK shade on light.
+        expect(contrastRatio(theme.accentBright, surface), `${colour} link shade on ${surface}`).toBeGreaterThanOrEqual(7);
+        // The same shade on the tint behind an active menu row or an "admin" badge (the accent at 20% over the surface).
+        expect(contrastRatio(theme.accentBright, blend(theme.accent, surface, 0.2)), `${colour} link shade on its own tint`).toBeGreaterThanOrEqual(4.5);
+        // The page's own ink on that same tint (the active row's words, the selected radio card).
+        expect(contrastRatio(light["--ui-ink"], blend(theme.accent, surface, 0.2)), `${colour} ink on the tint`).toBeGreaterThanOrEqual(4.5);
+      }
+      expect(contrastRatio(theme.onAccent, theme.accent), `${colour} text on accent`).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(theme.onAccent, theme.accentHover), `${colour} text on hover`).toBeGreaterThanOrEqual(4.5);
+      expect(relativeLuminance(theme.accentBright), `${colour} link shade is dark, not pale`).toBeLessThan(0.2);
+      expect(["#ffffff", "#000000"]).toContain(theme.onAccent);
+    }
+  });
+
+  it("darkens a colour too pale to see on a light screen, and leaves one that works alone", () => {
+    expect(staffTheme("#ffe9a8", "light").accent).not.toBe("#ffe9a8");
+    expect(staffTheme("#7a1f2b", "light").accent).toBe("#7a1f2b");
+  });
+
+  it("gives the same colour different shades in the two modes, and dark when no mode is given", () => {
+    expect(staffTheme("#0a1433", "light").accent).toBe("#0a1433"); // navy is fine on light
+    expect(staffTheme("#0a1433", "dark").accent).not.toBe("#0a1433"); // and invisible on black
+    expect(staffTheme("#0a1433")).toEqual(staffTheme("#0a1433", "dark"));
+    expect(staffTheme(null, "light")).toEqual(PULSE_STAFF_LIGHT_THEME);
+    expect(staffTheme(null)).toEqual(PULSE_STAFF_THEME);
+  });
+
+  it("keeps the dark-ground shades beside them, for the video player, which is black in both modes", () => {
+    for (const colour of [...everyColour(), null]) {
+      const vars = darkGroundVars(colour);
+      expect(contrastRatio(vars["--brand-dark-accent-bright"], "#000000"), `${colour} scrub bar on black`).toBeGreaterThanOrEqual(7);
+      expect(contrastRatio(vars["--brand-dark-accent"], "#000000")).toBeGreaterThanOrEqual(3);
+      for (const value of Object.values(vars)) expect(value).toMatch(/^#[0-9a-f]{6}$/);
+    }
+    expect(darkGroundVars(null)).toEqual({
+      "--brand-dark-accent": "#2a829b",
+      "--brand-dark-accent-hover": "#1e5668",
+      "--brand-dark-accent-bright": "#5fb8d4",
+      "--brand-dark-on-accent": "#ffffff",
+    });
+  });
+});
+
+describe("the light mode colours in app/globals.css", () => {
+  const light = lightTokens();
+  const grounds = ["--ui-ground", "--ui-surface", "--ui-sunken", "--ui-overlay", "--ui-field"].map((name) => light[name]);
+  // A hovered row, a quiet chip: the wash colours laid over each ground.
+  const washed = grounds.flatMap((ground) => [ground, over(light["--ui-wash"], ground), over(light["--ui-wash-strong"], ground)]);
+
+  it("has a light value for every token the dark block defines", () => {
+    expect(Object.keys(light).sort()).toEqual(Object.keys(darkTokens()).sort());
+  });
+
+  it("keeps every kind of text readable (4.5:1) on every light surface, plain or under a hover wash", () => {
+    for (const name of ["--ui-ink", "--ui-ink-soft", "--ui-ink-muted", "--ui-ink-quiet", "--ui-warn", "--ui-warn-bright", "--ui-problem", "--ui-danger"]) {
+      for (const ground of washed) expect(contrastRatio(light[name], ground), `${name} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("keeps amber text readable on its own amber chip and box (the accent at 20% over 10%)", () => {
+    for (const ground of grounds) {
+      const box = blend(light["--ui-warn"], ground, 0.1);
+      const chip = blend(light["--ui-warn"], box, 0.2);
+      expect(contrastRatio(light["--ui-warn"], chip), `amber on its chip over ${ground}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(light["--ui-ink"], box)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(light["--ui-ink-soft"], box)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("keeps the edge of a button or a text box visible (3:1) on every light surface", () => {
+    for (const name of ["--ui-line-strong", "--ui-line-hover", "--ui-danger-line"]) {
+      for (const ground of washed) expect(contrastRatio(light[name], ground), `${name} on ${ground}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("keeps the dimmed library tile's words readable on its pale veil", () => {
+    // Worst case behind the words: a black picture at 25% over the white tile, under the veil at its thinnest there (40%).
+    const picture = blend("#000000", light["--ui-surface"], 0.25);
+    const behind = blend(light["--ui-veil"], picture, 0.4);
+    expect(contrastRatio(light["--ui-ink-soft"], behind)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(light["--ui-ink-quiet"], behind)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe("the patient page, for every colour a clinic could pick", () => {
   it("keeps the band and the call button visible on the light page, and the words on them readable", () => {
     for (const colour of everyColour()) {
@@ -167,16 +307,36 @@ describe("themeVars", () => {
   });
 });
 
+describe("parseBrandTheme", () => {
+  it("accepts the two modes, however they are typed", () => {
+    expect(parseBrandTheme("light")).toBe("light");
+    expect(parseBrandTheme(" Dark ")).toBe("dark");
+  });
+
+  it("refuses anything else, so nothing but a known word reaches the data-theme attribute", () => {
+    for (const bad of ["", "sepia", "auto", "system", "light dark", 'light" onload="x', null, undefined, 1, true]) {
+      expect(parseBrandTheme(bad), String(bad)).toBeNull();
+    }
+  });
+
+  it("names them for the form and the clinic log, and dark is the default", () => {
+    expect(BRAND_THEMES.map((theme) => theme.key)).toEqual(["dark", "light"]);
+    expect(brandThemeLabel("light")).toBe("Light");
+    expect(DEFAULT_BRAND_THEME).toBe("dark");
+  });
+});
+
 describe("readBranding", () => {
   it("passes good stored values through", () => {
-    expect(readBranding({ brandColor: "#7A1F2B", brandFont: "merriweather" })).toEqual({ color: "#7a1f2b", font: "merriweather" });
+    expect(readBranding({ brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "light" })).toEqual({ color: "#7a1f2b", font: "merriweather", theme: "light" });
+    expect(readBranding({ brandColor: "#7A1F2B", brandFont: "merriweather" })).toEqual({ color: "#7a1f2b", font: "merriweather", theme: "dark" });
   });
 
   it("falls back to the Pulse look for empty values, junk, and a font no longer on the list", () => {
-    expect(readBranding({ brandColor: null, brandFont: null })).toEqual({ color: null, font: "inter" });
-    expect(readBranding({ brandColor: "blue", brandFont: "papyrus" })).toEqual({ color: null, font: "inter" });
-    expect(readBranding(null)).toEqual({ color: null, font: "inter" });
-    expect(readBranding({})).toEqual({ color: null, font: "inter" });
+    expect(readBranding({ brandColor: null, brandFont: null, brandTheme: null })).toEqual({ color: null, font: "inter", theme: "dark" });
+    expect(readBranding({ brandColor: "blue", brandFont: "papyrus", brandTheme: "sepia" })).toEqual({ color: null, font: "inter", theme: "dark" });
+    expect(readBranding(null)).toEqual({ color: null, font: "inter", theme: "dark" });
+    expect(readBranding({})).toEqual({ color: null, font: "inter", theme: "dark" });
   });
 });
 

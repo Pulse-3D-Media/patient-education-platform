@@ -110,14 +110,14 @@ export function ShareLists({
           <label className="sr-only" htmlFor="share-search">
             Search procedures
           </label>
-          <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#667085]" />
+          <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-ink-muted" />
           <input
             id="share-search"
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search procedures..."
-            className="h-11 w-full rounded-full border border-white/15 bg-[#0d1113] pl-12 pr-5 text-base text-white placeholder:text-[#667085] focus:border-brand focus:outline-none"
+            className="h-11 w-full rounded-full border border-line-strong bg-surface pl-12 pr-5 text-base text-ink placeholder:text-ink-muted focus:border-brand focus:outline-none"
           />
         </div>
       </div>
@@ -130,7 +130,7 @@ export function ShareLists({
         </h2>
 
         {procedures.length === 0 ? (
-          <p className="mt-3 text-[#bfbfbf]">{emptyProceduresText}</p>
+          <p className="mt-3 text-ink-soft">{emptyProceduresText}</p>
         ) : shownProcedures === 0 ? (
           <NothingMatches what="procedures" query={query} onShowAll={showAll} />
         ) : null}
@@ -141,7 +141,7 @@ export function ShareLists({
               key={video.id}
               className={
                 matches(video)
-                  ? "flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#0d1113] p-5 lg:flex-row lg:items-start lg:justify-between"
+                  ? "flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5 lg:flex-row lg:items-start lg:justify-between"
                   : "hidden"
               }
             >
@@ -150,7 +150,7 @@ export function ShareLists({
                   {video.title}
                   {video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
                 </p>
-                <p className="mt-1 text-sm text-[#667085]">
+                <p className="mt-1 text-sm text-ink-muted">
                   {video.categoryLabel}
                   {video.durationText && <> &middot; {video.durationText}</>}
                 </p>
@@ -169,7 +169,7 @@ export function ShareLists({
         </h2>
 
         {links.length === 0 ? (
-          <p className="mt-3 text-[#bfbfbf]">No links yet. Create one above.</p>
+          <p className="mt-3 text-ink-soft">No links yet. Create one above.</p>
         ) : shownLinks === 0 ? (
           <NothingMatches what="links" query={query} onShowAll={showAll} />
         ) : null}
@@ -183,18 +183,18 @@ export function ShareLists({
                 key={share.id}
                 className={
                   matches(share)
-                    ? "flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#0d1113] p-5 lg:flex-row lg:items-center lg:justify-between"
+                    ? "flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5 lg:flex-row lg:items-center lg:justify-between"
                     : "hidden"
                 }
               >
                 <div className="min-w-0 flex-1">
-                  <p className={`flex flex-wrap items-center gap-2 text-lg font-semibold ${share.expired ? "text-[#667085]" : ""}`}>
+                  <p className={`flex flex-wrap items-center gap-2 text-lg font-semibold ${share.expired ? "text-ink-muted" : ""}`}>
                     {share.title}
                     {share.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
                   </p>
                   {/* break-all lets a long address wrap anywhere instead of widening the page */}
-                  <p className="mt-1 break-all text-sm text-[#bfbfbf]">{link}</p>
-                  <p className="mt-2 text-sm text-[#667085]">
+                  <p className="mt-1 break-all text-sm text-ink-soft">{link}</p>
+                  <p className="mt-2 text-sm text-ink-muted">
                     {share.categoryLabel} &middot; {share.whenText}&nbsp;&middot; {share.playText}
                   </p>
                 </div>
@@ -227,7 +227,7 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
       aria-pressed={active}
       onClick={onClick}
       className={`h-10 rounded-full border px-4 text-sm font-medium transition ${
-        active ? "border-brand bg-brand text-on-brand" : "border-white/15 text-[#bfbfbf] hover:border-brand hover:text-white"
+        active ? "border-brand bg-brand text-on-brand" : "border-line-strong text-ink-soft hover:border-brand hover:text-ink"
       }`}
     >
       {children}
@@ -238,7 +238,7 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
 /** "3 of 13", in muted text beside a heading, shown only while a filter is on. */
 function Count({ shown, total }: { shown: number; total: number }) {
   return (
-    <span className="ml-2 text-base font-normal text-[#667085]">
+    <span className="ml-2 text-base font-normal text-ink-muted">
       {shown} of {total}
     </span>
   );
@@ -248,8 +248,8 @@ function Count({ shown, total }: { shown: number; total: number }) {
 function NothingMatches({ what, query, onShowAll }: { what: "procedures" | "links"; query: string; onShowAll: () => void }) {
   const typed = query.trim();
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-4 rounded-2xl border border-dashed border-white/15 px-5 py-6">
-      <p className="text-[#bfbfbf]">{typed ? `No ${what} match “${typed}”.` : `No ${what} in this category.`}</p>
+    <div className="mt-3 flex flex-wrap items-center gap-4 rounded-2xl border border-dashed border-line-strong px-5 py-6">
+      <p className="text-ink-soft">{typed ? `No ${what} match “${typed}”.` : `No ${what} in this category.`}</p>
       <button type="button" onClick={onShowAll} className={SECONDARY_BUTTON}>
         Show all
       </button>

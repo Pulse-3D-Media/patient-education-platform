@@ -39,13 +39,13 @@ export function AdminFrame({
     <ClinicShell clinic={clinic} showAdmin>
       <main className="px-5 py-6 sm:px-8">
         <div className={`mx-auto ${wide ? "max-w-6xl" : "max-w-4xl"}`}>
-          <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">{clinic.name}</p>
+          <p className="text-sm font-medium uppercase tracking-wider text-ink-muted">{clinic.name}</p>
           <div className="mt-2">
             <AdminNav />
           </div>
           <header className="mt-6">
             <h1 className="text-2xl font-semibold sm:text-3xl">{title}</h1>
-            {intro && <p className="mt-1 max-w-2xl text-[#bfbfbf]">{intro}</p>}
+            {intro && <p className="mt-1 max-w-2xl text-ink-soft">{intro}</p>}
           </header>
           {children}
         </div>

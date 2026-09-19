@@ -48,7 +48,7 @@ export default async function LibraryPage() {
     <main className="px-5 py-6 sm:px-8">
       <header className="mb-6">
         <h1 className="text-2xl font-semibold sm:text-3xl">My Procedure Library</h1>
-        <p className="mt-1 text-base text-[#bfbfbf]">Choose a category to see its procedures.</p>
+        <p className="mt-1 text-base text-ink-soft">Choose a category to see its procedures.</p>
       </header>
 
       <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -84,7 +84,7 @@ export default async function LibraryPage() {
             <li key={category.value}>
               <Link
                 href={`/library/${category.slug}`}
-                className="group relative block aspect-[16/9] overflow-hidden rounded-2xl border border-white/10 bg-[#0d1113] transition hover:border-brand/70 active:scale-[0.985]"
+                className="group relative block aspect-[16/9] overflow-hidden rounded-2xl border border-line bg-[#0d1113] text-white transition hover:border-brand/70 active:scale-[0.985]"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- CDN still, no resizing needed */}
                 <img

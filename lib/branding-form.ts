@@ -1,4 +1,4 @@
-import { DEFAULT_BRAND_FONT, parseBrandColor, parseBrandFont, parseLogoUrl } from "./branding";
+import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, parseBrandColor, parseBrandFont, parseBrandTheme, parseLogoUrl } from "./branding";
 import { normalizeUsPhone } from "./phone";
 
 /**
@@ -16,7 +16,7 @@ import { normalizeUsPhone } from "./phone";
  * value: a form is accepted whole or not at all.
  */
 
-/** The three values every branding save carries, checked and ready to store. */
+/** The four values every branding save carries, checked and ready to store. */
 export type BrandingFormValues = {
   /** Ten digits, or null for no phone. */
   phone: string | null;
@@ -24,6 +24,8 @@ export type BrandingFormValues = {
   brandColor: string | null;
   /** A font key, or null for the default (Inter). */
   brandFont: string | null;
+  /** "light", or null for the default (dark). */
+  brandTheme: string | null;
 };
 
 function field(formData: FormData, name: string): string {
@@ -31,9 +33,9 @@ function field(formData: FormData, name: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** The phone, colour and font from a branding form, or the sentence saying what to fix. */
+/** The phone, colour, font and light-or-dark choice from a branding form, or the sentence saying what to fix. */
 export function readBrandingForm(formData: FormData): { values: BrandingFormValues } | { error: string } {
-  if (["phone", "brandColor", "brandFont"].some((name) => {
+  if (["phone", "brandColor", "brandFont", "brandTheme"].some((name) => {
     const values = formData.getAll(name);
     return values.length > 1 || values.some((value) => typeof value !== "string");
   })) return { error: "Send one text value for each branding field." };
@@ -51,8 +53,20 @@ export function readBrandingForm(formData: FormData): { values: BrandingFormValu
   const font = fontText ? parseBrandFont(fontText) : DEFAULT_BRAND_FONT;
   if (!font) return { error: "Choose one of the fonts on the list." };
 
-  // The default font is stored as "nothing set", so a clinic that never chose one and a clinic that chose Inter are the same.
-  return { values: { phone, brandColor, brandFont: font === DEFAULT_BRAND_FONT ? null : font } };
+  // An empty mode means the default (dark). Anything else has to be one of the two.
+  const themeText = field(formData, "brandTheme");
+  const theme = themeText ? parseBrandTheme(themeText) : DEFAULT_BRAND_THEME;
+  if (!theme) return { error: "Choose Dark or Light." };
+
+  // The defaults are stored as "nothing set", so a clinic that never chose and a clinic that chose Inter, or dark, are the same row.
+  return {
+    values: {
+      phone,
+      brandColor,
+      brandFont: font === DEFAULT_BRAND_FONT ? null : font,
+      brandTheme: theme === DEFAULT_BRAND_THEME ? null : theme,
+    },
+  };
 }
 
 /**

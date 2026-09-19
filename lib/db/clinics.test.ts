@@ -81,7 +81,7 @@ describe("upsertClinicForClerkOrg", () => {
     createdClinicIds.push(clinic.id);
     const original = prisma.clinic.upsert.bind(prisma.clinic);
     const paused = vi.spyOn(prisma.clinic, "upsert").mockImplementationOnce((async (args: Parameters<typeof original>[0]) => {
-      await updateClinicBranding(clinic.id, { logoUrl: "https://example.com/new-logo.png", phone: null, brandColor: null, brandFont: null }, "Vitest Pulse staff");
+      await updateClinicBranding(clinic.id, { logoUrl: "https://example.com/new-logo.png", phone: null, brandColor: null, brandFont: null, brandTheme: null }, "Vitest Pulse staff");
       return original(args);
     }) as unknown as typeof original);
     try {
@@ -139,7 +139,7 @@ describe("upsertClinicForClerkOrg and a logo set by Pulse staff", () => {
     const created = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: null });
     createdClinicIds.push(created.id);
 
-    await updateClinicBranding(created.id, { logoUrl: "https://example.com/staff-logo.png", phone: null, brandColor: null, brandFont: null }, "Evan Miller");
+    await updateClinicBranding(created.id, { logoUrl: "https://example.com/staff-logo.png", phone: null, brandColor: null, brandFont: null, brandTheme: null }, "Evan Miller");
 
     // The clinic signs in again; its organization still has no logo of its own.
     const afterSignIn = await upsertClinicForClerkOrg(orgId, { name: "Vitest logo clinic", logoUrl: null });
@@ -245,14 +245,17 @@ describe("updateClinicBranding", () => {
 
     const { clinic, logged } = await updateClinicBranding(
       clinicId,
-      { phone: "8015550123", brandColor: "#7a1f2b", brandFont: "merriweather" },
+      { phone: "8015550123", brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light" },
       "Jane Smith (clinic admin)",
     );
 
     expect(clinic.phone).toBe("8015550123");
     expect(clinic.brandColor).toBe("#7a1f2b");
     expect(clinic.brandFont).toBe("merriweather");
-    expect(logged).toBe("Branding changed: colour set to #7a1f2b; font changed from Inter to Merriweather; phone set to (801) 555-0123.");
+    expect(clinic.brandTheme).toBe("light");
+    expect(logged).toBe(
+      "Branding changed: colour set to #7a1f2b; font changed from Inter to Merriweather; mode changed from Dark to Light; phone set to (801) 555-0123.",
+    );
 
     const notes = await listNotesForClinic(clinicId);
     expect(notes).toHaveLength(1);
@@ -261,33 +264,50 @@ describe("updateClinicBranding", () => {
 
   it("leaves the logo alone when the save does not carry one, and sets or removes it when it does", async () => {
     const clinicId = await makeClinic("logo");
-    await updateClinicBranding(clinicId, { logoUrl: "https://example.com/pulse-set.png", phone: null, brandColor: null, brandFont: null }, "Evan Miller");
+    await updateClinicBranding(clinicId, { logoUrl: "https://example.com/pulse-set.png", phone: null, brandColor: null, brandFont: null, brandTheme: null }, "Evan Miller");
 
     // The clinic's own admin saves: no logo in the save, so the stored logo stays.
-    const byAdmin = await updateClinicBranding(clinicId, { phone: null, brandColor: "#112233", brandFont: null }, "Jane Smith (clinic admin)");
+    const byAdmin = await updateClinicBranding(clinicId, { phone: null, brandColor: "#112233", brandFont: null, brandTheme: null }, "Jane Smith (clinic admin)");
     expect(byAdmin.clinic.logoUrl).toBe("https://example.com/pulse-set.png");
     expect(byAdmin.logged).toBe("Branding changed: colour set to #112233.");
 
     // Pulse staff remove it.
-    const removed = await updateClinicBranding(clinicId, { logoUrl: null, phone: null, brandColor: "#112233", brandFont: null }, "Evan Miller");
+    const removed = await updateClinicBranding(clinicId, { logoUrl: null, phone: null, brandColor: "#112233", brandFont: null, brandTheme: null }, "Evan Miller");
     expect(removed.clinic.logoUrl).toBeNull();
     expect(removed.logged).toBe("Branding changed: logo removed (was https://example.com/pulse-set.png).");
   });
 
   it("writes nothing, and logs nothing, when nothing changed", async () => {
     const clinicId = await makeClinic("same");
-    await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "lato-not-checked-here" }, "Evan Miller");
+    await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "lato-not-checked-here", brandTheme: "light" }, "Evan Miller");
 
-    const again = await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "lato-not-checked-here" }, "Evan Miller");
+    const again = await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "lato-not-checked-here", brandTheme: "light" }, "Evan Miller");
     expect(again.logged).toBeNull();
     expect(await listNotesForClinic(clinicId)).toHaveLength(1);
   });
 
+  it("logs a change of mode on its own, and treats nothing stored and dark as the same thing", async () => {
+    const clinicId = await makeClinic("mode");
+
+    // Nothing stored is dark, so saving "dark" over it is no change at all.
+    const same = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: "dark" }, "Evan Miller");
+    expect(same.logged).toBeNull();
+    expect(await listNotesForClinic(clinicId)).toHaveLength(0);
+
+    const toLight = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: "light" }, "Jane Smith (clinic admin)");
+    expect(toLight.clinic.brandTheme).toBe("light");
+    expect(toLight.logged).toBe("Branding changed: mode changed from Dark to Light.");
+
+    const back = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: null }, "Evan Miller");
+    expect(back.clinic.brandTheme).toBeNull();
+    expect(back.logged).toBe("Branding changed: mode changed from Light to Dark.");
+  });
+
   it("going back to the Pulse look reads as removed, and Inter is the word for no font", async () => {
     const clinicId = await makeClinic("reset");
-    await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "montserrat" }, "Evan Miller");
+    await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "montserrat", brandTheme: null }, "Evan Miller");
 
-    const { logged } = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null }, "Evan Miller");
+    const { logged } = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: null }, "Evan Miller");
     expect(logged).toBe("Branding changed: colour removed (was #112233); font changed from Montserrat to Inter; phone removed (was (801) 555-0123).");
   });
 
@@ -295,15 +315,15 @@ describe("updateClinicBranding", () => {
     const mine = await makeClinic("mine");
     const theirs = await makeClinic("theirs");
 
-    await updateClinicBranding(mine, { phone: "8015550123", brandColor: "#7a1f2b", brandFont: "open-sans" }, "Jane Smith (clinic admin)");
+    await updateClinicBranding(mine, { phone: "8015550123", brandColor: "#7a1f2b", brandFont: "open-sans", brandTheme: "light" }, "Jane Smith (clinic admin)");
 
-    const other = await prisma.clinic.findUnique({ where: { id: theirs }, select: { phone: true, brandColor: true, brandFont: true, logoUrl: true } });
-    expect(other).toEqual({ phone: null, brandColor: null, brandFont: null, logoUrl: null });
+    const other = await prisma.clinic.findUnique({ where: { id: theirs }, select: { phone: true, brandColor: true, brandFont: true, brandTheme: true, logoUrl: true } });
+    expect(other).toEqual({ phone: null, brandColor: null, brandFont: null, brandTheme: null, logoUrl: null });
     expect(await listNotesForClinic(theirs)).toHaveLength(0);
   });
 
   it("throws for a clinic that does not exist, and writes nothing", async () => {
-    await expect(updateClinicBranding("no-such-clinic", { phone: null, brandColor: "#112233", brandFont: null }, "Evan Miller")).rejects.toThrow(/No clinic/);
+    await expect(updateClinicBranding("no-such-clinic", { phone: null, brandColor: "#112233", brandFont: null, brandTheme: null }, "Evan Miller")).rejects.toThrow(/No clinic/);
   });
 });
 

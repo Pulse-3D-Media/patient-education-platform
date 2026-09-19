@@ -41,7 +41,7 @@ export function SendPanel({
   return (
     <div
       ref={panel}
-      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/70 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-scrim pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:items-center sm:p-6"
       // A tap on the dark backdrop (not on the panel itself) closes it.
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
@@ -50,12 +50,12 @@ export function SendPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="send-panel-title"
-        className="w-full max-w-2xl rounded-t-3xl border border-white/10 bg-[#0d1113] p-6 shadow-[0_24px_80px_rgba(0,0,0,.7)] outline-none sm:rounded-2xl sm:p-8"
+        className="w-full max-w-2xl rounded-t-3xl border border-line bg-surface p-6 shadow-panel outline-none sm:rounded-2xl sm:p-8"
       >
-        {placeholder && <p role="note" className="mb-4 text-base text-[#ffd783]">Placeholder animation. This plays a sample, not this procedure.</p>}
+        {placeholder && <p role="note" className="mb-4 text-base text-warn-bright">Placeholder animation. This plays a sample, not this procedure.</p>}
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">Send to a patient</p>
+            <p className="text-sm font-medium uppercase tracking-wider text-ink-muted">Send to a patient</p>
             <h2 id="send-panel-title" className="mt-1 text-2xl font-semibold leading-tight">
               {title}
             </h2>
@@ -64,7 +64,7 @@ export function SendPanel({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[#bfbfbf] transition hover:bg-white/5 hover:text-white"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-ink-soft transition hover:bg-wash hover:text-ink"
           >
             <CloseIcon className="h-5 w-5" />
           </button>
@@ -98,9 +98,9 @@ function Creating() {
     <div className="mt-8 flex flex-col items-center gap-4 py-10" role="status" aria-live="polite">
       <span
         aria-hidden="true"
-        className="h-10 w-10 animate-spin rounded-full border-4 border-white/15 border-t-brand-bright"
+        className="h-10 w-10 animate-spin rounded-full border-4 border-line-strong border-t-brand-bright"
       />
-      <p className="text-lg text-[#bfbfbf]">Creating link...</p>
+      <p className="text-lg text-ink-soft">Creating link...</p>
     </div>
   );
 }
@@ -129,13 +129,13 @@ function Ready({
       </div>
 
       <div className="min-w-0 w-full flex-1">
-        <p className="text-base leading-relaxed text-[#bfbfbf]">
+        <p className="text-base leading-relaxed text-ink-soft">
           Let the patient scan the code with their phone camera, or copy the link and send it to them.
         </p>
 
         {/* break-all lets the address wrap anywhere instead of widening the panel */}
         <p
-          className="mt-4 break-all rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 text-base text-white"
+          className="mt-4 break-all rounded-lg border border-brand/50 bg-brand/10 px-4 py-3 text-base text-ink"
           aria-label="Patient link"
         >
           {link}
@@ -146,7 +146,7 @@ function Ready({
         </div>
 
         {/* The same numbers createShare copied onto this link, so this says what the link will actually do. */}
-        <p className="mt-5 text-sm text-[#667085]">
+        <p className="mt-5 text-sm text-ink-muted">
           Once the patient plays it, it works for {daysAfterFirstPlay} {daysAfterFirstPlay === 1 ? "day" : "days"}. If nobody plays it,
           it stops on {until}. The office can print a pamphlet for it from Shared links.
         </p>
@@ -159,11 +159,11 @@ function Ready({
 function Failed({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <div className="mt-8 py-6 text-center" role="alert">
-      <p className="text-lg text-[#f0b06a]">{error}</p>
+      <p className="text-lg text-problem">{error}</p>
       <button
         type="button"
         onClick={onRetry}
-        className="mt-5 inline-flex h-12 items-center rounded-lg border border-white/15 px-6 text-base font-medium text-[#bfbfbf] transition hover:border-brand hover:text-white"
+        className="mt-5 inline-flex h-12 items-center rounded-lg border border-line-strong px-6 text-base font-medium text-ink-soft transition hover:border-brand hover:text-ink"
       >
         Try again
       </button>

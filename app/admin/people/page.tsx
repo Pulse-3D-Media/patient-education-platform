@@ -75,12 +75,12 @@ export default async function PeoplePage() {
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h2 id="people-heading" className="text-lg font-semibold">
             Surgeons: {surgeons}
-            <span className="ml-3 text-base font-normal text-[#667085]">
+            <span className="ml-3 text-base font-normal text-ink-muted">
               {people.length} {people.length === 1 ? "person" : "people"} in the clinic
             </span>
           </h2>
           {unanswered > 0 && (
-            <p className="text-sm text-[#f3b94d]">
+            <p className="text-sm text-warn">
               {unanswered} {unanswered === 1 ? "person has" : "people have"} not said yet. Mark them here, or they
               will be asked next time they sign in.
             </p>
@@ -91,24 +91,24 @@ export default async function PeoplePage() {
           {people.map((person) => (
             <li
               key={person.userId}
-              className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:flex-row sm:items-center sm:justify-between"
+              className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5 sm:flex-row sm:items-center sm:justify-between"
             >
               <div className="flex min-w-0 items-center gap-4">
                 {/* eslint-disable-next-line @next/next/no-img-element -- Clerk serves the avatar already sized */}
-                <img src={person.imageUrl} alt="" className="h-11 w-11 shrink-0 rounded-full bg-white/10" />
+                <img src={person.imageUrl} alt="" className="h-11 w-11 shrink-0 rounded-full bg-wash-strong" />
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2 text-lg font-semibold">
                     <span className="truncate">{person.name}</span>
-                    {person.userId === userId && <span className="text-sm font-normal text-[#667085]">(you)</span>}
+                    {person.userId === userId && <span className="text-sm font-normal text-ink-muted">(you)</span>}
                     <span
                       className={`rounded-md px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide ${
-                        person.role === "admin" ? "bg-brand/20 text-brand-bright" : "bg-white/10 text-[#bfbfbf]"
+                        person.role === "admin" ? "bg-brand/20 text-brand-bright" : "bg-wash-strong text-ink-soft"
                       }`}
                     >
                       {person.role}
                     </span>
                   </p>
-                  <p className="mt-0.5 truncate text-sm text-[#667085]">{person.email}</p>
+                  <p className="mt-0.5 truncate text-sm text-ink-muted">{person.email}</p>
                 </div>
               </div>
               <KindControl userId={person.userId} name={person.name} kind={person.kind} />
@@ -121,7 +121,7 @@ export default async function PeoplePage() {
         <h2 id="clerk-heading" className="text-lg font-semibold">
           Invite, change roles, remove
         </h2>
-        <p className="mt-1 mb-4 max-w-2xl text-[#bfbfbf]">
+        <p className="mt-1 mb-4 max-w-2xl text-ink-soft">
           Open the Members tab to invite someone by email, make them an admin or a member, or remove them. New
           people are asked the surgeon question when they first sign in.
         </p>

@@ -70,12 +70,12 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   return (
     <main className="px-5 py-6 sm:px-8">
       <header className="mb-6">
-        <p className="mb-1 text-sm text-[#667085]">
-          <Link href="/library" className="hover:text-white">
+        <p className="mb-1 text-sm text-ink-muted">
+          <Link href="/library" className="hover:text-ink">
             My Library
           </Link>
           <span className="mx-2">/</span>
-          <span className="text-[#bfbfbf]">{category.label}</span>
+          <span className="text-ink-soft">{category.label}</span>
         </p>
         <h1 className="text-2xl font-semibold sm:text-3xl">{category.label}</h1>
       </header>

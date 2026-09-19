@@ -10,9 +10,12 @@
  * because a clinic must not be able to make its own screens, or a
  * patient's, hard to read:
  *
- *   - the staff screens (/library, /admin) are near-black, so the colour is
- *     lightened until a button made of it stands out from the ground, and
- *     lightened further for the shade used as text;
+ *   - the staff screens (/library, /admin) are near-black by default, so the
+ *     colour is lightened until a button made of it stands out from the
+ *     ground, and lightened further for the shade used as text. A clinic
+ *     that has chosen LIGHT staff screens gets the opposite: the colour is
+ *     darkened until it stands out from the light ground, and darkened
+ *     further for the shade used as text;
  *   - the patient page is light, so the colour is darkened until it stands
  *     out there;
  *   - the text that sits ON the colour is white or black, whichever reads.
@@ -24,10 +27,11 @@
  * were before branding existed, not a computed version of them, so nothing
  * changes for a clinic that never opens the Branding page.
  *
- * Both stored values are checked when they are read as well as when they
- * are saved (readBranding), so a value this file does not understand (a
- * hand edit, a font later taken off the list) falls back to the Pulse look
- * and never reaches a style attribute.
+ * All three stored values (colour, font, light or dark) are checked when
+ * they are read as well as when they are saved (readBranding), so a value
+ * this file does not understand (a hand edit, a font later taken off the
+ * list) falls back to the Pulse look, in dark, and never reaches a style
+ * attribute.
  */
 
 // ---------------------------------------------------------------------------
@@ -67,6 +71,38 @@ export function parseBrandFont(input: unknown): BrandFontKey | null {
 /** "Open Sans" for "open-sans". For the clinic log and the forms. */
 export function brandFontLabel(key: BrandFontKey): string {
   return BRAND_FONTS.find((font) => font.key === key)?.label ?? key;
+}
+
+// ---------------------------------------------------------------------------
+// Light or dark
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a clinic's STAFF screens (/library and /admin) are dark or light.
+ * The clinic's setting, chosen on its Branding page: not each person's, and
+ * not the computer's own dark-mode setting. The patient page is light for
+ * every clinic and /pulse is dark for Pulse staff; neither reads this.
+ */
+export const BRAND_THEMES = [
+  { key: "dark", label: "Dark", note: "White words on black." },
+  { key: "light", label: "Light", note: "Dark words on warm white." },
+] as const;
+
+export type BrandTheme = (typeof BRAND_THEMES)[number]["key"];
+
+/** The mode a clinic has until it chooses the other. Stored as "nothing set". */
+export const DEFAULT_BRAND_THEME: BrandTheme = "dark";
+
+/** "dark" or "light", or null when the value is anything else. */
+export function parseBrandTheme(input: unknown): BrandTheme | null {
+  if (typeof input !== "string") return null;
+  const key = input.trim().toLowerCase();
+  return BRAND_THEMES.find((theme) => theme.key === key)?.key ?? null;
+}
+
+/** "Light" for "light". For the clinic log and the forms. */
+export function brandThemeLabel(key: BrandTheme): string {
+  return BRAND_THEMES.find((theme) => theme.key === key)?.label ?? key;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,16 +188,24 @@ function textOn(fill: string): string {
 /** The lightest dark surface the accent sits on in the staff screens (a card). Black is darker, so clearing this clears black too. */
 export const STAFF_GROUND = "#0d1113";
 
+/**
+ * The DARKEST light surface the accent sits on in a light-mode clinic's
+ * staff screens (the icon rail, --ui-sunken in app/globals.css). The page and the white cards are lighter, so clearing
+ * this clears them too. lib/branding.test.ts checks it still matches the
+ * stylesheet.
+ */
+export const STAFF_LIGHT_GROUND = "#f4f1ea";
+
 /** The patient page's warm light ground. */
 export const PATIENT_GROUND = "#fbfaf7";
 
-/** The colours of the staff screens (/library, /admin), which are near-black. */
+/** The colours of the staff screens (/library, /admin): near-black, or light when the clinic chose light. */
 export type StaffTheme = {
   /** Filled buttons, the active pill, borders on hover. At least 3:1 against the ground. */
   accent: string;
   /** The same fill while it is hovered or pressed. */
   accentHover: string;
-  /** The shade used as text and icons on the dark ground. At least 7:1. */
+  /** The shade used as text and icons on the ground: a pale shade on dark, a DARK shade on light. At least 7:1 either way. */
   accentBright: string;
   /** Text on top of `accent` and `accentHover`. White or black, at least 4.5:1. */
   onAccent: string;
@@ -186,18 +230,38 @@ export const PULSE_STAFF_THEME: StaffTheme = {
 /** The patient page's Pulse colours: the deep teal its focus ring already used. */
 export const PULSE_PATIENT_THEME: PatientTheme = { accent: "#1e5668", onAccent: WHITE };
 
-/** The staff screens' colours for one clinic. `color` is a checked "#rrggbb" or null for the Pulse look. */
-export function staffTheme(color: string | null): StaffTheme {
-  const checked = parseBrandColor(color);
-  if (!checked) return PULSE_STAFF_THEME;
+/**
+ * The Pulse 3D look on LIGHT staff screens, for a clinic that chose light
+ * and no colour of its own. The deep teal the patient page already uses:
+ * white reads on it, and it reads as text on the light ground.
+ */
+export const PULSE_STAFF_LIGHT_THEME: StaffTheme = {
+  accent: "#1e5668",
+  accentHover: "#16414f",
+  accentBright: "#1e5668",
+  onAccent: WHITE,
+};
 
-  const accent = standOut(checked, STAFF_GROUND, 3, WHITE);
+/**
+ * The staff screens' colours for one clinic. `color` is a checked "#rrggbb"
+ * or null for the Pulse look. `mode` is the clinic's light-or-dark choice:
+ * the same colour gives different shades in each, because what stands out
+ * from black and what stands out from near-white are opposites.
+ */
+export function staffTheme(color: string | null, mode: BrandTheme = DEFAULT_BRAND_THEME): StaffTheme {
+  const light = mode === "light";
+  const checked = parseBrandColor(color);
+  if (!checked) return light ? PULSE_STAFF_LIGHT_THEME : PULSE_STAFF_THEME;
+
+  const ground = light ? STAFF_LIGHT_GROUND : STAFF_GROUND;
+  const toward = light ? BLACK : WHITE; // lighten on dark, darken on light
+  const accent = standOut(checked, ground, 3, toward);
   const onAccent = textOn(accent);
   return {
     accent,
     // Hover moves away from the text colour, so the text only gets easier to read.
     accentHover: mix(accent, onAccent === WHITE ? BLACK : WHITE, 0.25),
-    accentBright: standOut(checked, STAFF_GROUND, 7, WHITE),
+    accentBright: standOut(checked, ground, 7, toward),
     onAccent,
   };
 }
@@ -229,18 +293,37 @@ export function themeVars(theme: StaffTheme | PatientTheme): Record<string, stri
   return vars;
 }
 
+/**
+ * The staff accent as it must be on a DARK ground, under the second set of
+ * names app/globals.css keeps for that. The app shell sets these beside the
+ * colours for the clinic's own mode, so the one part of a light clinic's
+ * library that stays black (the video player, marked data-theme="dark")
+ * gets shades that show up on black. In a dark clinic they equal the main
+ * four.
+ */
+export function darkGroundVars(color: string | null): Record<string, string> {
+  const theme = staffTheme(color, "dark");
+  return {
+    "--brand-dark-accent": theme.accent,
+    "--brand-dark-accent-hover": theme.accentHover,
+    "--brand-dark-accent-bright": theme.accentBright,
+    "--brand-dark-on-accent": theme.onAccent,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Reading what is stored
 // ---------------------------------------------------------------------------
 
-/** A clinic's branding as the screens use it: a checked colour or null, and a font that is on the list. */
-export type Branding = { color: string | null; font: BrandFontKey };
+/** A clinic's branding as the screens use it: a checked colour or null, a font that is on the list, and light or dark for its staff screens. */
+export type Branding = { color: string | null; font: BrandFontKey; theme: BrandTheme };
 
-/** Check the two stored values on the way out of the database. Anything not understood becomes the Pulse look. */
-export function readBranding(stored: { brandColor?: string | null; brandFont?: string | null } | null | undefined): Branding {
+/** Check the three stored values on the way out of the database. Anything not understood becomes the Pulse look, in dark. */
+export function readBranding(stored: { brandColor?: string | null; brandFont?: string | null; brandTheme?: string | null } | null | undefined): Branding {
   return {
     color: parseBrandColor(stored?.brandColor ?? null),
     font: parseBrandFont(stored?.brandFont ?? null) ?? DEFAULT_BRAND_FONT,
+    theme: parseBrandTheme(stored?.brandTheme ?? null) ?? DEFAULT_BRAND_THEME,
   };
 }
 

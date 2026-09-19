@@ -13,15 +13,126 @@
    */
   --brand-accent: #2a829b; /* filled buttons, the active pill, borders on hover */
   --brand-accent-hover: #1e5668; /* the same fill while hovered */
-  --brand-accent-bright: #5fb8d4; /* the shade used as text and icons on the dark screens */
+  --brand-accent-bright: #5fb8d4; /* the shade used as text and icons on the staff screens */
   --brand-on-accent: #ffffff; /* text on top of the accent */
+
+  /*
+   * The same four, as they should be on a DARK ground whatever mode the
+   * clinic has chosen. A light-mode clinic's accent is worked out for a
+   * light page, so it could vanish on black; the library's video player is
+   * black in both modes and takes these instead (see [data-theme="dark"]
+   * below). The app shell sets them for the clinic; these are the Pulse
+   * defaults.
+   */
+  --brand-dark-accent: #2a829b;
+  --brand-dark-accent-hover: #1e5668;
+  --brand-dark-accent-bright: #5fb8d4;
+  --brand-dark-on-accent: #ffffff;
+}
+
+/*
+ * THE STAFF SCREENS' SURFACES, as named values ("tokens").
+ *
+ * Every background, border and text colour on /library and /admin is one of
+ * these names, never a hex code in a page. That is what lets a clinic choose
+ * light or dark on its Branding page: the mode is one attribute,
+ * data-theme="light", on the element that wraps the clinic's screens (the
+ * app shell), and the block further down gives the same names light values.
+ *
+ * The first block holds the DARK values, exactly the colours the screens had
+ * before tokens existed. (Checked pixel by pixel against screenshots taken
+ * before the change. The dialog backdrop is written as color-mix because
+ * that is what matched; as rgba() one row came out a single shade off.)
+ * It applies to everything by default, so /pulse, the
+ * sign-in pages and anything else with no attribute stay dark, and it applies
+ * again inside data-theme="dark", which is how the video player stays dark
+ * inside a light clinic's library.
+ *
+ * The mode is the clinic's saved setting, written into the page by the
+ * server. Nothing here follows the computer's own dark-mode setting, and
+ * nothing is stored in the browser.
+ */
+:root,
+[data-theme="dark"] {
+  --ui-ground: #000000; /* the page itself, and the banner */
+  --ui-surface: #0d1113; /* cards and panels that sit on the page */
+  --ui-sunken: #07090b; /* the icon rail */
+  --ui-field: #07090b; /* the inside of a text box */
+  --ui-overlay: #0a0d0f; /* the pull-out menus */
+  --ui-well: #0f1518; /* behind a thumbnail while its picture loads */
+  --ui-line: rgba(255, 255, 255, 0.1); /* hairlines: card edges, dividers */
+  --ui-line-strong: rgba(255, 255, 255, 0.15); /* the edge of a button or a text box */
+  --ui-line-hover: rgba(255, 255, 255, 0.3); /* an edge while hovered */
+  --ui-ink: #ffffff; /* headings and the words that matter most */
+  --ui-ink-soft: #bfbfbf; /* body text */
+  --ui-ink-muted: #667085; /* small labels and notes */
+  --ui-ink-quiet: #9ca3af; /* the sentence on a dimmed library tile */
+  --ui-wash: rgba(255, 255, 255, 0.05); /* the tint under a hovered row or icon */
+  --ui-wash-strong: rgba(255, 255, 255, 0.1); /* quiet chips, loading blocks */
+  --ui-scrim: color-mix(in oklab, #000 70%, transparent); /* behind a dialog */
+  --ui-veil: #000000; /* the wash over a dimmed library tile's picture */
+  --ui-warn: #f3b94d; /* amber: something needs a look, nothing is broken */
+  --ui-warn-bright: #ffd783; /* the amber note in the Send panel */
+  --ui-problem: #f0b06a; /* a save or a send that did not work */
+  --ui-danger: #ff8a8e; /* the words on a destructive button while hovered */
+  --ui-danger-line: #e5484d; /* its edge while hovered */
+  --ui-shadow-panel: 0 24px 80px rgba(0, 0, 0, 0.7); /* under a dialog */
+  --ui-shadow-drawer: 8px 0 40px rgba(0, 0, 0, 0.6); /* beside a pull-out menu */
+  --ui-shadow-lift: 0 12px 32px rgba(0, 0, 0, 0.5); /* under a hovered card */
+}
+
+/* Inside something that stays dark in a light clinic, the accent goes back to its dark-ground shades. */
+[data-theme="dark"] {
+  --brand-accent: var(--brand-dark-accent);
+  --brand-accent-hover: var(--brand-dark-accent-hover);
+  --brand-accent-bright: var(--brand-dark-accent-bright);
+  --brand-on-accent: var(--brand-dark-on-accent);
+}
+
+/*
+ * LIGHT MODE. The same family as the patient page (app/watch), so the
+ * product feels like one thing: a warm off-white ground, white cards, dark
+ * blue-grey ink. Every pair used on the screens is measured in
+ * lib/branding.test.ts against WCAG AA (4.5:1 for text, 3:1 for the edge of
+ * a button or a text box). Change a value here and that test tells you if
+ * something stopped being readable: the test reads this file.
+ */
+[data-theme="light"] {
+  --ui-ground: #fbfaf7;
+  --ui-surface: #ffffff;
+  --ui-sunken: #f4f1ea;
+  --ui-field: #ffffff;
+  --ui-overlay: #ffffff;
+  --ui-well: #e9e5dc;
+  --ui-line: #e2ddd2;
+  --ui-line-strong: #7f796c;
+  --ui-line-hover: #5a6972;
+  --ui-ink: #12202a;
+  --ui-ink-soft: #3a4c56;
+  --ui-ink-muted: #52616a;
+  --ui-ink-quiet: #46555e;
+  --ui-wash: rgba(18, 32, 42, 0.06);
+  --ui-wash-strong: rgba(18, 32, 42, 0.1);
+  --ui-scrim: rgba(18, 32, 42, 0.55);
+  --ui-veil: #fbfaf7;
+  --ui-warn: #684400;
+  --ui-warn-bright: #684400;
+  --ui-problem: #9a3d00;
+  --ui-danger: #a3241c;
+  --ui-danger-line: #c9352c;
+  --ui-shadow-panel: 0 24px 80px rgba(18, 32, 42, 0.2);
+  --ui-shadow-drawer: 8px 0 40px rgba(18, 32, 42, 0.14);
+  --ui-shadow-lift: 0 12px 32px rgba(18, 32, 42, 0.14);
 }
 
 /*
  * "inline" makes each Tailwind class use the variable itself rather than a
  * copy of its value, which is what lets a wrapping element change it. The
  * classes this gives: bg-brand, border-brand, text-brand-bright,
- * hover:bg-brand-hover, text-on-brand, and the faded forms (bg-brand/20).
+ * hover:bg-brand-hover, text-on-brand, and the faded forms (bg-brand/20);
+ * and for the surfaces: bg-ground, bg-surface, bg-sunken, bg-overlay,
+ * border-line, border-line-strong, text-ink, text-ink-soft, text-ink-muted,
+ * hover:bg-wash, bg-scrim, text-warn, shadow-panel and the rest below.
  */
 @theme inline {
   --color-background: var(--background);
@@ -31,6 +142,32 @@
   --color-brand-hover: var(--brand-accent-hover);
   --color-brand-bright: var(--brand-accent-bright);
   --color-on-brand: var(--brand-on-accent);
+
+  --color-ground: var(--ui-ground);
+  --color-surface: var(--ui-surface);
+  --color-sunken: var(--ui-sunken);
+  --color-field: var(--ui-field);
+  --color-overlay: var(--ui-overlay);
+  --color-well: var(--ui-well);
+  --color-line: var(--ui-line);
+  --color-line-strong: var(--ui-line-strong);
+  --color-line-hover: var(--ui-line-hover);
+  --color-ink: var(--ui-ink);
+  --color-ink-soft: var(--ui-ink-soft);
+  --color-ink-muted: var(--ui-ink-muted);
+  --color-ink-quiet: var(--ui-ink-quiet);
+  --color-wash: var(--ui-wash);
+  --color-wash-strong: var(--ui-wash-strong);
+  --color-scrim: var(--ui-scrim);
+  --color-veil: var(--ui-veil);
+  --color-warn: var(--ui-warn);
+  --color-warn-bright: var(--ui-warn-bright);
+  --color-problem: var(--ui-problem);
+  --color-danger: var(--ui-danger);
+  --color-danger-line: var(--ui-danger-line);
+  --shadow-panel: var(--ui-shadow-panel);
+  --shadow-drawer: var(--ui-shadow-drawer);
+  --shadow-lift: var(--ui-shadow-lift);
 }
 
 @media (prefers-color-scheme: dark) {

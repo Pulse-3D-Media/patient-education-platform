@@ -87,15 +87,15 @@ export default async function AdminOverviewPage() {
           Needs a look
         </h2>
         {attention.length === 0 ? (
-          <p className="mt-2 text-[#bfbfbf]">Nothing right now.</p>
+          <p className="mt-2 text-ink-soft">Nothing right now.</p>
         ) : (
           <ul className="mt-3 flex flex-col gap-3">
             {attention.map((item) => (
               <li
                 key={item.text}
-                className="flex flex-col gap-3 rounded-2xl border border-[#f3b94d]/40 bg-[#f3b94d]/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
               >
-                <p className="text-[15px] text-white">{item.text}</p>
+                <p className="text-[15px] text-ink">{item.text}</p>
                 <Link href={item.href} className={SECONDARY_BUTTON}>
                   {item.label}
                 </Link>
@@ -126,19 +126,19 @@ export default async function AdminOverviewPage() {
           <h2 id="recent-heading" className="text-lg font-semibold">
             Newest links
           </h2>
-          <Link href="/admin/links" className="text-sm text-brand-bright hover:text-white">
+          <Link href="/admin/links" className="text-sm text-brand-bright hover:text-ink">
             All shared links
           </Link>
         </div>
         {recent.length === 0 ? (
-          <p className="mt-2 text-[#bfbfbf]">
+          <p className="mt-2 text-ink-soft">
             No links yet.{" "}
-            <Link href="/admin/links" className="text-brand-bright hover:text-white">
+            <Link href="/admin/links" className="text-brand-bright hover:text-ink">
               Create the first one.
             </Link>
           </p>
         ) : (
-          <ul className="mt-3 divide-y divide-white/10 rounded-2xl border border-white/10 bg-[#0d1113]">
+          <ul className="mt-3 divide-y divide-line rounded-2xl border border-line bg-surface">
             {recent.map((share) => {
               const state = shareExpiryState(share, now);
               const works = state.kind !== "expired" && share.video.isPublished;
@@ -154,11 +154,11 @@ export default async function AdminOverviewPage() {
                   : `Works until ${formatDate(share.expiresAt)}`;
               return (
                 <li key={share.id} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className={`flex flex-wrap items-center gap-2 text-[15px] ${works ? "" : "text-[#667085]"}`}>
+                  <p className={`flex flex-wrap items-center gap-2 text-[15px] ${works ? "" : "text-ink-muted"}`}>
                     {share.video.title}
                     {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
                   </p>
-                  <p className="text-sm text-[#667085]">
+                  <p className="text-sm text-ink-muted">
                     {when} &middot;{" "}
                     {share.viewCount === 0 ? "Not played yet" : `${share.viewCount} ${share.viewCount === 1 ? "play start" : "play starts"}`}
                   </p>
@@ -178,7 +178,7 @@ export default async function AdminOverviewPage() {
 function Notice({ text }: { text: string | null }) {
   if (!text) return null;
   return (
-    <p role="status" className="mt-6 rounded-xl border border-brand/50 bg-brand/15 px-4 py-3 text-[15px] text-white">
+    <p role="status" className="mt-6 rounded-xl border border-brand/50 bg-brand/15 px-4 py-3 text-[15px] text-ink">
       <span className="mr-2 font-semibold text-brand-bright">From Pulse 3D:</span>
       {text}
     </p>
@@ -188,10 +188,10 @@ function Notice({ text }: { text: string | null }) {
 /** One number with its label. The label says exactly what is counted. */
 function Fact({ label, value, note }: { label: string; value: number; note?: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0d1113] px-5 py-4">
-      <dt className="text-sm text-[#667085]">{label}</dt>
-      <dd className="mt-1 text-2xl font-semibold text-white">{value.toLocaleString("en-US")}</dd>
-      {note && <dd className="mt-1 text-xs text-[#667085]">{note}</dd>}
+    <div className="rounded-2xl border border-line bg-surface px-5 py-4">
+      <dt className="text-sm text-ink-muted">{label}</dt>
+      <dd className="mt-1 text-2xl font-semibold text-ink">{value.toLocaleString("en-US")}</dd>
+      {note && <dd className="mt-1 text-xs text-ink-muted">{note}</dd>}
     </div>
   );
 }
@@ -208,13 +208,13 @@ function SectionCards(): ReactNode {
           <li key={section.href}>
             <Link
               href={section.href}
-              className="flex h-full flex-col rounded-2xl border border-white/10 bg-[#0d1113] p-5 transition hover:border-brand/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-bright"
+              className="flex h-full flex-col rounded-2xl border border-line bg-surface p-5 transition hover:border-brand/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-bright"
             >
-              <span className="flex items-center gap-2 text-lg font-semibold text-white">
+              <span className="flex items-center gap-2 text-lg font-semibold text-ink">
                 {section.label}
-                {section.coming && <span className="text-xs font-normal uppercase tracking-wider text-[#667085]">Coming</span>}
+                {section.coming && <span className="text-xs font-normal uppercase tracking-wider text-ink-muted">Coming</span>}
               </span>
-              <span className="mt-1 text-sm text-[#bfbfbf]">{section.blurb}</span>
+              <span className="mt-1 text-sm text-ink-soft">{section.blurb}</span>
             </Link>
           </li>
         ))}

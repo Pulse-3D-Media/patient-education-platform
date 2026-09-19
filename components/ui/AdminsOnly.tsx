@@ -10,7 +10,7 @@ export function AdminsOnly() {
     <main className="px-5 py-6 sm:px-8">
       <div className="mx-auto max-w-xl py-10">
         <h1 className="text-2xl font-semibold sm:text-3xl">This page is for your clinic&rsquo;s office admins.</h1>
-        <p className="mt-3 text-[#bfbfbf]">
+        <p className="mt-3 text-ink-soft">
           You can browse the library and send videos to patients. Share links, QR codes and people are managed by an
           admin. If you need something changed, ask them.
         </p>

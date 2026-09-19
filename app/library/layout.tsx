@@ -18,8 +18,8 @@ import { getCurrentClinic } from "@/lib/clinic";
  * What the layout does read is the clinic, for two things that are about
  * how the shell looks and never about what a person may do:
  *
- *   - the clinic's branding (its colour, font, and logo or name in the
- *     banner), so the library is the clinic's own from the first frame;
+ *   - the clinic's branding (its colour, font, light or dark, and logo or
+ *     name in the banner), so the library is the clinic's own from the first frame;
  *   - whether this person is a clinic admin, so the shell can show or hide
  *     the admin icon. Hiding it is a courtesy, not the check: /admin checks
  *     for itself.
@@ -31,8 +31,10 @@ import { getCurrentClinic } from "@/lib/clinic";
  */
 export default async function LibraryLayout({ children }: LayoutProps<"/library">) {
   const clinic = await getCurrentClinic();
+  // Clerk's own pieces take the accent worked out for the clinic's mode, light or dark.
+  const accent = staffTheme(clinic?.branding.color ?? null, clinic?.branding.theme);
   return (
-    <StaffClerkProvider accent={staffTheme(clinic?.branding.color ?? null).accent} fontFamily={brandFontFamily(clinic?.branding.font ?? "inter")}>
+    <StaffClerkProvider accent={accent.accent} onAccent={accent.onAccent} theme={clinic?.branding.theme ?? "dark"} fontFamily={brandFontFamily(clinic?.branding.font ?? "inter")}>
       {clinic ? (
         <ClinicShell clinic={clinic} showAdmin={clinic.isAdmin}>
           {children}

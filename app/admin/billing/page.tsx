@@ -52,72 +52,72 @@ export default async function BillingPage() {
     <AdminFrame clinic={clinic} title="Billing" intro="Your plan, and what it comes to. Nothing here is an invoice.">
       <StatusCard status={clinic.status} managed={managed} />
 
-      <section aria-labelledby="plan-heading" className="mt-6 rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
+      <section aria-labelledby="plan-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="plan-heading" className="text-lg font-semibold">
           Your plan
         </h2>
         {!view || !view.hasPlan ? (
-          <p className="mt-2 text-[#bfbfbf]">
+          <p className="mt-2 text-ink-soft">
             {managed ? "Pulse 3D is setting your plan up with you." : "No plan yet. Choosing one here is coming; until then Pulse 3D sets it up with you."}
           </p>
         ) : (
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div>
-              <p className="text-sm text-[#667085]">Categories</p>
+              <p className="text-sm text-ink-muted">Categories</p>
               <ul className="mt-2 flex flex-wrap gap-2">
                 {labels.map((label) => (
-                  <li key={label} className="rounded-full border border-white/15 px-3 py-1 text-sm text-white">
+                  <li key={label} className="rounded-full border border-line-strong px-3 py-1 text-sm text-ink">
                     {label}
                   </li>
                 ))}
               </ul>
               {view.estimate?.fullLibrary && (
-                <p className="mt-2 text-sm text-[#bfbfbf]">That is the full library: all current categories.</p>
+                <p className="mt-2 text-sm text-ink-soft">That is the full library: all current categories.</p>
               )}
             </div>
             <div>
-              <p className="text-sm text-[#667085]">Surgeon seats</p>
-              <p className="mt-1 text-[15px] text-white">
+              <p className="text-sm text-ink-muted">Surgeon seats</p>
+              <p className="mt-1 text-[15px] text-ink">
                 {view.plan.surgeonSeats} {view.plan.surgeonSeats === 1 ? "surgeon" : "surgeons"}
               </p>
-              <p className="mt-1 text-sm text-[#667085]">Office staff are never charged. Who counts as a surgeon is set on the People page.</p>
+              <p className="mt-1 text-sm text-ink-muted">Office staff are never charged. Who counts as a surgeon is set on the People page.</p>
             </div>
           </div>
         )}
         {managed && (
-          <p className="mt-4 text-sm text-[#bfbfbf]">
+          <p className="mt-4 text-sm text-ink-soft">
             Your plan is managed by Pulse 3D and invoiced by agreement. To change categories or seats, get in touch with Pulse 3D.
           </p>
         )}
       </section>
 
       {view?.hasPlan && (
-        <section aria-labelledby="estimate-heading" className="mt-6 rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
+        <section aria-labelledby="estimate-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
           <div className="flex flex-wrap items-center gap-3">
             <h2 id="estimate-heading" className="text-lg font-semibold">
               What it comes to
             </h2>
-            <span className="rounded-md bg-white/10 px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide text-[#bfbfbf]">Estimate</span>
+            <span className="rounded-md bg-wash-strong px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide text-ink-soft">Estimate</span>
           </div>
 
           {view.problem ? (
-            <p className="mt-2 text-[#bfbfbf]">{view.problem}</p>
+            <p className="mt-2 text-ink-soft">{view.problem}</p>
           ) : view.estimate?.band === "enterprise" ? (
-            <p className="mt-2 text-[#bfbfbf]">Priced by agreement with Pulse 3D. {view.estimate.notes.join(" ")}</p>
+            <p className="mt-2 text-ink-soft">Priced by agreement with Pulse 3D. {view.estimate.notes.join(" ")}</p>
           ) : view.estimate ? (
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
-                <p className="text-sm text-[#667085]">Per month</p>
+                <p className="text-sm text-ink-muted">Per month</p>
                 <p className="mt-1 text-2xl font-semibold text-brand-bright">{formatCents(view.estimate.monthlyCents ?? 0)}</p>
               </div>
               <div>
-                <p className="text-sm text-[#667085]">Per year</p>
+                <p className="text-sm text-ink-muted">Per year</p>
                 <p className="mt-1 text-2xl font-semibold text-brand-bright">{formatCents(view.estimate.yearlyCents ?? 0)}</p>
               </div>
             </div>
           ) : null}
 
-          <p className="mt-4 text-sm text-[#667085]">
+          <p className="mt-4 text-sm text-ink-muted">
             {managed
               ? "An estimate from the plan on file, not your invoice. Pulse 3D invoices your clinic by agreement."
               : "An estimate from the plan on file. It is not an invoice, and nothing has been charged: card payment is not set up yet."}
@@ -125,11 +125,11 @@ export default async function BillingPage() {
         </section>
       )}
 
-      <section aria-labelledby="next-heading" className="mt-6 rounded-2xl border border-dashed border-white/15 p-5 sm:p-6">
+      <section aria-labelledby="next-heading" className="mt-6 rounded-2xl border border-dashed border-line-strong p-5 sm:p-6">
         <h2 id="next-heading" className="text-lg font-semibold">
           {managed ? "Changes to your plan" : "Coming here"}
         </h2>
-        <p className="mt-2 text-[#bfbfbf]">
+        <p className="mt-2 text-ink-soft">
           {managed
             ? "Pulse 3D manages this plan, so there is nothing to set up here. Questions about your invoice go to Pulse 3D."
             : "Choosing a plan, paying by card, changing seats or categories, and your invoices. Until then, Pulse 3D sets clinics up by hand."}
@@ -146,20 +146,20 @@ function StatusCard({ status, managed }: { status: ClinicStatus; managed: boolea
   return (
     <section
       aria-labelledby="status-heading"
-      className={`mt-6 rounded-2xl border px-5 py-4 ${open ? "border-white/10 bg-[#0d1113]" : "border-[#f3b94d]/40 bg-[#f3b94d]/10"}`}
+      className={`mt-6 rounded-2xl border px-5 py-4 ${open ? "border-line bg-surface" : "border-warn/40 bg-warn/10"}`}
     >
       <h2 id="status-heading" className="flex flex-wrap items-center gap-3 text-lg font-semibold">
         Status
         <span
           className={`rounded-md px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide ${
-            open ? "bg-brand/20 text-brand-bright" : "bg-[#f3b94d]/20 text-[#f3b94d]"
+            open ? "bg-brand/20 text-brand-bright" : "bg-warn/20 text-warn"
           }`}
         >
           {label}
         </span>
       </h2>
-      <p className="mt-2 text-[15px] text-[#bfbfbf]">{body}</p>
-      {!open && managed && <p className="mt-2 text-[15px] text-[#bfbfbf]">Your plan is managed by Pulse 3D, so get in touch with Pulse 3D to sort this out.</p>}
+      <p className="mt-2 text-[15px] text-ink-soft">{body}</p>
+      {!open && managed && <p className="mt-2 text-[15px] text-ink-soft">Your plan is managed by Pulse 3D, so get in touch with Pulse 3D to sort this out.</p>}
     </section>
   );
 }

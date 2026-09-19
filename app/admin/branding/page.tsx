@@ -75,12 +75,12 @@ export default async function BrandingPage() {
       }
       wide
     >
-      <section aria-labelledby="logo-heading" className="mt-8 rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
+      <section aria-labelledby="logo-heading" className="mt-8 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="logo-heading" className="text-lg font-semibold">
           Logo
         </h2>
         <div className="mt-4 flex flex-col gap-5 sm:flex-row sm:items-center">
-          {/* Shown on white, which is how it appears in the banner, over the video, and on the patient page. */}
+          {/* Shown on white, which is how it appears on the patient page and in the mark above a video. (In the banner it sits straight on the page colour, dark or light; the form below says which kind of logo suits which.) */}
           <div className="flex h-20 w-[260px] max-w-full shrink-0 items-center rounded-xl bg-white px-4">
             <ClinicLogo
               src={look.logoUrl}
@@ -90,14 +90,14 @@ export default async function BrandingPage() {
             />
           </div>
           <div className="min-w-0">
-            <p className="text-[15px] text-white">
+            <p className="text-[15px] text-ink">
               {look.logoUrl
                 ? clinic.logoIsFromClerk
                   ? "This is the logo on your clinic's profile."
                   : "Pulse 3D set this logo for you. Uploading your own replaces it."
                 : "No logo yet, so your clinic's name is shown in its place everywhere."}
             </p>
-            <p className="mt-1 max-w-xl text-sm text-[#bfbfbf]">
+            <p className="mt-1 max-w-xl text-sm text-ink-soft">
               To change it, open People, scroll to the panel at the bottom, and choose General, then Update profile. A wide logo on a
               white or clear background works best. It shows here the next time you open a page.
             </p>
@@ -108,7 +108,7 @@ export default async function BrandingPage() {
         </div>
       </section>
 
-      <section aria-labelledby="look-heading" className="mt-6 rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
+      <section aria-labelledby="look-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="look-heading" className="text-lg font-semibold">
           Colour, font and phone
         </h2>
@@ -116,7 +116,7 @@ export default async function BrandingPage() {
           <BrandingForm
             action={saveClinicBrandingAction}
             clinicName={clinic.name}
-            values={{ logoUrl: look.logoUrl, phone: clinic.phone, brandColor: clinic.branding.color, brandFont: clinic.branding.font }}
+            values={{ logoUrl: look.logoUrl, phone: clinic.phone, brandColor: clinic.branding.color, brandFont: clinic.branding.font, brandTheme: clinic.branding.theme }}
             showLogoField={false}
             fontClasses={allFontClasses()}
           />

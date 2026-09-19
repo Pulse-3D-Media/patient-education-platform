@@ -54,14 +54,14 @@ export function CancelShareButton({ code, title, expired }: { code: string; titl
           setError(null);
           setOpen(true);
         }}
-        className="inline-flex h-10 shrink-0 items-center rounded-lg border border-white/15 px-4 text-sm font-medium text-[#bfbfbf] transition hover:border-[#e5484d] hover:text-[#ff8a8e]"
+        className="inline-flex h-10 shrink-0 items-center rounded-lg border border-line-strong px-4 text-sm font-medium text-ink-soft transition hover:border-danger-line hover:text-danger"
       >
         {expired ? "Remove" : "Cancel link"}
       </button>
 
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-5"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-5"
           // A click on the dark backdrop (not on the popup itself) closes it, unless we are mid-cancel.
           onClick={(e) => e.target === e.currentTarget && !pending && setOpen(false)}
         >
@@ -70,19 +70,19 @@ export function CancelShareButton({ code, title, expired }: { code: string; titl
             aria-modal="true"
             aria-labelledby={headingId}
             aria-describedby={bodyId}
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0d1113] p-6 shadow-[0_24px_80px_rgba(0,0,0,.7)] sm:p-8"
+            className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 shadow-panel sm:p-8"
           >
             <h2 id={headingId} className="text-xl font-semibold">
               {expired ? "Remove this link?" : "Cancel this link?"}
             </h2>
-            <p className="mt-1 text-base text-[#bfbfbf]">{title}</p>
-            <p id={bodyId} className="mt-4 text-base leading-relaxed text-[#bfbfbf]">
+            <p className="mt-1 text-base text-ink-soft">{title}</p>
+            <p id={bodyId} className="mt-4 text-base leading-relaxed text-ink-soft">
               {expired
                 ? "It has already expired, so this only takes it off the list."
                 : "It will stop working right away. Anyone who still has it will be asked to get a new link from your office."}
             </p>
 
-            {error && <p className="mt-4 text-sm text-[#f0b06a]">{error}</p>}
+            {error && <p className="mt-4 text-sm text-problem">{error}</p>}
 
             <div className="mt-6 flex flex-wrap justify-end gap-3">
               <button
@@ -90,7 +90,7 @@ export function CancelShareButton({ code, title, expired }: { code: string; titl
                 type="button"
                 onClick={() => setOpen(false)}
                 disabled={pending}
-                className="inline-flex h-11 items-center rounded-lg border border-white/15 px-5 text-base font-medium text-[#bfbfbf] transition hover:border-brand hover:text-white disabled:opacity-60"
+                className="inline-flex h-11 items-center rounded-lg border border-line-strong px-5 text-base font-medium text-ink-soft transition hover:border-brand hover:text-ink disabled:opacity-60"
               >
                 No, keep it
               </button>

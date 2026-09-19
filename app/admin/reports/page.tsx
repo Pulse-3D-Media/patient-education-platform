@@ -23,7 +23,7 @@ export default async function ReportsPage() {
 
   return (
     <AdminFrame clinic={clinic} title="Reports" intro="Coming later.">
-      <p className="mt-6 max-w-xl text-[#bfbfbf]">
+      <p className="mt-6 max-w-xl text-ink-soft">
         How your links get used: links made and play starts per procedure, and which categories see the most use. Totals
         only, never anything about a patient. Until then, each link&rsquo;s play starts are on the Shared links page.
       </p>

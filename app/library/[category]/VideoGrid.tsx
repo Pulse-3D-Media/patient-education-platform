@@ -121,13 +121,13 @@ export function VideoGrid({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search procedures..."
-            className="h-11 w-full rounded-full border border-white/15 bg-[#0d1113] px-5 text-base text-white placeholder:text-[#667085] focus:border-brand focus:outline-none"
+            className="h-11 w-full rounded-full border border-line-strong bg-surface px-5 text-base text-ink placeholder:text-ink-muted focus:border-brand focus:outline-none"
           />
         </div>
       )}
 
       {shown.length === 0 ? (
-        <p className="text-lg text-[#bfbfbf]">No procedures match &ldquo;{query}&rdquo;.</p>
+        <p className="text-lg text-ink-soft">No procedures match &ldquo;{query}&rdquo;.</p>
       ) : (
         <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 2xl:grid-cols-3">
           {shown.map((video) => (
@@ -139,7 +139,7 @@ export function VideoGrid({
       )}
 
       {playing && (
-        <div ref={playerDialog} tabIndex={-1} className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-black pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]" role="dialog" aria-modal="true" aria-label={`${playing.title}, from ${clinicName}`}>
+        <div ref={playerDialog} tabIndex={-1} data-theme="dark" className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-black text-ink pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]" role="dialog" aria-modal="true" aria-label={`${playing.title}, from ${clinicName}`}>
           <VideoPlayer
             key={playing.id}
             src={playing.src}
@@ -172,13 +172,13 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
   const [thumbFailed, setThumbFailed] = useState(false);
 
   return (
-    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#0d1113] transition hover:-translate-y-0.5 hover:border-brand/70 hover:shadow-[0_12px_32px_rgba(0,0,0,.5)]">
+    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-surface transition hover:-translate-y-0.5 hover:border-brand/70 hover:shadow-lift">
       {/* The thumbnail is itself a Play button, so the big circle in the middle does what it looks like. */}
       <button
         type="button"
         onClick={onPlay}
         aria-label={video.isPlaceholder ? `Play ${video.title} (placeholder animation)` : `Play ${video.title}`}
-        className="group relative block aspect-video w-full overflow-hidden bg-[#0f1518] active:scale-[0.985]"
+        className="group relative block aspect-video w-full overflow-hidden bg-well active:scale-[0.985]"
       >
         {thumbFailed ? (
           <BrandedFallback />
@@ -225,7 +225,7 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
           onClick={onSend}
           aria-label={`Send ${video.title} to a patient`}
           title="Send to a patient"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/15 text-[#bfbfbf] transition hover:border-brand hover:text-white active:scale-[0.95]"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line-strong text-ink-soft transition hover:border-brand hover:text-ink active:scale-[0.95]"
         >
           <ShareIcon className="h-5 w-5" />
         </button>
@@ -237,7 +237,7 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
 /** Shown when a thumbnail cannot load. Quiet, on-brand, never a broken image. */
 function BrandedFallback() {
   return (
-    <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#0d1113] to-brand-hover/40">
+    <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-surface to-brand-hover/40">
       <span className="rounded-lg bg-brand px-3 py-1.5 text-lg font-bold text-on-brand">P3</span>
     </span>
   );

@@ -11,24 +11,29 @@ function form(fields: Record<string, string>) {
 
 describe("readBrandingForm", () => {
   it("tidies good values: lowercase hex, ten-digit phone, the font's key", () => {
-    expect(readBrandingForm(form({ brandColor: " #7A1F2B ", brandFont: "Merriweather", phone: "+1 (801) 555-0123" }))).toEqual({
-      values: { brandColor: "#7a1f2b", brandFont: "merriweather", phone: "8015550123" },
+    expect(readBrandingForm(form({ brandColor: " #7A1F2B ", brandFont: "Merriweather", brandTheme: " Light ", phone: "+1 (801) 555-0123" }))).toEqual({
+      values: { brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light", phone: "8015550123" },
     });
   });
 
   it("reads an empty form, and a form with fields missing altogether, as the Pulse look and no phone", () => {
-    const nothing = { values: { brandColor: null, brandFont: null, phone: null } };
-    expect(readBrandingForm(form({ brandColor: "", brandFont: "", phone: "" }))).toEqual(nothing);
+    const nothing = { values: { brandColor: null, brandFont: null, brandTheme: null, phone: null } };
+    expect(readBrandingForm(form({ brandColor: "", brandFont: "", brandTheme: "", phone: "" }))).toEqual(nothing);
     expect(readBrandingForm(form({}))).toEqual(nothing);
   });
 
   it("stores the default font as nothing set", () => {
-    expect(readBrandingForm(form({ brandFont: "inter" }))).toEqual({ values: { brandColor: null, brandFont: null, phone: null } });
+    expect(readBrandingForm(form({ brandFont: "inter" }))).toEqual({ values: { brandColor: null, brandFont: null, brandTheme: null, phone: null } });
+    // Dark is the default too, so choosing it is stored as nothing set.
+    expect(readBrandingForm(form({ brandTheme: "dark" }))).toEqual({ values: { brandColor: null, brandFont: null, brandTheme: null, phone: null } });
   });
 
   it("refuses a value it does not understand rather than guessing or dropping it", () => {
     expect(readBrandingForm(form({ brandColor: "teal" }))).toMatchObject({ error: expect.stringContaining("hex colour") });
     expect(readBrandingForm(form({ brandFont: "comic-sans" }))).toMatchObject({ error: expect.stringContaining("fonts on the list") });
+    for (const bad of ["sepia", "auto", "system", 'light" data-x="1']) {
+      expect(readBrandingForm(form({ brandTheme: bad })), bad).toEqual({ error: "Choose Dark or Light." });
+    }
     expect(readBrandingForm(form({ phone: "12345" }))).toMatchObject({ error: expect.stringContaining("US phone number") });
   });
 
@@ -41,6 +46,16 @@ describe("readBrandingForm", () => {
   it("refuses ambiguous duplicate fields", () => {
     const data = form({ brandColor: "#123456" });
     data.append("brandColor", "#654321");
+    expect(readBrandingForm(data)).toHaveProperty("error");
+
+    const twoModes = form({ brandTheme: "light" });
+    twoModes.append("brandTheme", "dark");
+    expect(readBrandingForm(twoModes)).toHaveProperty("error");
+  });
+
+  it("refuses a file sent as the mode", () => {
+    const data = form({ brandFont: "open-sans" });
+    data.append("brandTheme", new Blob(["light"]), "mode.txt");
     expect(readBrandingForm(data)).toHaveProperty("error");
   });
 });

@@ -44,7 +44,13 @@ import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
  * variables and the font's class, both set on the outermost element so
  * every page inside picks them up, plus the clinic's name and logo. Without
  * it (a page drawn before the clinic is known) the shell is the plain
- * Pulse 3D one. Pulse 3D's own mark moves to the foot of the category menu,
+ * Pulse 3D one, in dark.
+ *
+ * LIGHT OR DARK is the clinic's saved choice and arrives the same way. It
+ * becomes the data-theme attribute on the outermost element, and that is
+ * all it takes: every colour inside is a named token (app/globals.css) with
+ * a dark value and a light one. The server writes the attribute, so there
+ * is no flash of the wrong mode and nothing is read from the browser. Pulse 3D's own mark moves to the foot of the category menu,
  * small, as "Powered by".
  */
 
@@ -54,6 +60,8 @@ export type ShellBrand = {
   style: CSSProperties;
   /** The class that sets the clinic's font. Empty for Inter. */
   fontClass: string;
+  /** Light or dark, the clinic's saved choice. Written into the page by the server, so the first paint is already right. */
+  theme: "dark" | "light";
   clinicName: string;
   logoUrl: string | null;
 };
@@ -78,9 +86,9 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
   const onAdmin = pathname.startsWith("/admin");
 
   return (
-    <div className={`flex min-h-screen flex-col bg-black text-white ${brand?.fontClass ?? ""}`} style={brand?.style}>
+    <div data-theme={brand?.theme ?? "dark"} className={`flex min-h-screen flex-col bg-ground text-ink ${brand?.fontClass ?? ""}`} style={brand?.style}>
       {/* Banner, the full width of the screen */}
-      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-white/10 bg-black px-3 sm:px-4">
+      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-ground px-3 sm:px-4">
         <LibraryButton open={menu === "library"} onClick={() => toggle("library")} className="md:hidden" />
         {brand ? (
           <Link href="/library" aria-label={`${brand.clinicName}, library home`} className="flex min-w-0 items-center rounded-lg">
@@ -89,7 +97,7 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
               src={brand.logoUrl}
               name={brand.clinicName}
               boxClassName="h-10 w-[150px] sm:w-[240px]"
-              nameClassName="text-base font-semibold text-white"
+              nameClassName="text-base font-semibold text-ink"
             />
           </Link>
         ) : (
@@ -109,7 +117,7 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
         {/* Rail, tablet and up. It stays put under the banner while the page scrolls. */}
         <nav
           aria-label="Application"
-          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-16 shrink-0 flex-col items-center gap-2 border-r border-white/10 bg-[#07090b] py-3 md:flex"
+          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-16 shrink-0 flex-col items-center gap-2 border-r border-line bg-sunken py-3 md:flex"
         >
           <LibraryButton open={menu === "library"} onClick={() => toggle("library")} />
           {showAdmin && <AdminButton open={menu === "admin"} active={onAdmin} onClick={() => toggle("admin")} />}
@@ -145,7 +153,7 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
 // The look of a rail icon, shared by both so the rail lines up.
 const RAIL_BUTTON = "flex h-11 w-11 items-center justify-center rounded-xl transition";
 const RAIL_ON = "bg-brand/20 text-brand-bright";
-const RAIL_OFF = "text-[#bfbfbf] hover:bg-white/5 hover:text-white";
+const RAIL_OFF = "text-ink-soft hover:bg-wash hover:text-ink";
 
 function LibraryButton({ open, onClick, className = "" }: { open: boolean; onClick: () => void; className?: string }) {
   return (
@@ -182,21 +190,21 @@ function AdminButton({ open, active, onClick }: { open: boolean; active: boolean
 
 // The look of the pull-out menus, shared by both.
 const MENU_PANEL =
-  "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-white/10 bg-[#0a0d0f] shadow-[8px_0_40px_rgba(0,0,0,.6)] md:left-16 md:top-14 md:w-64";
+  "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-line bg-overlay shadow-drawer md:left-16 md:top-14 md:w-64";
 const MENU_ITEM = "flex h-12 items-center gap-3 rounded-lg border-l-2 px-3 text-base transition";
-const MENU_ITEM_IDLE = "border-transparent text-[#bfbfbf] hover:bg-white/5 hover:text-white";
-const MENU_ITEM_ACTIVE = "border-brand-bright bg-brand/15 font-medium text-white";
+const MENU_ITEM_IDLE = "border-transparent text-ink-soft hover:bg-wash hover:text-ink";
+const MENU_ITEM_ACTIVE = "border-brand-bright bg-brand/15 font-medium text-ink";
 
 /** The title row at the top of a menu. The close button is for phones, where the menu covers the icon that opened it. */
 function MenuHeading({ title, onClose }: { title: string; onClose: () => void }) {
   return (
     <div className="flex h-14 items-center justify-between px-4">
-      <p className="text-sm font-semibold uppercase tracking-wider text-[#667085]">{title}</p>
+      <p className="text-sm font-semibold uppercase tracking-wider text-ink-muted">{title}</p>
       <button
         type="button"
         onClick={onClose}
         aria-label="Close"
-        className="flex h-10 w-10 items-center justify-center rounded-lg text-[#bfbfbf] hover:bg-white/5 hover:text-white md:hidden"
+        className="flex h-10 w-10 items-center justify-center rounded-lg text-ink-soft hover:bg-wash hover:text-ink md:hidden"
       >
         <CloseIcon className="h-5 w-5" />
       </button>
@@ -217,7 +225,7 @@ function CategoryMenu({ pathname, onClose, poweredBy }: { pathname: string; onCl
           Home
         </Link>
 
-        <p className="mt-5 mb-1 px-3 text-xs font-medium uppercase tracking-wider text-[#667085]">{CATEGORY_GROUP}</p>
+        <p className="mt-5 mb-1 px-3 text-xs font-medium uppercase tracking-wider text-ink-muted">{CATEGORY_GROUP}</p>
         <ul className="flex flex-col gap-0.5">
           {CATEGORIES.map((c) => {
             const isActive = pathname === `/library/${c.slug}`;
@@ -239,7 +247,7 @@ function CategoryMenu({ pathname, onClose, poweredBy }: { pathname: string; onCl
 
       {/* When the banner carries the clinic's logo, Pulse 3D's own mark lives here, small. */}
       {poweredBy && (
-        <p className="flex items-center gap-2 border-t border-white/10 px-4 py-3 text-xs text-[#667085]">
+        <p className="flex items-center gap-2 border-t border-line px-4 py-3 text-xs text-ink-muted">
           Powered by
           {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
           <img src={LOGO_URL} alt="Pulse 3D" className="h-4 w-auto" />
@@ -275,7 +283,7 @@ function AdminMenu({ pathname, onClose }: { pathname: string; onClose: () => voi
                   className={`${MENU_ITEM} ${isActive ? MENU_ITEM_ACTIVE : MENU_ITEM_IDLE}`}
                 >
                   {section.label}
-                  {section.coming && <span className="ml-auto text-xs uppercase tracking-wider text-[#667085]">Coming</span>}
+                  {section.coming && <span className="ml-auto text-xs uppercase tracking-wider text-ink-muted">Coming</span>}
                 </Link>
               </li>
             );

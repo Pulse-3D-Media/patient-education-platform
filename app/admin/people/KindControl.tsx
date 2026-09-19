@@ -30,13 +30,13 @@ export function KindControl({ userId, name, kind }: { userId: string; name: stri
 
   return (
     <div className="flex flex-col items-start gap-1 sm:items-end">
-      <div role="group" aria-label={`Is ${name} a surgeon or staff?`} className="flex overflow-hidden rounded-lg border border-white/15">
+      <div role="group" aria-label={`Is ${name} a surgeon or staff?`} className="flex overflow-hidden rounded-lg border border-line-strong">
         <Option label="Surgeon" active={current === "surgeon"} pending={pending} onClick={() => choose("surgeon")} />
         <Option label="Staff" active={current === "staff"} pending={pending} onClick={() => choose("staff")} />
       </div>
-      {current === null && !error && <p className="text-xs text-[#667085]">Not set</p>}
+      {current === null && !error && <p className="text-xs text-ink-muted">Not set</p>}
       {error && (
-        <p role="alert" className="text-xs text-[#f3b94d]">
+        <p role="alert" className="text-xs text-warn">
           {error}
         </p>
       )}
@@ -52,7 +52,7 @@ function Option({ label, active, pending, onClick }: { label: string; active: bo
       disabled={pending}
       onClick={onClick}
       className={`h-10 px-4 text-sm font-medium transition disabled:opacity-60 ${
-        active ? "bg-brand text-on-brand" : "text-[#bfbfbf] hover:bg-white/5 hover:text-white"
+        active ? "bg-brand text-on-brand" : "text-ink-soft hover:bg-wash hover:text-ink"
       }`}
     >
       {label}

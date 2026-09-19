@@ -22,7 +22,7 @@ export function AdminNav() {
 
   return (
     <nav aria-label="Clinic admin" className="-mx-5 overflow-x-auto px-5 sm:-mx-8 sm:px-8">
-      <ul className="flex min-w-max gap-1 border-b border-white/10">
+      <ul className="flex min-w-max gap-1 border-b border-line">
         {ADMIN_SECTIONS.map((section) => {
           const isActive = section.href === active;
           return (
@@ -31,11 +31,11 @@ export function AdminNav() {
                 href={section.href}
                 aria-current={isActive ? "page" : undefined}
                 className={`-mb-px flex h-12 items-center gap-2 whitespace-nowrap border-b-2 px-3 text-[15px] transition focus-visible:rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-bright ${
-                  isActive ? "border-brand-bright font-medium text-white" : "border-transparent text-[#bfbfbf] hover:border-white/30 hover:text-white"
+                  isActive ? "border-brand-bright font-medium text-ink" : "border-transparent text-ink-soft hover:border-line-hover hover:text-ink"
                 }`}
               >
                 {section.label}
-                {section.coming && <span className="text-xs uppercase tracking-wider text-[#667085]">Coming</span>}
+                {section.coming && <span className="text-xs uppercase tracking-wider text-ink-muted">Coming</span>}
               </Link>
             </li>
           );

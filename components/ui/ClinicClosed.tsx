@@ -39,13 +39,13 @@ export function ClinicClosed({
   return (
     <Wrapper className={inFrame ? "" : "px-5 py-6 sm:px-8"}>
       <div className={inFrame ? "max-w-xl py-4" : "mx-auto max-w-xl py-10"}>
-        {!inFrame && <p className="text-sm font-medium uppercase tracking-wider text-[#667085]">{clinicName}</p>}
+        {!inFrame && <p className="text-sm font-medium uppercase tracking-wider text-ink-muted">{clinicName}</p>}
         {inFrame ? (
           <h2 className="text-xl font-semibold">{heading}</h2>
         ) : (
           <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">{heading}</h1>
         )}
-        <p className="mt-3 text-[#bfbfbf]">{body}</p>
+        <p className="mt-3 text-ink-soft">{body}</p>
         {billingLink && (
           <Link
             href="/admin/billing"
@@ -54,11 +54,11 @@ export function ClinicClosed({
             Go to billing
           </Link>
         )}
-        <p className="mt-6 text-[#bfbfbf]">Signed in with the wrong account? Sign out and try the other one.</p>
+        <p className="mt-6 text-ink-soft">Signed in with the wrong account? Sign out and try the other one.</p>
         <SignOutButton>
           <button
             type="button"
-            className="mt-6 inline-flex h-11 items-center rounded-lg border border-white/15 px-5 text-sm font-medium text-[#bfbfbf] transition hover:border-brand hover:text-white"
+            className="mt-6 inline-flex h-11 items-center rounded-lg border border-line-strong px-5 text-sm font-medium text-ink-soft transition hover:border-brand hover:text-ink"
           >
             Sign out
           </button>

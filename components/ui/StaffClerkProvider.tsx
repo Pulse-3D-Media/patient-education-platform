@@ -19,8 +19,29 @@ import type { ReactNode } from "react";
  * plain hex colour the server has already checked and adjusted to be
  * readable (staffTheme in lib/branding.ts). Left out, on the sign-in and
  * onboarding pages where there is no clinic yet, it is the Pulse teal.
+ *
+ * `theme` is the clinic's light-or-dark choice. Clerk's pieces are light
+ * panels either way (that is Clerk's own default, and what they were before
+ * the choice existed). In a DARK clinic they are left exactly as they were.
+ * In a LIGHT clinic they are given the light screens' own white, ink and
+ * accent (with the right text colour on the accent), so they match the page
+ * around them instead of only resembling it. The values are the same ones
+ * app/globals.css gives the light tokens.
  */
-export function StaffClerkProvider({ children, accent = "#2a829b", fontFamily = "var(--font-inter), Inter, sans-serif" }: { children: ReactNode; accent?: string; fontFamily?: string }) {
+export function StaffClerkProvider({
+  children,
+  accent = "#2a829b",
+  onAccent = "#ffffff",
+  fontFamily = "var(--font-inter), Inter, sans-serif",
+  theme = "dark",
+}: {
+  children: ReactNode;
+  accent?: string;
+  /** The text colour that reads on `accent`. Only used in light mode; dark mode leaves Clerk's own choice alone, as before. */
+  onAccent?: string;
+  fontFamily?: string;
+  theme?: "dark" | "light";
+}) {
   return (
     <ClerkProvider
       // Where the sign-in page lives. Must match proxy.ts and the <SignIn /> path.
@@ -34,6 +55,17 @@ export function StaffClerkProvider({ children, accent = "#2a829b", fontFamily = 
           colorPrimary: accent,
           fontFamily,
           borderRadius: "0.625rem",
+          ...(theme === "light"
+            ? {
+                colorPrimaryForeground: onAccent,
+                colorBackground: "#ffffff",
+                colorForeground: "#12202a",
+                colorMutedForeground: "#52616a",
+                colorNeutral: "#12202a",
+                colorInput: "#ffffff",
+                colorInputForeground: "#12202a",
+              }
+            : {}),
         },
       }}
     >

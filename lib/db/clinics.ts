@@ -1,5 +1,5 @@
 import type { Category, ClinicStatus, Prisma } from "@prisma/client";
-import { DEFAULT_BRAND_FONT, brandFontLabel, parseBrandFont } from "../branding";
+import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, brandFontLabel, brandThemeLabel, parseBrandFont, parseBrandTheme } from "../branding";
 import { CATEGORIES } from "../categories";
 import { formatUsPhone } from "../phone";
 import { readClinicLocked } from "./clinic-lock";
@@ -22,7 +22,7 @@ import { prisma } from "./client";
 /**
  * The fields the clinic side of the app reads about a clinic. noticeText and
  * showPlaceholders are set by Pulse staff and change what the clinic sees.
- * The phone, brand colour and brand font are the clinic's branding, which
+ * The phone, brand colour, brand font and light-or-dark mode are the clinic's branding, which
  * its own admin can edit too (/admin/branding). Nothing internal (notes,
  * status reasons, the pricing pin) is in here.
  */
@@ -37,6 +37,7 @@ const CLINIC_FIELDS = {
   phone: true,
   brandColor: true,
   brandFont: true,
+  brandTheme: true,
 } as const;
 
 /** What Clerk tells us about an organization that we keep a copy of. */
@@ -423,7 +424,7 @@ export async function updateClinicDetails(clinicId: string, details: ClinicDetai
 }
 
 // ---------------------------------------------------------------------------
-// Branding: the clinic's logo, phone, brand colour and font. Edited by the
+// Branding: the clinic's logo, phone, brand colour, font and mode. Edited by the
 // clinic's own admin on /admin/branding and by Pulse staff on the Branding
 // tab of /pulse. Both go through the one function below, so both are logged
 // the same way and the last save wins.
@@ -448,6 +449,8 @@ export type ClinicBrandingInput = {
   brandColor: string | null;
   /** A font key from lib/branding.ts, or null for the default. */
   brandFont: string | null;
+  /** "light", or null for the default (dark staff screens). */
+  brandTheme: string | null;
   /** A full https address, null to remove it, or left out to leave the logo alone. */
   logoUrl?: string | null;
 };
@@ -455,6 +458,11 @@ export type ClinicBrandingInput = {
 /** "Inter" for nothing stored, otherwise the font's name as the forms show it. */
 function fontWords(key: string | null) {
   return brandFontLabel(parseBrandFont(key) ?? DEFAULT_BRAND_FONT);
+}
+
+/** "Dark" for nothing stored, otherwise "Dark" or "Light" as the forms show it. */
+function themeWords(key: string | null) {
+  return brandThemeLabel(parseBrandTheme(key) ?? DEFAULT_BRAND_THEME);
 }
 
 /**
@@ -467,6 +475,7 @@ export async function updateClinicBranding(clinicId: string, branding: ClinicBra
     phone: branding.phone,
     brandColor: branding.brandColor,
     brandFont: branding.brandFont,
+    brandTheme: branding.brandTheme,
     ...(branding.logoUrl !== undefined ? { logoUrl: branding.logoUrl } : {}),
   };
 
@@ -480,6 +489,9 @@ export async function updateClinicBranding(clinicId: string, branding: ClinicBra
         fontWords(before.brandFont) === fontWords(branding.brandFont)
           ? null
           : `font changed from ${fontWords(before.brandFont)} to ${fontWords(branding.brandFont)}`,
+        themeWords(before.brandTheme) === themeWords(branding.brandTheme)
+          ? null
+          : `mode changed from ${themeWords(before.brandTheme)} to ${themeWords(branding.brandTheme)}`,
         changeWords("phone", formatUsPhone(before.phone) || null, formatUsPhone(branding.phone) || null),
       ].filter((part): part is string => part !== null);
       return parts.length > 0 ? `Branding changed: ${parts.join("; ")}.` : null;

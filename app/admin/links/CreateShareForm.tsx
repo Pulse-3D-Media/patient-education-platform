@@ -38,7 +38,7 @@ export function CreateShareForm({
       <form action={formAction} className="flex flex-wrap items-center gap-3">
         <input type="hidden" name="videoId" value={videoId} />
 
-        <p className="text-sm text-[#bfbfbf]">
+        <p className="text-sm text-ink-soft">
           {daysAfterFirstPlay === null
             ? "Links cannot be made right now. Ask Pulse 3D."
             : `Works for ${daysAfterFirstPlay} ${daysAfterFirstPlay === 1 ? "day" : "days"} after the first play`}
@@ -54,11 +54,11 @@ export function CreateShareForm({
         </button>
       </form>
 
-      {state?.error && <p className="text-sm text-[#f0b06a]">{state.error}</p>}
+      {state?.error && <p className="text-sm text-problem">{state.error}</p>}
 
       {link && (
         <div className="flex w-full max-w-xl items-center gap-3 rounded-lg border border-brand/50 bg-brand/10 px-4 py-3">
-          <span className="min-w-0 flex-1 truncate text-sm text-white" title={link}>
+          <span className="min-w-0 flex-1 truncate text-sm text-ink" title={link}>
             {link}
           </span>
           <CopyButton text={link} />

@@ -209,7 +209,7 @@ describe("saveDetailsAction and the clinic's branding", () => {
 });
 
 describe("saveBrandingAction", () => {
-  const good = { logoUrl: "https://example.com/logo.png", brandColor: "#7A1F2B", brandFont: "merriweather", phone: "801-555-0123" };
+  const good = { logoUrl: "https://example.com/logo.png", brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "light", phone: "801-555-0123" };
 
   it("refuses a user who is not Pulse staff with not-found, and writes nothing", async () => {
     const clinicId = await makeClinic();
@@ -217,8 +217,8 @@ describe("saveBrandingAction", () => {
 
     await expect(saveBrandingAction(null, form({ clinicId, ...good }))).rejects.toMatchObject({ digest: expect.stringContaining("404") });
 
-    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, phone: true } });
-    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, phone: null });
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, brandTheme: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, brandTheme: null, phone: null });
     expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(0);
   });
 
@@ -228,14 +228,14 @@ describe("saveBrandingAction", () => {
 
     expect(await saveBrandingAction(null, form({ clinicId, ...good }))).toMatchObject({ ok: expect.stringContaining("Branding saved") });
 
-    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, phone: true } });
-    expect(clinic).toEqual({ logoUrl: "https://example.com/logo.png", brandColor: "#7a1f2b", brandFont: "merriweather", phone: "8015550123" });
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, brandTheme: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: "https://example.com/logo.png", brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light", phone: "8015550123" });
 
     const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { body: true, authorName: true, kind: true } });
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({ authorName: "Evan Miller", kind: "STATUS" });
     expect(notes[0].body).toBe(
-      "Branding changed: logo set to https://example.com/logo.png; colour set to #7a1f2b; font changed from Inter to Merriweather; phone set to (801) 555-0123.",
+      "Branding changed: logo set to https://example.com/logo.png; colour set to #7a1f2b; font changed from Inter to Merriweather; mode changed from Dark to Light; phone set to (801) 555-0123.",
     );
 
     // The same form again changes nothing and logs nothing.
@@ -248,10 +248,10 @@ describe("saveBrandingAction", () => {
     signInAs("user_staff", { pulseStaff: true });
     await saveBrandingAction(null, form({ clinicId, ...good }));
 
-    await saveBrandingAction(null, form({ clinicId, logoUrl: "", brandColor: "", brandFont: "inter", phone: "" }));
+    await saveBrandingAction(null, form({ clinicId, logoUrl: "", brandColor: "", brandFont: "inter", brandTheme: "dark", phone: "" }));
 
-    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, phone: true } });
-    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, phone: null });
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, brandTheme: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, brandTheme: null, phone: null });
   });
 
   it("refuses a bad colour, a font not on the list, a bad phone and a logo that is not https, saving none of the form", async () => {
@@ -262,6 +262,7 @@ describe("saveBrandingAction", () => {
       [{ ...good, brandColor: "teal" }, "hex colour"],
       [{ ...good, brandColor: "red; background:url(x)" }, "hex colour"],
       [{ ...good, brandFont: "papyrus" }, "fonts on the list"],
+      [{ ...good, brandTheme: "sepia" }, "Dark or Light"],
       [{ ...good, phone: "555-0123" }, "US phone number"],
       [{ ...good, logoUrl: "http://example.com/logo.png" }, "https://"],
       [{ ...good, logoUrl: "javascript:alert(1)" }, "https://"],
@@ -270,8 +271,8 @@ describe("saveBrandingAction", () => {
       expect(await saveBrandingAction(null, form({ clinicId, ...fields }))).toMatchObject({ error: expect.stringContaining(words) });
     }
 
-    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, phone: true } });
-    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, phone: null });
+    const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, brandTheme: true, phone: true } });
+    expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, brandTheme: null, phone: null });
     expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(0);
   });
 

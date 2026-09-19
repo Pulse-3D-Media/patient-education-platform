@@ -88,6 +88,7 @@ model Clinic {
   // value that is not understood falls back to the Pulse look.
   brandColor       String? // one brand colour as "#rrggbb"; empty means the Pulse teal. The readable shades are worked out from it, never stored
   brandFont        String? // the key of one font from the short list in lib/branding.ts; empty means Inter
+  brandTheme       String? // "light" for light staff screens (/library and /admin); empty or "dark" means dark, which is what every clinic had before. Checked by parseBrandTheme in lib/branding.ts. The patient page and /pulse ignore it
   shares           Share[]
   clinicNotes      ClinicNote[]
 

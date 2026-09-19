@@ -154,6 +154,8 @@ describe("a member", () => {
       const html = await render(page, path);
       expect(html).toContain("This page is for your clinic");
       expect(html).not.toContain('aria-label="Clinic admin"');
+      // Nor the icon that opens the admin menu.
+      expect(html).not.toContain('aria-controls="admin-menu"');
       expect(html).not.toContain("Create share link");
       expect(html).not.toContain("Save branding");
       for (const word of PLAN_WORDS) expect(html).not.toContain(word);
@@ -340,8 +342,12 @@ describe("an admin of an ACTIVE clinic", () => {
         expect(html).toMatch(/--brand-accent:#[0-9a-f]{6}/);
         expect(html).not.toContain("--brand-accent:#2a829b");
         expect(html).toContain("font-montserrat");
-        // The clinic's name is always in the banner, on every admin page.
-        expect(html).toContain("Vitest pages clinic (active)&#x27;s Patient Education Library");
+        // The clinic's name is always in the banner, on every admin page: it labels the logo's link home, and stands in as words until the logo has loaded.
+        expect(html).toContain('aria-label="Vitest pages clinic (active), library home"');
+        expect(html).toMatch(/<header\b[\s\S]*?Vitest pages clinic \(active\)[\s\S]*?<\/header>/);
+        // The admin menu's icon is offered to an admin; the menu itself stays shut until it is pressed.
+        expect(html).toContain('aria-controls="admin-menu"');
+        expect(html).not.toContain('id="admin-menu"');
       }
       // The Branding form opens on what is saved.
       signInAs(orgActive, "admin", "Vitest pages clinic (active)");

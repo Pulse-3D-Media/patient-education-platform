@@ -340,7 +340,8 @@ describe("an admin of an ACTIVE clinic", () => {
         expect(html).toMatch(/--brand-accent:#[0-9a-f]{6}/);
         expect(html).not.toContain("--brand-accent:#2a829b");
         expect(html).toContain("font-montserrat");
-        expect(html).toContain('aria-label="Vitest pages clinic (active), library home"');
+        // The clinic's name is always in the banner, on every admin page.
+        expect(html).toContain("Vitest pages clinic (active)&#x27;s Patient Education Library");
       }
       // The Branding form opens on what is saved.
       signInAs(orgActive, "admin", "Vitest pages clinic (active)");

@@ -82,6 +82,14 @@ Browser (same set-up as the second pass: headless Edge over the DevTools protoco
 
 Still not covered: anything signed in, the deployed preview, real phones and tablets, screen readers, captions.
 
+## Fourth pass: the staff shell, September 19, 2026
+
+After Evan's walkthrough of the preview: the clinic's logo no longer sits on a white chip in the banner. It is at the top of the icon rail (now 80px wide and the full height of the screen), 56 by 56, above the library icon, with nothing behind it. The right of the banner reads "<clinic name>'s Patient Education Library" on every page (a name ending in s takes the apostrophe alone); on a phone, where the sentence does not fit, it is the clinic's name, and the logo rides in the banner at 36 by 36.
+
+Checked in headless Edge through a throwaway route since deleted, at 1280, 820 and 390 wide: logo inside the rail and above the library icon, transparent behind it, no sideways scroll, nothing cut off at desktop and tablet widths, the category drawer opening flush against the wider rail, rail and banner staying pinned while the page scrolls, and no logo link at all for a clinic without a logo or with a broken one. Lint, `tsc`, 385 tests in 36 files and the build passed again.
+
+Two things this makes visible, both stated to Evan: a wide wordmark logo is small in a 56px square (a square mark, which is what Clerk's organization logo normally is, fills it), and a dark logo with a transparent background is hard to see on the near-black rail now that the white chip is gone.
+
 ## Signed-in preview walkthrough for Evan
 
 1. Open the PR's Vercel preview as Pulse staff. Open a synthetic clinic, then its **Branding** tab. Set an approved HTTPS logo, one colour, a font and a US phone number. Save, reload and inspect Notes for the correct actor and old/new values.

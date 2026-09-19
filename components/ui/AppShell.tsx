@@ -14,14 +14,16 @@ import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
  * console. (The patient page at /watch has no frame at all, on purpose.)
  * One navigation model on every screen:
  *
- *   - a thin banner across the top with the clinic's own logo (or its name,
- *     when it has no logo or the logo does not load) and, on the right,
- *     Clerk's user button (the signed-in person's avatar; Sign out lives in
- *     its menu)
- *   - an icon rail down the left: the books icon opens the category drawer,
- *     and the admin icon right below it opens the clinic admin area (the
- *     overview, shared links, people and billing; on phones both icons sit
- *     in the banner instead, so nothing permanent eats the narrow width)
+ *   - an icon rail down the left, the full height of the screen: the
+ *     clinic's own logo at the top (as it is, no chip behind it), then the
+ *     books icon that opens the category drawer, and the admin icon that
+ *     opens the clinic admin area (the overview, shared links, people and
+ *     billing). On phones there is no rail: the icons and a smaller logo sit
+ *     in the banner instead, so nothing permanent eats the narrow width
+ *   - a thin banner across the top of the page with, on the right, "<clinic
+ *     name>'s Patient Education Library" (the same words on every page, and
+ *     a link home) and Clerk's user button (the signed-in person's avatar;
+ *     Sign out lives in its menu)
  *   - the category drawer, listing Home and every category from
  *     lib/categories. It floats over the content rather than pushing it, and
  *     closes on outside click, Escape, or choosing a category.
@@ -37,8 +39,7 @@ import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
  * THE CLINIC'S BRANDING arrives as `brand`, already worked out and checked
  * on the server (ClinicShell, app/brand-look.ts): the colours as CSS
  * variables and the font's class, both set on the outermost element so
- * every page inside picks them up, plus the clinic's name and logo for the
- * banner. Without it (a page drawn before the clinic is known) the shell is
+ * every page inside picks them up, plus the clinic's name and logo. Without it (a page drawn before the clinic is known) the shell is
  * the plain Pulse 3D one. Pulse 3D's own mark moves to the foot of the
  * category drawer, small, as "Powered by".
  */
@@ -67,52 +68,54 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
   const toggle = () => setOpen((v) => !v);
   const onAdmin = pathname.startsWith("/admin");
 
+  // The words on the right of the banner. The same on every page, so the clinic's name is always on screen.
+  const title = brand ? `${possessive(brand.clinicName)} Patient Education Library` : "Patient Education Library";
+
   return (
-    <div className={`flex min-h-screen flex-col bg-black text-white ${brand?.fontClass ?? ""}`} style={brand?.style}>
-      {/* Banner */}
-      <header className="sticky top-0 z-30 flex h-12 items-center gap-3 border-b border-white/10 bg-black px-3 sm:px-4">
-        <LibraryButton open={open} onClick={toggle} className="md:hidden" />
-        {brand ? (
-          <Link href="/library" className="flex min-w-0 items-center" aria-label={`${brand.clinicName}, library home`}>
-            {brand.logoUrl ? (
-              // On a white chip, because most logos are drawn for a white page and would vanish on this black banner. The box is a fixed size, so a slow or broken logo moves nothing; the name stands in until the picture loads, and for good if it does not.
-              <span className="flex items-center rounded-md bg-white px-2 py-1">
-                <ClinicLogo
-                  src={brand.logoUrl}
-                  name={brand.clinicName}
-                  boxClassName="h-6 w-[116px]"
-                  nameClassName="text-[13px] font-semibold text-[#12202a]"
-                />
-              </span>
-            ) : (
-              <span className="max-w-[46vw] truncate text-[15px] font-semibold text-white sm:max-w-xs">{brand.clinicName}</span>
-            )}
-          </Link>
-        ) : (
-          <Link href="/library" className="flex items-center" aria-label="Pulse 3D, library home">
-            {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-            <img src={LOGO_URL} alt="Pulse 3D" className="h-7 w-auto" />
+    <div className={`flex min-h-screen bg-black text-white ${brand?.fontClass ?? ""}`} style={brand?.style}>
+      {/* Rail, tablet and up. It runs the full height of the screen, so the clinic's logo can sit at its very top, above the icons. */}
+      <nav
+        aria-label="Application"
+        className="sticky top-0 hidden h-screen w-20 shrink-0 flex-col items-center gap-2 border-r border-white/10 bg-[#07090b] py-3 md:flex"
+      >
+        {brand?.logoUrl && (
+          <Link href="/library" aria-label={`${brand.clinicName}, library home`} className="mb-1 flex items-center justify-center rounded-xl">
+            {/* The logo as it is, with no chip behind it. The box is a fixed size, so a slow or broken logo moves nothing; it stays empty if the picture never loads, because the clinic's name is already written in the banner. */}
+            <ClinicLogo src={brand.logoUrl} name={brand.clinicName} boxClassName="h-14 w-14" fallback="blank" position="center" />
           </Link>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          <span className="hidden text-sm text-[#667085] sm:inline">
-            {onAdmin ? "Clinic admin" : "Patient Education Library"}
-          </span>
-          {showAdmin && <AdminLink active={onAdmin} className="md:hidden" />}
-          {/* Clerk's user button: the signed-in person's avatar, with Sign out in its menu. */}
-          <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
-        </div>
-      </header>
+        <LibraryButton open={open} onClick={toggle} />
+        {showAdmin && <AdminLink active={onAdmin} />}
+      </nav>
 
-      <div className="flex flex-1">
-        {/* Rail, tablet and up */}
-        <nav
-          aria-label="Application"
-          className="sticky top-12 hidden h-[calc(100vh-3rem)] w-16 shrink-0 flex-col items-center gap-2 border-r border-white/10 bg-[#07090b] py-3 md:flex"
-        >
-          <LibraryButton open={open} onClick={toggle} />
-          {showAdmin && <AdminLink active={onAdmin} />}
-        </nav>
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Banner */}
+        <header className="sticky top-0 z-30 flex h-12 items-center gap-3 border-b border-white/10 bg-black px-3 sm:px-4">
+          <LibraryButton open={open} onClick={toggle} className="md:hidden" />
+          {brand ? (
+            // On a phone there is no rail, so the logo rides in the banner instead, a little smaller.
+            brand.logoUrl && (
+              <Link href="/library" aria-label={`${brand.clinicName}, library home`} className="flex items-center md:hidden">
+                <ClinicLogo src={brand.logoUrl} name={brand.clinicName} boxClassName="h-9 w-9" fallback="blank" position="center" />
+              </Link>
+            )
+          ) : (
+            <Link href="/library" className="flex items-center" aria-label="Pulse 3D, library home">
+              {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
+              <img src={LOGO_URL} alt="Pulse 3D" className="h-7 w-auto" />
+            </Link>
+          )}
+          <div className="ml-auto flex min-w-0 items-center gap-2">
+            {/* On a phone the whole sentence does not fit, and cutting it would lose the clinic's name or the end of it, so there it is the name alone. */}
+            <Link href="/library" aria-label={title} className="min-w-0 truncate text-sm text-[#98a2b3] hover:text-white">
+              <span className="sm:hidden">{brand ? brand.clinicName : title}</span>
+              <span className="hidden sm:inline">{title}</span>
+            </Link>
+            {showAdmin && <AdminLink active={onAdmin} className="md:hidden" />}
+            {/* Clerk's user button: the signed-in person's avatar, with Sign out in its menu. */}
+            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+          </div>
+        </header>
 
         {/* Drawer and its backdrop */}
         {open && (
@@ -121,7 +124,7 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
               type="button"
               aria-label="Close the library menu"
               onClick={() => setOpen(false)}
-              className="fixed inset-0 z-40 bg-black/60 md:top-12 md:left-16 lg:bg-black/25"
+              className="fixed inset-0 z-40 bg-black/60 md:left-20 lg:bg-black/25"
             />
             <CategoryDrawer pathname={pathname} onClose={() => setOpen(false)} poweredBy={Boolean(brand)} />
           </>
@@ -131,6 +134,12 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
       </div>
     </div>
   );
+}
+
+/** "Summit Orthopedics'" and "Valley Clinic's": a name that already ends in s takes the apostrophe alone. */
+function possessive(name: string) {
+  const trimmed = name.trim();
+  return /s$/i.test(trimmed) ? `${trimmed}'` : `${trimmed}'s`;
 }
 
 function LibraryButton({ open, onClick, className = "" }: { open: boolean; onClick: () => void; className?: string }) {
@@ -178,7 +187,7 @@ function CategoryDrawer({ pathname, onClose, poweredBy }: { pathname: string; on
     <aside
       id="category-drawer"
       aria-label="Procedure categories"
-      className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-white/10 bg-[#0a0d0f] shadow-[8px_0_40px_rgba(0,0,0,.6)] md:top-12 md:left-16 md:w-64"
+      className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-white/10 bg-[#0a0d0f] shadow-[8px_0_40px_rgba(0,0,0,.6)] md:left-20 md:w-64"
     >
       <div className="flex h-12 items-center justify-between px-4 md:h-14">
         <p className="text-sm font-semibold uppercase tracking-wider text-[#667085]">Procedure Library</p>

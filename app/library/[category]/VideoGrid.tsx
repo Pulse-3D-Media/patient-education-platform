@@ -81,9 +81,14 @@ export function VideoGrid({
   function send(video: Item) {
     const thisTap = ++sendCount.current;
     setSending({ video, result: null });
-    sendShareAction(video.id).then((result) => {
-      if (sendCount.current === thisTap) setSending({ video, result });
-    });
+    sendShareAction(video.id)
+      // The request itself can fail before the server answers (the tablet dropped off the Wi-Fi, the server was
+      // restarting). Without this the panel would say "Creating link..." for ever. It may be that a link WAS made
+      // and only the answer was lost, so the words do not claim otherwise; an unused link simply expires.
+      .catch((): SendResult => ({ ok: false, error: "We could not reach the server. Check the connection, then try again." }))
+      .then((result) => {
+        if (sendCount.current === thisTap) setSending({ video, result });
+      });
   }
 
   function closeSend() {

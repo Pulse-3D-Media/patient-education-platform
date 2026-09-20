@@ -274,10 +274,33 @@ describe("decideBilling: whose subscription is it", () => {
   });
 
   it("ignores an unrelated subscription: not the expected one, not carrying the waiting plan", () => {
-    const d = decideBilling(active, snap({ subscriptionId: "sub_unrelated", planId: null }), NOW, 14);
-    expect(d).toMatchObject({ kind: "ignored", needsLook: false });
-    const wrongPlan = decideBilling(waiting, snap({ subscriptionId: "sub_unrelated", planId: "plan_of_another_clinic" }), NOW, 14);
-    expect(wrongPlan.kind).toBe("ignored");
+    // Nobody is being charged for it: noise, and nobody needs to look.
+    const unpaid = decideBilling(active, snap({ subscriptionId: "sub_unrelated", planId: null, status: "incomplete", latestInvoicePaid: false }), NOW, 14);
+    expect(unpaid).toMatchObject({ kind: "ignored", needsLook: false });
+    const wrongPlan = decideBilling(waiting, snap({ subscriptionId: "sub_unrelated", planId: "plan_of_another_clinic", status: "incomplete", latestInvoicePaid: false }), NOW, 14);
+    expect(wrongPlan).toMatchObject({ kind: "ignored", needsLook: false });
+  });
+
+  it("an unrecognised subscription that IS being charged changes nothing but asks for a look: the clinic is paying for something", () => {
+    // The checkout case: the admin paid on the page of an earlier attempt after accepting a newer plan.
+    for (const status of ["active", "past_due", "unpaid", "trialing"]) {
+      const d = decideBilling(waiting, snap({ subscriptionId: "sub_earlier_attempt", planId: "plan_of_the_earlier_attempt", status }), NOW, 14);
+      expect(d).toMatchObject({ kind: "ignored", needsLook: true, reason: expect.stringContaining("earlier attempt") });
+    }
+  });
+
+  it("an attempt that dies clears the waiting plan only when it is the plan that attempt was for", () => {
+    // The ordinary case: the one attempt expires, and nothing is waiting any more.
+    const started = facts({ status: "INCOMPLETE", stripeSubscriptionId: SUB, pendingPlanId: PLAN });
+    for (const status of ["incomplete_expired", "canceled"]) {
+      expect(apply(started, snap({ status, latestInvoicePaid: false })).next).toMatchObject({ status: "NONE", stripeSubscriptionId: null, pendingPlanId: null });
+    }
+    // The checkout case: the admin started again, so a NEWER plan is waiting. The old attempt's death must leave it alone,
+    // or the new checkout would be paid and then not recognised.
+    const startedAgain = facts({ status: "INCOMPLETE", stripeSubscriptionId: SUB, pendingPlanId: "plan_newer" });
+    for (const status of ["incomplete_expired", "canceled"]) {
+      expect(apply(startedAgain, snap({ status, latestInvoicePaid: false, planId: PLAN })).next).toMatchObject({ status: "NONE", stripeSubscriptionId: null, pendingPlanId: "plan_newer" });
+    }
   });
 
   it("news of an OLD, cancelled subscription cannot touch the plan that replaced it", () => {
@@ -317,6 +340,12 @@ describe("who may pay by card", () => {
     expect(selfServeEligibility({ practiceType: "UNKNOWN", managedByPulse: false })).toEqual({ eligible: false, reason: "practice-type-unknown" });
     expect(selfServeEligibility({ practiceType: "HOSPITAL", managedByPulse: false })).toEqual({ eligible: false, reason: "hospital" });
     expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: true })).toEqual({ eligible: false, reason: "managed-by-pulse" });
+    // Paused or ended by Pulse staff: a payment would be taken and the clinic would stay closed, so it may not pay.
+    expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: false, staffAccess: "PAUSED" })).toEqual({ eligible: false, reason: "closed-by-staff" });
+    expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: false, staffAccess: "CANCELED" })).toEqual({ eligible: false, reason: "closed-by-staff" });
+    // Held open by hand may pay: its first confirmed payment hands its access over to its payments.
+    expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: false, staffAccess: "OPEN" })).toEqual({ eligible: true });
+    expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: false, staffAccess: null })).toEqual({ eligible: true });
   });
 
   it("a subscription that may still be charging is any but none and ended", () => {

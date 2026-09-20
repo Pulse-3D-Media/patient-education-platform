@@ -1,6 +1,16 @@
 import Stripe from "stripe";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StripeConfigError, eventRefs, getWebhookSecret, isHandledEventType, isTestSecretKey, snapshotFromSubscription, verifyWebhook } from "./stripe";
+import {
+  StripeConfigError,
+  checkoutIsOpen,
+  checkoutSessionParams,
+  eventRefs,
+  getWebhookSecret,
+  isHandledEventType,
+  isTestSecretKey,
+  snapshotFromSubscription,
+  verifyWebhook,
+} from "./stripe";
 
 /**
  * The Stripe wrapper, without Stripe: no network, no real key, no real
@@ -156,5 +166,76 @@ describe("snapshotFromSubscription", () => {
 
   it("a subscription with no customer cannot be used", () => {
     expect(snapshotFromSubscription(subscription({ customer: null }))).toBeNull();
+  });
+});
+
+describe("checkoutIsOpen: test-mode checkout is never offered on the production deployment", () => {
+  const key = "sk_test_made_up_for_vitest";
+
+  it("is off unless BILLING_CHECKOUT is exactly test", () => {
+    expect(checkoutIsOpen({ STRIPE_SECRET_KEY: key })).toBe(false);
+    for (const value of ["", "on", "true", "1", "TEST", "live"]) expect(checkoutIsOpen({ BILLING_CHECKOUT: value, STRIPE_SECRET_KEY: key })).toBe(false);
+    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key })).toBe(true);
+  });
+
+  it("needs a test key: no key, or a live key, keeps it shut", () => {
+    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test" })).toBe(false);
+    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: "sk_live_made_up_for_vitest" })).toBe(false);
+  });
+
+  it("stays shut on Vercel's production deployment even when the switch was set there by mistake", () => {
+    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "production" })).toBe(false);
+    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "preview" })).toBe(true);
+    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "development" })).toBe(true);
+  });
+});
+
+describe("checkoutSessionParams: exactly what Stripe is asked to charge", () => {
+  const args = {
+    customerId: "cus_made_up",
+    clinicId: "clinic_made_up",
+    planId: "plan_made_up",
+    perSeatCents: 8900,
+    seats: 4,
+    interval: "MONTH" as const,
+    description: "Knee, Hip; 4 surgeon seats",
+    origin: "https://app.example.com",
+    expiresAt: new Date("2026-09-19T13:00:00.000Z"),
+  };
+
+  it("monthly: the per-seat amount is the unit price, the seats are the quantity, in US dollars, every month", () => {
+    const params = checkoutSessionParams(args);
+    expect(params.line_items).toEqual([
+      { quantity: 4, price_data: { currency: "usd", product: "p3d_patient_education_library", unit_amount: 8900, recurring: { interval: "month", interval_count: 1 } } },
+    ]);
+  });
+
+  it("yearly: a yearly price of the whole year's amount, once a year", () => {
+    const params = checkoutSessionParams({ ...args, interval: "YEAR", perSeatCents: 89000 });
+    expect(params.line_items?.[0].price_data).toMatchObject({ unit_amount: 89000, recurring: { interval: "year", interval_count: 1 } });
+  });
+
+  it("is a subscription for the clinic's own customer, asking for the card payment type only, with nothing the customer can change and no trial, discount or tax added", () => {
+    const params = checkoutSessionParams(args);
+    expect(params).toMatchObject({ mode: "subscription", customer: "cus_made_up", client_reference_id: "clinic_made_up", payment_method_types: ["card"] });
+    for (const absent of ["allow_promotion_codes", "discounts", "automatic_tax", "customer_email", "payment_method_collection"] as const) {
+      expect(params[absent]).toBeUndefined();
+    }
+    expect(params.line_items?.[0].adjustable_quantity).toBeUndefined();
+    expect(params.subscription_data?.trial_period_days).toBeUndefined();
+    expect(params.subscription_data?.trial_end).toBeUndefined();
+  });
+
+  it("puts the plan id on the subscription itself, which is the only place the webhook looks", () => {
+    const params = checkoutSessionParams(args);
+    expect(params.subscription_data?.metadata).toEqual({ billingPlanId: "plan_made_up", clinicId: "clinic_made_up" });
+    expect(params.metadata).toEqual({ billingPlanId: "plan_made_up", clinicId: "clinic_made_up" });
+  });
+
+  it("comes back to this site's own Billing pages, and expires when it is told to", () => {
+    const params = checkoutSessionParams(args);
+    expect(params.success_url).toBe("https://app.example.com/admin/billing/return");
+    expect(params.cancel_url).toBe("https://app.example.com/admin/billing?checkout=cancelled");
+    expect(params.expires_at).toBe(Date.parse("2026-09-19T13:00:00.000Z") / 1000);
   });
 });

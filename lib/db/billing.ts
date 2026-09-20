@@ -1,12 +1,15 @@
 import { Prisma, type BillingEventStatus, type BillingInterval, type Category, type ClinicStatus } from "@prisma/client";
 import {
   NO_BILLING,
+  SELF_SERVE_REFUSALS,
   decideBilling,
   effectiveAccess,
   sameBillingFacts,
+  selfServeEligibility,
   type BillingFacts,
   type SubscriptionSnapshot,
 } from "../billing-state";
+import { attemptIsReusable, samePlanShape } from "../checkout-rules";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
 import { readSettingsIn } from "./settings";
@@ -34,7 +37,7 @@ import { readSettingsIn } from "./settings";
  * nothing and logs nothing.
  *
  * The clinic id these functions take comes from the server: from the
- * signed-in admin (checkout, later), from /pulse after the staff check, or
+ * signed-in admin (checkout), from /pulse after the staff check, or
  * from looking a clinic up by the Stripe customer on a verified
  * notification. Never from a browser form.
  */
@@ -112,8 +115,8 @@ const TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 } as const;
  * Record the Stripe customer made for a clinic. Set once: asking again with
  * the same id changes nothing, and a different id is refused, because a
  * clinic with two customers could be charged twice and only one of them
- * would ever be matched to it. Checkout (a later step) calls this before it
- * creates anything else in Stripe, so that by the time Stripe sends news
+ * would ever be matched to it. Checkout (lib/checkout.ts) calls this before
+ * it creates anything else in Stripe, so that by the time Stripe sends news
  * about the customer, the clinic can be found.
  */
 export async function setStripeCustomer(clinicId: string, stripeCustomerId: string) {
@@ -171,6 +174,10 @@ function checkPlan(input: AcceptedPlanInput) {
  *
  * Refused while the clinic has a live subscription: changing a plan that is
  * being paid for is its own, later, step (proration, scheduled reductions).
+ *
+ * The plain writer. Checkout uses acceptPlanForCheckout (further down),
+ * which also checks who may pay and finds an identical recent attempt
+ * instead of writing a second one.
  */
 export async function recordAcceptedPlan(clinicId: string, input: AcceptedPlanInput) {
   checkPlan(input);
@@ -189,6 +196,116 @@ export async function recordAcceptedPlan(clinicId: string, input: AcceptedPlanIn
       select: { clinicId: true },
     });
     return plan;
+  }, TX_OPTIONS);
+}
+
+// ---------------------------------------------------------------------------
+// Checkout
+// ---------------------------------------------------------------------------
+
+/** What the Billing page and the checkout flow read about one clinic, in one query. */
+export async function getCheckoutFacts(clinicId: string) {
+  const clinic = await prisma.clinic.findUnique({
+    where: { id: clinicId },
+    select: {
+      name: true,
+      practiceType: true,
+      managedByPulse: true,
+      staffAccess: true,
+      billing: { select: { ...FACTS_SELECT, currentPlan: { select: PLAN_SELECT }, pendingPlan: { select: PLAN_SELECT } } },
+    },
+  });
+  if (!clinic) return null;
+  const { billing, ...rest } = clinic;
+  return {
+    ...rest,
+    facts: billing
+      ? {
+          status: billing.status,
+          stripeCustomerId: billing.stripeCustomerId,
+          stripeSubscriptionId: billing.stripeSubscriptionId,
+          pendingPlanId: billing.pendingPlanId,
+          currentPlanId: billing.currentPlanId,
+          currentPeriodEnd: billing.currentPeriodEnd,
+          cancelAt: billing.cancelAt,
+          paymentFailedAt: billing.paymentFailedAt,
+          graceEndsAt: billing.graceEndsAt,
+        }
+      : NO_BILLING,
+    currentPlan: billing?.currentPlan ?? null,
+    pendingPlan: billing?.pendingPlan ?? null,
+  };
+}
+
+export type CheckoutFacts = NonNullable<Awaited<ReturnType<typeof getCheckoutFacts>>>;
+
+/** The purchase attempt a checkout page is made for. */
+export type PurchaseAttempt = {
+  planId: string;
+  /** When the attempt was written. The checkout page's expiry is worked out from this, so asking twice gives the same page. */
+  createdAt: Date;
+  /** True when an identical attempt from a moment ago was found and used again, instead of a second one being written. */
+  reused: boolean;
+};
+
+/**
+ * Write down the plan an admin just accepted as a PURCHASE ATTEMPT, or find
+ * the identical one they made a moment ago. This is the durable record that
+ * makes a double click, a retry and a second browser tab harmless:
+ *
+ *   - It runs under the clinic's row lock, so two requests for one clinic
+ *     happen one after the other. The second one reads what the first wrote.
+ *   - If the plan already waiting is the same in every way that is charged
+ *     for or included, and it is recent, THAT attempt is returned again.
+ *     Both requests then ask Stripe for a payment page with the same
+ *     idempotency key (built from the attempt's id), and Stripe hands both
+ *     the same page. One attempt, one page, at most one subscription.
+ *   - A different selection writes a new row and points "waiting" at it. The
+ *     earlier row is never edited; the caller closes its payment page.
+ *
+ * Everything that could have changed since the page was drawn is checked
+ * again here, under the lock: who may pay by card (a clinic marked managed
+ * or paused by Pulse a second ago is refused), and whether a subscription
+ * has started in the meantime.
+ *
+ * The Stripe customer must already be on file (setStripeCustomer). That
+ * order is what lets a notification about the purchase find its clinic.
+ */
+export async function acceptPlanForCheckout(
+  clinicId: string,
+  input: AcceptedPlanInput,
+  options: { now?: Date; forceNew?: boolean } = {},
+): Promise<PurchaseAttempt> {
+  checkPlan(input);
+  return prisma.$transaction(async (tx) => {
+    const clinic = await readClinicLocked(tx, clinicId, { id: true, practiceType: true, managedByPulse: true, staffAccess: true });
+    // The clock is read AFTER the lock is held, so it is later than anything an earlier request wrote while this one waited.
+    const now = options.now ?? new Date();
+    if (!clinic) throw new BillingRefusedError("That clinic no longer exists.");
+
+    const eligibility = selfServeEligibility(clinic);
+    if (!eligibility.eligible) throw new BillingRefusedError(SELF_SERVE_REFUSALS[eligibility.reason]);
+
+    const facts = await readBillingFacts(tx, clinicId);
+    if (facts.status === "ACTIVE" || facts.status === "PAST_DUE") {
+      throw new BillingRefusedError("Your clinic already has a subscription, so a second one was not started.");
+    }
+    if (!facts.stripeCustomerId) throw new BillingRefusedError("The clinic has no Stripe customer yet, so checkout cannot start.");
+
+    // forceNew: the caller found that the earlier attempt's payment page has closed, so that attempt cannot be paid any more.
+    if (facts.pendingPlanId && !options.forceNew) {
+      const waiting = await tx.billingPlan.findUnique({
+        where: { id: facts.pendingPlanId },
+        select: { id: true, clinicId: true, createdAt: true, pricingVersionId: true, categories: true, entitledCategories: true, surgeonSeats: true, interval: true, perSeatCents: true, totalCents: true },
+      });
+      if (waiting && waiting.clinicId === clinicId && samePlanShape(waiting, input) && attemptIsReusable(waiting.createdAt, now)) {
+        return { planId: waiting.id, createdAt: waiting.createdAt, reused: true };
+      }
+    }
+
+    const plan = await tx.billingPlan.create({ data: { clinicId, ...input }, select: { id: true, createdAt: true } });
+    await tx.clinicBilling.update({ where: { clinicId }, data: { pendingPlanId: plan.id }, select: { clinicId: true } });
+    return { planId: plan.id, createdAt: plan.createdAt, reused: false };
   }, TX_OPTIONS);
 }
 

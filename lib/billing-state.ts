@@ -218,7 +218,22 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
     const dead = snap.status === "canceled" || snap.status === "incomplete_expired";
     const carriesPendingPlan = current.pendingPlanId !== null && snap.planId === current.pendingPlanId;
     if (!carriesPendingPlan || dead) {
-      return { kind: "ignored", reason: "Not the subscription this clinic is expected to have.", needsLook: false };
+      // A subscription that is dead, or that nobody has paid, costs the clinic
+      // nothing and is noise. One that is being CHARGED is different: it is on
+      // this clinic's own customer, so the clinic is paying for something this
+      // record does not recognise (most likely a checkout page from an earlier
+      // attempt that was paid after a newer one was started). Nothing is
+      // changed, because which plan it bought cannot be known from here, but a
+      // person has to look.
+      const charging = ["active", "past_due", "unpaid", "trialing"].includes(snap.status);
+      return charging
+        ? {
+            kind: "ignored",
+            reason:
+              "Stripe is charging this clinic's customer for a subscription that is not the plan the clinic accepted last. Nothing was changed. Check Stripe: the clinic may have paid on a checkout page from an earlier attempt.",
+            needsLook: true,
+          }
+        : { kind: "ignored", reason: "Not the subscription this clinic is expected to have.", needsLook: false };
     }
     if (!REPLACEABLE.includes(current.status)) {
       return {
@@ -247,7 +262,7 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
       if (wasLive) return unsupported(snap.status);
       next.status = "NONE";
       next.stripeSubscriptionId = null;
-      next.pendingPlanId = null;
+      next.pendingPlanId = pendingPlanAfterDeath(base, snap);
       next.currentPeriodEnd = null;
       next.cancelAt = null;
       entries.push("The first payment was never completed, so the subscription did not start.");
@@ -316,7 +331,7 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
         // Cancelled before it was ever paid: the clinic never became a customer.
         next.status = "NONE";
         next.stripeSubscriptionId = null;
-        next.pendingPlanId = null;
+        next.pendingPlanId = pendingPlanAfterDeath(base, snap);
         entries.push("The subscription was cancelled before the first payment, so it did not start.");
       }
       next.cancelAt = null;
@@ -344,6 +359,22 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
   }
 
   return { kind: "apply", next, entries, activatePlanId };
+}
+
+/**
+ * Which plan is still waiting for a first payment once a subscription that
+ * was never paid has died (it expired, or was cancelled before paying).
+ *
+ * The plan that subscription was FOR is no longer waiting: nothing can pay
+ * for it any more. But an admin may have started again in the meantime and
+ * accepted a newer plan, which is now the one waiting, and a late notice
+ * about the old attempt must not wipe it. If it did, the new checkout would
+ * be paid and then not recognised, because the subscription it creates
+ * carries a plan id this record no longer remembers. So the waiting plan is
+ * only cleared when it is the very plan the dead subscription carried.
+ */
+function pendingPlanAfterDeath(base: BillingFacts, snap: SubscriptionSnapshot): string | null {
+  return snap.planId !== null && snap.planId === base.pendingPlanId ? null : base.pendingPlanId;
 }
 
 function unsupported(status: string): BillingDecision {
@@ -379,23 +410,39 @@ export function hasLiveSubscription(status: BillingStatus): boolean {
 // Who may pay by card
 // ---------------------------------------------------------------------------
 
-export type SelfServeReason = "practice-type-unknown" | "hospital" | "managed-by-pulse";
+export type SelfServeReason = "practice-type-unknown" | "hospital" | "managed-by-pulse" | "closed-by-staff";
 
 export type SelfServeEligibility = { eligible: true } | { eligible: false; reason: SelfServeReason };
 
 /**
- * May this clinic buy a plan by card? Checkout (not built yet) asks this on
- * the server before it does anything. A clinic that has not said what kind
- * of practice it is may not: it has to answer first, so a hospital is never
- * sold a self-serve plan by default. No clinic that existed before billing
- * is assumed to be eligible; they all start UNKNOWN.
+ * May this clinic buy a plan by card? Checkout asks this on the server
+ * before it does anything, and again under the clinic's row lock before it
+ * writes anything. A clinic that has not said what kind of practice it is
+ * may not: it has to answer first, so a hospital is never sold a self-serve
+ * plan by default. No clinic that existed before billing is assumed to be
+ * eligible; they all start UNKNOWN.
+ *
+ * A clinic Pulse staff have paused or ended by hand may not either. What
+ * staff set by hand wins over billing (the state table above), so its card
+ * payment would be taken and the clinic would stay closed. It has to talk
+ * to Pulse first. A clinic staff are holding OPEN may buy: its first
+ * confirmed payment hands its access over to its payments.
  */
-export function selfServeEligibility(clinic: { practiceType: PracticeType; managedByPulse: boolean }): SelfServeEligibility {
+export function selfServeEligibility(clinic: { practiceType: PracticeType; managedByPulse: boolean; staffAccess?: StaffAccess | null }): SelfServeEligibility {
   if (clinic.managedByPulse) return { eligible: false, reason: "managed-by-pulse" };
   if (clinic.practiceType === "HOSPITAL") return { eligible: false, reason: "hospital" };
   if (clinic.practiceType !== "CLINIC") return { eligible: false, reason: "practice-type-unknown" };
+  if (clinic.staffAccess === "PAUSED" || clinic.staffAccess === "CANCELED") return { eligible: false, reason: "closed-by-staff" };
   return { eligible: true };
 }
+
+/** Why a clinic cannot pay by card, as a sentence for the clinic's admin. */
+export const SELF_SERVE_REFUSALS: Record<SelfServeReason, string> = {
+  "practice-type-unknown": "Tell us first whether this is a clinic or a hospital. The question is at the top of this page.",
+  hospital: "Hospitals and health systems are set up by Pulse 3D by agreement, so there is no card payment here.",
+  "managed-by-pulse": "Your plan is managed by Pulse 3D, so there is nothing to pay for here.",
+  "closed-by-staff": "Pulse 3D has paused this clinic by hand, so a card payment would not open it. Get in touch with Pulse 3D first.",
+};
 
 /** How each practice type reads on a screen and in the log. */
 export const PRACTICE_TYPE_WORDS: Record<PracticeType, string> = {

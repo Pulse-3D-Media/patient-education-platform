@@ -6,17 +6,22 @@ import Link from "next/link";
  * What a signed-in person sees on /library or /admin when their clinic is
  * not open (clinicIsOpen() in lib/clinic-status.ts said no).
  *
- * A PENDING clinic has just been set up and has not chosen a plan; that is
- * the normal case today. The other statuses are set by billing later and
- * get a short line each so nobody is left staring at a blank page.
+ * A PENDING clinic has just been set up and has not chosen a plan. The
+ * other statuses come from billing or from Pulse staff. Each gets a short
+ * line so nobody is left staring at a blank page.
+ *
+ * The words do not promise that a plan can be bought on the Billing page:
+ * whether it can depends on the deployment and the clinic (the Billing page
+ * itself says). They only say where to go, and who can go there.
  *
  * Calm on purpose: nothing is broken on their side. The sign-out button is
  * here so someone who signed in with the wrong account is not stuck.
  *
  * `billingLink` is true when the person is an admin of the clinic: they get
  * a button to /admin/billing, the one admin page that stays open for a
- * closed clinic, because that is where the plan is seen and, once billing
- * exists, fixed. Members do not get it; billing is an admin page.
+ * closed clinic, because that is where a plan is chosen, paid for and
+ * fixed. Members do not get it; billing is an admin page, so they are told
+ * to ask an admin instead.
  *
  * `inFrame` is true when the caller has already drawn the clinic name and
  * a page title around this (the admin pages do), so they are not repeated.
@@ -46,6 +51,7 @@ export function ClinicClosed({
           <h1 className="mt-2 text-2xl font-semibold sm:text-3xl">{heading}</h1>
         )}
         <p className="mt-3 text-ink-soft">{body}</p>
+        {!billingLink && <p className="mt-3 text-ink-soft">Plans and payments are handled by your clinic&rsquo;s office admins. Ask one of them to open Billing.</p>}
         {billingLink && (
           <Link
             href="/admin/billing"
@@ -71,7 +77,7 @@ export function ClinicClosed({
 const COPY: Record<ClinicStatus, { heading: string; body: string }> = {
   PENDING: {
     heading: "Your clinic is set up. Choose a plan to start.",
-    body: "Plans are coming soon. Until they open, Pulse 3D switches clinics on by hand: get in touch and we will turn yours on.",
+    body: "The library opens once your clinic is on a plan. Billing is where a plan is chosen, and it says what to do if plans are not open for your clinic yet.",
   },
   ACTIVE: {
     // Never shown: an ACTIVE clinic is open. Here only so every status has copy.
@@ -80,14 +86,14 @@ const COPY: Record<ClinicStatus, { heading: string; body: string }> = {
   },
   PAUSED: {
     heading: "Your clinic's plan is paused.",
-    body: "The library and share links are off while the plan is paused. Your clinic's admin can start it again from billing.",
+    body: "The library and share links are off while the plan is paused. Billing says where things stand.",
   },
   PAST_DUE: {
     heading: "Your clinic's last payment did not go through.",
-    body: "Update the payment method in billing and the library opens again straight away.",
+    body: "The library and share links are off until it is sorted out. Billing says where things stand and what to do.",
   },
   CANCELED: {
     heading: "Your clinic's plan has ended.",
-    body: "Choose a plan to start again. Your clinic's people and settings are kept.",
+    body: "Your clinic's people and settings are kept. Billing is where a plan is started again.",
   },
 };

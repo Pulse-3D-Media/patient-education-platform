@@ -51,7 +51,7 @@ export default async function BrandingPage() {
 
   // A clinic that is not open: the frame and its navigation stay, so Billing
   // is one tap away, but there is nothing to brand until it opens.
-  if (!clinicIsOpen(clinic.status)) {
+  if (!clinicIsOpen(clinic)) {
     return (
       <AdminFrame clinic={clinic} title="Branding">
         <div className="mt-6">

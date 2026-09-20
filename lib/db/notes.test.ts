@@ -48,13 +48,13 @@ describe("addClinicNote and listNotesForClinic", () => {
   it("a status change by staff writes a STATUS entry with the reason", async () => {
     const clinicId = await makeClinic("status");
 
-    await setClinicStatusByStaff(clinicId, "ACTIVE", "Paid by invoice through March", "Evan Miller");
+    await setClinicStatusByStaff(clinicId, "OPEN", "Paid by invoice through March.", "Evan Miller");
 
     const notes = await listNotesForClinic(clinicId);
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({
       kind: "STATUS",
-      body: "Status set to Active: Paid by invoice through March",
+      body: "Access set by hand to Open: Paid by invoice through March. Status is now Active.",
       authorName: "Evan Miller",
     });
   });

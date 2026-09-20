@@ -64,7 +64,7 @@ async function makeClinic(data: Partial<Parameters<typeof prisma.clinic.create>[
 
 /** The access facts for a clinic made here, the way getClinicAccess() would read them. */
 async function accessOf(clinicId: string) {
-  const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { id: true, status: true, categories: true, showPlaceholders: true } });
+  const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { id: true, status: true, graceEndsAt: true, categories: true, showPlaceholders: true } });
   return accessFromClinic(clinic);
 }
 

@@ -15,7 +15,8 @@ import { clinicIsOpen } from "./clinic-status";
  *
  * What access depends on, and nothing else:
  *
- *   - the clinic is open (clinicIsOpen in lib/clinic-status.ts)
+ *   - the clinic is open (clinicIsOpen in lib/clinic-status.ts: ACTIVE, or
+ *     PAST_DUE while its grace period has not run out)
  *   - the video's category is on the clinic's plan (Clinic.categories)
  *   - the video is published
  *   - a placeholder video is only usable while the clinic is shown
@@ -38,7 +39,9 @@ import { clinicIsOpen } from "./clinic-status";
 export type ClinicAccess = {
   clinicId: string;
   status: ClinicStatus;
-  /** clinicIsOpen(status): whether the clinic may use the app at all right now. */
+  /** When a PAST_DUE clinic's grace period ends. Null otherwise. */
+  graceEndsAt: Date | null;
+  /** clinicIsOpen(): whether the clinic may use the app at all, at the moment this was read. */
   open: boolean;
   /** The categories on the clinic's plan, each once, in library order. Empty means no plan yet. */
   categories: Category[];
@@ -65,11 +68,15 @@ export function inLibraryOrder(categories: Category[]): Category[] {
 }
 
 /** Turn the fields of a clinic row into a ClinicAccess. Pure, so lib/db/access.ts and the tests share it. */
-export function accessFromClinic(clinic: { id: string; status: ClinicStatus; categories: Category[]; showPlaceholders: boolean }): ClinicAccess {
+export function accessFromClinic(
+  clinic: { id: string; status: ClinicStatus; graceEndsAt: Date | null; categories: Category[]; showPlaceholders: boolean },
+  now: Date = new Date(),
+): ClinicAccess {
   return {
     clinicId: clinic.id,
     status: clinic.status,
-    open: clinicIsOpen(clinic.status),
+    graceEndsAt: clinic.graceEndsAt,
+    open: clinicIsOpen(clinic, now),
     categories: inLibraryOrder(clinic.categories),
     showPlaceholders: clinic.showPlaceholders,
   };

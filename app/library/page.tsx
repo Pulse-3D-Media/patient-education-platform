@@ -36,7 +36,7 @@ export default async function LibraryPage() {
   // right step. A clinic that is not open (not on a plan yet) sees a calm
   // page instead of the library.
   const clinic = await requireClinicPage();
-  if (!clinicIsOpen(clinic.status)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
+  if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
 
   const [access, counts, configs] = await Promise.all([getClinicAccess(clinic.id), countPublishedVideosByKind(), getCategoryConfigs()]);
 

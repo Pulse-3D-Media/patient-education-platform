@@ -22,14 +22,14 @@ afterEach(() => {
 
 describe("getBillingView when the prices cannot be read", () => {
   it("still returns the plan, with a plain problem instead of an estimate, and logs the detail", async () => {
-    vi.mocked(getClinicPlan).mockResolvedValue({ categories: ["KNEE"], surgeonSeats: 2, managedByPulse: false });
+    vi.mocked(getClinicPlan).mockResolvedValue({ categories: ["KNEE"], surgeonSeats: 2, managedByPulse: false, practiceType: "CLINIC" });
     vi.mocked(getPricingForClinic).mockRejectedValue(new Error('The table "public.PricingVersion" does not exist'));
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const view = await getBillingView("clinic_1");
 
     expect(view).toEqual({
-      plan: { categories: ["KNEE"], surgeonSeats: 2, managedByPulse: false },
+      plan: { categories: ["KNEE"], surgeonSeats: 2, managedByPulse: false, practiceType: "CLINIC" },
       hasPlan: true,
       estimate: null,
       problem: "We could not work out an estimate right now. Your plan is unchanged.",

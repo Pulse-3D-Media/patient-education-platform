@@ -77,7 +77,9 @@ export async function getBillingView(clinicId: string): Promise<BillingView | nu
       categories: plan.categories,
       interval,
       founding: false,
-      practiceType: "clinic",
+      // A hospital is always priced by agreement. A practice that has not
+      // said what it is gets a clinic's estimate, labelled as an estimate.
+      practiceType: plan.practiceType === "HOSPITAL" ? "hospital" : "clinic",
       sellable: plan.categories,
     });
 

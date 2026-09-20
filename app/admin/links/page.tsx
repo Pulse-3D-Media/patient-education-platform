@@ -72,7 +72,7 @@ export default async function LinksPage() {
 
   // A clinic that is not open (not on a plan yet): no links can be made or
   // managed. The frame and its navigation stay, so Billing is one tap away.
-  if (!clinicIsOpen(clinic.status)) {
+  if (!clinicIsOpen(clinic)) {
     return (
       <AdminFrame clinic={clinic} title="Shared links">
         <div className="mt-6">

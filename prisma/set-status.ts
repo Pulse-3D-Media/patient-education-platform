@@ -1,60 +1,68 @@
 /**
- * Change one clinic's status by hand. Run with:
+ * Set one clinic's access by hand. Run with:
  *
- *   npm run db:set-status -- <clinicId> <STATUS>
+ *   npm run db:set-status -- <clinicId> <SETTING> [reason in quotes]
  *
- * STATUS is one of PENDING, ACTIVE, PAUSED, PAST_DUE or CANCELED (the
- * ClinicStatus enum in prisma/schema.prisma). Only ACTIVE clinics can use
- * the library; see clinicIsOpen() in lib/clinic-status.ts.
+ * SETTING is one of:
  *
- * Until billing exists this is how a clinic that has agreed a plan gets
- * switched on. It is the only sanctioned way to change a status by hand
- * (never in the Neon console). It prints what it changed, and refuses to
- * run with missing or unknown arguments.
+ *   ACTIVE    open the clinic by hand (the same as "Open" on /pulse)
+ *   PAUSED    close it for now
+ *   CANCELED  close it, ended
+ *   FOLLOW    remove the hand setting, so the clinic follows its billing
+ *             (a clinic with no card subscription then goes back to PENDING)
+ *
+ * This is the same change the Status form on /pulse makes, through the same
+ * function, so it is logged in the clinic's log and the status is worked out
+ * by the same rule (lib/billing-state.ts). A hand setting wins over billing.
+ * PENDING and PAST_DUE cannot be set: they are what the rule works out.
+ *
+ * PAUSED and CANCELED do NOT cancel a card subscription in Stripe.
+ *
+ * Never change a status by hand in the Neon console. It prints what it
+ * changed, and refuses to run with missing or unknown arguments.
  */
-import { ClinicStatus } from "@prisma/client";
+import type { StaffAccess } from "@prisma/client";
 import { prisma } from "../lib/db/client";
-import { setClinicStatus } from "../lib/db/clinics";
+import { setClinicStatusByStaff } from "../lib/db/clinics";
 
-const STATUSES = Object.values(ClinicStatus);
+const SETTINGS: Record<string, StaffAccess | null> = { ACTIVE: "OPEN", OPEN: "OPEN", PAUSED: "PAUSED", CANCELED: "CANCELED", FOLLOW: null };
 
-function isStatus(value: string): value is ClinicStatus {
-  return (STATUSES as string[]).includes(value);
-}
+const WHO = "npm run db:set-status";
 
 async function main() {
   // npm passes everything after "--" through to this script.
-  const [clinicId, rawStatus] = process.argv.slice(2).map((value) => value.trim());
-  const status = rawStatus?.toUpperCase();
+  const [clinicId, rawSetting, ...reasonWords] = process.argv.slice(2).map((value) => value.trim());
+  const setting = rawSetting?.toUpperCase();
 
-  if (!clinicId || !status) {
-    console.error("Usage: npm run db:set-status -- <clinicId> <STATUS>");
-    console.error(`STATUS is one of: ${STATUSES.join(", ")}`);
+  if (!clinicId || !setting) {
+    console.error('Usage: npm run db:set-status -- <clinicId> <SETTING> ["reason"]');
+    console.error("SETTING is one of: ACTIVE, PAUSED, CANCELED, FOLLOW");
     process.exit(1);
   }
-  if (!isStatus(status)) {
-    console.error(`"${rawStatus}" is not a clinic status. Use one of: ${STATUSES.join(", ")}`);
+  if (!Object.hasOwn(SETTINGS, setting)) {
+    console.error(`"${rawSetting}" cannot be set by hand. Use one of: ACTIVE, PAUSED, CANCELED, FOLLOW`);
     process.exit(1);
   }
+  const staffAccess = SETTINGS[setting];
+  const reason = reasonWords.join(" ").trim() || "Set from the command line.";
 
   const before = await prisma.clinic.findUnique({
     where: { id: clinicId },
-    select: { id: true, name: true, status: true },
+    select: { id: true, name: true, status: true, staffAccess: true },
   });
   if (!before) {
     console.error(`No clinic has the id "${clinicId}".`);
     process.exit(1);
   }
 
-  if (before.status === status) {
-    console.log(`Clinic "${before.name}" (${before.id}) is already ${status}. Nothing changed.`);
-    return;
+  const { clinic, stillCharging } = await setClinicStatusByStaff(clinicId, staffAccess, reason, WHO);
+
+  console.log(`Clinic "${clinic.name}" (${clinic.id})`);
+  console.log(`  set by hand: ${before.staffAccess ?? "nothing"} -> ${clinic.staffAccess ?? "nothing (follows billing)"}`);
+  console.log(`  status:      ${before.status} -> ${clinic.status}`);
+  if (stillCharging) {
+    console.log("  NOTE: this clinic has a card subscription in Stripe. This did not cancel it; cancel it in Stripe or the card keeps being charged.");
   }
-
-  const after = await setClinicStatus(clinicId, status);
-
-  console.log(`Clinic "${after.name}" (${after.id})`);
-  console.log(`  status: ${before.status} -> ${after.status}`);
 }
 
 main()

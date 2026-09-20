@@ -1,7 +1,10 @@
-import type { Category, ClinicStatus, Prisma } from "@prisma/client";
+import type { Category, ClinicStatus, PracticeType, Prisma, StaffAccess } from "@prisma/client";
+import { PRACTICE_TYPE_WORDS, STAFF_ACCESS_WORDS, effectiveAccess, hasLiveSubscription } from "../billing-state";
 import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, brandFontLabel, brandThemeLabel, parseBrandFont, parseBrandTheme } from "../branding";
 import { CATEGORIES } from "../categories";
+import { clinicIsOpen } from "../clinic-status";
 import { formatUsPhone } from "../phone";
+import { readBillingFacts } from "./billing";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
 
@@ -31,6 +34,8 @@ const CLINIC_FIELDS = {
   name: true,
   clerkOrgId: true,
   status: true,
+  graceEndsAt: true,
+  practiceType: true,
   logoUrl: true,
   noticeText: true,
   showPlaceholders: true,
@@ -102,6 +107,8 @@ export type ClinicPlan = {
   categories: Category[];
   surgeonSeats: number;
   managedByPulse: boolean;
+  /** What kind of practice the clinic said it is. A hospital is always priced by agreement. */
+  practiceType: PracticeType;
 };
 
 /**
@@ -114,19 +121,7 @@ export type ClinicPlan = {
 export async function getClinicPlan(clinicId: string): Promise<ClinicPlan | null> {
   return prisma.clinic.findUnique({
     where: { id: clinicId },
-    select: { categories: true, surgeonSeats: true, managedByPulse: true },
-  });
-}
-
-/**
- * Change one clinic's status. Used by the db:set-status script now, and by
- * billing later. Throws if the clinic does not exist.
- */
-export async function setClinicStatus(clinicId: string, status: ClinicStatus) {
-  return prisma.clinic.update({
-    where: { id: clinicId },
-    data: { status },
-    select: CLINIC_FIELDS,
+    select: { categories: true, surgeonSeats: true, managedByPulse: true, practiceType: true },
   });
 }
 
@@ -162,6 +157,7 @@ const PULSE_CLINIC_FIELDS = {
   statusReason: true,
   statusChangedBy: true,
   statusChangedAt: true,
+  staffAccess: true,
   viewDaysOverride: true,
   categories: true,
   surgeonSeats: true,
@@ -277,18 +273,23 @@ type PulseClinic = NonNullable<Awaited<ReturnType<typeof getClinicForPulse>>>;
  */
 async function changeClinicWithLog(
   clinicId: string,
-  data: Prisma.ClinicUncheckedUpdateInput,
-  describe: (before: PulseClinic) => string | null,
+  data: Prisma.ClinicUncheckedUpdateInput | ((before: PulseClinic, tx: Prisma.TransactionClient) => Promise<Prisma.ClinicUncheckedUpdateInput>),
+  describe: (before: PulseClinic, data: Prisma.ClinicUncheckedUpdateInput) => string | null,
   changedBy: string,
 ) {
   return prisma.$transaction(async (tx) => {
     const before = await readClinicLocked(tx, clinicId, PULSE_CLINIC_FIELDS);
     if (!before) throw new Error(`No clinic has the id "${clinicId}".`);
 
-    const body = describe(before);
+    // Most changes know their new values up front. A change to access has to
+    // work them out from what is there now (the clinic and its billing
+    // record), so it gives a function instead, run here, under the lock.
+    const values = typeof data === "function" ? await data(before, tx) : data;
+
+    const body = describe(before, values);
     if (body === null) return { clinic: before, logged: null };
 
-    const clinic = await tx.clinic.update({ where: { id: clinicId }, data, select: PULSE_CLINIC_FIELDS });
+    const clinic = await tx.clinic.update({ where: { id: clinicId }, data: values, select: PULSE_CLINIC_FIELDS });
     await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: changedBy }, select: { id: true } });
     return { clinic, logged: body };
   });
@@ -303,22 +304,96 @@ const STATUS_WORDS: Record<ClinicStatus, string> = {
   CANCELED: "Canceled",
 };
 
+// ---------------------------------------------------------------------------
+// Access set by hand. Clinic.status is never written on its own: it is
+// worked out by effectiveAccess() (lib/billing-state.ts) from what staff set
+// by hand, whether Pulse manages the clinic, and the billing record, and
+// written together with whichever of those changed, under the clinic's lock.
+// ---------------------------------------------------------------------------
+
+/** What a hand change to access came to, for the screen to say. */
+export type AccessChange = {
+  clinic: PulseClinic;
+  /** The sentence that went in the log, or null when nothing changed. */
+  logged: string | null;
+  /**
+   * True when the clinic is now closed (or managed) by hand while Stripe may
+   * still be charging its card. Nothing here cancels a subscription; the
+   * screen must say so.
+   */
+  stillCharging: boolean;
+};
+
+/** Work the clinic's status out again from a new hand setting and managed flag, plus its billing record. */
+async function accessData(tx: Prisma.TransactionClient, clinicId: string, staffAccess: StaffAccess | null, managedByPulse: boolean) {
+  const billing = await readBillingFacts(tx, clinicId);
+  const access = effectiveAccess({ staffAccess, managedByPulse, billingStatus: billing.status, billingGraceEndsAt: billing.graceEndsAt });
+  return { access, billing };
+}
+
 /**
- * A staff member sets a clinic's status by hand, with the reason why and
- * who did it. The status fields (what it is now, and the last change) and
- * the log entry are written together. Setting the same status again with a
- * new reason still counts as a change, since the reason is new. Later,
- * billing writes the same pair with its own name. Throws if the clinic does
- * not exist.
+ * A staff member sets a clinic's access by hand, with the reason why and who
+ * did it: OPEN, PAUSED or CANCELED, or null to remove the hand setting so
+ * the clinic follows its billing again. What is set by hand always wins
+ * over billing (the state table in lib/billing-state.ts), so a payment
+ * arriving later never reopens a clinic paused here.
+ *
+ * The hand setting, the status it works out to, who, why and when, and the
+ * log entry are written together. Setting the same thing again with a new
+ * reason still counts as a change, since the reason is new. Throws if the
+ * clinic does not exist.
+ *
+ * Pausing or cancelling here does NOT cancel a card subscription in Stripe.
  */
-export async function setClinicStatusByStaff(clinicId: string, status: ClinicStatus, reason: string, changedBy: string) {
-  const { clinic } = await changeClinicWithLog(
+export async function setClinicStatusByStaff(clinicId: string, staffAccess: StaffAccess | null, reason: string, changedBy: string): Promise<AccessChange> {
+  let stillCharging = false;
+  const { clinic, logged } = await changeClinicWithLog(
     clinicId,
-    { status, statusReason: reason, statusChangedBy: changedBy, statusChangedAt: new Date() },
-    () => `Status set to ${STATUS_WORDS[status]}: ${reason}`,
+    async (before, tx) => {
+      const { access, billing } = await accessData(tx, clinicId, staffAccess, before.managedByPulse);
+      stillCharging = (staffAccess === "PAUSED" || staffAccess === "CANCELED") && hasLiveSubscription(billing.status);
+      return {
+        staffAccess,
+        status: access.status,
+        graceEndsAt: access.graceEndsAt,
+        statusReason: reason,
+        statusChangedBy: changedBy,
+        statusChangedAt: new Date(),
+      };
+    },
+    (_before, data) => {
+      const status = STATUS_WORDS[data.status as ClinicStatus];
+      return staffAccess
+        ? `Access set by hand to ${STAFF_ACCESS_WORDS[staffAccess]}: ${reason} Status is now ${status}.`
+        : `Hand setting removed, so access follows billing: ${reason} Status is now ${status}.`;
+    },
     changedBy,
   );
-  return clinic;
+  return { clinic, logged, stillCharging };
+}
+
+/**
+ * Record what kind of practice a clinic is, and log it. Asked of the
+ * clinic's own admin on /admin/billing (once), and editable by Pulse staff.
+ * A hospital is always Enterprise and never offered card checkout.
+ */
+export async function setClinicPracticeType(
+  clinicId: string,
+  practiceType: PracticeType,
+  changedBy: string,
+  // The clinic's own admin may only answer while it is unanswered. Checked
+  // here, under the lock, so two admins answering at once cannot both win.
+  options: { onlyIfUnknown?: boolean } = {},
+) {
+  return changeClinicWithLog(
+    clinicId,
+    { practiceType },
+    (before) =>
+      before.practiceType === practiceType || (options.onlyIfUnknown && before.practiceType !== "UNKNOWN")
+        ? null
+        : `Practice type changed from "${PRACTICE_TYPE_WORDS[before.practiceType]}" to "${PRACTICE_TYPE_WORDS[practiceType]}".`,
+    changedBy,
+  );
 }
 
 /** "Knee, Hip" as a person reads it, in the order the library shows them; "none" for an empty plan. */
@@ -357,14 +432,39 @@ export async function setClinicPlan(clinicId: string, categories: Category[], su
   );
 }
 
-/** Mark a clinic as managed by Pulse (enterprise or comped), or not, and log it. */
-export async function setClinicManagedByPulse(clinicId: string, managedByPulse: boolean, changedBy: string) {
-  return changeClinicWithLog(
+/**
+ * Mark a clinic as managed by Pulse (enterprise or comped), or not, and log it.
+ *
+ * A managed clinic's access is only what staff set by hand; billing never
+ * changes it. So that turning this ON does not shut a clinic that is open
+ * right now because it pays by card, an open clinic with no hand setting is
+ * given OPEN in the same write. Turning it OFF leaves the hand setting as it
+ * is; remove it on the Status form to have the clinic follow billing.
+ *
+ * Turning this on does NOT cancel a card subscription in Stripe.
+ */
+export async function setClinicManagedByPulse(clinicId: string, managedByPulse: boolean, changedBy: string): Promise<AccessChange> {
+  let stillCharging = false;
+  let keptOpen = false;
+  const { clinic, logged } = await changeClinicWithLog(
     clinicId,
-    { managedByPulse },
-    (before) => (before.managedByPulse === managedByPulse ? null : `Managed by Pulse turned ${managedByPulse ? "on" : "off"}.`),
+    async (before, tx) => {
+      keptOpen = managedByPulse && !before.managedByPulse && before.staffAccess === null && clinicIsOpen(before);
+      const staffAccess = keptOpen ? "OPEN" : before.staffAccess;
+      const { access, billing } = await accessData(tx, clinicId, staffAccess, managedByPulse);
+      stillCharging = managedByPulse && hasLiveSubscription(billing.status);
+      return { managedByPulse, staffAccess, status: access.status, graceEndsAt: access.graceEndsAt };
+    },
+    (before, data) => {
+      if (before.managedByPulse === managedByPulse) return null;
+      const parts = [`Managed by Pulse turned ${managedByPulse ? "on" : "off"}.`];
+      if (keptOpen) parts.push("The clinic was open, so it was set to Open by hand to keep it open.");
+      if (data.status !== before.status) parts.push(`Status is now ${STATUS_WORDS[data.status as ClinicStatus]}.`);
+      return parts.join(" ");
+    },
     changedBy,
   );
+  return { clinic, logged, stillCharging };
 }
 
 /**

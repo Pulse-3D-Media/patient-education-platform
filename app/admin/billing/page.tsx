@@ -3,10 +3,11 @@ import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
-import { clinicIsOpen } from "@/lib/clinic-status";
+import { clinicIsOpen, type ClinicOpenFacts } from "@/lib/clinic-status";
 import { formatCents } from "@/lib/pricing";
 import { AdminFrame } from "../AdminFrame";
 import { getBillingView } from "./billing";
+import { PracticeTypeQuestion } from "./PracticeTypeQuestion";
 
 /**
  * Billing, at /admin/billing: the one place on the clinic side that shows
@@ -25,7 +26,9 @@ import { getBillingView } from "./billing";
  * does. Permission to see and repair billing is separate from permission
  * to use the library or make links; those still follow clinicIsOpen().
  *
- * Nothing on this page writes anything, so there are no actions to guard.
+ * One thing can be saved here: what kind of practice this is, asked once
+ * (actions.ts, which checks the admin role on the server and works for a
+ * closed clinic). Everything else on the page is read-only.
  */
 export const dynamic = "force-dynamic";
 
@@ -50,7 +53,31 @@ export default async function BillingPage() {
 
   return (
     <AdminFrame clinic={clinic} title="Billing" intro="Your plan, and what it comes to. Nothing here is an invoice.">
-      <StatusCard status={clinic.status} managed={managed} />
+      <StatusCard clinic={clinic} managed={managed} />
+
+      {!managed && (
+        <section aria-labelledby="practice-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
+          <h2 id="practice-heading" className="text-lg font-semibold">
+            Your practice
+          </h2>
+          {clinic.practiceType === "UNKNOWN" ? (
+            <>
+              <p className="mt-2 text-ink-soft">
+                One question before plans open. Hospitals and health systems are set up by Pulse 3D by agreement; clinics and private practices
+                will be able to choose a plan and pay by card here.
+              </p>
+              <PracticeTypeQuestion />
+            </>
+          ) : clinic.practiceType === "CLINIC" ? (
+            <p className="mt-2 text-ink-soft">You told us this is a clinic or private practice. If that is not right, get in touch with Pulse 3D.</p>
+          ) : (
+            <p className="mt-2 text-ink-soft">
+              You told us this is a hospital or health system, so Pulse 3D sets your plan up with you by agreement and there is no card payment
+              here. If that is not right, get in touch with Pulse 3D.
+            </p>
+          )}
+        </section>
+      )}
 
       <section aria-labelledby="plan-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="plan-heading" className="text-lg font-semibold">
@@ -140,29 +167,43 @@ export default async function BillingPage() {
 }
 
 /** Where the clinic stands, in one line, with what it means for the rest of the app. */
-function StatusCard({ status, managed }: { status: ClinicStatus; managed: boolean }) {
-  const open = clinicIsOpen(status);
-  const { label, body } = STATUS_COPY[status];
+function StatusCard({ clinic, managed }: { clinic: ClinicOpenFacts; managed: boolean }) {
+  const status = clinic.status;
+  const open = clinicIsOpen(clinic);
+  const inGrace = open && status === "PAST_DUE";
+  const { label, body } = inGrace ? GRACE_COPY : STATUS_COPY[status];
   return (
     <section
       aria-labelledby="status-heading"
-      className={`mt-6 rounded-2xl border px-5 py-4 ${open ? "border-line bg-surface" : "border-warn/40 bg-warn/10"}`}
+      className={`mt-6 rounded-2xl border px-5 py-4 ${open && !inGrace ? "border-line bg-surface" : "border-warn/40 bg-warn/10"}`}
     >
       <h2 id="status-heading" className="flex flex-wrap items-center gap-3 text-lg font-semibold">
         Status
         <span
           className={`rounded-md px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide ${
-            open ? "bg-brand/20 text-brand-bright" : "bg-warn/20 text-warn"
+            open && !inGrace ? "bg-brand/20 text-brand-bright" : "bg-warn/20 text-warn"
           }`}
         >
           {label}
         </span>
       </h2>
       <p className="mt-2 text-[15px] text-ink-soft">{body}</p>
+      {inGrace && clinic.graceEndsAt && (
+        <p className="mt-2 text-[15px] text-ink-soft">
+          They stay open until{" "}
+          {clinic.graceEndsAt.toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "America/Denver" })} (Mountain Time).
+        </p>
+      )}
       {!open && managed && <p className="mt-2 text-[15px] text-ink-soft">Your plan is managed by Pulse 3D, so get in touch with Pulse 3D to sort this out.</p>}
     </section>
   );
 }
+
+/** A payment failed but the grace period has not run out: the clinic is still open, for now. */
+const GRACE_COPY = {
+  label: "Payment failed",
+  body: "Your last payment did not go through. The library and shared links are still open for now. Updating the payment method will live here once billing opens; until then, get in touch with Pulse 3D.",
+};
 
 const STATUS_COPY: Record<ClinicStatus, { label: string; body: string }> = {
   PENDING: {

@@ -32,6 +32,15 @@ afterAll(async () => {
 });
 
 describe("getBillingView", () => {
+  it("quotes a hospital as Enterprise, with no self-serve amount, whatever its seats", async () => {
+    const clinicId = await makeClinic({ status: "ACTIVE", categories: ["KNEE"], surgeonSeats: 2 });
+    await prisma.clinic.update({ where: { id: clinicId }, data: { practiceType: "HOSPITAL" } });
+    const view = await getBillingView(clinicId);
+    expect(view?.estimate?.band).toBe("enterprise");
+    expect(view?.estimate?.monthlyCents).toBeNull();
+    expect(view?.estimate?.yearlyCents).toBeNull();
+  });
+
   it("is null for an unknown clinic", async () => {
     expect(await getBillingView("clinic_that_does_not_exist")).toBeNull();
   });
@@ -40,7 +49,7 @@ describe("getBillingView", () => {
     const clinicId = await makeClinic({ status: "PENDING", categories: ["KNEE", "HIP"], surgeonSeats: 3 });
     const view = await getBillingView(clinicId);
     expect(view?.hasPlan).toBe(true);
-    expect(view?.plan).toEqual({ categories: ["KNEE", "HIP"], surgeonSeats: 3, managedByPulse: false });
+    expect(view?.plan).toEqual({ categories: ["KNEE", "HIP"], surgeonSeats: 3, managedByPulse: false, practiceType: "UNKNOWN" });
     expect(view?.problem).toBeNull();
 
     // The same numbers the engine gives for that plan, from the prices the server is using right now.
@@ -62,7 +71,7 @@ describe("getBillingView", () => {
   it("has no estimate, and no problem, for a clinic with no plan yet", async () => {
     const clinicId = await makeClinic();
     expect(await getBillingView(clinicId)).toEqual({
-      plan: { categories: [], surgeonSeats: 0, managedByPulse: false },
+      plan: { categories: [], surgeonSeats: 0, managedByPulse: false, practiceType: "UNKNOWN" },
       hasPlan: false,
       estimate: null,
       problem: null,

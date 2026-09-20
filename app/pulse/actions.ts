@@ -1,14 +1,17 @@
 "use server";
 
-import { Category, ClinicStatus } from "@prisma/client";
+import { Category, PracticeType, type StaffAccess } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { retryBillingEvent } from "@/lib/billing-events";
+import { MAX_GRACE_DAYS, MIN_GRACE_DAYS } from "@/lib/billing-state";
 import { saveCategoryConfig } from "@/lib/db/category-config";
 import { readBrandingForm, readLogoField } from "@/lib/branding-form";
 import {
   getClinicForPulse,
   setClinicManagedByPulse,
   setClinicPlan,
+  setClinicPracticeType,
   setClinicStatusByStaff,
   updateClinicBranding,
   updateClinicDetails,
@@ -39,8 +42,17 @@ import { requirePulseStaff } from "@/lib/pulse";
 /** What a form gets back after it is submitted. */
 export type FormState = { ok?: string; error?: string } | null;
 
-/** The statuses staff may set by hand. PENDING and PAST_DUE are for the app and billing to set. */
-const STAFF_STATUSES: ClinicStatus[] = ["ACTIVE", "PAUSED", "CANCELED"];
+/**
+ * What staff may set by hand, as the Status form sends it. OPEN, PAUSED and
+ * CANCELED are hand settings that win over billing; FOLLOW removes the hand
+ * setting so the clinic's access follows its billing again. Pending and
+ * Past due are never set by hand: they are what the rules work out.
+ */
+const STAFF_CHOICES: Record<string, StaffAccess | null> = { OPEN: "OPEN", PAUSED: "PAUSED", CANCELED: "CANCELED", FOLLOW: null };
+
+/** Said wherever staff close or take over a clinic whose card may still be charged. Hiding billing stops nothing in Stripe. */
+const STILL_CHARGING =
+  " This clinic has a card subscription in Stripe, and this did not cancel it: the card keeps being charged until the subscription is cancelled in Stripe.";
 
 const ALL_CATEGORIES = Object.values(Category);
 
@@ -88,16 +100,61 @@ export async function setStatusAction(_previous: FormState, formData: FormData):
   const clinic = await clinicFromForm(formData);
   if (!clinic) return { error: "That clinic no longer exists." };
 
-  const status = String(formData.get("status") ?? "") as ClinicStatus;
-  if (!STAFF_STATUSES.includes(status)) return { error: "Choose Active, Paused or Canceled." };
+  const choice = String(formData.get("status") ?? "");
+  if (!Object.hasOwn(STAFF_CHOICES, choice)) return { error: "Choose Open, Paused, Canceled or Follow billing." };
+  const staffAccess = STAFF_CHOICES[choice];
 
   const reason = String(formData.get("reason") ?? "").trim();
   if (!reason) return { error: "Say why, in a few words. It is kept with the change." };
   if (reason.length > SHORT_TEXT_LIMIT) return { error: `Keep the reason under ${SHORT_TEXT_LIMIT} characters.` };
 
-  await setClinicStatusByStaff(clinic.id, status, reason, staff.name);
+  const change = await setClinicStatusByStaff(clinic.id, staffAccess, reason, staff.name);
   refreshClinic(clinic.id);
-  return { ok: `Status set to ${status.toLowerCase()}.` };
+  refreshClinicScreens();
+  const now = change.clinic.status.toLowerCase().replace("_", " ");
+  const said = staffAccess ? `Set by hand. The clinic's status is now ${now}.` : `Hand setting removed. The clinic follows billing; its status is now ${now}.`;
+  return { ok: said + (change.stillCharging ? STILL_CHARGING : "") };
+}
+
+/** Record what kind of practice a clinic is. A hospital is always Enterprise and is never offered card checkout. */
+export async function setPracticeTypeAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePulseStaff();
+
+  const clinic = await clinicFromForm(formData);
+  if (!clinic) return { error: "That clinic no longer exists." };
+
+  const value = String(formData.get("practiceType") ?? "");
+  if (!(Object.values(PracticeType) as string[]).includes(value)) return { error: "Choose one of the three." };
+
+  const { logged } = await setClinicPracticeType(clinic.id, value as PracticeType, staff.name);
+  if (!logged) return { ok: NOTHING_CHANGED };
+  refreshClinic(clinic.id);
+  return { ok: "Practice type saved." };
+}
+
+/**
+ * Try a billing notification again, from /pulse/billing. It asks Stripe
+ * where the subscription stands now and applies that, exactly as a fresh
+ * delivery from Stripe would. Safe to press twice: a notification that is
+ * already finished is left alone.
+ */
+export async function retryBillingEventAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  await requirePulseStaff();
+
+  const id = String(formData.get("eventId") ?? "").trim();
+  if (!id) return { error: "That notification no longer exists." };
+
+  try {
+    const result = await retryBillingEvent(id);
+    revalidatePath("/pulse/billing");
+    if (!result) return { error: "That notification no longer exists." };
+    if (result.status === "duplicate") return { ok: "Already finished. Nothing more to do." };
+    return { ok: result.outcome || "Done." };
+  } catch {
+    // The kind of failure is on the row and in the server log (lib/billing-events.ts).
+    revalidatePath("/pulse/billing");
+    return { error: "It failed again. The kind of error is shown on the row. Stripe or the database may be unreachable; try later." };
+  }
 }
 
 /** What a form hears when it was saved with the same values it already had. */
@@ -132,10 +189,11 @@ export async function setManagedAction(_previous: FormState, formData: FormData)
 
   // An unticked checkbox sends nothing; a ticked one sends "on".
   const managed = formData.get("managedByPulse") === "on";
-  const { logged } = await setClinicManagedByPulse(clinic.id, managed, staff.name);
+  const { logged, stillCharging } = await setClinicManagedByPulse(clinic.id, managed, staff.name);
   if (!logged) return { ok: NOTHING_CHANGED };
   refreshClinic(clinic.id);
-  return { ok: managed ? "This clinic is now managed by Pulse." : "This clinic now manages itself." };
+  refreshClinicScreens();
+  return { ok: (managed ? "This clinic is now managed by Pulse." : "This clinic now manages itself.") + (stillCharging ? STILL_CHARGING : "") };
 }
 
 /** Save a clinic's name, notice, placeholder setting and view-days override. (Its logo and phone are branding: see saveBrandingAction.) */
@@ -241,6 +299,10 @@ export async function saveSettingsAction(_previous: FormState, formData: FormDat
     if (value === null || value < 1) return { error: `${LABELS[field]} must be a whole number, at least 1.` };
     if (DAY_LIMITED.includes(field) && value > MAX_LINK_DAYS) {
       return { error: `${LABELS[field]} must be a whole number of days from ${MIN_LINK_DAYS} to ${MAX_LINK_DAYS}.` };
+    }
+    // The grace period becomes a deadline too (lib/billing-state.ts refuses anything outside these limits).
+    if (field === "graceDays" && value > MAX_GRACE_DAYS) {
+      return { error: `${LABELS[field]} must be a whole number of days from ${MIN_GRACE_DAYS} to ${MAX_GRACE_DAYS}.` };
     }
     values[field] = value;
   }

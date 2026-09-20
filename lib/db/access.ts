@@ -31,8 +31,8 @@ import { prisma } from "./client";
 /** The ordinary client, or the client inside an interactive transaction. */
 type Db = PrismaClient | Prisma.TransactionClient;
 
-/** The four fields the access rule reads about a clinic. */
-const ACCESS_FIELDS = { id: true, status: true, categories: true, showPlaceholders: true } as const;
+/** The five fields the access rule reads about a clinic. */
+const ACCESS_FIELDS = { id: true, status: true, graceEndsAt: true, categories: true, showPlaceholders: true } as const;
 
 /** The three fields the access rule reads about a video. */
 const VIDEO_FACTS = { category: true, isPublished: true, isPlaceholder: true } as const;
@@ -68,26 +68,31 @@ export async function readVideoFacts(db: Db, videoId: string): Promise<VideoFact
 // ---------------------------------------------------------------------------
 
 /** What the locking clinic read returns: the same four fields, enum values as text. */
-type LockedClinicRow = { id: string; status: string; categories: string[]; showPlaceholders: boolean };
+type LockedClinicRow = { id: string; status: string; graceEndsAt: Date | null; categories: string[]; showPlaceholders: boolean };
 
 /** What the locking video read returns. */
 type LockedVideoRow = { category: string; isPublished: boolean; isPlaceholder: boolean };
 
 /** Read one clinic's access facts and hold the row against change until the transaction ends. Null for an unknown clinic. */
-export async function lockClinicAccess(tx: Prisma.TransactionClient, clinicId: string): Promise<ClinicAccess | null> {
+export async function lockClinicAccess(tx: Prisma.TransactionClient, clinicId: string, now: Date = new Date()): Promise<ClinicAccess | null> {
   const rows = await tx.$queryRaw<LockedClinicRow[]>`
-    SELECT "id", "status"::text AS "status", "categories"::text[] AS "categories", "showPlaceholders"
+    SELECT "id", "status"::text AS "status", "graceEndsAt", "categories"::text[] AS "categories", "showPlaceholders"
     FROM "Clinic"
     WHERE "id" = ${clinicId}
     FOR SHARE`;
   const row = rows[0];
   if (!row) return null;
-  return accessFromClinic({
-    id: row.id,
-    status: row.status as ClinicStatus,
-    categories: row.categories as Category[],
-    showPlaceholders: row.showPlaceholders,
-  });
+  // `now` decides whether a past-due clinic is still inside its grace period.
+  return accessFromClinic(
+    {
+      id: row.id,
+      status: row.status as ClinicStatus,
+      graceEndsAt: row.graceEndsAt,
+      categories: row.categories as Category[],
+      showPlaceholders: row.showPlaceholders,
+    },
+    now,
+  );
 }
 
 /** Read the three facts about one video and hold the row against change until the transaction ends. Null when no video has that id. */

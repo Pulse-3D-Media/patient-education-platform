@@ -19,7 +19,7 @@ import {
  */
 
 function access(overrides: Partial<ClinicAccess> = {}): ClinicAccess {
-  return { clinicId: "clinic_a", status: "ACTIVE", open: true, categories: ["KNEE"], showPlaceholders: true, ...overrides };
+  return { clinicId: "clinic_a", status: "ACTIVE", graceEndsAt: null, open: true, categories: ["KNEE"], showPlaceholders: true, ...overrides };
 }
 
 function video(overrides: Partial<VideoFacts> = {}): VideoFacts {
@@ -28,17 +28,30 @@ function video(overrides: Partial<VideoFacts> = {}): VideoFacts {
 
 describe("accessFromClinic", () => {
   it("reads open from the status rule, and puts the plan's categories in library order, each once", () => {
-    const active = accessFromClinic({ id: "c1", status: "ACTIVE", categories: ["HIP", "KNEE", "HIP", "SPINE"], showPlaceholders: false });
-    expect(active).toEqual({ clinicId: "c1", status: "ACTIVE", open: true, categories: ["SPINE", "KNEE", "HIP"], showPlaceholders: false });
+    const active = accessFromClinic({ id: "c1", status: "ACTIVE", graceEndsAt: null, categories: ["HIP", "KNEE", "HIP", "SPINE"], showPlaceholders: false });
+    expect(active).toEqual({ clinicId: "c1", status: "ACTIVE", graceEndsAt: null, open: true, categories: ["SPINE", "KNEE", "HIP"], showPlaceholders: false });
 
     for (const status of ["PENDING", "PAUSED", "PAST_DUE", "CANCELED"] as const) {
-      expect(accessFromClinic({ id: "c1", status, categories: ["KNEE"], showPlaceholders: true }).open).toBe(false);
+      expect(accessFromClinic({ id: "c1", status, graceEndsAt: null, categories: ["KNEE"], showPlaceholders: true }).open).toBe(false);
     }
+  });
+
+  it("a past-due clinic is open until the exact moment its grace period ends, so links can be made in grace and not after", () => {
+    const deadline = new Date("2026-10-01T12:00:00.000Z");
+    const clinic = { id: "c1", status: "PAST_DUE" as const, graceEndsAt: deadline, categories: ["KNEE" as const], showPlaceholders: true };
+
+    const before = accessFromClinic(clinic, new Date(deadline.getTime() - 1));
+    expect(before.open).toBe(true);
+    expect(decideVideoAccess(before, video())).toEqual({ allowed: true });
+
+    const at = accessFromClinic(clinic, deadline);
+    expect(at.open).toBe(false);
+    expect(decideVideoAccess(at, video())).toEqual({ allowed: false, reason: "clinic-closed" });
   });
 
   it("does not read managedByPulse: it is not one of the facts", () => {
     // The type has no such field, so a managed clinic is decided by its status and plan alone.
-    const fields = Object.keys(accessFromClinic({ id: "c1", status: "PAUSED", categories: [], showPlaceholders: true }));
+    const fields = Object.keys(accessFromClinic({ id: "c1", status: "PAUSED", graceEndsAt: null, categories: [], showPlaceholders: true }));
     expect(fields).not.toContain("managedByPulse");
   });
 });

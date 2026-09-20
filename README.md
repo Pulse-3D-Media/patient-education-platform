@@ -31,7 +31,7 @@ npx prisma migrate dev   # set up the database tables
 npm run dev
 ```
 
-`.env.example` lists the variables you need: two Neon connection strings and two Clerk keys. Real values never go in this repository.
+`.env.example` lists the variables you need: two Neon connection strings, two Clerk keys, and two Stripe values (test mode only; the app runs without them, and refuses a live key). Real values never go in this repository.
 
 `npm test` runs the tests against a separate Neon branch (see the Tests section of `CLAUDE.md`).
 

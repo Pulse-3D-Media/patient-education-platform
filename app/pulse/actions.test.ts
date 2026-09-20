@@ -3,11 +3,14 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { saveSettings } from "@/lib/db/settings";
+import { MAX_GRACE_DAYS } from "@/lib/billing-state";
+import { recordAcceptedPlan, setStripeCustomer } from "@/lib/db/billing";
 import { MAX_LINK_DAYS } from "@/lib/expiry";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
   activatePricingVersionAction,
   addNoteAction,
+  retryBillingEventAction,
   saveBrandingAction,
   saveCategoryConfigAction,
   saveDetailsAction,
@@ -16,6 +19,7 @@ import {
   saveVideoAction,
   setManagedAction,
   setPlanAction,
+  setPracticeTypeAction,
   setStatusAction,
 } from "./actions";
 
@@ -63,6 +67,7 @@ function form(fields: Record<string, string | string[]>) {
 }
 
 const createdClinicIds: string[] = [];
+const BILLING_FIXTURE_NOTE = `Vitest pulse actions billing fixture ${randomBytes(4).toString("hex")}`;
 const createdVideoIds: string[] = [];
 
 async function makeClinic() {
@@ -79,6 +84,9 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
+  await prisma.clinicBilling.deleteMany({ where: { clinicId: { in: createdClinicIds } } });
+  await prisma.billingPlan.deleteMany({ where: { clinicId: { in: createdClinicIds } } });
+  await prisma.pricingVersion.deleteMany({ where: { note: BILLING_FIXTURE_NOTE } });
   await prisma.clinic.deleteMany({ where: { id: { in: createdClinicIds } } });
   await prisma.video.deleteMany({ where: { id: { in: createdVideoIds } } });
   await prisma.$disconnect();
@@ -90,7 +98,7 @@ describe("setStatusAction", () => {
     signInAs("user_clinic_admin", { kind: "staff" });
 
     await expect(
-      setStatusAction(null, form({ clinicId, status: "ACTIVE", reason: "trying it on" })),
+      setStatusAction(null, form({ clinicId, status: "OPEN", reason: "trying it on" })),
     ).rejects.toMatchObject({ digest: expect.stringContaining("404") });
 
     const clinic = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { status: true, statusReason: true } });
@@ -102,30 +110,105 @@ describe("setStatusAction", () => {
     const clinicId = await makeClinic();
     signInAs("user_staff", { pulseStaff: true });
 
-    const result = await setStatusAction(null, form({ clinicId, status: "ACTIVE", reason: "Paid by invoice" }));
-    expect(result).toEqual({ ok: "Status set to active." });
+    const result = await setStatusAction(null, form({ clinicId, status: "OPEN", reason: "Paid by invoice" }));
+    expect(result).toEqual({ ok: "Set by hand. The clinic's status is now active." });
 
     const clinic = await prisma.clinic.findUnique({
       where: { id: clinicId },
-      select: { status: true, statusReason: true, statusChangedBy: true, statusChangedAt: true },
+      select: { status: true, staffAccess: true, statusReason: true, statusChangedBy: true, statusChangedAt: true },
     });
     expect(clinic?.status).toBe("ACTIVE");
+    expect(clinic?.staffAccess).toBe("OPEN");
     expect(clinic?.statusReason).toBe("Paid by invoice");
     expect(clinic?.statusChangedBy).toBe("Evan Miller");
     expect(clinic?.statusChangedAt).toBeInstanceOf(Date);
 
     // The change also went into the clinic's log, under the staff member's name.
     const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { kind: true, body: true, authorName: true } });
-    expect(notes).toEqual([{ kind: "STATUS", body: "Status set to Active: Paid by invoice", authorName: "Evan Miller" }]);
+    expect(notes).toEqual([{ kind: "STATUS", body: "Access set by hand to Open: Paid by invoice Status is now Active.", authorName: "Evan Miller" }]);
+  });
+
+  it("Follow billing removes the hand setting, and a clinic with no subscription goes back to pending", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+    await setStatusAction(null, form({ clinicId, status: "OPEN", reason: "Pilot" }));
+
+    const result = await setStatusAction(null, form({ clinicId, status: "FOLLOW", reason: "Pilot over" }));
+
+    expect(result).toEqual({ ok: "Hand setting removed. The clinic follows billing; its status is now pending." });
+    const clinic = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { status: true, staffAccess: true } });
+    expect(clinic).toEqual({ status: "PENDING", staffAccess: null });
+  });
+
+  it("pausing a clinic whose card is still being charged says, in as many words, that Stripe was not cancelled", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+    // A clinic with a live subscription on record, made the way checkout will make it.
+    const version = await prisma.pricingVersion.create({
+      data: { config: DEFAULT_PRICING_CONFIG, note: BILLING_FIXTURE_NOTE, createdBy: "user_vitest", createdByName: "Vitest" },
+      select: { id: true },
+    });
+    await setStripeCustomer(clinicId, `cus_vitestactions${randomBytes(4).toString("hex")}`);
+    await recordAcceptedPlan(clinicId, {
+      pricingVersionId: version.id,
+      categories: ["KNEE"],
+      entitledCategories: ["KNEE"],
+      surgeonSeats: 1,
+      interval: "MONTH",
+      perSeatCents: 5900,
+      totalCents: 5900,
+      acceptedById: "user_vitest",
+      acceptedByName: "Vitest",
+    });
+    await prisma.clinicBilling.update({ where: { clinicId }, data: { status: "ACTIVE" } });
+
+    const paused = await setStatusAction(null, form({ clinicId, status: "PAUSED", reason: "On hold" }));
+    expect(paused?.ok).toContain("did not cancel it");
+    expect(paused?.ok).toContain("keeps being charged");
+
+    const managed = await setManagedAction(null, form({ clinicId, managedByPulse: "on" }));
+    expect(managed?.ok).toContain("keeps being charged");
   });
 
   it("needs a reason, and only the three statuses staff may set", async () => {
     const clinicId = await makeClinic();
     signInAs("user_staff", { pulseStaff: true });
 
-    expect(await setStatusAction(null, form({ clinicId, status: "ACTIVE", reason: "  " }))).toMatchObject({ error: expect.any(String) });
-    expect(await setStatusAction(null, form({ clinicId, status: "PAST_DUE", reason: "no" }))).toMatchObject({ error: expect.any(String) });
+    expect(await setStatusAction(null, form({ clinicId, status: "OPEN", reason: "  " }))).toMatchObject({ error: expect.any(String) });
+    // What the rules work out can never be set by hand, and neither can a word that is not ours.
+    for (const status of ["PAST_DUE", "PENDING", "ACTIVE", "", "toString", "__proto__"]) {
+      expect(await setStatusAction(null, form({ clinicId, status, reason: "no" }))).toMatchObject({ error: expect.any(String) });
+    }
     expect((await prisma.clinic.findUnique({ where: { id: clinicId }, select: { status: true } }))?.status).toBe("PENDING");
+  });
+});
+
+describe("setPracticeTypeAction", () => {
+  it("is for Pulse staff only, refuses a value that is not one of the three, and logs a real change once", async () => {
+    const clinicId = await makeClinic();
+
+    signInAs("user_clinic_admin", { kind: "staff" });
+    await expect(setPracticeTypeAction(null, form({ clinicId, practiceType: "HOSPITAL" }))).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await setPracticeTypeAction(null, form({ clinicId, practiceType: "CHARITY" }))).toMatchObject({ error: expect.any(String) });
+    expect(await setPracticeTypeAction(null, form({ clinicId, practiceType: "HOSPITAL" }))).toEqual({ ok: "Practice type saved." });
+    expect(await setPracticeTypeAction(null, form({ clinicId, practiceType: "HOSPITAL" }))).toEqual({ ok: "Nothing changed, so nothing was saved." });
+
+    expect((await prisma.clinic.findUnique({ where: { id: clinicId }, select: { practiceType: true } }))?.practiceType).toBe("HOSPITAL");
+    const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { body: true } });
+    expect(notes).toEqual([{ body: 'Practice type changed from "Not answered yet" to "Hospital or health system".' }]);
+  });
+});
+
+describe("retryBillingEventAction", () => {
+  it("is for Pulse staff only, and says so plainly when the notification is gone", async () => {
+    signInAs("user_clinic_admin", { kind: "staff" });
+    await expect(retryBillingEventAction(null, form({ eventId: "anything" }))).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await retryBillingEventAction(null, form({ eventId: "" }))).toMatchObject({ error: expect.any(String) });
+    expect(await retryBillingEventAction(null, form({ eventId: "no_such_notification" }))).toMatchObject({ error: expect.any(String) });
   });
 });
 
@@ -310,6 +393,16 @@ describe("saveSettingsAction", () => {
     expect(await saveSettingsAction(null, typed({ viewDays: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
     expect(await saveSettingsAction(null, typed({ unclaimedDays: "1.5" }))).toMatchObject({ error: expect.stringContaining("whole number") });
     expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+  });
+
+  it("holds the grace days to the limits the grace rule itself enforces", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await saveSettingsAction(null, typed({ graceDays: String(MAX_GRACE_DAYS + 1) }))).toEqual({
+      error: "Grace days must be a whole number of days from 1 to 365.",
+    });
+    expect(await saveSettingsAction(null, typed({ graceDays: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
+    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+    expect(await saveSettingsAction(null, typed({ graceDays: String(MAX_GRACE_DAYS) }))).toEqual({ ok: "Settings saved." });
   });
 });
 

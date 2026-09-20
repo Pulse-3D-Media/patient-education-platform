@@ -24,6 +24,7 @@ const SECTIONS: { href: string; label: string; coming?: boolean; matches: (path:
   { href: "/pulse", label: "Clinics", matches: (p) => p === "/pulse" || p.startsWith("/pulse/clinics") },
   { href: "/pulse/videos", label: "Videos", matches: (p) => p.startsWith("/pulse/videos") },
   { href: "/pulse/pricing", label: "Pricing", matches: (p) => p.startsWith("/pulse/pricing") },
+  { href: "/pulse/billing", label: "Billing", matches: (p) => p.startsWith("/pulse/billing") },
   { href: "/pulse/settings", label: "Settings", matches: (p) => p.startsWith("/pulse/settings") },
   { href: "/pulse/reports", label: "Reports", coming: true, matches: (p) => p.startsWith("/pulse/reports") },
 ];

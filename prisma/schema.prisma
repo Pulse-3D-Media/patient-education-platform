@@ -97,6 +97,141 @@ model Clinic {
   // version never changes a pin: a clinic keeps the prices it signed up at.
   pricingVersionId String?
   pricingVersion   PricingVersion? @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict) // a pinned version cannot be deleted; a pin is never silently lost
+
+  // Billing (see lib/billing-state.ts for the rules, lib/db/billing.ts for the writes).
+  //
+  // `status` above is the clinic's EFFECTIVE status: what the app reads to
+  // decide whether the clinic is open. It is never set on its own any more.
+  // It is worked out (effectiveAccess in lib/billing-state.ts) from three
+  // things that are stored separately, and rewritten whenever one of them
+  // changes: what Pulse staff set by hand (staffAccess), whether Pulse
+  // manages the clinic (managedByPulse), and what Stripe says about its
+  // payments (the ClinicBilling row).
+  practiceType PracticeType   @default(UNKNOWN) // a hospital is always Enterprise and never pays by card; UNKNOWN cannot check out until it is answered
+  staffAccess  StaffAccess? // what Pulse staff set by hand, which always wins over billing; empty means nothing set by hand (billing decides). Who, why and when are statusChangedBy, statusReason and statusChangedAt
+  graceEndsAt  DateTime? // only while status is PAST_DUE: the exact moment the grace period ends and the clinic closes. Copied from ClinicBilling.graceEndsAt; empty with PAST_DUE means closed
+  billing      ClinicBilling?
+  billingPlans BillingPlan[]
+}
+
+/// What kind of practice a clinic is, for billing. Never guessed from a name.
+enum PracticeType {
+  UNKNOWN // not answered yet. Every clinic starts here, including every clinic that existed before billing
+  CLINIC // a clinic or private practice: may pay by card (Solo or Clinic, by seats)
+  HOSPITAL // a hospital or health system: always Enterprise, set up by Pulse, never self-serve
+}
+
+/// What Pulse staff set by hand about a clinic's access. It always wins over
+/// what billing says: a payment arriving never reopens a clinic staff paused,
+/// and a failed payment never closes a clinic staff are holding open.
+enum StaffAccess {
+  OPEN // opened by hand (how every clinic was switched on before billing)
+  PAUSED // closed by hand, for now
+  CANCELED // closed by hand, ended
+}
+
+/// Where a clinic's card subscription stands, as Stripe reports it, reduced to
+/// the states the product needs. This is the financial record only; whether
+/// the clinic is open is Clinic.status.
+enum BillingStatus {
+  NONE // no subscription (never had one, or the first payment was never completed)
+  INCOMPLETE // checkout was started; the first payment is not confirmed. No access comes from this
+  ACTIVE // paid and in good standing
+  PAST_DUE // a renewal payment failed. The grace period runs from the first time this was recorded
+  CANCELED // the subscription has ended
+}
+
+/// How often a plan is charged.
+enum BillingInterval {
+  MONTH
+  YEAR
+}
+
+/// Stripe's side of one clinic: the customer, the ONE subscription the clinic
+/// is expected to have, and where that subscription stands. One row per
+/// clinic, made when the clinic first starts a checkout. Written only by
+/// lib/db/billing.ts, inside a transaction that holds the clinic's row lock.
+model ClinicBilling {
+  clinicId             String        @id
+  clinic               Clinic        @relation(fields: [clinicId], references: [id])
+  stripeCustomerId     String?       @unique // set once, before a checkout is started; never changed
+  stripeSubscriptionId String?       @unique // the subscription this clinic is expected to have. News about any other subscription is ignored
+  status               BillingStatus @default(NONE)
+  currentPeriodEnd     DateTime? // when the period the clinic has paid for ends
+  cancelAt             DateTime? // set while a cancellation is scheduled: the subscription stays active until then
+  paymentFailedAt      DateTime? // when the failed renewal was first recorded. Set once; repeated failures do not move it
+  graceEndsAt          DateTime? // paymentFailedAt plus the grace days in the settings at that moment. Fixed once; cleared when payment recovers
+  lastReconciledAt     DateTime? // the last time this row was compared with Stripe
+
+  // The plan the clinic agreed to. Plans are rows of their own that are never
+  // edited (BillingPlan); these three only point at them.
+  pendingPlanId     String?      @unique // accepted at checkout, waiting for the first payment
+  pendingPlan       BillingPlan? @relation("PendingPlan", fields: [pendingPlanId], references: [id], onDelete: Restrict)
+  currentPlanId     String?      @unique // in force
+  currentPlan       BillingPlan? @relation("CurrentPlan", fields: [currentPlanId], references: [id], onDelete: Restrict)
+  scheduledPlanId   String?      @unique // takes over at scheduledChangeAt (a seat reduction at renewal, for instance). Nothing sets it until plan changes are built
+  scheduledPlan     BillingPlan? @relation("ScheduledPlan", fields: [scheduledPlanId], references: [id], onDelete: Restrict)
+  scheduledChangeAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// One plan a clinic accepted: what it chose, what that includes, the pricing
+/// version it was quoted from and the exact amounts. Written once and never
+/// edited, so what a clinic agreed to can always be shown as it was.
+model BillingPlan {
+  id                 String          @id @default(cuid())
+  clinicId           String
+  clinic             Clinic          @relation(fields: [clinicId], references: [id])
+  pricingVersionId   String
+  pricingVersion     PricingVersion  @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+  categories         Category[] // what the clinic picked
+  entitledCategories Category[] // what it gets, which is every category when the full library is included
+  surgeonSeats       Int
+  interval           BillingInterval
+  perSeatCents       Int // the per-seat amount for the interval, from the pricing engine: the unit price Stripe is given
+  totalCents         Int // perSeatCents times the seats
+  acceptedById       String // the Clerk user id of the admin who accepted it
+  acceptedByName     String
+  createdAt          DateTime        @default(now())
+
+  pendingFor   ClinicBilling? @relation("PendingPlan")
+  currentFor   ClinicBilling? @relation("CurrentPlan")
+  scheduledFor ClinicBilling? @relation("ScheduledPlan")
+
+  @@index([clinicId, createdAt])
+}
+
+/// What happened to one notification from Stripe.
+enum BillingEventStatus {
+  RECEIVED // written down, work not finished (or the process died partway). Tried again when Stripe sends it again, or from /pulse/billing
+  PROCESSED // the work was done and committed
+  IGNORED // nothing to do, on purpose: not our customer, not the expected subscription, a kind we do not use
+  FAILED // the work threw. Stripe was told to send it again
+}
+
+/// One row per Stripe event id, which is what makes a repeated delivery
+/// harmless: the unique constraint lets one insert through and the rest find
+/// the row already there. The body Stripe sent is never stored, only which
+/// customer and subscription it was about, so it can be tried again by
+/// asking Stripe for the current state.
+model BillingEvent {
+  id                   String             @id @default(cuid())
+  stripeEventId        String             @unique
+  type                 String // Stripe's event type, e.g. invoice.paid
+  clinicId             String? // the clinic it turned out to be about, when one was found. Not a relation: an event can arrive for a customer we do not know
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  status               BillingEventStatus @default(RECEIVED)
+  outcome              String? // one plain sentence: what was done, or why nothing was
+  attempts             Int                @default(0)
+  lastErrorCode        String? // the kind of error only (a class name or a code), never a message that could carry a secret
+  receivedAt           DateTime           @default(now())
+  processedAt          DateTime?
+
+  @@index([status, receivedAt])
+  @@index([clinicId, receivedAt])
 }
 
 /// One saved set of prices (see lib/pricing.ts for the shape). Versions are
@@ -104,24 +239,25 @@ model Clinic {
 /// pinned to version 3 keeps exactly the prices version 3 held. At most one
 /// version is active, and it is what new quotes use.
 model PricingVersion {
-  id            String   @id @default(cuid())
-  version       Int      @unique @default(autoincrement()) // 1, 2, 3, handed out by the database, so two saves at once cannot share a number
+  id            String        @id @default(cuid())
+  version       Int           @unique @default(autoincrement()) // 1, 2, 3, handed out by the database, so two saves at once cannot share a number
   config        Json // a PricingConfig, validated before it is saved and again when it is read
   note          String // what changed and why, written by the staff member who saved it
-  createdAt     DateTime @default(now())
+  createdAt     DateTime      @default(now())
   createdBy     String // the Clerk user id of the staff member who saved it
   createdByName String // their name, for the history list
   // true for the active version, null for every other one, never false. The
   // unique constraint is what guarantees a single active version: only one
   // row can hold true, while any number of rows can be empty.
-  active        Boolean? @unique
+  active        Boolean?      @unique
   clinics       Clinic[]
+  billingPlans  BillingPlan[] // the accepted plans that were quoted from this version; one of those keeps it from being deleted
 }
 
 /// What kind of entry a clinic note is: typed by a staff member, or written
 /// by the app when something changed (any change saved on /pulse today; billing later).
 enum NoteKind {
-  STAFF  // typed by a staff member
+  STAFF // typed by a staff member
   STATUS // written by the app when a change was saved on /pulse: status, plan, details, managed by Pulse. Named for the first such change; shown as "Change"
 }
 

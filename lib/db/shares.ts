@@ -108,7 +108,7 @@ export async function createShare(clinicId: string, videoId: string, options: { 
   const now = options.now ?? new Date();
 
   return prisma.$transaction(async (tx) => {
-    const access = await lockClinicAccess(tx, clinicId);
+    const access = await lockClinicAccess(tx, clinicId, now);
     // An unknown clinic id has nothing to grant, so it answers as closed.
     const decision: AccessDecision = access
       ? decideVideoAccess(access, await lockVideoFacts(tx, videoId))

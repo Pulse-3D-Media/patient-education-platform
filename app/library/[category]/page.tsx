@@ -36,7 +36,7 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   // Same gate as the library home: signed in, in a clinic, question answered,
   // and the clinic open. Otherwise the right step or a calm page.
   const clinic = await requireClinicPage();
-  if (!clinicIsOpen(clinic.status)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
+  if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
 
   const { category: slug } = await params;
   const category = categoryFromSlug(slug);

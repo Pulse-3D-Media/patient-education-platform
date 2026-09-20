@@ -63,6 +63,7 @@ describe("getClinicAccess", () => {
     expect(await getClinicAccess(clinicId)).toEqual({
       clinicId,
       status: "ACTIVE",
+      graceEndsAt: null,
       open: true,
       categories: ["KNEE", "HIP"],
       showPlaceholders: false,
@@ -75,6 +76,18 @@ describe("getClinicAccess", () => {
 
     const noPlan = await makeClinic({ categories: [] });
     expect(await getClinicAccess(noPlan)).toMatchObject({ open: true, categories: [] });
+  });
+
+  it("reports a past-due clinic as open while its grace period runs, and closed once it has run out or was never stored", async () => {
+    const inGrace = await makeClinic({ status: "PAST_DUE", graceEndsAt: new Date(Date.now() + 86_400_000) });
+    const graceOver = await makeClinic({ status: "PAST_DUE", graceEndsAt: new Date(Date.now() - 1000) });
+    const noDeadline = await makeClinic({ status: "PAST_DUE" });
+
+    expect(await getClinicAccess(inGrace)).toMatchObject({ open: true, status: "PAST_DUE" });
+    expect(await canUseVideo(inGrace, kneeVideo)).toEqual({ allowed: true });
+    expect(await getClinicAccess(graceOver)).toMatchObject({ open: false });
+    expect(await canUseVideo(graceOver, kneeVideo)).toEqual({ allowed: false, reason: "clinic-closed" });
+    expect(await getClinicAccess(noDeadline)).toMatchObject({ open: false });
   });
 
   it("is null for a clinic that does not exist", async () => {

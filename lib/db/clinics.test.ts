@@ -5,7 +5,7 @@ import {
   getClinicByClerkOrgId,
   linkClinicToClerkOrg,
   setClinicPlan,
-  setClinicStatus,
+  setClinicStatusByStaff,
   updateClinicBranding,
   upsertClinicForClerkOrg,
 } from "./clinics";
@@ -122,7 +122,7 @@ describe("upsertClinicForClerkOrg", () => {
     const orgId = fakeOrgId();
     const created = await upsertClinicForClerkOrg(orgId, { name: "Vitest old name", logoUrl: null });
     createdClinicIds.push(created.id);
-    await setClinicStatus(created.id, "ACTIVE");
+    await setClinicStatusByStaff(created.id, "OPEN", "Opened for the test", "Vitest");
 
     const updated = await upsertClinicForClerkOrg(orgId, { name: "Vitest new name", logoUrl: "https://example.com/l.png" });
 
@@ -176,14 +176,26 @@ describe("setClinicPlan", () => {
   });
 });
 
-describe("setClinicStatus", () => {
-  it("changes the status and the lookup sees it", async () => {
+describe("setClinicStatusByStaff", () => {
+  it("records the hand setting, works the status out from it, and the lookup sees it", async () => {
     const orgId = fakeOrgId();
     const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest status clinic", logoUrl: null });
     createdClinicIds.push(clinic.id);
 
-    await setClinicStatus(clinic.id, "PAUSED");
+    const paused = await setClinicStatusByStaff(clinic.id, "PAUSED", "Asked to stop for the summer", "Vitest");
+    expect(paused.clinic.staffAccess).toBe("PAUSED");
+    expect(paused.stillCharging).toBe(false); // no card subscription exists
     expect((await getClinicByClerkOrgId(orgId))?.status).toBe("PAUSED");
+
+    const opened = await setClinicStatusByStaff(clinic.id, "OPEN", "Back from the summer", "Vitest");
+    expect(opened.clinic.status).toBe("ACTIVE");
+
+    // Removing the hand setting hands the clinic back to billing; with no
+    // subscription that is PENDING, never "whatever it was before".
+    const followed = await setClinicStatusByStaff(clinic.id, null, "Will pay by card", "Vitest");
+    expect(followed.clinic.staffAccess).toBeNull();
+    expect(followed.clinic.status).toBe("PENDING");
+    expect(followed.logged).toBe("Hand setting removed, so access follows billing: Will pay by card Status is now Pending.");
   });
 });
 

@@ -60,6 +60,17 @@ export async function getSettings(): Promise<Settings> {
   return row ?? SETTINGS_DEFAULTS;
 }
 
+/**
+ * The same read, inside a transaction somebody else opened. Billing uses it
+ * to read the grace days in the same transaction that records a failed
+ * payment (lib/db/billing.ts). No lock: a grace period is fixed the moment
+ * it starts, so a settings save a moment later simply applies to the next one.
+ */
+export async function readSettingsIn(tx: Prisma.TransactionClient): Promise<Settings> {
+  const row = await tx.appSettings.findUnique({ where: { id: SETTINGS_ID }, select: SETTINGS_SELECT });
+  return row ?? SETTINGS_DEFAULTS;
+}
+
 // ---------------------------------------------------------------------------
 // The settings lock.
 //

@@ -85,6 +85,10 @@ const orgActive = fakeOrgId();
 const orgPending = fakeOrgId();
 const orgManaged = fakeOrgId();
 const orgHip = fakeOrgId();
+const orgGrace = fakeOrgId();
+const orgGraceOver = fakeOrgId();
+const orgHospital = fakeOrgId();
+const DAY_MS = 86_400_000;
 /** A published Hip video made here, so the procedure picker has one thing whose category is known. */
 const hipVideoTitle = `Vitest pages hip video ${randomBytes(4).toString("hex")}`;
 
@@ -94,6 +98,10 @@ beforeAll(async () => {
     { name: "Vitest pages clinic (pending)", clerkOrgId: orgPending, status: "PENDING", categories: ["KNEE", "SHOULDER"], surgeonSeats: 1 },
     { name: "Vitest pages clinic (managed)", clerkOrgId: orgManaged, status: "ACTIVE", categories: ["SPINE"], surgeonSeats: 4, managedByPulse: true },
     { name: "Vitest pages clinic (hip)", clerkOrgId: orgHip, status: "ACTIVE", categories: ["HIP"], surgeonSeats: 1 },
+    // A payment failed: one clinic still inside its grace period, one whose grace ran out yesterday.
+    { name: "Vitest pages clinic (grace)", clerkOrgId: orgGrace, status: "PAST_DUE", graceEndsAt: new Date(Date.now() + 5 * DAY_MS), categories: ["KNEE"], surgeonSeats: 1, practiceType: "CLINIC" },
+    { name: "Vitest pages clinic (grace over)", clerkOrgId: orgGraceOver, status: "PAST_DUE", graceEndsAt: new Date(Date.now() - DAY_MS), categories: ["KNEE"], surgeonSeats: 1, practiceType: "CLINIC" },
+    { name: "Vitest pages clinic (hospital)", clerkOrgId: orgHospital, status: "ACTIVE", categories: ["KNEE"], surgeonSeats: 2, practiceType: "HOSPITAL" },
   ];
   for (const data of clinics) {
     const clinic = await prisma.clinic.create({ data, select: { id: true } });
@@ -423,6 +431,65 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).toContain("--brand-accent:#2a829b");
     expect(html).toContain("--brand-accent-bright:#5fb8d4");
     expect(html).not.toMatch(/font-(merriweather|open-sans|source-sans|montserrat|nunito-sans)/);
+  });
+});
+
+describe("a clinic whose payment failed", () => {
+  it("stays open inside its grace period: the overview works, and Billing says the payment failed and until when", async () => {
+    signInAs(orgGrace, "admin", "Vitest pages clinic (grace)");
+    const overview = await render(AdminOverviewPage, "/admin");
+    expect(overview).not.toContain("did not go through");
+    expect(overview).not.toContain("Go to billing");
+
+    const billing = await render(BillingPage, "/admin/billing");
+    expect(billing).toContain("Payment failed");
+    expect(billing).toContain("still open for now");
+    expect(billing).toContain("They stay open until");
+    expect(billing).toContain("Mountain Time");
+  });
+
+  it("is closed everywhere but Billing once the grace period is over", async () => {
+    signInAs(orgGraceOver, "admin", "Vitest pages clinic (grace over)");
+    const overview = await render(AdminOverviewPage, "/admin");
+    expect(overview).toContain("last payment did not go through");
+    expect(overview).toContain("Go to billing");
+
+    const billing = await render(BillingPage, "/admin/billing");
+    expect(billing).toContain("Past due");
+    expect(billing).not.toContain("still open for now");
+    expect(billing).toContain("Your plan");
+  });
+});
+
+describe("the practice question on Billing", () => {
+  it("is asked of an admin whose clinic has not answered, with exactly the two answers, and promises no price or checkout", async () => {
+    signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+    const html = await render(BillingPage, "/admin/billing");
+    expect(html).toContain("Which describes your practice?");
+    expect(html).toContain('value="CLINIC"');
+    expect(html).toContain('value="HOSPITAL"');
+    expect(html).not.toContain('value="UNKNOWN"');
+    // Still no purchasable UI: nothing to pick a plan with, nothing about a card form.
+    expect(html).not.toMatch(/checkout|card number|subscribe/i);
+  });
+
+  it("is not asked again once answered, and a hospital is told Pulse sets it up, with no amount shown", async () => {
+    signInAs(orgGrace, "admin", "Vitest pages clinic (grace)");
+    const answered = await render(BillingPage, "/admin/billing");
+    expect(answered).not.toContain("Which describes your practice?");
+    expect(answered).toContain("You told us this is a clinic or private practice");
+
+    signInAs(orgHospital, "admin", "Vitest pages clinic (hospital)");
+    const html = await render(BillingPage, "/admin/billing");
+    expect(html).not.toContain("Which describes your practice?");
+    expect(html).toContain("hospital or health system");
+    expect(html).toContain("Priced by agreement");
+    expect(showsAnAmount(html)).toBe(false);
+  });
+
+  it("is never shown to a member, who does not see Billing at all", async () => {
+    signInAs(orgActive, "member", "Vitest pages clinic (active)");
+    expect(await render(BillingPage, "/admin/billing")).not.toContain("Which describes your practice?");
   });
 });
 

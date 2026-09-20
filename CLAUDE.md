@@ -14,8 +14,8 @@ The Pulse 3D Patient Education Platform. Surgical patient education animations, 
 A clinic creates a share link. The patient scans a QR code or opens the link, watches an animation explaining their upcoming procedure, and the link stops working seven days after the patient first plays it, or after ninety days if nobody ever does (both numbers are settings; see "How a link expires").
 
 **Phase 1 is done:** create a link, watch a video, link expires.
-**We are in Phase 2, the clinic dashboard:** logins (done, see Auth), clinics and people (done, see Roles), the Pulse 3D master dashboard (done, see the four surfaces), the clinic admin area's sections (done: overview, shared links, people, billing), clinic branding (implemented, device acceptance pending), then billing itself and real video hosting.
-**Phase 3 is billing.**
+**We are in Phase 2, the clinic dashboard:** logins (done, see Auth), clinics and people (done, see Roles), the Pulse 3D master dashboard (done, see the four surfaces), the clinic admin area's sections (done: overview, shared links, people, billing), clinic branding (implemented, device acceptance pending), then billing and real video hosting.
+**Billing is being built in steps, in Stripe test mode only.** Done: the payment-state foundation (what is stored about a clinic's subscription, the rule that turns it into access, and the webhook that keeps it true; see "Billing state"). Not built: checkout, seat limits, plan changes. **No clinic can buy anything yet, and nothing is ever charged: the app refuses a live Stripe key.**
 
 ## This repository is public
 
@@ -172,19 +172,19 @@ The app is four different screens for four different people. Keep them separate 
 
 **Never turn the overview back into the links list, and never put plan or billing detail on the overview or on the links page.** Every admin page draws itself inside `AdminFrame` (`app/admin/AdminFrame.tsx`): the app shell, the clinic's name, the row of section links (`AdminNav`, driven by the list and the current-page rule in `lib/admin-nav.ts`), then the page's own title. The frame is drawn only after the page has checked that the person is an admin; a member gets `<AdminsOnly />` and no navigation at all. An admin of a closed clinic does get the frame on every page, with the closed-clinic message in place of the content, so Billing is always one tap away.
 
-**Billing stays reachable when the clinic is not open.** A clinic that is PENDING, PAST_DUE, PAUSED or CANCELED cannot use the library or make new links (`clinicIsOpen()` says so), but its admin must still be able to open `/admin/billing` to see why and fix it: choose a plan, update a card, restart. So **permission to view and repair billing is separate from permission to use the app**, and `/admin/billing` is never behind the `ClinicClosed` page: it checks `isAdmin` and deliberately not `clinicIsOpen()`, and shows the status with what it means instead. A clinic that is managed by Pulse (`managedByPulse`) sees its plan as read-only, with no self-serve billing controls and a line saying Pulse manages it. Until card payment exists the page has no controls for anyone: the plan, the seats, an estimate marked as an estimate, and the words that nothing has been charged.
+**Billing stays reachable when the clinic is not open.** A clinic that is PENDING, PAST_DUE, PAUSED or CANCELED cannot use the library or make new links (`clinicIsOpen()` says so), but its admin must still be able to open `/admin/billing` to see why and fix it: choose a plan, update a card, restart. So **permission to view and repair billing is separate from permission to use the app**, and `/admin/billing` is never behind the `ClinicClosed` page: it checks `isAdmin` and deliberately not `clinicIsOpen()`, and shows the status with what it means instead. A clinic that is managed by Pulse (`managedByPulse`) sees its plan as read-only, with no self-serve billing controls and a line saying Pulse manages it. Until card payment exists the page has no billing controls for anyone: the plan, the seats, an estimate marked as an estimate, and the words that nothing has been charged. The one thing a clinic can save there is what kind of practice it is (a clinic, or a hospital), asked once of an admin while it is still unanswered (`app/admin/billing/actions.ts`); afterwards only Pulse staff can change it. A clinic whose payment failed but whose grace period is still running is open, and the page says the payment failed and until when.
 
 **`app/pulse` is the Pulse 3D master dashboard.** Used only by Pulse staff, Evan and Van. It shows every clinic, every video, and every price and rule. **Nothing on it is visible to clinics.** It is not a bigger `app/admin`: admin shows one clinic its own data, pulse sees across all of them, so the two never share a page.
 
 **Who may open it is decided in one function, `isPulseStaff()` in `lib/pulse.ts`.** A person is Pulse staff when their Clerk user has `pulseStaff: true` in its public metadata, set by hand in the Clerk dashboard (Users, the user, Metadata, Public) and nowhere else. It is read on the server from Clerk's backend API on every request. **Every page and every Server Action under `app/pulse` calls `requirePulseStaff()` first**, which ends the request with not-found for anyone else: not a redirect, not a message, so the dashboard's existence is not confirmed to people who cannot use it. The `/pulse` layout checks too, so the not-found page has no dashboard rail around it. Never check this in the browser only.
 
-Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, seven sections behind a row of pills: Overview with status by hand and managed-by-Pulse, Plan, Details, Branding, People, Links, and Notes, an append-only log to which every change saved on the page adds an entry of its own), the catalogue (`/pulse/videos`: every video, the add and edit form, and the Categories panel), the platform settings (`/pulse/settings`) and pricing (`/pulse/pricing`: the numbers behind every quote, a live calculator, and the saved versions with Make active on each). Reports is a placeholder page.
+Built so far: the clinics table (`/pulse`), one clinic's page (`/pulse/clinics/[id]`, seven sections behind a row of pills: Overview with access set by hand, managed-by-Pulse, the read-only Card billing facts and the practice type, Plan, Details, Branding, People, Links, and Notes, an append-only log to which every change saved on the page adds an entry of its own), the catalogue (`/pulse/videos`: every video, the add and edit form, and the Categories panel), the platform settings (`/pulse/settings`) and pricing (`/pulse/pricing`: the numbers behind every quote, a live calculator, and the saved versions with Make active on each), and billing diagnostics (`/pulse/billing`: what became of each notification from Stripe, the ones that need attention first, and Try again on a failed one; never a key, a secret, an error message or what a notification contained). Reports is a placeholder page.
 
 ## Phase 1 scope
 
 **In scope:** the three original models (Video, Clinic, Share) · `app/library` to browse and play · `app/admin` to create and manage share links · `app/watch/[code]` for patients · QR code generation · link expiry.
 
-**Still not built unless a task asks for it:** subscriptions, payments, Stripe, analytics dashboards, email sending, video uploading, file storage.
+**Still not built unless a task asks for it:** checkout and anything a clinic can buy, seat limits, plan changes, invoices, analytics dashboards, email sending, video uploading, file storage. (The billing state and the Stripe webhook exist; see "Billing state".)
 
 **Do not invent a login system.** Sign-in is **Clerk** (see Auth), and its organizations feature is what models clinics and doctors. Never add a users table, a password field or a session cookie of our own.
 
@@ -194,9 +194,9 @@ If a request seems to need something on the not-built list, say so before buildi
 
 Phase 2 is the clinic dashboard: logins, clinics, doctors, permissions, real video hosting. It also adds **`app/pulse`**, the Pulse 3D master dashboard (see the four surfaces above).
 
-**Decided: self sign-up with card payment.** Solo (1 surgeon) and Clinic (2 to 10 surgeons) sign themselves up and pay by card. Enterprise (11 or more surgeons, or any hospital) is set up by Pulse from `app/pulse`. The card payment itself is billing work (Phase 3): decided, not yet built.
+**Decided: self sign-up with card payment.** Solo (1 surgeon) and Clinic (2 to 10 surgeons) sign themselves up and pay by card. Enterprise (11 or more surgeons, or any hospital) is set up by Pulse from `app/pulse`. The payment state underneath it is built (see "Billing state"); the checkout a clinic would actually use is decided, not yet built.
 
-**Built so far:** a person signs up, creates their clinic (a Clerk organization) at `/onboarding`, answers the surgeon-or-staff question once, and lands on a PENDING clinic that shows "Choose a plan to start" until billing, `npm run db:set-status`, or Pulse staff on `/pulse` makes it ACTIVE. Admins invite people and mark each one Surgeon or Staff in `/admin/people`. Pulse staff set each clinic's plan (categories and surgeon seats) on `/pulse` or with `npm run db:set-plan`. The categories on the plan decide what the clinic's library shows and what it may share (see Category entitlements below); seat limits are not enforced until billing.
+**Built so far:** a person signs up, creates their clinic (a Clerk organization) at `/onboarding`, answers the surgeon-or-staff question once, and lands on a PENDING clinic that shows "Choose a plan to start" until Pulse staff open it by hand on `/pulse` (or with `npm run db:set-status`), or, once checkout exists, its first card payment is confirmed. Admins invite people and mark each one Surgeon or Staff in `/admin/people`. Pulse staff set each clinic's plan (categories and surgeon seats) on `/pulse` or with `npm run db:set-plan`. The categories on the plan decide what the clinic's library shows and what it may share (see Category entitlements below); seat limits are not enforced until billing.
 
 ### Pricing shape
 
@@ -237,7 +237,7 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 - **A placeholder video carries its mark everywhere it appears**: the library card, the player, the Send result, the printed pamphlet, the patient page, the admin lists, and any surface added later. Swapping in the real file is an edit to the same row, never a new row, so share links and QR codes keep working. Unticking "Placeholder" on `/pulse/videos` asks for a yes first, because links already sent start playing the new file at once.
 - **A video with a `posterUrl` shows it on the library card**; without one, the card shows the video's own first frame, and the branded fallback if that cannot load.
 - **Settings come from `getSettings()` in `lib/db/settings.ts`, never constants.** Expiry days and limits are one AppSettings row, read at request time. Prices are not settings: they are pricing versions, read through `getActivePricing()` (see Pricing shape). `getSettings()` returns the code defaults when the row does not exist, so nothing depends on it having been saved. A clinic can carry its own override for a setting (`Clinic.viewDaysOverride` today); read the clinic's value first, then the platform's. Never put one of these numbers in a page or a constant. The expiry numbers are read when a link is made and copied onto it (`getShareTerms()` and `createShare()` in `lib/db/shares.ts` resolve them the same way), so a settings edit changes links made from then on and never a link a patient already has; see "How a link expires". **A save and a link being made never cross:** `createShare()` reads the settings inside its own transaction through `lockSettings()`, which holds the settings lock shared, and `saveSettings()` takes the same lock exclusively, so a save either landed before the link read the settings or waits until the link is written. Any future write to the settings row goes through `saveSettings()` for that reason.
-- **Access is decided in one function each, on the server, and every mutation rechecks it.** Whether a clinic may use the app at all: `clinicIsOpen(status)` in `lib/clinic-status.ts` (today: ACTIVE only; a grace period or pausing changes that one function). Whether a person is an admin: `isClinicAdmin()`. What a clinic may use, and whether it may use one video: `getClinicAccess()` and `canUseVideo()` in `lib/db/access.ts`, both answering with the rule in `lib/access.ts` (see Category entitlements). Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement any check, and a Server Action calls the same function again rather than trusting that the page did.
+- **Access is decided in one function each, on the server, and every mutation rechecks it.** Whether a clinic may use the app at all: `clinicIsOpen(clinic)` in `lib/clinic-status.ts`, which reads the clinic's status and its grace deadline: ACTIVE is open, PAST_DUE is open until the exact moment `graceEndsAt` (and closed when no deadline is stored), everything else is closed. The library, `createShare()` and, later, QR issuance all reach it (the last two through the access rule), so they cannot disagree. Whether a person is an admin: `isClinicAdmin()`. What a clinic may use, and whether it may use one video: `getClinicAccess()` and `canUseVideo()` in `lib/db/access.ts`, both answering with the rule in `lib/access.ts` (see Category entitlements). Whether someone can open `/pulse`: `isPulseStaff()`. Pages call these and never re-implement any check, and a Server Action calls the same function again rather than trusting that the page did.
 
 ---
 
@@ -252,7 +252,7 @@ Finished animations arrive slowly and placeholders stand in until they do, while
 | Video | **the existing Webflow CDN URL** in Phase 1 | Read it through `getPlaybackUrl()`. See below. |
 | Logins | **Clerk** (`@clerk/nextjs`) | Staff only. See Auth below. |
 | Tests | **Vitest**, against a Neon branch called `testing` | `npm test`. See Tests below. |
-| Payments | **none until Phase 3** | |
+| Payments | **Stripe** (the `stripe` package), **test mode only** | Only `lib/stripe.ts` talks to it, and it refuses any key that is not a test key. See "Billing state". |
 
 ### Auth
 
@@ -262,14 +262,15 @@ Clerk guards the staff surfaces. The patient surface is never behind it.
 - **`proxy.ts` is a convenience, not the security boundary.** It sends signed-out visitors to `/sign-in` and back again. Clerk's guidance is that every page, Server Action and Route Handler that reads protected data checks for itself, so: staff pages call `requireClinicPage()` first (which calls `await auth.protect()`); actions and handlers rely on `getCurrentClinicId()` returning null. Keep both layers.
 - **A clinic is a Clerk organization, and the Clinic row is created on first use.** `getCurrentClinic()` in `lib/clinic.ts` reads the signed-in user's membership in their active organization from Clerk (one call per request, cached), then upserts the Clinic row keyed on `clerkOrgId` (`upsertClinicForClerkOrg()` in `lib/db/clinics.ts`): the first visit creates it with status PENDING, later visits copy a changed name or logo. No webhooks. It is the only place the signed-in user meets the database. **A Clerk organization id (`org_...`) is not a clinic id** and must never be passed to a `lib/db` function that takes a `clinicId`.
 - **`requireClinicPage()` is what every staff page calls first.** Signed out goes to `/sign-in`; no organization goes to `/onboarding` (Clerk's CreateOrganization form, or the list of organizations they were invited to); surgeon question unanswered goes to `/onboarding/kind`. It returns the clinic (id, name, status, logoUrl, kind, isAdmin). Each page then checks `clinicIsOpen(clinic.status)` and shows `<ClinicClosed />` if not; admin pages also check `clinic.isAdmin` and show `<AdminsOnly />` if not. Never crash, never a blank page. **The exception is `/admin/billing`**: an admin of a closed clinic must reach it, so it checks `isAdmin` but not `clinicIsOpen` (see the four surfaces).
-- **`getCurrentClinicId()` is for Server Actions and Route Handlers.** A database lookup, no call to Clerk. It returns the clinic id only when the clinic is open, otherwise null, and actions return a plain message on null. A billing action that has to work for a closed clinic will need its own lookup that checks the admin role and skips the open check; it must not loosen this one.
+- **`getCurrentClinicId()` is for Server Actions and Route Handlers.** A database lookup, no call to Clerk. It returns the clinic id only when the clinic is open, otherwise null, and actions return a plain message on null. A billing action has to work for a closed clinic, so it has its own lookup, `getBillingClinicId()`, which checks the admin role and skips the open check; only the actions under `app/admin/billing` may use it, and it must never be used to loosen anything else.
+- **`/api/webhooks/stripe` has no sign-in at all, on purpose.** Stripe's signature over the exact bytes it sent stands in for one (`verifyWebhook()` in `lib/stripe.ts`), and nothing is read, stored or done before it has been checked.
 - **`npm run db:link-clinic -- <clinicId> <orgId>`** still exists for a clinic created before its organization (the test clinic was). Clinics that sign themselves up never need it.
 - **`CLINIC_ID` is retired.** Nothing reads it. Remove it from `.env` and from Vercel.
 - **Clerk's provider wraps only the staff side** (`StaffClerkProvider` in the layouts of `app/library`, `app/admin`, `app/onboarding`, `app/sign-in` and `app/sign-up`). Never put it in the root layout: that would load Clerk's script on every patient's phone. `auth()` on the server works without it.
 - The sign-in and sign-up paths, `/sign-in` and `/sign-up`, are set in code in three places that must agree: `proxy.ts`, `StaffClerkProvider` and the `<SignIn path>` / `<SignUp path>` props. No `NEXT_PUBLIC_CLERK_*_URL` variables are used.
 - Clerk dashboard settings this depends on: Organizations enabled, and "Allow users to create organizations" on (so a new sign-up can set up a clinic).
 - Clerk treats a session that still has a task to finish (such as choosing an organization) as signed out. The prebuilt `<SignIn />` component walks the user through that step itself.
-- Keys: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`, in `.env` and in Vercel (Production and Preview). Rule 7 applies.
+- Keys: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`, in `.env` and in Vercel (Production and Preview). Rule 7 applies. Stripe's two (`STRIPE_SECRET_KEY`, a test key, and `STRIPE_WEBHOOK_SECRET`) live the same way; with neither set the app runs as before and the webhook answers "not configured".
 
 ### Roles
 
@@ -307,7 +308,7 @@ Phase 1 returns the stored URL. Phase 2 returns a signed, expiring URL from Mux 
 
 ## The database
 
-Seven models and four enums. If a task seems to need an eighth model, stop and ask.
+Ten models and nine enums. If a task seems to need an eleventh model, stop and ask.
 
 ```prisma
 generator client {
@@ -375,7 +376,7 @@ model Clinic {
   id         String       @id @default(cuid())
   name       String                             // copied from the Clerk organization's name; used for the on-video watermark
   clerkOrgId String?      @unique               // the Clerk organization its staff sign in with
-  status     ClinicStatus @default(PENDING)     // changed by billing, by npm run db:set-status, or by Pulse staff on /pulse
+  status     ClinicStatus @default(PENDING)     // the EFFECTIVE status, never set on its own: worked out by effectiveAccess() from staffAccess, managedByPulse and the ClinicBilling row, and rewritten whenever one of them changes
   logoUrl    String?                            // copied from the Clerk organization's logo, when it has one; Pulse staff can set one too
   createdAt  DateTime     @default(now())
 
@@ -404,6 +405,108 @@ model Clinic {
   // version never changes a pin: a clinic keeps the prices it signed up at.
   pricingVersionId String?
   pricingVersion   PricingVersion? @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict) // a pinned version cannot be deleted; a pin is never silently lost
+
+  // Billing. See "Billing state" below.
+  practiceType PracticeType @default(UNKNOWN)   // a hospital is always Enterprise and never pays by card; UNKNOWN cannot check out until it is answered
+  staffAccess  StaffAccess?                     // what Pulse staff set by hand, which always wins over billing; empty means billing decides. Who, why and when are statusChangedBy, statusReason, statusChangedAt
+  graceEndsAt  DateTime?                        // only while status is PAST_DUE: the exact moment the clinic closes. Copied from ClinicBilling.graceEndsAt; empty with PAST_DUE means closed
+  billing      ClinicBilling?
+  billingPlans BillingPlan[]
+}
+
+enum PracticeType {
+  UNKNOWN   // not answered yet: every clinic starts here, including every clinic that existed before billing
+  CLINIC    // may pay by card
+  HOSPITAL  // always Enterprise, set up by Pulse, never self-serve
+}
+
+/// What Pulse staff set by hand. It always wins over what billing says.
+enum StaffAccess {
+  OPEN      // opened by hand (how every clinic was switched on before billing)
+  PAUSED
+  CANCELED
+}
+
+/// Where a clinic's card subscription stands, as Stripe reports it. The
+/// financial record only; whether the clinic is open is Clinic.status.
+enum BillingStatus {
+  NONE        // no subscription
+  INCOMPLETE  // checkout started, first payment not confirmed. No access comes from this
+  ACTIVE      // paid
+  PAST_DUE    // a renewal failed; grace runs from the first time this was recorded
+  CANCELED    // ended
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+}
+
+/// Stripe's side of one clinic. One row per clinic, made when it first starts
+/// a checkout. Written only by lib/db/billing.ts, under the clinic's row lock.
+model ClinicBilling {
+  clinicId             String        @id
+  clinic               Clinic        @relation(fields: [clinicId], references: [id])
+  stripeCustomerId     String?       @unique     // set once, before a checkout is started; never changed
+  stripeSubscriptionId String?       @unique     // the ONE subscription this clinic is expected to have. News about any other is ignored
+  status               BillingStatus @default(NONE)
+  currentPeriodEnd     DateTime?
+  cancelAt             DateTime?                 // set while a cancellation is scheduled: the subscription stays active until then
+  paymentFailedAt      DateTime?                 // when the failed renewal was first recorded. Set once
+  graceEndsAt          DateTime?                 // paymentFailedAt plus the grace days in the settings at that moment. Fixed once; cleared on recovery
+  lastReconciledAt     DateTime?
+  pendingPlanId        String?       @unique     // accepted at checkout, waiting for the first payment
+  currentPlanId        String?       @unique     // in force
+  scheduledPlanId      String?       @unique     // takes over at scheduledChangeAt. Nothing sets it until plan changes are built (rule 4)
+  scheduledChangeAt    DateTime?
+  // (the three plan ids are relations to BillingPlan, onDelete: Restrict)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+}
+
+/// One plan a clinic accepted. Written once and never edited.
+model BillingPlan {
+  id                 String          @id @default(cuid())
+  clinicId           String
+  pricingVersionId   String                      // the version it was quoted from; Restrict, so that version can never be deleted
+  categories         Category[]                  // what the clinic picked
+  entitledCategories Category[]                  // what it gets (every category when the full library is included)
+  surgeonSeats       Int
+  interval           BillingInterval
+  perSeatCents       Int                         // from the pricing engine: the unit price Stripe is given
+  totalCents         Int
+  acceptedById       String
+  acceptedByName     String
+  createdAt          DateTime        @default(now())
+
+  @@index([clinicId, createdAt])
+}
+
+enum BillingEventStatus {
+  RECEIVED   // written down, work not finished
+  PROCESSED  // done and committed
+  IGNORED    // nothing to do, on purpose
+  FAILED     // the work threw; Stripe was told to send it again
+}
+
+/// One row per Stripe event id. The unique constraint is what makes a
+/// repeated delivery harmless. The body Stripe sent is never stored.
+model BillingEvent {
+  id                   String             @id @default(cuid())
+  stripeEventId        String             @unique
+  type                 String
+  clinicId             String?            // not a relation: an event can arrive for a customer we do not know
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  status               BillingEventStatus @default(RECEIVED)
+  outcome              String?            // one plain sentence
+  attempts             Int                @default(0)
+  lastErrorCode        String?            // the KIND of error only, never a message
+  receivedAt           DateTime           @default(now())
+  processedAt          DateTime?
+
+  @@index([status, receivedAt])
+  @@index([clinicId, receivedAt])
 }
 
 /// One saved set of prices (see lib/pricing.ts for the shape). Versions are
@@ -423,6 +526,7 @@ model PricingVersion {
   // row can hold true, while any number of rows can be empty.
   active        Boolean? @unique
   clinics       Clinic[]
+  billingPlans  BillingPlan[]   // the accepted plans quoted from this version
 }
 
 /// What kind of entry a clinic note is: typed by a staff member, or written
@@ -496,13 +600,43 @@ model Share {
 
 **Why `Clinic` existed in Phase 1 when there was only one of them.** Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter. Adding it early cost one table and one column. This is the single most important scale decision in the project.
 
-**Clinic status.** A clinic is created PENDING and only ACTIVE clinics get in. Until billing exists, Pulse staff switch a clinic on from its page on `/pulse`, or with `npm run db:set-status -- <clinicId> ACTIVE`. Never change a status by hand in Neon. A closed clinic's issued patient links keep working until they expire (see "Nothing breaks while the library fills up").
+**Clinic status.** A clinic is created PENDING. `Clinic.status` is the clinic's **effective** status and is never written on its own: it is worked out from what staff set by hand, whether Pulse manages the clinic, and its billing record (see "Billing state"), and rewritten in the same transaction as whichever of those changed. Pulse staff open, pause or cancel a clinic by hand from its page on `/pulse`, or with `npm run db:set-status -- <clinicId> ACTIVE` (also PAUSED, CANCELED, or FOLLOW to remove the hand setting); both go through `setClinicStatusByStaff()`. Never change a status by hand in Neon. A closed clinic's issued patient links keep working until they expire (see "Nothing breaks while the library fills up").
 
-**The clinic log.** `ClinicNote` is the history of a clinic as Pulse sees it: notes staff type (kind STAFF), and entries the app writes when something changes (kind STATUS, named for the first such change and shown as "Change"). **Every change staff save on a clinic's page writes an entry: status, plan, managed by Pulse, each detail field, and branding (including saves by clinic admins)**, saying what it was and what it became, under the staff member's name. The change and its entry go in one transaction (`changeClinicWithLog()` in `lib/db/clinics.ts`), so the current state and the history cannot disagree, and a save that changes nothing writes nothing. Entries are only ever added. When billing changes a status later, it writes the same pair under its own name. If you add a new thing staff can change about a clinic, write it through the same helper so it is logged too. Nothing in the log is ever shown to the clinic.
+### Billing state
+
+Stripe, in **test mode only**. `lib/stripe.ts` is the only file that talks to Stripe and it refuses any key that does not start with `sk_test_` or `rk_test_`; a live-mode notification is refused too. Going live is a deliberate, reviewed change to that file, never a value pasted into Vercel. **Nothing can be bought yet:** this is the state underneath checkout, not checkout.
+
+**Two things are kept apart.** The **financial record** (`ClinicBilling`) is what Stripe says about the clinic's one expected subscription; it is brought up to date from Stripe whatever else is true, so it can always be checked against Stripe. **Access** (`Clinic.status`, `Clinic.graceEndsAt`) is worked out by `effectiveAccess()` in `lib/billing-state.ts` from three inputs. The state table, first rule that fits wins:
+
+| Staff set by hand | Managed by Pulse | Billing | Status | Open? |
+|---|---|---|---|---|
+| PAUSED | any | any | PAUSED | no |
+| CANCELED | any | any | CANCELED | no |
+| OPEN | any | any | ACTIVE | yes |
+| nothing | yes | any | PENDING | no |
+| nothing | no | NONE or INCOMPLETE | PENDING | no |
+| nothing | no | ACTIVE (also: cancellation scheduled) | ACTIVE | yes |
+| nothing | no | PAST_DUE | PAST_DUE | until `graceEndsAt` |
+| nothing | no | CANCELED | CANCELED | no |
+
+- **What staff set by hand always wins.** No notification, old or new, reopens a clinic staff paused; billing never writes `staffAccess` to PAUSED, CANCELED or OPEN. Who, why and when are stored with it, and removing it ("Follow billing") hands the clinic back to its billing record. **One automatic change exists (decided while building, flagged for Evan):** when a self-serve clinic's first card payment is confirmed, a hand setting of OPEN is cleared, with a log entry, so a clinic opened by hand before billing follows its payments from then on. PAUSED and CANCELED are never cleared by anything but staff.
+- **A Pulse-managed clinic keeps the plan and access staff gave it.** Billing news still updates its financial record and is still logged, but changes neither. Turning managed ON for a clinic that is open keeps it open (it is given OPEN in the same write).
+- **Pausing, cancelling or marking a clinic managed does NOT cancel anything in Stripe.** A card subscription keeps charging until it is cancelled in Stripe, and every screen, script and log line that does one of those says so. Never describe hiding billing as stopping charges.
+- **The webhook never applies what a notification says.** `POST /api/webhooks/stripe` checks the signature over the raw body, then `handleStripeEvent()` (`lib/billing-events.ts`) writes the notification down under Stripe's event id (insert first, catch the unique refusal: a repeat finds the row and, if it is finished, nothing at all is done), takes only the customer id and subscription id from its body, finds the clinic by the customer, and calls `reconcileSubscription()` (`lib/db/billing.ts`). That locks the clinic's row (the same lock every staff change takes), asks Stripe where the subscription stands **now**, and applies that with `decideBilling()`, writing the record, the plan, the status, one log entry and the notification's "finished" mark in **one transaction**. So order, lateness and repeats do not matter, two notifications (or a notification and a staff pause) happen one after the other, and "finished" is never true of work that did not commit. Event time and arrival order are never used to decide freshness.
+- **Whose subscription it is.** The subscription Stripe returns must belong to the clinic's own Stripe customer (set once, by `setStripeCustomer()`, before checkout creates anything). Only the expected subscription is applied. A different one may take over only when the expected one is over or never started, it carries the id of the plan the clinic accepted and is waiting on (`metadata.billingPlanId` on the **subscription itself**, which checkout must put there: session metadata does not appear on subscription events), and it is not already dead. News of an old cancelled subscription therefore cannot touch its replacement. A second live subscription changes nothing and is flagged for a person ("Needs a look").
+- **Payment is never inferred.** Not from a redirect, not from checkout completing, not from Stripe's word "active" alone: the first activation, and a recovery from PAST_DUE, both need the subscription's latest invoice to be **paid** (Stripe also says "active" when an invoice is written off). A failed **first** payment leaves the subscription INCOMPLETE: no grace, no access. No trial and no second payment method exists; a trialing or paused subscription changes nothing and is flagged.
+- **Grace.** Starts once, at the server's time when the failed renewal is first recorded (a late notification can only give a clinic more time, never less). The deadline is that moment plus the grace days setting as it was then (1 to 365; `graceDeadline()`), fixed: repeated failures never move it. It is cleared by a confirmed recovery. At the deadline itself the clinic is closed; no job has to run, because `clinicIsOpen()` compares the stored deadline with the server's clock on every request. A setting or a deadline that cannot be read means **no** grace, never unlimited.
+- **A failure is retried, never lost.** When the work throws, everything rolls back, the notification is marked FAILED with the kind of error only, and the route answers 500 so Stripe sends it again. Staff can also press Try again on `/pulse/billing`. The work is awaited before answering: nothing runs in the background after the response.
+- **Accepted plans are immutable.** `recordAcceptedPlan()` writes a `BillingPlan` row (amounts from the pricing engine on the server, checked again here) and points `pendingPlanId` at it; the first confirmed payment makes it the current plan and, for a self-serve clinic, copies its entitled categories, seats and pricing version onto the clinic. It is refused while a subscription is live: changing a paid plan is a later step.
+- **Who may pay by card** is `selfServeEligibility()`: a clinic that has said it is a clinic and is not managed by Pulse. UNKNOWN is not eligible (checkout must ask first), a hospital never is, and no clinic that existed before billing is assumed to be.
+- **Issued patient links are untouched by all of this**, as always.
+- To try it against real Stripe test mode on your own computer: put a test key in `.env`, run `stripe listen --forward-to localhost:3000/api/webhooks/stripe`, and put the signing secret it prints in `STRIPE_WEBHOOK_SECRET`.
+
+**The clinic log.** `ClinicNote` is the history of a clinic as Pulse sees it: notes staff type (kind STAFF), and entries the app writes when something changes (kind STATUS, named for the first such change and shown as "Change"). **Every change staff save on a clinic's page writes an entry: access set by hand, plan, managed by Pulse, practice type, each detail field, and branding (including saves by clinic admins)**, saying what it was and what it became, under the staff member's name. The change and its entry go in one transaction (`changeClinicWithLog()` in `lib/db/clinics.ts`), so the current state and the history cannot disagree, and a save that changes nothing writes nothing. Entries are only ever added. Billing writes the same pair under the name "billing": one entry for each real change to a clinic's subscription, none for a repeated or late notification that changed nothing. If you add a new thing staff can change about a clinic, write it through the same helper so it is logged too. Nothing in the log is ever shown to the clinic.
 
 **Clinic plan.** `Clinic.categories` and `Clinic.surgeonSeats` are the plan. Set on `/pulse` or with `npm run db:set-plan -- <clinicId> --categories all --seats 10`. The categories are enforced: they decide what the library shows and what `createShare()` allows (see Category entitlements). The seats are not enforced yet; that comes with billing. On the clinic side the plan is shown in one place, `/admin/billing`, read through `getClinicPlan()` (categories, seats, managed by Pulse, and nothing internal). Do not put plan or pricing information on `/admin` (the overview) or `/admin/links`.
 
-**Pricing versions.** Saving on `/pulse/pricing` adds a `PricingVersion` row; nothing ever edits one. Making a version active is the only update the table sees, done in one transaction under the unique constraint on `active`, so two activations at once still end with one active version. The page asks before it does so (the confirmation names the version and says that new quotes and unpinned clinics move to it); that is a courtesy, and the server gate plus the constraint are the protection. The history list is bounded, so the page hands the editor the active config on its own, from `getActivePricing()`, never by looking for it in the list: the editor must open on the version the page says is active. A stored config that fails `validatePricingConfig()` (a hand edit in Neon) cannot be activated, and reading it as the active or a pinned version is a loud `PricingError`, never a quiet switch to other prices. A clinic's pin (`Clinic.pricingVersionId`) is set by billing later; nothing on `/pulse` sets one yet.
+**Pricing versions.** Saving on `/pulse/pricing` adds a `PricingVersion` row; nothing ever edits one. Making a version active is the only update the table sees, done in one transaction under the unique constraint on `active`, so two activations at once still end with one active version. The page asks before it does so (the confirmation names the version and says that new quotes and unpinned clinics move to it); that is a courtesy, and the server gate plus the constraint are the protection. The history list is bounded, so the page hands the editor the active config on its own, from `getActivePricing()`, never by looking for it in the list: the editor must open on the version the page says is active. A stored config that fails `validatePricingConfig()` (a hand edit in Neon) cannot be activated, and reading it as the active or a pinned version is a loud `PricingError`, never a quiet switch to other prices. A clinic's pin (`Clinic.pricingVersionId`) is set by billing, when a self-serve clinic's first payment is confirmed (from the accepted plan); nothing on `/pulse` sets one.
 
 **The name and logo sync.** On every signed-in page request `upsertClinicForClerkOrg()` copies the organization's name from Clerk, and its logo when Clerk has one. A logo set by Pulse staff survives when the organization has no logo of its own. A name changed on `/pulse` is written to the Clerk organization as well (`lib/organization.ts`), so it does not change back.
 
@@ -553,7 +687,8 @@ app/admin/links/     Shared links, the complete workspace: ShareLists.tsx (the t
 app/admin/print/     The printable pamphlet for one share link.
 app/admin/qr/        The QR code image for one share link.
 app/admin/people/    The People section: everyone in the clinic, Surgeon / Staff on each, Clerk's invite and role panel. Admins only.
-app/admin/billing/   Billing: the plan and its estimate. billing.ts works the view out on the server; page.tsx turns it into words. Open to an admin of a closed clinic.
+app/admin/billing/   Billing: the plan and its estimate. billing.ts works the view out on the server; page.tsx turns it into words. Open to an admin of a closed clinic. actions.ts and PracticeTypeQuestion.tsx are the one question a clinic answers there (clinic or hospital), asked once.
+app/api/webhooks/stripe/   Where Stripe sends its notifications. Public; the signature is the check. See "Billing state".
 app/admin/branding/  The clinic branding form and its admin-only Server Action.
 app/admin/reports/   A placeholder until clinic reporting is built.
 app/onboarding       Set up your clinic (Clerk's CreateOrganization), then the surgeon-or-staff question at /onboarding/kind.
@@ -562,15 +697,19 @@ app/pulse/clinics/   One clinic behind a row of pills (ClinicTabs.tsx): overview
 app/pulse/settings/  The AppSettings form.
 app/pulse/videos     The catalogue: every video in a table with filters, plus the Categories panel (CategoryConfigForm.tsx). new/ adds a video, [id]/ edits one; both use VideoForm.tsx.
 app/pulse/pricing    Pricing: the editor, the live calculator and the version history, all in PricingEditor.tsx. Saving and Make active go through actions.ts.
+app/pulse/billing    Billing diagnostics: what became of each notification from Stripe, and Try again (RetryButton.tsx). Never a key, a secret, an error message or a notification's contents.
 app/pulse/reports    Placeholder page until Reports is built.
 app/pulse/FormBits.tsx   Outcome and SaveButton, the two pieces every dashboard form ends with.
 app/sign-in          The staff sign-in page, Clerk's prebuilt <SignIn /> component.
 app/sign-up          The staff sign-up page, Clerk's prebuilt <SignUp /> component. A new account is sent on to /onboarding.
 proxy.ts             Clerk's middleware. Sends signed-out visitors of /admin, /library, /pulse and /onboarding to /sign-in.
-lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, getClinicPlan() for /admin/billing, the Pulse-side reads and writes, and updateClinicBranding() (both branding pages save through it). clinic-lock.ts holds readClinicLocked(), the row-locking read changeClinicWithLog() starts with. access.ts holds getClinicAccess() and canUseVideo(), the reads behind the access rule, and the two locking reads (lockClinicAccess, lockVideoFacts) createShare() uses inside its transaction. shares.ts holds every share-link query, including createShare() (the one guarded write, see Category entitlements) and the overview's summarizeSharesForClinic() and listRecentSharesForClinic(). settings.ts holds getSettings(), lockSettings() (the read a link being made uses, inside its transaction, with the settings lock held shared) and saveSettings() (which takes that lock exclusively). notes.ts holds the clinic log. videos.ts holds the clinic-side lists (listUsableVideos and listUsableVideosInCategory, filtered by the clinic's access in the query; countPublishedVideosByKind for the library states) and the Pulse-side catalogue (listVideosForPulse, createVideo, updateVideo). category-config.ts holds the per-category rows, comingSoonSentence(), getCategoryAvailability() and listSellableCategories(). pricing.ts holds the version store: listPricingVersions, createPricingVersion, activatePricingVersion, getActivePricing, getPricingForClinic.
+lib/db/              EVERY database query. Nothing else touches Prisma. clinics.ts holds the organization-to-clinic lookup, the first-use upsert, getClinicPlan() for /admin/billing, the Pulse-side reads and writes, and updateClinicBranding() (both branding pages save through it). clinic-lock.ts holds readClinicLocked(), the row-locking read changeClinicWithLog() starts with. access.ts holds getClinicAccess() and canUseVideo(), the reads behind the access rule, and the two locking reads (lockClinicAccess, lockVideoFacts) createShare() uses inside its transaction. shares.ts holds every share-link query, including createShare() (the one guarded write, see Category entitlements) and the overview's summarizeSharesForClinic() and listRecentSharesForClinic(). settings.ts holds getSettings(), lockSettings() (the read a link being made uses, inside its transaction, with the settings lock held shared) and saveSettings() (which takes that lock exclusively). notes.ts holds the clinic log. videos.ts holds the clinic-side lists (listUsableVideos and listUsableVideosInCategory, filtered by the clinic's access in the query; countPublishedVideosByKind for the library states) and the Pulse-side catalogue (listVideosForPulse, createVideo, updateVideo). category-config.ts holds the per-category rows, comingSoonSentence(), getCategoryAvailability() and listSellableCategories(). pricing.ts holds the version store: listPricingVersions, createPricingVersion, activatePricingVersion, getActivePricing, getPricingForClinic. billing.ts holds every billing query: setStripeCustomer(), recordAcceptedPlan(), receiveBillingEvent() and the other notification rows, and reconcileSubscription(), the one transaction that brings a clinic into line with Stripe. clinics.ts also holds setClinicStatusByStaff(), setClinicManagedByPulse() and setClinicPracticeType(), which work the status out again as they write.
 lib/access.ts        The access rule, pure: decideVideoAccess() (may this clinic use this video, and why not), categoryState() (coming soon, locked, nothing yet, available), accessRefusalMessage(). No database; lib/db/access.ts feeds it.
 lib/admin-nav.ts     The sections of the clinic admin area and activeAdminSection(), the rule for which one an address belongs to. Pure; AdminNav and the admin pull-out menu in AppShell both render from it.
 lib/pricing.ts       The pricing engine: the config type and its validator, quote(), the built-in defaults, and the dollar and percent reading and writing. Pure, no database, safe for the browser. Never a price literal anywhere else.
+lib/billing-state.ts The billing rules, pure and safe for the browser: effectiveAccess() (the state table), decideBilling() (what one look at Stripe means for a clinic's record), graceDeadline(), selfServeEligibility(), and the words for each status. No database, no Stripe.
+lib/billing-events.ts What happens to a verified notification: handleStripeEvent() and retryBillingEvent(). Server only.
+lib/stripe.ts        The only file that talks to Stripe. Server only. Test keys only. verifyWebhook(), eventRefs() (the two ids taken from a notification), fetchSubscriptionSnapshot().
 lib/pulse.ts         isPulseStaff() and requirePulseStaff(). The one gate for /pulse.
 lib/phone.ts         US phone numbers: normalizeUsPhone() to ten digits for storing, formatUsPhone() for showing, telHref() for a tap-to-call link.
 lib/branding.ts      The branding rules, pure and safe for the browser: the font list, the two modes (parseBrandTheme(), dark by default), parseBrandColor(), parseBrandFont(), parseLogoUrl() (https only), and staffTheme(color, mode) / patientTheme(), which turn one brand colour into shades that stay readable on a dark or a light ground. darkGroundVars() for the video player, which stays black. The Pulse look when nothing is set.
@@ -581,8 +720,8 @@ app/brand-look.ts    patientLook() and staffLook(): a clinic's stored branding t
 app/globals.css      The colour tokens: the brand accent's four values, and the staff screens' surfaces, borders and text as named values with a dark set (the default) and a light set (data-theme="light"). See "Light and dark staff screens".
 lib/organization.ts  renameClerkOrganization(). Writes a clinic's new name back to its Clerk organization.
 lib/video.ts         getPlaybackUrl(). The only place a video URL is built. describeVideoSource(), the "CDN" (later "Mux") word on /pulse/videos.
-lib/clinic.ts        getCurrentClinic() (creates the clinic on first use, syncs name and logo), getCurrentClinicId() for actions, requireClinicPage() for pages. The one place the signed-in user meets the database.
-lib/clinic-status.ts clinicIsOpen(status). The one place that decides whether a clinic may use the app.
+lib/clinic.ts        getCurrentClinic() (creates the clinic on first use, syncs name and logo), getCurrentClinicId() for actions, getBillingClinicId() for the billing actions only (admin, open or not), requireClinicPage() for pages. The one place the signed-in user meets the database.
+lib/clinic-status.ts clinicIsOpen(clinic): ACTIVE, or PAST_DUE before its grace deadline. The one place that decides whether a clinic may use the app.
 lib/roles.ts         The two Clerk roles, kind, isClinicAdmin(). See Roles.
 lib/people.ts        The people in a clinic, from Clerk: listPeople(), setPersonKind(). Never touches lib/db.
 lib/share-link.ts    watchLink() and qrFileName(). The only place a patient link is built.
@@ -611,6 +750,7 @@ vitest.fonts.ts      A stand-in for Next.js's font loader, which only exists ins
 - `lib/pricing.test.ts` is the price fixtures, pure, and carries the record of the pricing decision. `lib/db/pricing.test.ts` hits the real testing database, and because only one version can be active in the whole table, it remembers which one was active when it started and makes it active again at the end. `lib/db/pricing.defaults.test.ts` uses an in-memory stand-in for the empty-installation and damaged-active-version cases, for the same reason the settings test does.
 - Tests in `lib/db` never need Clerk. A gate or an action that reads the signed-in user (`lib/pulse.test.ts`, `app/pulse/actions.test.ts`, `app/admin/links/actions.test.ts`, `app/library/[category]/actions.test.ts`) replaces Clerk with `vi.mock("@clerk/nextjs/server")` and plays a staff member, an admin, a member or an ordinary user. A whole route can be rendered the same way (`app/admin/pages.test.tsx` renders the overview, Shared links and Billing, and `app/library/pages.test.tsx` the library home and a category page, with `renderToStaticMarkup`, Clerk's client pieces and `next/navigation` replaced), which proves what each kind of person is shown; clicking is still checked on the preview.
 - The access rule is tested four ways: `lib/access.test.ts` with plain values (every reason, the order of the checks, the four category states), `lib/db/access.test.ts` and `lib/db/shares.test.ts` against the database (two clinics with different plans asked about the same video, paused and pending clinics, unpublished and missing videos, placeholders hidden, and a link already issued outliving the plan change that refuses a new one), the action tests with a forged clinic id in the form and a form replayed after the plan changed, and `lib/db/shares.race.test.ts` for the forced overlap: it wraps the locking video read for one call so a plan removal, a pause, a placeholder-setting change or an unpublish is started after both rows are locked and before the insert, and checks that the change waited for the link to commit. Its control does the same with a plain read and shows the change getting through, which is what the locks prevent and proves the test would catch their removal. The shared test database holds published videos in most categories, so a test that needs "a category with nothing in it" works the expected state out from the real counts with the same rule the page uses rather than assuming.
+- Billing is tested without Stripe and without a real id, key or notification. `lib/billing-state.test.ts` is the state table row by row, plus every transition of `decideBilling()` (first payment, a failed first payment, a failed renewal, repeated failures, recovery only on a paid invoice, scheduled and final cancellation, an unrelated or old subscription, a second live one, a trial) and the grace boundaries. `lib/db/billing.test.ts` runs the whole processor against the database with an in-memory stand-in for "where does this subscription stand now": repeats, reversed delivery, several notifications at once, the same one three times at once, Stripe unreachable and then retried, a failure partway through rolling back what was already written, another customer's subscription, the old subscription's late cancellation, grace inside and past its deadline with `createShare()` allowed and refused, a staff pause surviving payments, a managed clinic untouched, and one clinic's news never touching another. `lib/stripe.test.ts` and `app/api/webhooks/stripe/route.test.ts` use Stripe's own signing arithmetic with a made-up secret: a valid signature, a wrong secret, a changed body, the same JSON re-spaced, a replay older than the tolerance, and that nothing is handed on before the check passes. The action tests cover the staff gate, the forged clinic id, the asked-once practice question (two admins at once included) and the "still being charged" words. A local run against real Stripe test mode with the Stripe CLI is a separate check that needs a test key.
 - The expiry rule is tested twice: `lib/expiry.test.ts` with plain values, and `lib/db/shares.expiry.test.ts` against the database, with a clock handed in for every call (legacy links written without the new columns stay as issued; first, second and three simultaneous plays; a play just before the unclaimed deadline, at it, and after it; a clinic's number changed after a link was made; unpublished, cancelled and missing links). `app/watch/[code]/actions.test.ts` covers the patient action, including a server failure answered with `recorded: false`. The testing branch's settings row may hold any numbers, so those tests read `getSettings()` and check the link against whatever it holds rather than assuming 90 and 7. The limits are tested at every layer: the pure rule at 0, 1, 365 and 366 (and non-numbers), `createShare()` with a clinic number of exactly a year and one past it (refused, nothing written), the settings and override actions at the same edges (with `saveSettings` a stand-in, since the row is shared), and the links page drawing its "cannot be made" words instead of failing. The settings lock has its own forced overlap in `lib/db/shares.race.test.ts`: a save started after the settings were read and before the insert has to wait for the link, and its control with a plain read shows the save getting through and the link written with numbers already replaced; those tests put the shared settings row back exactly as they found it (saved again, or removed if they created it).
 - **What a test suite for a change covers:** the permission boundary (signed out, member, admin, another clinic, Pulse staff, whichever apply), tenant isolation (one clinic cannot read or change another's rows), invalid input, the failure path, a forced overlap where two writes can race, and the behavior that existed before the change.
 - After any schema migration, apply it to the `testing` branch with `migrate deploy` (step 2 of "How a schema change ships", under rule 3) before running the tests. Never reset the testing branch to catch it up: a reset copies production's rows into it and throws away whatever the tests had there. If Evan wants a reset, he does it himself.

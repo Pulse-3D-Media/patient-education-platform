@@ -1,11 +1,11 @@
 "use client";
 
-import type { Category, ClinicStatus } from "@prisma/client";
+import type { Category, PracticeType, StaffAccess } from "@prisma/client";
 import { useActionState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
-import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setStatusAction } from "../../actions";
+import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
 import { Outcome, SaveButton } from "../../FormBits";
 
 /**
@@ -19,13 +19,15 @@ import { Outcome, SaveButton } from "../../FormBits";
  * not someone else's clinic.
  */
 
-const STATUS_CHOICES: { value: ClinicStatus; label: string; hint: string }[] = [
-  { value: "ACTIVE", label: "Active", hint: "Library and share links on." },
-  { value: "PAUSED", label: "Paused", hint: "Off for now. People and settings kept." },
-  { value: "CANCELED", label: "Canceled", hint: "The plan has ended." },
+/** What the Status form can send. The first three are hand settings, which win over billing; FOLLOW removes the hand setting. */
+const STATUS_CHOICES: { value: StaffAccess | "FOLLOW"; label: string; hint: string }[] = [
+  { value: "OPEN", label: "Open", hint: "On, whatever billing says." },
+  { value: "PAUSED", label: "Paused", hint: "Off for now, whatever billing says." },
+  { value: "CANCELED", label: "Canceled", hint: "Ended, whatever billing says." },
+  { value: "FOLLOW", label: "Follow billing", hint: "No hand setting: card payments decide." },
 ];
 
-export function StatusForm({ clinicId, status }: { clinicId: string; status: ClinicStatus }) {
+export function StatusForm({ clinicId, staffAccess }: { clinicId: string; staffAccess: StaffAccess | null }) {
   const [state, action, pending] = useActionState(setStatusAction, null);
   return (
     <form action={action} className="flex flex-col gap-4">
@@ -38,7 +40,13 @@ export function StatusForm({ clinicId, status }: { clinicId: string; status: Cli
               key={choice.value}
               className="flex h-12 cursor-pointer items-center gap-2 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15"
             >
-              <input type="radio" name="status" value={choice.value} defaultChecked={status === choice.value} className="accent-[#2a829b]" />
+              <input
+                type="radio"
+                name="status"
+                value={choice.value}
+                defaultChecked={(staffAccess ?? "FOLLOW") === choice.value}
+                className="accent-[#2a829b]"
+              />
               <span className="text-[15px] font-medium">{choice.label}</span>
               <span className="hidden text-sm text-[#667085] sm:inline">{choice.hint}</span>
             </label>
@@ -53,6 +61,44 @@ export function StatusForm({ clinicId, status }: { clinicId: string; status: Cli
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} label="Set status" />
+        <Outcome state={state} />
+      </div>
+      <p className="text-sm text-[#bfbfbf]">
+        Pausing or cancelling here closes the clinic in this app only. It does not cancel a card subscription in Stripe: a clinic that pays by card
+        keeps being charged until its subscription is cancelled in Stripe.
+      </p>
+    </form>
+  );
+}
+
+const PRACTICE_CHOICES: { value: PracticeType; label: string; hint: string }[] = [
+  { value: "UNKNOWN", label: "Not answered", hint: "Cannot check out until it is." },
+  { value: "CLINIC", label: "Clinic or practice", hint: "May pay by card." },
+  { value: "HOSPITAL", label: "Hospital or health system", hint: "Always Enterprise, set up by Pulse." },
+];
+
+export function PracticeTypeForm({ clinicId, practiceType }: { clinicId: string; practiceType: PracticeType }) {
+  const [state, action, pending] = useActionState(setPracticeTypeAction, null);
+  return (
+    <form action={action} className="flex flex-col gap-4">
+      <input type="hidden" name="clinicId" value={clinicId} />
+      <fieldset>
+        <legend className={LABEL}>What kind of practice this is</legend>
+        <div className="flex flex-wrap gap-2">
+          {PRACTICE_CHOICES.map((choice) => (
+            <label
+              key={choice.value}
+              className="flex h-12 cursor-pointer items-center gap-2 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15"
+            >
+              <input type="radio" name="practiceType" value={choice.value} defaultChecked={practiceType === choice.value} className="accent-[#2a829b]" />
+              <span className="text-[15px] font-medium">{choice.label}</span>
+              <span className="hidden text-sm text-[#667085] sm:inline">{choice.hint}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div className="flex flex-wrap items-center gap-3">
+        <SaveButton pending={pending} />
         <Outcome state={state} />
       </div>
     </form>
@@ -123,7 +169,9 @@ export function ManagedForm({ clinicId, managedByPulse }: { clinicId: string; ma
         <span>
           <span className="block text-[15px] font-medium">Managed by Pulse</span>
           <span className="block text-sm text-[#bfbfbf]">
-            For enterprise and comped clinics. Pulse sets the plan and status by hand, and the clinic never sees billing screens.
+            For enterprise and comped clinics. Pulse sets the plan and status by hand, billing news never changes either, and the clinic never
+            sees billing controls. Turning this on does not cancel a card subscription in Stripe: if the clinic pays by card, cancel that in
+            Stripe too, or it keeps being charged.
           </span>
         </span>
       </label>

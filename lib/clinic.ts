@@ -4,8 +4,8 @@ import { cache } from "react";
 import { readBranding, type Branding } from "./branding";
 import { clinicIsOpen } from "./clinic-status";
 import { getClinicByClerkOrgId, upsertClinicForClerkOrg } from "./db/clinics";
-import { ADMIN_ROLE, kindFromMetadata, type Kind } from "./roles";
-import type { ClinicStatus } from "@prisma/client";
+import { ADMIN_ROLE, isClinicAdmin, kindFromMetadata, type Kind } from "./roles";
+import type { ClinicStatus, PracticeType } from "@prisma/client";
 
 /**
  * Which clinic is using the app right now, and who in it.
@@ -21,6 +21,10 @@ export type CurrentClinic = {
   id: string;
   name: string;
   status: ClinicStatus;
+  /** When a PAST_DUE clinic's grace period ends; null otherwise. Read by clinicIsOpen(). */
+  graceEndsAt: Date | null;
+  /** What kind of practice this is, for billing. UNKNOWN until the clinic's admin answers on /admin/billing. */
+  practiceType: PracticeType;
   logoUrl: string | null;
   /** A line Pulse staff want shown at the top of this clinic's admin console, or null. */
   noticeText: string | null;
@@ -80,6 +84,8 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     id: clinic.id,
     name: clinic.name,
     status: clinic.status,
+    graceEndsAt: clinic.graceEndsAt,
+    practiceType: clinic.practiceType,
     logoUrl: clinic.logoUrl,
     noticeText: clinic.noticeText,
     showPlaceholders: clinic.showPlaceholders,
@@ -107,8 +113,27 @@ export async function getCurrentClinicId(): Promise<string | null> {
   if (!orgId) return null;
 
   const clinic = (await getClinicByClerkOrgId(orgId)) ?? (await getCurrentClinic());
-  if (!clinic || !clinicIsOpen(clinic.status)) return null;
+  if (!clinic || !clinicIsOpen(clinic)) return null;
   return clinic.id;
+}
+
+/**
+ * The id of the current clinic for a BILLING action, which has to work for
+ * a clinic that is not open: Billing is the page a closed clinic's admin
+ * comes to in order to fix things. So this checks that the person is an
+ * office admin and deliberately does NOT check clinicIsOpen(). Nothing but
+ * the actions under app/admin/billing may use it; everything else uses
+ * getCurrentClinicId() above, which stays as strict as it was.
+ *
+ * Null means: signed out, no active organization, or not an admin.
+ */
+export async function getBillingClinicId(): Promise<string | null> {
+  const { orgId } = await auth();
+  if (!orgId) return null;
+  if (!(await isClinicAdmin())) return null;
+
+  const clinic = (await getClinicByClerkOrgId(orgId)) ?? (await getCurrentClinic());
+  return clinic?.id ?? null;
 }
 
 /**

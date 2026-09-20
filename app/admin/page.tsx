@@ -43,7 +43,7 @@ export default async function AdminOverviewPage() {
     );
   }
 
-  if (!clinicIsOpen(clinic.status)) {
+  if (!clinicIsOpen(clinic)) {
     return (
       <AdminFrame clinic={clinic} title="Overview">
         <Notice text={clinic.noticeText} />

@@ -42,7 +42,7 @@ export default async function PeoplePage() {
 
   // A clinic that is not open: the frame and its navigation stay, so Billing
   // is one tap away, but there is nothing to manage here until it opens.
-  if (!clinicIsOpen(clinic.status)) {
+  if (!clinicIsOpen(clinic)) {
     return (
       <AdminFrame clinic={clinic} title="People">
         <div className="mt-6">

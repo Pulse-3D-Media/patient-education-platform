@@ -1,10 +1,13 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { allFontClasses } from "@/app/brand-look";
 import { BrandingForm } from "@/components/ui/BrandingForm";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
+import { BILLING_STATUS_WORDS, STAFF_ACCESS_WORDS, hasLiveSubscription } from "@/lib/billing-state";
 import { parseLogoUrl, readBranding } from "@/lib/branding";
 import { CATEGORIES } from "@/lib/categories";
+import { getClinicBilling } from "@/lib/db/billing";
 import { getCategoryAvailability } from "@/lib/db/category-config";
 import { getClinicForPulse } from "@/lib/db/clinics";
 import { listNotesForClinic } from "@/lib/db/notes";
@@ -13,11 +16,12 @@ import { listSharesForClinic } from "@/lib/db/shares";
 import { shareExpiryState } from "@/lib/expiry";
 import { listPeople, type Person } from "@/lib/people";
 import { formatUsPhone } from "@/lib/phone";
+import { formatCents } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 import { saveBrandingAction } from "../../actions";
 import { Section, StatusBadge, formatDate, formatDateTime } from "../../ui";
 import { ClinicTabs } from "./ClinicTabs";
-import { DetailsForm, ManagedForm, NoteForm, PlanForm, StatusForm } from "./forms";
+import { DetailsForm, ManagedForm, NoteForm, PlanForm, PracticeTypeForm, StatusForm } from "./forms";
 
 /**
  * One clinic, everything Pulse staff can see and change about it, in seven
@@ -43,12 +47,13 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   const clinic = await getClinicForPulse(id);
   if (!clinic) notFound();
 
-  const [settings, shares, notes, people, availability] = await Promise.all([
+  const [settings, shares, notes, people, availability, billing] = await Promise.all([
     getSettings(),
     listSharesForClinic(clinic.id),
     listNotesForClinic(clinic.id),
     clinic.clerkOrgId ? listPeople(clinic.clerkOrgId).catch(() => null) : Promise.resolve(null),
     getCategoryAvailability(),
+    getClinicBilling(clinic.id),
   ]);
   const now = new Date();
   const surgeons = people?.filter((person) => person.kind === "surgeon").length;
@@ -62,14 +67,57 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
             ? `Last changed by ${clinic.statusChangedBy ?? "unknown"} on ${formatDateTime(clinic.statusChangedAt)}${
                 clinic.statusReason ? `: ${clinic.statusReason}` : ""
               }`
-            : "Never changed by hand. New clinics start pending until a plan is chosen or set here."
+            : "Never changed. New clinics start pending until they are opened here or pay by card."
         }
       >
-        <StatusForm clinicId={clinic.id} status={clinic.status} />
+        <p className="mb-4 text-[15px] text-[#bfbfbf]">
+          {clinic.staffAccess
+            ? `Set by hand to ${STAFF_ACCESS_WORDS[clinic.staffAccess]}. That wins over billing until it is changed here.`
+            : clinic.managedByPulse
+              ? "Nothing is set by hand, and this clinic is managed by Pulse, so it stays pending until it is opened here."
+              : "Nothing is set by hand, so this clinic's status follows its card payments."}
+          {clinic.status === "PAST_DUE" && clinic.graceEndsAt ? ` Its grace period ends ${formatDateTime(clinic.graceEndsAt)}.` : ""}
+        </p>
+        <StatusForm clinicId={clinic.id} staffAccess={clinic.staffAccess} />
       </Section>
 
       <Section title="Managed by Pulse">
         <ManagedForm clinicId={clinic.id} managedByPulse={clinic.managedByPulse} />
+      </Section>
+
+      <Section
+        title="Card billing"
+        blurb="What Stripe says about this clinic's subscription. Read-only: it is kept up to date from Stripe's notifications, whatever is set by hand above. Test mode only."
+      >
+        {billing ? (
+          <dl className="grid gap-x-8 gap-y-3 text-[15px] sm:grid-cols-2">
+            <Fact label="Subscription">{BILLING_STATUS_WORDS[billing.status]}</Fact>
+            <Fact label="Stripe customer">{billing.stripeCustomerId ?? "None"}</Fact>
+            <Fact label="Stripe subscription">{billing.stripeSubscriptionId ?? "None"}</Fact>
+            <Fact label="Paid through">{billing.currentPeriodEnd ? formatDate(billing.currentPeriodEnd) : "Not known"}</Fact>
+            {billing.cancelAt && <Fact label="Cancellation scheduled for">{formatDateTime(billing.cancelAt)}</Fact>}
+            {billing.paymentFailedAt && <Fact label="Payment failure first recorded">{formatDateTime(billing.paymentFailedAt)}</Fact>}
+            {billing.graceEndsAt && <Fact label="Grace period ends">{formatDateTime(billing.graceEndsAt)}</Fact>}
+            <Fact label="Plan in force">{planWords(billing.currentPlan)}</Fact>
+            {billing.pendingPlan && <Fact label="Plan waiting for a first payment">{planWords(billing.pendingPlan)}</Fact>}
+            <Fact label="Last checked against Stripe">{billing.lastReconciledAt ? formatDateTime(billing.lastReconciledAt) : "Never"}</Fact>
+          </dl>
+        ) : (
+          <p className="text-[15px] text-[#bfbfbf]">This clinic has never started a card checkout, so there is nothing in Stripe for it.</p>
+        )}
+        {billing && hasLiveSubscription(billing.status) && (clinic.managedByPulse || clinic.staffAccess === "PAUSED" || clinic.staffAccess === "CANCELED") && (
+          <p className="mt-4 rounded-lg border border-[#f3b94d]/40 bg-[#f3b94d]/10 px-4 py-3 text-[15px] text-[#f3b94d]">
+            This clinic is closed or managed by hand, but its card subscription is still live in Stripe and keeps being charged until it is cancelled
+            there.
+          </p>
+        )}
+      </Section>
+
+      <Section
+        title="Practice type"
+        blurb="A hospital or health system is always Enterprise and is never offered card checkout. A clinic that has not answered cannot check out until it does. The clinic's admin is asked once on their Billing page; change it here if they chose wrongly."
+      >
+        <PracticeTypeForm clinicId={clinic.id} practiceType={clinic.practiceType} />
       </Section>
     </>
   );
@@ -293,4 +341,23 @@ function PeopleTable({ people }: { people: Person[] }) {
 /** "KNEE" becomes "Knee". */
 function categoryLabel(value: string) {
   return CATEGORIES.find((c) => c.value === value)?.label ?? value;
+}
+
+/** One labelled fact in the Card billing section. */
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <dt className="text-sm text-[#667085]">{label}</dt>
+      <dd className="mt-0.5 break-all">{children}</dd>
+    </div>
+  );
+}
+
+/** One accepted plan in a line: what, how many seats, how much, who accepted it. */
+function planWords(plan: NonNullable<Awaited<ReturnType<typeof getClinicBilling>>>["currentPlan"]) {
+  if (!plan) return "None";
+  const categories = plan.entitledCategories.map(categoryLabel).join(", ");
+  const seats = `${plan.surgeonSeats} ${plan.surgeonSeats === 1 ? "seat" : "seats"}`;
+  const per = plan.interval === "YEAR" ? "year" : "month";
+  return `${categories}; ${seats}; ${formatCents(plan.totalCents)} a ${per}; prices version ${plan.pricingVersion.version}; accepted by ${plan.acceptedByName} on ${formatDate(plan.createdAt)}`;
 }

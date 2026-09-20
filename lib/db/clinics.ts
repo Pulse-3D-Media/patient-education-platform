@@ -4,9 +4,11 @@ import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, brandFontLabel, brandThemeLabe
 import { CATEGORIES } from "../categories";
 import { clinicIsOpen } from "../clinic-status";
 import { formatUsPhone } from "../phone";
+import { checkSeatReduction, overAllocatedWords, seatSummary } from "../seats";
 import { readBillingFacts } from "./billing";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
+import { countSeatsInUseIn } from "./seats";
 
 /**
  * Queries for the Clinic table.
@@ -408,16 +410,54 @@ function sameCategories(a: Category[], b: Category[]) {
 }
 
 /**
+ * Thrown when a plan would be lowered below the surgeon seats in use and the
+ * staff member did not say, in as many words, that they mean it. The message
+ * is a plain sentence, safe to show to Pulse staff.
+ */
+export class PlanSeatsRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PlanSeatsRefusedError";
+  }
+}
+
+/**
  * Set the categories on a clinic's plan and how many surgeon seats it pays
  * for, and log what changed under the name given. Used by /pulse and by npm
  * run db:set-plan. Duplicate categories are dropped and the rest kept in
  * the order given. Throws if the clinic does not exist.
+ *
+ * LOWERING THE SEATS BELOW THE NUMBER IN USE is refused with a
+ * PlanSeatsRefusedError unless `allowFewerSeatsThanInUse` is set, which the
+ * form only sends when the staff member ticked the box that says so. The
+ * count is read here, under the clinic's lock, so a seat being given at the
+ * same moment is either counted or has to wait. When it is allowed, nobody
+ * is relabelled, no seat is taken away and no charge is changed: the clinic
+ * is simply over its plan, the log says by how much, and nobody new can be
+ * given a seat until that is settled (lib/seats.ts).
  */
-export async function setClinicPlan(clinicId: string, categories: Category[], surgeonSeats: number, changedBy: string) {
+export async function setClinicPlan(
+  clinicId: string,
+  categories: Category[],
+  surgeonSeats: number,
+  changedBy: string,
+  options: { allowFewerSeatsThanInUse?: boolean } = {},
+) {
   const wanted = Array.from(new Set(categories));
+  let over: string | null = null;
   return changeClinicWithLog(
     clinicId,
-    { categories: wanted, surgeonSeats },
+    async (before, tx) => {
+      const inUse = await countSeatsInUseIn(tx, clinicId);
+      const lowering = surgeonSeats < before.surgeonSeats;
+      if (lowering && !checkSeatReduction(inUse, surgeonSeats).ok && !options.allowFewerSeatsThanInUse) {
+        throw new PlanSeatsRefusedError(
+          `${inUse} ${inUse === 1 ? "person holds" : "people hold"} a surgeon seat at this clinic, so ${surgeonSeats} ${surgeonSeats === 1 ? "seat" : "seats"} would leave it ${inUse - surgeonSeats} over. Nothing was saved. To save it anyway, tick "Allow fewer seats than are in use": nobody is relabelled and no charge is changed, but nobody new can be given a seat until it is settled.`,
+        );
+      }
+      over = overAllocatedWords(seatSummary(surgeonSeats, inUse));
+      return { categories: wanted, surgeonSeats };
+    },
     (before) => {
       const parts: string[] = [];
       if (!sameCategories(before.categories, wanted)) {
@@ -426,7 +466,10 @@ export async function setClinicPlan(clinicId: string, categories: Category[], su
       if (before.surgeonSeats !== surgeonSeats) {
         parts.push(`surgeon seats set to ${surgeonSeats} (was ${before.surgeonSeats})`);
       }
-      return parts.length > 0 ? `Plan changed: ${parts.join("; ")}.` : null;
+      if (parts.length === 0) return null;
+      // Said only when the seats changed: an over-the-plan clinic whose categories are edited does not need telling again.
+      const overWords = before.surgeonSeats !== surgeonSeats && over ? ` ${over}` : "";
+      return `Plan changed: ${parts.join("; ")}.${overWords}`;
     },
     changedBy,
   );

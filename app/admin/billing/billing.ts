@@ -1,6 +1,7 @@
 import type { Category } from "@prisma/client";
 import { getClinicPlan, type ClinicPlan } from "@/lib/db/clinics";
 import { getPricingForClinic } from "@/lib/db/pricing";
+import { getSeatSummary } from "@/lib/db/seats";
 import { quote, type Band } from "@/lib/pricing";
 
 /**
@@ -34,6 +35,8 @@ export type BillingView = {
   plan: ClinicPlan;
   /** True when the plan has at least one category and one surgeon seat. */
   hasPlan: boolean;
+  /** How many people hold a surgeon seat right now, or null when that could not be read. The page still shows the plan without it. */
+  seatsInUse: number | null;
   /** Null when there is no plan to estimate, or when the estimate could not be worked out (see `problem`). */
   estimate: PlanEstimate | null;
   /** Why there is no estimate for a clinic that does have a plan, in plain words. Null when there is one, or no plan. */
@@ -52,7 +55,16 @@ export async function getBillingView(clinicId: string): Promise<BillingView | nu
   if (!plan) return null;
 
   const hasPlan = plan.categories.length > 0 && plan.surgeonSeats > 0;
-  if (!hasPlan) return { plan, hasPlan, estimate: null, problem: null };
+  // A secondary thing on the page, like the estimate: if it cannot be read
+  // (a preview whose database is behind on migrations, say) the plan still shows.
+  const seatsInUse = await getSeatSummary(clinicId).then(
+    (summary) => summary?.inUse ?? null,
+    (error) => {
+      console.error(`Billing seats for clinic ${clinicId}: ${error instanceof Error ? error.name : "unknown error"}`);
+      return null;
+    },
+  );
+  if (!hasPlan) return { plan, hasPlan, seatsInUse, estimate: null, problem: null };
 
   // The estimate is the secondary thing on the page: the plan still shows
   // when the prices cannot be read. A PricingError (a damaged version, a
@@ -65,7 +77,7 @@ export async function getBillingView(clinicId: string): Promise<BillingView | nu
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error(`Billing estimate for clinic ${clinicId}: ${detail}`);
-    return { plan, hasPlan, estimate: null, problem: "We could not work out an estimate right now. Your plan is unchanged." };
+    return { plan, hasPlan, seatsInUse, estimate: null, problem: "We could not work out an estimate right now. Your plan is unchanged." };
   }
 
   // The clinic's own categories are what it may be quoted for here: this is
@@ -91,16 +103,17 @@ export async function getBillingView(clinicId: string): Promise<BillingView | nu
   const cannotQuote = "We could not work out an estimate for this plan. Your plan is unchanged.";
   if (!monthly.ok) {
     console.error(`Billing estimate for clinic ${clinicId}: ${monthly.error}`);
-    return { plan, hasPlan, estimate: null, problem: cannotQuote };
+    return { plan, hasPlan, seatsInUse, estimate: null, problem: cannotQuote };
   }
   if (!yearly.ok) {
     console.error(`Billing estimate for clinic ${clinicId}: ${yearly.error}`);
-    return { plan, hasPlan, estimate: null, problem: cannotQuote };
+    return { plan, hasPlan, seatsInUse, estimate: null, problem: cannotQuote };
   }
 
   return {
     plan,
     hasPlan,
+    seatsInUse,
     problem: null,
     estimate: {
       band: monthly.quote.band,

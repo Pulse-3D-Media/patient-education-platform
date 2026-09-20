@@ -12,11 +12,14 @@ import { StatusBadge, formatDate, statusLabel } from "./ui";
  * status through the form at the top (a plain GET form, so the address bar
  * carries the search and a page reload keeps it).
  *
- * "Seats" reads "in use / paid": how many people the clinic has marked as
- * surgeons in Clerk, over the seats on its plan. The in-use number comes
- * from Clerk one clinic at a time; with the handful of clinics we have that
- * is quick, and a clinic Clerk cannot answer for shows a dash rather than
- * breaking the page.
+ * "Surgeons / seats paid": how many people the clinic has marked as surgeons
+ * in Clerk, over the seats on its plan. That is the number of people
+ * LABELLED surgeon, which includes anyone waiting for a seat, so a row
+ * reading 4 / 3 is a clinic with a gap to settle. Who actually HOLDS a seat
+ * is on the clinic's own page, People tab (see lib/seats.ts). The number
+ * comes from Clerk one clinic at a time; with the handful of clinics we have
+ * that is quick, and a clinic Clerk cannot answer for shows a dash rather
+ * than breaking the page.
  *
  * Staff only. Rendered fresh on every request.
  */
@@ -96,7 +99,7 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Managed</th>
                   <th className="px-4 py-3 text-right font-medium">Categories</th>
-                  <th className="px-4 py-3 text-right font-medium">Seats in use / paid</th>
+                  <th className="px-4 py-3 text-right font-medium">Surgeons / seats paid</th>
                   <th className="px-4 py-3 text-right font-medium">Links, 30 days</th>
                   <th className="px-4 py-3 font-medium">Last link</th>
                   <th className="px-4 py-3 font-medium">Created</th>

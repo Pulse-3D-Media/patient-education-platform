@@ -16,6 +16,7 @@ import {
 import { prisma } from "./client";
 import { setClinicManagedByPulse, setClinicStatusByStaff } from "./clinics";
 import { createPricingVersion } from "./pricing";
+import { confirmSeat, listSeatRows, reserveSeat } from "./seats";
 import { getSettings } from "./settings";
 import { ShareRefusedError, createShare } from "./shares";
 
@@ -565,6 +566,36 @@ describe("what staff set by hand wins over billing", () => {
     const clinic = await clinicRow(f.clinicId);
     expect(clinic).toMatchObject({ status: "ACTIVE", staffAccess: null });
     expect((await billingNotes(f.clinicId))[0].body).toContain("opened by hand");
+  });
+
+  it("a plan that takes effect with fewer seats than are in use is applied, says so in the log, and relabels nobody", async () => {
+    // Opened by hand with five seats. The plan (three seats) is accepted while
+    // three are in use, which is allowed; two more people are seated before
+    // the payment lands.
+    const f = await makeCheckoutClinic("over at activation");
+    await prisma.clinic.update({ where: { id: f.clinicId }, data: { surgeonSeats: 5 } });
+    const surgeons = ["user_vitestoverA", "user_vitestoverB", "user_vitestoverC", "user_vitestoverD", "user_vitestoverE"];
+    for (const who of surgeons) {
+      await reserveSeat(f.clinicId, who);
+      await confirmSeat(f.clinicId, who);
+    }
+
+    await activate(f);
+
+    expect(await clinicRow(f.clinicId)).toMatchObject({ status: "ACTIVE", surgeonSeats: 3 }); // they paid, so the plan is applied
+    expect(await listSeatRows(f.clinicId)).toHaveLength(5); // nobody's seat was taken away
+    const note = (await billingNotes(f.clinicId)).at(-1)?.body ?? "";
+    expect(note).toContain("Plan started: 2 categories, 3 seats.");
+    expect(note).toContain("5 people hold a surgeon seat, 2 more than the 3 the plan now pays for. Nobody was relabelled and no charge was changed");
+
+    // And nobody new can be given a seat until that is settled.
+    expect(await reserveSeat(f.clinicId, "user_vitestoverF")).toMatchObject({ held: false, summary: { overBy: 2 } });
+  });
+
+  it("a plan that covers everyone says nothing about seats", async () => {
+    const f = await makeCheckoutClinic("covered at activation");
+    await activate(f);
+    expect((await billingNotes(f.clinicId)).at(-1)?.body).not.toContain("hold a surgeon seat");
   });
 
   it("a Pulse-managed clinic keeps the plan and access staff gave it; billing news is still recorded and logged", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import type { Category, PracticeType, StaffAccess } from "@prisma/client";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
@@ -109,15 +109,25 @@ export function PlanForm({
   clinicId,
   categories,
   surgeonSeats,
+  seatsInUse,
   availability,
 }: {
   clinicId: string;
   categories: Category[];
   surgeonSeats: number;
+  /** How many people hold a surgeon seat right now. Lowering the seats below this needs the override box. */
+  seatsInUse: number;
   /** Which categories can be bought right now. The others get a small label; they can still be ticked. */
   availability: Record<Category, CategoryAvailability>;
 }) {
   const [state, action, pending] = useActionState(setPlanAction, null);
+  // What is typed is kept here, not in the page, so a save that is refused
+  // (fewer seats than are in use) leaves the draft exactly as it was.
+  const [picked, setPicked] = useState<Category[]>(categories);
+  const [seatsText, setSeatsText] = useState(String(surgeonSeats));
+  const [allowFewer, setAllowFewer] = useState(false);
+  const wanted = /^\d+$/.test(seatsText.trim()) ? Number(seatsText.trim()) : null;
+  const wouldBeOver = wanted !== null && wanted < seatsInUse && wanted < surgeonSeats;
   return (
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
@@ -135,7 +145,10 @@ export function PlanForm({
                   type="checkbox"
                   name="categories"
                   value={category.value}
-                  defaultChecked={categories.includes(category.value)}
+                  checked={picked.includes(category.value)}
+                  onChange={(event) =>
+                    setPicked((now) => (event.target.checked ? [...now, category.value] : now.filter((value) => value !== category.value)))
+                  }
                   className="h-5 w-5 accent-[#2a829b]"
                 />
                 <span className="text-[15px]">{category.label}</span>
@@ -149,8 +162,40 @@ export function PlanForm({
         <label htmlFor="surgeonSeats" className={LABEL}>
           Surgeon seats paid for
         </label>
-        <input id="surgeonSeats" name="surgeonSeats" type="number" min={0} step={1} defaultValue={surgeonSeats} className={INPUT} />
+        <input
+          id="surgeonSeats"
+          name="surgeonSeats"
+          type="number"
+          min={0}
+          step={1}
+          value={seatsText}
+          onChange={(event) => setSeatsText(event.target.value)}
+          aria-describedby="surgeonSeats-help"
+          className={INPUT}
+        />
+        <p id="surgeonSeats-help" className="mt-1 text-sm text-[#bfbfbf]">
+          {seatsInUse} of {surgeonSeats} in use right now.
+        </p>
       </div>
+      {wouldBeOver && (
+        <label className="flex min-h-12 max-w-2xl cursor-pointer items-start gap-3 rounded-lg border border-[#f3b94d]/40 bg-[#f3b94d]/10 p-3">
+          <input
+            type="checkbox"
+            name="allowFewerSeats"
+            checked={allowFewer}
+            onChange={(event) => setAllowFewer(event.target.checked)}
+            className="mt-1 h-5 w-5 accent-[#f3b94d]"
+          />
+          <span>
+            <span className="block text-[15px] font-medium text-[#f3b94d]">Allow fewer seats than are in use</span>
+            <span className="block text-sm text-[#bfbfbf]">
+              {seatsInUse} {seatsInUse === 1 ? "person holds" : "people hold"} a surgeon seat, so {wanted} would leave this clinic {seatsInUse - (wanted ?? 0)} over.
+              Nobody is relabelled, no seat is taken away and no charge is changed. The clinic sees the gap on its People page, and nobody new can be given
+              a seat until a surgeon is marked as staff or a seat is added. It goes in the log under your name.
+            </span>
+          </span>
+        </label>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} label="Save plan" />
         <Outcome state={state} />

@@ -5,6 +5,7 @@ import { BillingRefusedError, acceptPlanForCheckout, getCheckoutFacts, setStripe
 import { prisma } from "./client";
 import { setClinicManagedByPulse, setClinicPracticeType, setClinicStatusByStaff } from "./clinics";
 import { createPricingVersion } from "./pricing";
+import { confirmSeat, reserveSeat } from "./seats";
 
 /**
  * acceptPlanForCheckout against the real test database: the write that
@@ -164,6 +165,33 @@ describe("acceptPlanForCheckout", () => {
     await expect(acceptPlanForCheckout(clinicId, planInput({ perSeatCents: 89.5, totalCents: 268.5 }))).rejects.toBeInstanceOf(BillingRefusedError);
     await expect(acceptPlanForCheckout(clinicId, planInput({ surgeonSeats: 0, totalCents: 0 }))).rejects.toBeInstanceOf(BillingRefusedError);
     expect(await countPlans(clinicId)).toBe(0);
+  });
+
+  it("refuses a plan with fewer surgeon seats than people hold right now, and says what to do", async () => {
+    // A clinic Pulse opened by hand with five seats, three of them in use, now choosing a plan by card.
+    const clinicId = await makeClinic("fewer seats");
+    await prisma.clinic.update({ where: { id: clinicId }, data: { surgeonSeats: 5 } });
+    for (const who of ["user_vitestseatA", "user_vitestseatB", "user_vitestseatC"]) {
+      await reserveSeat(clinicId, who);
+      await confirmSeat(clinicId, who);
+    }
+
+    const refused = acceptPlanForCheckout(clinicId, planInput({ surgeonSeats: 2, totalCents: 17800 }));
+    await expect(refused).rejects.toBeInstanceOf(BillingRefusedError);
+    await expect(refused).rejects.toThrow("3 people hold a surgeon seat, so the plan needs at least 3 seats");
+    expect(await countPlans(clinicId)).toBe(0);
+
+    // Exactly as many seats as are in use is fine.
+    expect(await acceptPlanForCheckout(clinicId, planInput({ surgeonSeats: 3 }))).toMatchObject({ reused: false });
+  });
+
+  it("another clinic's surgeons do not count against this one", async () => {
+    const busy = await makeClinic("busy neighbour");
+    await prisma.clinic.update({ where: { id: busy }, data: { surgeonSeats: 5 } });
+    await reserveSeat(busy, "user_vitestseatD");
+
+    const mine = await makeClinic("quiet");
+    expect(await acceptPlanForCheckout(mine, planInput({ surgeonSeats: 1, totalCents: 8900 }))).toMatchObject({ reused: false });
   });
 
   it("one clinic's attempt is never found for another", async () => {

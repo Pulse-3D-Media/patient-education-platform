@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "./client";
 import {
+  PlanSeatsRefusedError,
   getClinicByClerkOrgId,
   linkClinicToClerkOrg,
   setClinicPlan,
@@ -10,6 +11,7 @@ import {
   upsertClinicForClerkOrg,
 } from "./clinics";
 import { listNotesForClinic } from "./notes";
+import { confirmSeat, listSeatRows, reserveSeat } from "./seats";
 import { createShare, getShareByCode, getShareForClinic, listSharesForClinic } from "./shares";
 
 /**
@@ -173,6 +175,59 @@ describe("setClinicPlan", () => {
     const { clinic: planned } = await setClinicPlan(clinic.id, [], 0, "Evan Miller");
     expect(planned.categories).toEqual([]);
     expect(planned.surgeonSeats).toBe(0);
+  });
+
+  /** A clinic with this many seats, and this many of them held (by made-up people). */
+  async function makeSeatedClinic(surgeonSeats: number, held: number) {
+    const clinic = await prisma.clinic.create({ data: { name: "Vitest seated plan clinic", status: "ACTIVE", surgeonSeats }, select: { id: true } });
+    createdClinicIds.push(clinic.id);
+    for (let index = 0; index < held; index += 1) {
+      const who = `user_vitestplan${randomBytes(5).toString("hex")}`;
+      await reserveSeat(clinic.id, who);
+      await confirmSeat(clinic.id, who);
+    }
+    return clinic.id;
+  }
+
+  it("refuses to lower the seats below the number in use unless staff say, in as many words, that they mean it", async () => {
+    const clinicId = await makeSeatedClinic(4, 3);
+
+    const refused = setClinicPlan(clinicId, ["KNEE"], 2, "Evan Miller");
+    await expect(refused).rejects.toBeInstanceOf(PlanSeatsRefusedError);
+    await expect(refused).rejects.toThrow("3 people hold a surgeon seat at this clinic, so 2 seats would leave it 1 over. Nothing was saved.");
+
+    // Nothing was saved: not the seats, not the categories sent with them, and nothing in the log.
+    expect(await prisma.clinic.findUnique({ where: { id: clinicId }, select: { surgeonSeats: true, categories: true } })).toEqual({ surgeonSeats: 4, categories: [] });
+    expect(await listNotesForClinic(clinicId)).toEqual([]);
+
+    // Down to exactly the number in use needs no override.
+    expect((await setClinicPlan(clinicId, [], 3, "Evan Miller")).clinic.surgeonSeats).toBe(3);
+  });
+
+  it("with the override it saves, takes nobody's seat, and the log says how far over the clinic now is", async () => {
+    const clinicId = await makeSeatedClinic(4, 3);
+
+    const { clinic, logged } = await setClinicPlan(clinicId, [], 1, "Evan Miller", { allowFewerSeatsThanInUse: true });
+
+    expect(clinic.surgeonSeats).toBe(1);
+    expect(await listSeatRows(clinicId)).toHaveLength(3);
+    expect(logged).toBe(
+      "Plan changed: surgeon seats set to 1 (was 4). 3 people hold a surgeon seat, 2 more than the 1 the plan now pays for. Nobody was relabelled and no charge was changed; nobody else can be given a seat until that is settled.",
+    );
+    expect((await listNotesForClinic(clinicId))[0]).toMatchObject({ authorName: "Evan Miller", body: logged });
+  });
+
+  it("a clinic already over its plan can have its seats raised, or its categories edited, without the override", async () => {
+    const clinicId = await makeSeatedClinic(4, 3);
+    await setClinicPlan(clinicId, [], 1, "Evan Miller", { allowFewerSeatsThanInUse: true });
+
+    // Two seats is still one short, but it is a step towards settling it, not a new reduction.
+    const raised = await setClinicPlan(clinicId, [], 2, "Evan Miller");
+    expect(raised.logged).toContain("surgeon seats set to 2 (was 1). 3 people hold a surgeon seat, 1 more than the 2");
+
+    // Editing categories alone does not repeat the warning.
+    const categories = await setClinicPlan(clinicId, ["HIP"], 2, "Evan Miller");
+    expect(categories.logged).toBe("Plan changed: categories set to Hip (was none).");
   });
 });
 

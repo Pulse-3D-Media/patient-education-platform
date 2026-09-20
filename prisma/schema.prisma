@@ -112,6 +112,39 @@ model Clinic {
   graceEndsAt  DateTime? // only while status is PAST_DUE: the exact moment the grace period ends and the clinic closes. Copied from ClinicBilling.graceEndsAt; empty with PAST_DUE means closed
   billing      ClinicBilling?
   billingPlans BillingPlan[]
+
+  // Who holds one of the surgeon seats above (see lib/seats.ts for the rules, lib/db/seats.ts for the writes).
+  seatAllocations SeatAllocation[]
+}
+
+/// Whether Clerk's copy of a seat agrees with ours yet.
+enum SeatSyncState {
+  PENDING // the seat is reserved here, and the "surgeon" label has not been confirmed on the person's Clerk membership yet (the write is on its way, or it failed)
+  SYNCED // the person's Clerk membership says surgeon too
+}
+
+/// One surgeon seat, held by one person at one clinic. THIS TABLE IS THE
+/// AUTHORITY on who holds a paid seat, and the number of rows a clinic has
+/// here is what is compared with Clinic.surgeonSeats. A row is only ever
+/// added inside a transaction that holds the clinic's row lock, so two people
+/// reaching for the last seat cannot both get it.
+///
+/// It holds two ids and nothing about the person: no name, no email, no role.
+/// The "surgeon" or "staff" label itself lives on the person's Clerk
+/// membership; a person labelled surgeon with no row here is a surgeon
+/// WAITING for a seat, which is how a request made before the clinic has paid
+/// (or while it is full) is represented.
+model SeatAllocation {
+  id          String        @id @default(cuid())
+  clinicId    String // the tenant column. Always filter by it.
+  clinic      Clinic        @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  clerkUserId String // the Clerk user id (user_...) of the person holding the seat. An id only
+  syncState   SeatSyncState @default(PENDING)
+  reservedAt  DateTime      @default(now()) // when the seat was last reserved or tried again. A PENDING seat older than a few minutes that Clerk never confirmed is let go
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@unique([clinicId, clerkUserId]) // one seat per person per clinic, which is also what makes a repeated request harmless
 }
 
 /// What kind of practice a clinic is, for billing. Never guessed from a name.

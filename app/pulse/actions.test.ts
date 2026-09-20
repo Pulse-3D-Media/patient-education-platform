@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
+import { confirmSeat, reserveSeat } from "@/lib/db/seats";
 import { saveSettings } from "@/lib/db/settings";
 import { MAX_GRACE_DAYS } from "@/lib/billing-state";
 import { recordAcceptedPlan, setStripeCustomer } from "@/lib/db/billing";
@@ -444,6 +445,36 @@ describe("setPlanAction", () => {
 
     expect(await setPlanAction(null, form({ clinicId, categories: ["ELBOW"], surgeonSeats: "3" }))).toMatchObject({ error: expect.any(String) });
     expect(await setPlanAction(null, form({ clinicId, categories: ["KNEE"], surgeonSeats: "2.5" }))).toMatchObject({ error: expect.any(String) });
+  });
+
+  it("will not lower the seats below the number in use unless the override box was ticked, and logs it under the staff name when it was", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+    await setPlanAction(null, form({ clinicId, categories: ["KNEE"], surgeonSeats: "3" }));
+    for (const who of ["user_vitestpulseA", "user_vitestpulseB"]) {
+      await reserveSeat(clinicId, who);
+      await confirmSeat(clinicId, who);
+    }
+
+    // Without the box: refused with a sentence that says what to do, and nothing saved.
+    const refused = await setPlanAction(null, form({ clinicId, categories: ["KNEE"], surgeonSeats: "1" }));
+    expect(refused?.error).toContain("2 people hold a surgeon seat at this clinic, so 1 seat would leave it 1 over. Nothing was saved.");
+    expect(refused?.error).toContain('tick "Allow fewer seats than are in use"');
+    expect((await prisma.clinic.findUnique({ where: { id: clinicId }, select: { surgeonSeats: true } }))?.surgeonSeats).toBe(3);
+
+    // A box value the form never sends is not a tick.
+    expect((await setPlanAction(null, form({ clinicId, categories: ["KNEE"], surgeonSeats: "1", allowFewerSeats: "true" })))?.error).toBeTruthy();
+
+    // With the box: saved, both surgeons keep their seats, and the log says how far over.
+    const saved = await setPlanAction(null, form({ clinicId, categories: ["KNEE"], surgeonSeats: "1", allowFewerSeats: "on" }));
+    expect(saved?.ok).toContain("Plan saved: 1 category, 1 seat.");
+    expect(saved?.ok).toContain("more surgeons holding a seat than its plan pays for");
+    expect(await prisma.seatAllocation.count({ where: { clinicId } })).toBe(2);
+    const last = await prisma.clinicNote.findFirst({ where: { clinicId }, orderBy: { createdAt: "desc" }, select: { body: true, authorName: true } });
+    expect(last).toEqual({
+      authorName: "Evan Miller",
+      body: "Plan changed: surgeon seats set to 1 (was 3). 2 people hold a surgeon seat, 1 more than the 1 the plan now pays for. Nobody was relabelled and no charge was changed; nobody else can be given a seat until that is settled.",
+    });
   });
 });
 

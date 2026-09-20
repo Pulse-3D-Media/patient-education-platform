@@ -10,6 +10,15 @@
  * COMPLEX_SPINE, KNEE, SHOULDER, HIP, FOOT_ANKLE), or "all", or "none".
  * Seats is a whole number, 0 or more.
  *
+ * Lowering the seats below the number of people who hold one is refused,
+ * the same as on /pulse. To do it on purpose, add --allow-fewer-seats:
+ *
+ *   npm run db:set-plan -- <clinicId> --categories KNEE --seats 1 --allow-fewer-seats
+ *
+ * Nobody is relabelled and no seat is taken away; the clinic is simply over
+ * its plan, the log says by how much, and nobody new can be given a seat
+ * until that is settled.
+ *
  * The same change can be made on /pulse. This script exists for the test
  * clinic and for a clinic set up before /pulse existed. It is the only
  * sanctioned way to change a plan by hand (never in the Neon console). It
@@ -22,7 +31,7 @@ import { setClinicPlan } from "../lib/db/clinics";
 const ALL_CATEGORIES = Object.values(Category);
 
 function usage(): never {
-  console.error("Usage: npm run db:set-plan -- <clinicId> --categories <all|none|A,B,C> --seats <number>");
+  console.error("Usage: npm run db:set-plan -- <clinicId> --categories <all|none|A,B,C> --seats <number> [--allow-fewer-seats]");
   console.error(`Categories: ${ALL_CATEGORIES.join(", ")}`);
   process.exit(1);
 }
@@ -78,7 +87,9 @@ async function main() {
   }
 
   // The change goes in the clinic's log on /pulse like any other, under this script's name.
-  const { clinic: after, logged } = await setClinicPlan(clinicId, categories, seats, "npm run db:set-plan");
+  // A refusal (fewer seats than are in use, without the flag) is a plain sentence, printed by the catch below.
+  const allowFewerSeatsThanInUse = args.includes("--allow-fewer-seats");
+  const { clinic: after, logged } = await setClinicPlan(clinicId, categories, seats, "npm run db:set-plan", { allowFewerSeatsThanInUse });
 
   console.log(`Clinic "${after.name}" (${after.id})`);
   console.log(`  categories: ${before.categories.join(", ") || "(none)"} -> ${after.categories.join(", ") || "(none)"}`);

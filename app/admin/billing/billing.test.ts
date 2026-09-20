@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { getActivePricing } from "@/lib/db/pricing";
+import { reserveSeat } from "@/lib/db/seats";
 import { quote } from "@/lib/pricing";
 import { getBillingView } from "./billing";
 
@@ -73,9 +74,19 @@ describe("getBillingView", () => {
     expect(await getBillingView(clinicId)).toEqual({
       plan: { categories: [], surgeonSeats: 0, managedByPulse: false, practiceType: "UNKNOWN" },
       hasPlan: false,
+      seatsInUse: 0,
       estimate: null,
       problem: null,
     });
+  });
+
+  it("says how many surgeon seats are in use, from our own table", async () => {
+    const clinicId = await makeClinic({ categories: ["KNEE"], surgeonSeats: 3 });
+    for (const who of ["user_vitestbillviewA", "user_vitestbillviewB"]) await reserveSeat(clinicId, who);
+
+    const view = await getBillingView(clinicId);
+    expect(view?.seatsInUse).toBe(2);
+    expect(view?.plan.surgeonSeats).toBe(3);
   });
 
   it("carries the managed-by-Pulse flag through", async () => {

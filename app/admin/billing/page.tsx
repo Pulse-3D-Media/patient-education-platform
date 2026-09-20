@@ -138,7 +138,14 @@ export default async function BillingPage(props: BillingPageProps = {}) {
               <p className="text-sm text-ink-muted">Surgeon seats</p>
               <p className="mt-1 text-[15px] text-ink">
                 {view.plan.surgeonSeats} {view.plan.surgeonSeats === 1 ? "surgeon" : "surgeons"}
+                {view.seatsInUse !== null && <span className="text-ink-soft">, {view.seatsInUse} in use</span>}
               </p>
+              {view.seatsInUse !== null && view.seatsInUse > view.plan.surgeonSeats && (
+                <p className="mt-1 text-sm text-warn">
+                  More people hold a surgeon seat than your plan pays for. Nothing extra is being charged. Nobody else can be given a seat until someone is
+                  marked as Staff on the People page, or a seat is added.
+                </p>
+              )}
               <p className="mt-1 text-sm text-ink-muted">Office staff are never charged. Who counts as a surgeon is set on the People page.</p>
             </div>
           </div>

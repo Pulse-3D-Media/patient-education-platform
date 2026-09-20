@@ -10,8 +10,10 @@ import {
   type SubscriptionSnapshot,
 } from "../billing-state";
 import { attemptIsReusable, samePlanShape } from "../checkout-rules";
+import { checkSeatReduction, overAllocatedWords, seatSummary } from "../seats";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
+import { countSeatsInUseIn } from "./seats";
 import { readSettingsIn } from "./settings";
 
 /**
@@ -167,6 +169,22 @@ function checkPlan(input: AcceptedPlanInput) {
 }
 
 /**
+ * A plan may not be accepted with fewer surgeon seats than people hold right
+ * now (a clinic Pulse opened by hand can have surgeons seated before it ever
+ * pays by card). This is the "when it is scheduled" half of the rule in
+ * lib/seats.ts; the count is read under the clinic's lock, which the caller
+ * holds. The message tells the admin what to do about it.
+ *
+ * When changing a paid plan is built, a seat reduction must call this when it
+ * is scheduled, and the place that applies it must check again (see
+ * reconcileSubscription below for how "when it takes effect" is handled).
+ */
+async function refuseFewerSeatsThanInUse(tx: Prisma.TransactionClient, clinicId: string, surgeonSeats: number) {
+  const check = checkSeatReduction(await countSeatsInUseIn(tx, clinicId), surgeonSeats);
+  if (!check.ok) throw new BillingRefusedError(check.message);
+}
+
+/**
  * Write down the plan a clinic accepted and make it the one waiting for a
  * first payment. The plan row is never edited afterwards. An earlier plan
  * that was waiting is left in the table as history and simply stops being
@@ -188,6 +206,7 @@ export async function recordAcceptedPlan(clinicId: string, input: AcceptedPlanIn
     if (facts.status === "ACTIVE" || facts.status === "PAST_DUE") {
       throw new BillingRefusedError("This clinic already has a subscription. Changing a plan that is being paid for is not built yet.");
     }
+    await refuseFewerSeatsThanInUse(tx, clinicId, input.surgeonSeats);
     const plan = await tx.billingPlan.create({ data: { clinicId, ...input }, select: { id: true } });
     await tx.clinicBilling.upsert({
       where: { clinicId },
@@ -291,6 +310,7 @@ export async function acceptPlanForCheckout(
       throw new BillingRefusedError("Your clinic already has a subscription, so a second one was not started.");
     }
     if (!facts.stripeCustomerId) throw new BillingRefusedError("The clinic has no Stripe customer yet, so checkout cannot start.");
+    await refuseFewerSeatsThanInUse(tx, clinicId, input.surgeonSeats);
 
     // forceNew: the caller found that the earlier attempt's payment page has closed, so that attempt cannot be paid any more.
     if (facts.pendingPlanId && !options.forceNew) {
@@ -573,6 +593,15 @@ export async function reconcileSubscription(args: {
         entries.push(
           `Plan started: ${plan.entitledCategories.length} ${plan.entitledCategories.length === 1 ? "category" : "categories"}, ${plan.surgeonSeats} ${plan.surgeonSeats === 1 ? "seat" : "seats"}.`,
         );
+        // The "when it takes effect" half of the seat rule. The plan was
+        // checked against the seats in use when it was accepted, but people
+        // can be given seats between then and the payment. The payment has
+        // been made, so the plan is applied regardless; what must not happen
+        // is anything silent. Nobody is relabelled, no seat is taken away and
+        // no charge is changed: the log says the clinic is over its plan, and
+        // nobody new can be given a seat until that is settled.
+        const over = overAllocatedWords(seatSummary(plan.surgeonSeats, await countSeatsInUseIn(tx, clinicId)));
+        if (over) entries.push(over);
         if (staffAccess === "OPEN") {
           // The one hand setting billing ever clears, and only this one, only
           // here (see the top of lib/billing-state.ts).

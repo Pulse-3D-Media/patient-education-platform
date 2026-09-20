@@ -11,13 +11,15 @@ import { getClinicBilling } from "@/lib/db/billing";
 import { getCategoryAvailability } from "@/lib/db/category-config";
 import { getClinicForPulse } from "@/lib/db/clinics";
 import { listNotesForClinic } from "@/lib/db/notes";
+import { getSeatSummary } from "@/lib/db/seats";
 import { getSettings } from "@/lib/db/settings";
 import { listSharesForClinic } from "@/lib/db/shares";
 import { shareExpiryState } from "@/lib/expiry";
-import { listPeople, type Person } from "@/lib/people";
 import { formatUsPhone } from "@/lib/phone";
 import { formatCents } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
+import { checkSeats, type SeatedPerson } from "@/lib/seat-changes";
+import { SEAT_STATE_WORDS, seatCountWords, seatSummary } from "@/lib/seats";
 import { saveBrandingAction } from "../../actions";
 import { Section, StatusBadge, formatDate, formatDateTime } from "../../ui";
 import { ClinicTabs } from "./ClinicTabs";
@@ -29,9 +31,16 @@ import { DetailsForm, ManagedForm, NoteForm, PlanForm, PracticeTypeForm, StatusF
  * Pulse), Plan, Details, Branding, People, Links, Notes.
  *
  * The editable sections are forms in forms.tsx, each saving through its own
- * Server Action. People come from Clerk; links are the same list the
- * clinic's own admin console shows; Notes is the running log, newest first,
- * to which every change saved on this page adds an entry of its own.
+ * Server Action. People come from Clerk, with who holds a surgeon seat from
+ * our own table; links are the same list the clinic's own admin console
+ * shows; Notes is the running log, newest first, to which every change saved
+ * on this page adds an entry of its own.
+ *
+ * Opening this page also brings the clinic's seats into line with its people
+ * (checkSeats in lib/seat-changes.ts): it lets go the seat of someone who has
+ * left and fills free seats with surgeons who were waiting. It never relabels
+ * anyone and never goes over the plan, and it writes nothing when there is
+ * nothing to put right.
  *
  * Staff only. Rendered fresh on every request so a save is seen at once.
  */
@@ -47,16 +56,21 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   const clinic = await getClinicForPulse(id);
   if (!clinic) notFound();
 
-  const [settings, shares, notes, people, availability, billing] = await Promise.all([
+  // First, because it may add an entry to the log that is read just below. Null when Clerk cannot be read.
+  const board = clinic.clerkOrgId ? await checkSeats(clinic.id).catch(() => null) : null;
+
+  const [settings, shares, notes, availability, billing, storedSeats] = await Promise.all([
     getSettings(),
     listSharesForClinic(clinic.id),
     listNotesForClinic(clinic.id),
-    clinic.clerkOrgId ? listPeople(clinic.clerkOrgId).catch(() => null) : Promise.resolve(null),
     getCategoryAvailability(),
     getClinicBilling(clinic.id),
+    getSeatSummary(clinic.id),
   ]);
   const now = new Date();
-  const surgeons = people?.filter((person) => person.kind === "surgeon").length;
+  const people = board?.people ?? null;
+  // The seats in use come from our own table, so they are known even when Clerk cannot be read.
+  const seats = board?.summary ?? storedSeats ?? seatSummary(clinic.surgeonSeats, 0);
 
   const overview = (
     <>
@@ -127,7 +141,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
       title="Plan"
       blurb="Which categories the clinic can use and how many surgeon seats it pays for. A category marked Not for sale or Coming soon can still be ticked (an enterprise or comped clinic may get one early); the label makes it a choice, not an accident. Once billing exists, self-serve clinics set this themselves and it becomes read-only here unless the clinic is managed by Pulse."
     >
-      <PlanForm clinicId={clinic.id} categories={clinic.categories} surgeonSeats={clinic.surgeonSeats} availability={availability} />
+      <PlanForm clinicId={clinic.id} categories={clinic.categories} surgeonSeats={clinic.surgeonSeats} seatsInUse={seats.inUse} availability={availability} />
     </Section>
   );
 
@@ -171,10 +185,22 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
       title="People"
       blurb={
         people === null
-          ? "Could not read this clinic's people from Clerk right now."
-          : `${people.length} ${people.length === 1 ? "person" : "people"}, ${surgeons} marked as ${surgeons === 1 ? "surgeon" : "surgeons"}, ${clinic.surgeonSeats} ${clinic.surgeonSeats === 1 ? "seat" : "seats"} paid for.`
+          ? `Could not read this clinic's people from Clerk right now. From our own records: ${seatCountWords(seats)}.`
+          : `${people.length} ${people.length === 1 ? "person" : "people"}. ${seatCountWords(seats)}. Staff are free and never take a seat.`
       }
     >
+      {seats.overBy > 0 && (
+        <p className="mb-4 rounded-lg border border-[#f3b94d]/40 bg-[#f3b94d]/10 p-3 text-[15px] text-[#f3b94d]">
+          {seats.inUse} people hold a surgeon seat and the plan pays for {seats.seats}: {seats.overBy} over. Nobody has been relabelled and nothing extra is
+          being charged. Nobody new can be given a seat until a surgeon is marked as staff or the seats are raised on the Plan tab.
+        </p>
+      )}
+      {board && board.waiting > 0 && (
+        <p className="mb-4 rounded-lg border border-white/15 p-3 text-[15px] text-[#bfbfbf]">
+          {board.waiting} {board.waiting === 1 ? "person says they are a surgeon and has" : "people say they are surgeons and have"} no seat, because none is
+          free. They can use the library as usual. They get a seat, oldest member first, as soon as one is free.
+        </p>
+      )}
       {people && people.length > 0 ? <PeopleTable people={people} /> : <p className="text-sm text-[#667085]">Nobody yet.</p>}
     </Section>
   );
@@ -311,7 +337,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   );
 }
 
-function PeopleTable({ people }: { people: Person[] }) {
+function PeopleTable({ people }: { people: SeatedPerson[] }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-left text-[15px]">
@@ -321,6 +347,7 @@ function PeopleTable({ people }: { people: Person[] }) {
             <th className="px-3 py-2 font-medium">Email</th>
             <th className="px-3 py-2 font-medium">Role</th>
             <th className="px-3 py-2 font-medium">Kind</th>
+            <th className="px-3 py-2 font-medium">Surgeon seat</th>
           </tr>
         </thead>
         <tbody>
@@ -330,6 +357,9 @@ function PeopleTable({ people }: { people: Person[] }) {
               <td className="px-3 py-2 text-[#bfbfbf]">{person.email}</td>
               <td className="px-3 py-2 text-[#bfbfbf]">{person.role === "admin" ? "Admin" : "Member"}</td>
               <td className="px-3 py-2 text-[#bfbfbf]">{person.kind === "surgeon" ? "Surgeon" : person.kind === "staff" ? "Staff" : "Not set"}</td>
+              <td className={`px-3 py-2 ${person.seat === "waiting" || person.seat === "pending" ? "text-[#f3b94d]" : "text-[#bfbfbf]"}`}>
+                {SEAT_STATE_WORDS[person.seat]}
+              </td>
             </tr>
           ))}
         </tbody>

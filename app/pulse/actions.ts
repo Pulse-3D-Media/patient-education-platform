@@ -8,6 +8,7 @@ import { MAX_GRACE_DAYS, MIN_GRACE_DAYS } from "@/lib/billing-state";
 import { saveCategoryConfig } from "@/lib/db/category-config";
 import { readBrandingForm, readLogoField } from "@/lib/branding-form";
 import {
+  PlanSeatsRefusedError,
   getClinicForPulse,
   setClinicManagedByPulse,
   setClinicPlan,
@@ -174,10 +175,22 @@ export async function setPlanAction(_previous: FormState, formData: FormData): P
   const seats = wholeNumber(formData.get("surgeonSeats"));
   if (seats === null) return { error: "Surgeon seats must be a whole number, 0 or more." };
 
-  const { logged } = await setClinicPlan(clinic.id, chosen as Category[], seats, staff.name);
+  // Fewer seats than are in use is refused unless this box was ticked. It is
+  // an explicit, logged override, never a default: nobody is relabelled and
+  // no charge is changed, but the clinic is then over its plan.
+  const allowFewerSeatsThanInUse = formData.get("allowFewerSeats") === "on";
+
+  let logged: string | null;
+  try {
+    ({ logged } = await setClinicPlan(clinic.id, chosen as Category[], seats, staff.name, { allowFewerSeatsThanInUse }));
+  } catch (error) {
+    if (error instanceof PlanSeatsRefusedError) return { error: error.message };
+    throw error;
+  }
   if (!logged) return { ok: NOTHING_CHANGED };
   refreshClinic(clinic.id);
-  return { ok: `Plan saved: ${chosen.length} ${chosen.length === 1 ? "category" : "categories"}, ${seats} ${seats === 1 ? "seat" : "seats"}.` };
+  const saved = `Plan saved: ${chosen.length} ${chosen.length === 1 ? "category" : "categories"}, ${seats} ${seats === 1 ? "seat" : "seats"}.`;
+  return { ok: logged.includes("more than the") ? `${saved} This clinic now has more surgeons holding a seat than its plan pays for; see the People tab.` : saved };
 }
 
 /** Turn "managed by Pulse" on or off for a clinic. */

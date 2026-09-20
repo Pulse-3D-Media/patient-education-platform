@@ -31,6 +31,8 @@ describe("getBillingView when the prices cannot be read", () => {
     expect(view).toEqual({
       plan: { categories: ["KNEE"], surgeonSeats: 2, managedByPulse: false, practiceType: "CLINIC" },
       hasPlan: true,
+      // "clinic_1" is not a real clinic, so there is no seat count for it. The plan still shows without one.
+      seatsInUse: null,
       estimate: null,
       problem: "We could not work out an estimate right now. Your plan is unchanged.",
     });

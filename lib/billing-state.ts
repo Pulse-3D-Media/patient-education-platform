@@ -410,35 +410,40 @@ export function hasLiveSubscription(status: BillingStatus): boolean {
 // Who may pay by card
 // ---------------------------------------------------------------------------
 
-export type SelfServeReason = "practice-type-unknown" | "hospital" | "managed-by-pulse" | "closed-by-staff";
+export type SelfServeReason = "hospital" | "managed-by-pulse" | "closed-by-staff";
 
 export type SelfServeEligibility = { eligible: true } | { eligible: false; reason: SelfServeReason };
 
 /**
  * May this clinic buy a plan by card? Checkout asks this on the server
  * before it does anything, and again under the clinic's row lock before it
- * writes anything. A clinic that has not said what kind of practice it is
- * may not: it has to answer first, so a hospital is never sold a self-serve
- * plan by default. No clinic that existed before billing is assumed to be
- * eligible; they all start UNKNOWN.
+ * writes anything.
  *
- * A clinic Pulse staff have paused or ended by hand may not either. What
- * staff set by hand wins over billing (the state table above), so its card
- * payment would be taken and the clinic would stay closed. It has to talk
- * to Pulse first. A clinic staff are holding OPEN may buy: its first
+ * Only a hospital is turned away for what it is, and only Pulse staff can
+ * mark a clinic a hospital (on its /pulse page). A clinic that has never
+ * been marked anything (UNKNOWN, which is where every clinic starts) counts
+ * as a clinic here. Decided by Evan on 2026-09-25: clinics are no longer
+ * asked "clinic or hospital?" before they can choose a plan, because the
+ * seat limit already sends big practices to Pulse (more seats than the
+ * Clinic maximum is Enterprise and is refused at checkout). The trade-off,
+ * accepted: a small hospital with that many surgeons or fewer can pay by
+ * card without talking to Pulse first, unless staff have marked it one.
+ *
+ * A clinic Pulse staff have paused or ended by hand may not pay either.
+ * What staff set by hand wins over billing (the state table above), so its
+ * card payment would be taken and the clinic would stay closed. It has to
+ * talk to Pulse first. A clinic staff are holding OPEN may buy: its first
  * confirmed payment hands its access over to its payments.
  */
 export function selfServeEligibility(clinic: { practiceType: PracticeType; managedByPulse: boolean; staffAccess?: StaffAccess | null }): SelfServeEligibility {
   if (clinic.managedByPulse) return { eligible: false, reason: "managed-by-pulse" };
   if (clinic.practiceType === "HOSPITAL") return { eligible: false, reason: "hospital" };
-  if (clinic.practiceType !== "CLINIC") return { eligible: false, reason: "practice-type-unknown" };
   if (clinic.staffAccess === "PAUSED" || clinic.staffAccess === "CANCELED") return { eligible: false, reason: "closed-by-staff" };
   return { eligible: true };
 }
 
 /** Why a clinic cannot pay by card, as a sentence for the clinic's admin. */
 export const SELF_SERVE_REFUSALS: Record<SelfServeReason, string> = {
-  "practice-type-unknown": "Tell us first whether this is a clinic or a hospital. The question is at the top of this page.",
   hospital: "Hospitals and health systems are set up by Pulse 3D by agreement, so there is no card payment here.",
   "managed-by-pulse": "Your plan is managed by Pulse 3D, so there is nothing to pay for here.",
   "closed-by-staff": "Pulse 3D has paused this clinic by hand, so a card payment would not open it. Get in touch with Pulse 3D first.",
@@ -446,7 +451,7 @@ export const SELF_SERVE_REFUSALS: Record<SelfServeReason, string> = {
 
 /** How each practice type reads on a screen and in the log. */
 export const PRACTICE_TYPE_WORDS: Record<PracticeType, string> = {
-  UNKNOWN: "Not answered yet",
+  UNKNOWN: "Not set (counts as a clinic)",
   CLINIC: "Clinic or private practice",
   HOSPITAL: "Hospital or health system",
 };

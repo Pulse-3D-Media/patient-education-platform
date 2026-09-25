@@ -134,7 +134,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
 
       <Section
         title="Practice type"
-        blurb="A hospital or health system is always Enterprise and is never offered card checkout. A clinic that has not answered cannot check out until it does. The clinic's admin is asked once on their Billing page; change it here if they chose wrongly."
+        blurb="A hospital or health system is always Enterprise and is never offered card checkout. Clinics are not asked: a clinic that is not set counts as a clinic and may pay by card, as long as it stays within the seat limit. Mark a hospital here."
       >
         <PracticeTypeForm clinicId={clinic.id} practiceType={clinic.practiceType} />
       </Section>

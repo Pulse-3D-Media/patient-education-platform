@@ -72,7 +72,7 @@ export function StatusForm({ clinicId, staffAccess }: { clinicId: string; staffA
 }
 
 const PRACTICE_CHOICES: { value: PracticeType; label: string; hint: string }[] = [
-  { value: "UNKNOWN", label: "Not answered", hint: "Cannot check out until it is." },
+  { value: "UNKNOWN", label: "Not set", hint: "Counts as a clinic: may pay by card." },
   { value: "CLINIC", label: "Clinic or practice", hint: "May pay by card." },
   { value: "HOSPITAL", label: "Hospital or health system", hint: "Always Enterprise, set up by Pulse." },
 ];

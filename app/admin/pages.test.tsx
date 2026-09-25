@@ -470,35 +470,37 @@ describe("a clinic whose payment failed", () => {
   });
 });
 
-describe("the practice question on Billing", () => {
-  it("is asked of an admin whose clinic has not answered, with exactly the two answers, and promises no price or checkout", async () => {
+describe("the practice type on Billing", () => {
+  it("is never asked: a clinic Pulse staff never marked is treated as a clinic, and no question, answer or practice field is on the page", async () => {
+    // orgActive was made with the default practice type, UNKNOWN.
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(BillingPage, "/admin/billing");
-    expect(html).toContain("Which describes your practice?");
-    expect(html).toContain('value="CLINIC"');
-    expect(html).toContain('value="HOSPITAL"');
-    expect(html).not.toContain('value="UNKNOWN"');
-    // Still no purchasable UI: nothing to pick a plan with, nothing about a card form.
-    expect(html).not.toMatch(/checkout|card number|subscribe/i);
+    expect(html).not.toContain("Which describes your practice?");
+    expect(html).not.toContain("Your practice");
+    expect(html).not.toContain("You told us");
+    expect(html).not.toContain("Answer the question");
+    expect(html).not.toContain('name="practiceType"');
+    expect(html).not.toContain('value="HOSPITAL"');
+    // Nothing about a card form is ever drawn here: the card is entered on Stripe's page.
+    expect(html).not.toMatch(/card number/i);
   });
 
-  it("is not asked again once answered, and a hospital is told Pulse sets it up, with no amount shown", async () => {
-    signInAs(orgGrace, "admin", "Vitest pages clinic (grace)");
-    const answered = await render(BillingPage, "/admin/billing");
-    expect(answered).not.toContain("Which describes your practice?");
-    expect(answered).toContain("You told us this is a clinic or private practice");
-
+  it("a hospital is told Pulse sets it up, with no picker, no amount shown and no way to change what it is", async () => {
     signInAs(orgHospital, "admin", "Vitest pages clinic (hospital)");
     const html = await render(BillingPage, "/admin/billing");
-    expect(html).not.toContain("Which describes your practice?");
-    expect(html).toContain("hospital or health system");
+    expect(html).toContain("Set up by Pulse 3D");
+    expect(html).toContain("Hospitals and health systems");
     expect(html).toContain("Priced by agreement");
+    expect(html).not.toContain("Continue to payment");
+    expect(html).not.toContain('name="practiceType"');
     expect(showsAnAmount(html)).toBe(false);
   });
 
   it("is never shown to a member, who does not see Billing at all", async () => {
     signInAs(orgActive, "member", "Vitest pages clinic (active)");
-    expect(await render(BillingPage, "/admin/billing")).not.toContain("Which describes your practice?");
+    const html = await render(BillingPage, "/admin/billing");
+    expect(html).not.toContain("Which describes your practice?");
+    expect(html).not.toContain("Your plan");
   });
 });
 

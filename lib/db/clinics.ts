@@ -398,23 +398,17 @@ export async function setClinicStatusByStaff(clinicId: string, staffAccess: Staf
 }
 
 /**
- * Record what kind of practice a clinic is, and log it. Asked of the
- * clinic's own admin on /admin/billing (once), and editable by Pulse staff.
- * A hospital is always Enterprise and never offered card checkout.
+ * Record what kind of practice a clinic is, and log it. Set only by Pulse
+ * staff, on the clinic's /pulse page: a clinic is never asked. A hospital
+ * is always Enterprise and never offered card checkout; UNKNOWN (where
+ * every clinic starts) counts as a clinic.
  */
-export async function setClinicPracticeType(
-  clinicId: string,
-  practiceType: PracticeType,
-  changedBy: string,
-  // The clinic's own admin may only answer while it is unanswered. Checked
-  // here, under the lock, so two admins answering at once cannot both win.
-  options: { onlyIfUnknown?: boolean } = {},
-) {
+export async function setClinicPracticeType(clinicId: string, practiceType: PracticeType, changedBy: string) {
   return changeClinicWithLog(
     clinicId,
     { practiceType },
     (before) =>
-      before.practiceType === practiceType || (options.onlyIfUnknown && before.practiceType !== "UNKNOWN")
+      before.practiceType === practiceType
         ? null
         : `Practice type changed from "${PRACTICE_TYPE_WORDS[before.practiceType]}" to "${PRACTICE_TYPE_WORDS[practiceType]}".`,
     changedBy,

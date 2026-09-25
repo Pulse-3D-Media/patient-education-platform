@@ -335,10 +335,15 @@ describe("decideBilling: whose subscription is it", () => {
 });
 
 describe("who may pay by card", () => {
-  it("only a clinic that has said it is a clinic, and is not managed by Pulse", () => {
+  it("a clinic, or one Pulse staff never marked (UNKNOWN counts as a clinic, decided 2026-09-25); never a hospital, never one managed by Pulse", () => {
     expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: false })).toEqual({ eligible: true });
-    expect(selfServeEligibility({ practiceType: "UNKNOWN", managedByPulse: false })).toEqual({ eligible: false, reason: "practice-type-unknown" });
+    expect(selfServeEligibility({ practiceType: "UNKNOWN", managedByPulse: false })).toEqual({ eligible: true });
     expect(selfServeEligibility({ practiceType: "HOSPITAL", managedByPulse: false })).toEqual({ eligible: false, reason: "hospital" });
+    // A hospital is refused for what it is, whatever else is true of it.
+    expect(selfServeEligibility({ practiceType: "HOSPITAL", managedByPulse: false, staffAccess: "OPEN" })).toEqual({ eligible: false, reason: "hospital" });
+    // UNKNOWN is only ever treated as a clinic: the other refusals still apply to it.
+    expect(selfServeEligibility({ practiceType: "UNKNOWN", managedByPulse: true })).toEqual({ eligible: false, reason: "managed-by-pulse" });
+    expect(selfServeEligibility({ practiceType: "UNKNOWN", managedByPulse: false, staffAccess: "PAUSED" })).toEqual({ eligible: false, reason: "closed-by-staff" });
     expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: true })).toEqual({ eligible: false, reason: "managed-by-pulse" });
     // Paused or ended by Pulse staff: a payment would be taken and the clinic would stay closed, so it may not pay.
     expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: false, staffAccess: "PAUSED" })).toEqual({ eligible: false, reason: "closed-by-staff" });

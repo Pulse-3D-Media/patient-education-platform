@@ -107,7 +107,7 @@ model Clinic {
   // changes: what Pulse staff set by hand (staffAccess), whether Pulse
   // manages the clinic (managedByPulse), and what Stripe says about its
   // payments (the ClinicBilling row).
-  practiceType PracticeType   @default(UNKNOWN) // a hospital is always Enterprise and never pays by card; UNKNOWN cannot check out until it is answered
+  practiceType PracticeType   @default(UNKNOWN) // a hospital is always Enterprise and never pays by card; set only by Pulse staff. UNKNOWN counts as a clinic (decided 2026-09-25)
   staffAccess  StaffAccess? // what Pulse staff set by hand, which always wins over billing; empty means nothing set by hand (billing decides). Who, why and when are statusChangedBy, statusReason and statusChangedAt
   graceEndsAt  DateTime? // only while status is PAST_DUE: the exact moment the grace period ends and the clinic closes. Copied from ClinicBilling.graceEndsAt; empty with PAST_DUE means closed
   billing      ClinicBilling?

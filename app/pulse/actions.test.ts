@@ -198,7 +198,7 @@ describe("setPracticeTypeAction", () => {
 
     expect((await prisma.clinic.findUnique({ where: { id: clinicId }, select: { practiceType: true } }))?.practiceType).toBe("HOSPITAL");
     const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { body: true } });
-    expect(notes).toEqual([{ body: 'Practice type changed from "Not answered yet" to "Hospital or health system".' }]);
+    expect(notes).toEqual([{ body: 'Practice type changed from "Not set (counts as a clinic)" to "Hospital or health system".' }]);
   });
 });
 

@@ -12,18 +12,19 @@ import { AdminFrame } from "../AdminFrame";
 import { getBillingView } from "./billing";
 import { getCheckoutView, type CheckoutOffer, type PlanFacts } from "./checkout-view";
 import { PlanPicker } from "./PlanPicker";
-import { PracticeTypeQuestion } from "./PracticeTypeQuestion";
 
 /**
  * Billing, at /admin/billing: the one place on the clinic side that shows
  * plan and price information, and the one place a clinic chooses a plan and
  * pays for it.
  *
- * What is on it, top to bottom: where the clinic stands; the one question
- * (clinic or hospital); the subscription it is paying for, when it has one;
- * the plan on file with an estimate, labelled as an estimate, when it does
- * not; and then ONE of: the plan picker, a message about why there is no
- * card payment for this clinic, or what comes later.
+ * What is on it, top to bottom: where the clinic stands; the subscription
+ * it is paying for, when it has one; the plan on file with an estimate,
+ * labelled as an estimate, when it does not; and then ONE of: the plan
+ * picker, a message about why there is no card payment for this clinic, or
+ * what comes later. Nothing asks what kind of practice the clinic is: only
+ * Pulse staff mark a clinic a hospital (on /pulse), and a clinic that was
+ * never marked is treated as a clinic (see selfServeEligibility).
  *
  * THIS PAGE STAYS OPEN WHEN THE CLINIC IS NOT. An admin of a PENDING,
  * PAUSED, PAST_DUE or CANCELED clinic must be able to reach it, because it
@@ -87,30 +88,6 @@ export default async function BillingPage(props: BillingPageProps = {}) {
           </Link>
           .
         </p>
-      )}
-
-      {!managed && (
-        <section aria-labelledby="practice-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
-          <h2 id="practice-heading" className="text-lg font-semibold">
-            Your practice
-          </h2>
-          {clinic.practiceType === "UNKNOWN" ? (
-            <>
-              <p className="mt-2 text-ink-soft">
-                One question before you choose a plan. Hospitals and health systems are set up by Pulse 3D by agreement; clinics and private practices
-                choose a plan and pay by card here.
-              </p>
-              <PracticeTypeQuestion />
-            </>
-          ) : clinic.practiceType === "CLINIC" ? (
-            <p className="mt-2 text-ink-soft">You told us this is a clinic or private practice. If that is not right, get in touch with Pulse 3D.</p>
-          ) : (
-            <p className="mt-2 text-ink-soft">
-              You told us this is a hospital or health system, so Pulse 3D sets your plan up with you by agreement and there is no card payment
-              here. If that is not right, get in touch with Pulse 3D.
-            </p>
-          )}
-        </section>
       )}
 
       {subscription && <SubscriptionCard plan={subscription.plan} status={checkout?.billingStatus ?? "NONE"} renewsAt={subscription.currentPeriodEnd} endsAt={subscription.cancelAt} />}
@@ -247,9 +224,7 @@ function OfferSection({ offer, managed }: { offer: CheckoutOffer; managed: boole
             heading: "Changing your plan",
             body: "Changing seats or categories, updating your card, your invoices and cancelling are coming to this page. Until then, get in touch with Pulse 3D and we will do it with you.",
           }
-        : offer.kind === "ask-practice"
-          ? { heading: "Choose a plan", body: "Answer the question above first. Then, if this is a clinic or private practice, you can choose a plan here." }
-          : { heading: "Coming here", body: offer.message };
+        : { heading: "Coming here", body: offer.message };
 
   return (
     <section aria-labelledby="next-heading" className="mt-6 rounded-2xl border border-dashed border-line-strong p-5 sm:p-6">

@@ -119,9 +119,8 @@ describe("acceptPlanForCheckout", () => {
     expect(await countPlans(clinicId)).toBe(3);
   });
 
-  it("is refused, with nothing written, for a hospital, an unanswered practice, a managed clinic and a clinic staff paused: checked under the lock", async () => {
+  it("is refused, with nothing written, for a hospital, a managed clinic and a clinic staff paused: checked under the lock", async () => {
     const hospital = await makeClinic("hospital", { practiceType: "HOSPITAL" });
-    const unknown = await makeClinic("unknown", { practiceType: "UNKNOWN" });
     const managed = await makeClinic("managed");
     await setClinicManagedByPulse(managed, true, "Vitest");
     const paused = await makeClinic("paused");
@@ -129,10 +128,17 @@ describe("acceptPlanForCheckout", () => {
     const ended = await makeClinic("ended by staff");
     await setClinicStatusByStaff(ended, "CANCELED", "Vitest: ended by hand.", "Vitest");
 
-    for (const clinicId of [hospital, unknown, managed, paused, ended]) {
+    for (const clinicId of [hospital, managed, paused, ended]) {
       await expect(acceptPlanForCheckout(clinicId, planInput())).rejects.toBeInstanceOf(BillingRefusedError);
       expect(await countPlans(clinicId)).toBe(0);
     }
+  });
+
+  it("a clinic Pulse staff never marked (UNKNOWN) is accepted under the lock like a clinic, and stays UNKNOWN", async () => {
+    const clinicId = await makeClinic("unknown", { practiceType: "UNKNOWN" });
+    await expect(acceptPlanForCheckout(clinicId, planInput())).resolves.toMatchObject({ reused: false });
+    expect(await countPlans(clinicId)).toBe(1);
+    expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { practiceType: true } })).practiceType).toBe("UNKNOWN");
   });
 
   it("a clinic staff are holding OPEN may pay", async () => {

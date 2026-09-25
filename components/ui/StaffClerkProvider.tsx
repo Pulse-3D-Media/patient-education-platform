@@ -54,8 +54,8 @@ export function StaffClerkProvider({
       // particular page (a new account, an accepted invitation). /onboarding
       // sends the creator of a clinic that is not paid for yet to Billing and
       // everyone else to the library. Without these Clerk would use the home
-      // address, which is the library, where a new clinic only sees "choose a
-      // plan". A sign-in that proxy.ts asked for still returns to its page.
+      // address, which also goes to /onboarding (app/page.tsx). A sign-in that
+      // proxy.ts asked for still returns to its page.
       signUpFallbackRedirectUrl="/onboarding"
       signInFallbackRedirectUrl="/onboarding"
       appearance={{

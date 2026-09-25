@@ -1,4 +1,3 @@
-import { auth } from "@clerk/nextjs/server";
 import type { Category } from "@prisma/client";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
@@ -22,15 +21,13 @@ import { LinkRows } from "./LinkRows";
  *
  * One row per video this clinic may share (published, in a category on its
  * plan, placeholders only while the clinic is shown them), and on each row
- * one button, Create link. Pressing it makes one new link and opens a small
- * menu for it: Copy link, Download QR code, Print QR code (the pamphlet).
- * Category pills and a search box narrow the rows.
- *
- * Every link is from a surgeon, picked once at the top of the page from the
- * people in this clinic who hold a seat (the signed-in admin, when they hold
- * one, is picked already). The patient page and the pamphlet then say "Sent
- * by Dr. Jane Smith, <clinic>". The server checks the pick again when the
- * link is made (rule 8).
+ * one button, Create link. Pressing it asks which doctor the link is from
+ * (a dropdown of the people in this clinic who hold a seat, nothing picked in
+ * advance); choosing one makes one new link and opens a small menu for it:
+ * Copy link, Download QR code, Print QR code (the pamphlet). Category pills
+ * and a search box narrow the rows. The patient page and the pamphlet then
+ * say "Sent by Dr. Jane Smith, <clinic>". The server checks the choice again
+ * when the link is made (rule 8).
  *
  * THERE IS NO LIST OF PAST LINKS, on purpose (Evan's build plan of 2026-09-21, Prompt 4):
  * the app does not know which patient got which link, so the office never
@@ -78,12 +75,11 @@ export default async function LinksPage() {
   // createShare() applies when a link is made (lib/access.ts), so a row and
   // its button can never disagree.
   const access = await getClinicAccess(clinic.id);
-  const [videos, baseUrl, terms, senders, { userId }] = await Promise.all([
+  const [videos, baseUrl, terms, senders] = await Promise.all([
     access ? listUsableVideos(access) : [],
     getBaseUrl(),
     readShareTerms(clinic.id),
     readSenders(clinic.id),
-    auth(),
   ]);
 
   // What the page says when there is nothing to list.
@@ -109,7 +105,7 @@ export default async function LinksPage() {
       title="Shared links"
       intro={
         <>
-          Choose who the link is from, then press Create link on a procedure. Copy the link, download its QR code, or print it. Only the
+          Press Create link on a procedure and choose the doctor it is from. Then copy the link, download its QR code, or print it. Only the
           procedures in the categories on your clinic&rsquo;s plan are listed.{" "}
           {terms ? (
             <>
@@ -129,9 +125,6 @@ export default async function LinksPage() {
         emptyProceduresText={emptyProceduresText}
         linksCanBeMade={terms !== null}
         senders={senders}
-        // The signed-in admin is picked already when they hold a seat; otherwise nobody is, and they choose.
-        defaultSenderId={senders?.some((sender) => sender.userId === userId) ? userId : null}
-        clinicName={clinic.name}
       />
     </AdminFrame>
   );

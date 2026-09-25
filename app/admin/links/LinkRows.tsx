@@ -5,9 +5,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Category } from "@prisma/client";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CloseIcon, SearchIcon } from "@/components/ui/icons";
-import { INPUT, LABEL, PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
+import { INPUT, PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
-import { sentByLine, type Sender } from "@/lib/sender-name";
+import type { Sender } from "@/lib/sender-name";
 import { qrFileName, watchLink } from "@/lib/share-link";
 import { createLinkAction } from "./actions";
 
@@ -28,22 +28,26 @@ type Filter = Category | "ALL";
 type MadeLink = { code: string; senderName: string | null };
 
 /**
- * Everything on the Shared links page below its title: who the links are
- * from, the category pills and search box, and one row per video with its
- * Create link button.
+ * Everything on the Shared links page below its title: the category pills
+ * and search box, and one row per video with its Create link button.
  *
- * Who the link is from is picked once, at the top, and applies to every
- * row. Only people holding a seat are offered; the server checks the pick
- * again when the link is made, so this list is a courtesy, not the check.
+ * EVERY LINK IS FROM A DOCTOR, CHOSEN FOR THAT LINK (decided by Evan on
+ * 2026-09-25, after trying a single picker at the top of the page). Pressing
+ * Create link opens a small box on that row, "Which doctor is this link
+ * from?", with a dropdown of the people holding a seat. Nothing is picked in
+ * advance. Choosing a doctor makes exactly one new link and turns the box
+ * into the menu for it: Copy link, Download QR code, Print QR code, all three
+ * using that one link. The server checks the choice again when the link is
+ * made (lib/senders.ts and createShare), so the dropdown is a courtesy, not
+ * the check.
  *
- * Pressing Create link makes exactly one new link (a second press while the
- * first is on its way does nothing) and opens that row's small menu: Copy
- * link, Download QR code, Print QR code. All three use that one link. Only
- * one menu is open at a time; closing it (Close, or Escape) does not delete
- * the link, and pressing Create link again makes another one.
+ * One row's box is open at a time. Closing it (Close, or Escape) does not
+ * delete a link already made, and pressing Create link again asks for a
+ * doctor again and makes another one.
  *
  * Filtering is instant and happens in the browser: this is a client
- * component because the pick, the pressed pill and the typed words are state.
+ * component because the open row, the pressed pill and the typed words are
+ * state.
  */
 export function LinkRows({
   procedures,
@@ -51,27 +55,20 @@ export function LinkRows({
   emptyProceduresText,
   linksCanBeMade,
   senders,
-  defaultSenderId,
-  clinicName,
 }: {
   procedures: ProcedureItem[];
   baseUrl: string;
   /** What the page says when the clinic has nothing to share, worked out by the page from the clinic's plan. */
   emptyProceduresText: string;
-  /** False when a link setting is out of range: every Create button is off, and the page's intro says why. */
+  /** False when a link setting is out of range: pressing Create link says so, and the page's intro says why. */
   linksCanBeMade: boolean;
   /** Everyone holding a seat, or null when the clinic's people could not be read just now. */
   senders: Sender[] | null;
-  /** The signed-in admin, when they hold a seat. Picked when the page opens. */
-  defaultSenderId: string | null;
-  clinicName: string;
 }) {
-  const [senderId, setSenderId] = useState(defaultSenderId ?? "");
   const [filter, setFilter] = useState<Filter>("ALL");
   const [query, setQuery] = useState("");
-  const [openFor, setOpenFor] = useState<string | null>(null);
-
-  const sender = senders?.find((candidate) => candidate.userId === senderId) ?? null;
+  // The row whose box (the doctor dropdown, or the menu for its new link) is open.
+  const [activeRow, setActiveRow] = useState<string | null>(null);
 
   // Why no link can be made right now, if that is so. Each Create button says it when pressed.
   const blocked = !linksCanBeMade
@@ -102,7 +99,20 @@ export function LinkRows({
 
   return (
     <>
-      <SenderPicker senders={senders} senderId={senderId} onChange={setSenderId} sender={sender} clinicName={clinicName} />
+      {/* Only when no link can be made for want of doctors does the page say so up front. */}
+      {senders === null ? (
+        <p role="alert" className="mt-8 rounded-2xl border border-line bg-surface p-5 text-ink-soft">
+          We could not read your clinic&apos;s people just now, so links cannot be made. Reload this page in a moment.
+        </p>
+      ) : senders.length === 0 ? (
+        <p className="mt-8 rounded-2xl border border-line bg-surface p-5 text-ink-soft">
+          Every link is from a doctor, and only people holding a seat can send one. Nobody in your clinic holds a seat yet.{" "}
+          <Link href="/admin/people" className="font-medium text-brand-bright underline underline-offset-2">
+            Give someone a seat on People
+          </Link>
+          .
+        </p>
+      ) : null}
 
       {/* The controls: category pills on the left, the search box on the right (stacked on narrow screens). */}
       <div className="mt-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -149,7 +159,7 @@ export function LinkRows({
           <NothingMatches query={query} onShowAll={showAll} />
         ) : null}
 
-        {/* Rows that do not match are hidden rather than removed, so an open menu survives a change of filter. */}
+        {/* Rows that do not match are hidden rather than removed, so an open box survives a change of filter. */}
         <ul className={procedures.length === 0 || shown === 0 ? "hidden" : "mt-3 flex flex-col gap-3"}>
           {procedures.map((video) => (
             <li
@@ -172,12 +182,12 @@ export function LinkRows({
               </div>
               <CreateLink
                 video={video}
-                senderId={sender?.userId ?? null}
+                senders={senders ?? []}
                 blocked={blocked}
                 baseUrl={baseUrl}
-                open={openFor === video.id}
-                onOpen={() => setOpenFor(video.id)}
-                onClose={() => setOpenFor((current) => (current === video.id ? null : current))}
+                active={activeRow === video.id}
+                onActivate={() => setActiveRow(video.id)}
+                onClose={() => setActiveRow((current) => (current === video.id ? null : current))}
               />
             </li>
           ))}
@@ -187,124 +197,69 @@ export function LinkRows({
   );
 }
 
-/** "Links are from": the surgeon picker, and the line patients will see. */
-function SenderPicker({
-  senders,
-  senderId,
-  onChange,
-  sender,
-  clinicName,
-}: {
-  senders: Sender[] | null;
-  senderId: string;
-  onChange: (userId: string) => void;
-  sender: Sender | null;
-  clinicName: string;
-}) {
-  return (
-    <section aria-labelledby="sender-heading" className="mt-8 rounded-2xl border border-line bg-surface p-5">
-      <h2 id="sender-heading" className="sr-only">
-        Who the links are from
-      </h2>
-      {senders === null ? (
-        <p role="alert" className="text-ink-soft">
-          We could not read your clinic&apos;s people just now, so links cannot be made. Reload this page in a moment.
-        </p>
-      ) : senders.length === 0 ? (
-        <p className="text-ink-soft">
-          Every link is from a surgeon, and only people holding a seat can send one. Nobody in your clinic holds a seat yet.{" "}
-          <Link href="/admin/people" className="font-medium text-brand-bright underline underline-offset-2">
-            Give someone a seat on People
-          </Link>
-          .
-        </p>
-      ) : (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-5">
-          <div className="sm:w-80">
-            <label htmlFor="link-sender" className={LABEL}>
-              Links are from
-            </label>
-            <select id="link-sender" value={senderId} onChange={(event) => onChange(event.target.value)} className={INPUT}>
-              <option value="" disabled>
-                Choose a surgeon...
-              </option>
-              {senders.map((candidate) => (
-                <option key={candidate.userId} value={candidate.userId}>
-                  {candidate.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <p className="text-sm text-ink-soft sm:pb-3">
-            {sender ? (
-              <>
-                Patients will see: <span className="font-medium text-ink">{sentByLine(sender.patientName, clinicName)}</span>
-                {!sender.patientName && (
-                  <span className="block text-warn">
-                    No name is set for them yet, so their links name only your clinic. Set one on{" "}
-                    <Link href="/admin/people" className="underline underline-offset-2">
-                      People
-                    </Link>
-                    .
-                  </span>
-                )}
-              </>
-            ) : (
-              "Choose who the links are from. Only people holding a seat are listed."
-            )}
-          </p>
-        </div>
-      )}
-    </section>
-  );
+/**
+ * What a doctor is called in the dropdown: their name for the office, and,
+ * when patients will see something else, that too, so the admin knows what
+ * the patient page will say before choosing.
+ */
+function doctorLabel(sender: Sender): string {
+  if (!sender.patientName) return `${sender.name} (no name set for patients)`;
+  if (sender.patientName === `Dr. ${sender.name}`) return sender.name;
+  return `${sender.name} (patients see: ${sender.patientName})`;
 }
 
 /**
- * One row's Create link button, and the menu for the link it just made.
- * The button is the clinic's brand colour, never red: red reads as delete.
+ * One row's Create link button, then the doctor dropdown, then the menu for
+ * the link it made. The button is the clinic's brand colour, never red: red
+ * reads as delete.
  */
 function CreateLink({
   video,
-  senderId,
+  senders,
   blocked,
   baseUrl,
-  open,
-  onOpen,
+  active,
+  onActivate,
   onClose,
 }: {
   video: ProcedureItem;
-  senderId: string | null;
+  senders: Sender[];
   blocked: string | null;
   baseUrl: string;
-  open: boolean;
-  onOpen: () => void;
+  /** True while this row's box is the open one. */
+  active: boolean;
+  onActivate: () => void;
   onClose: () => void;
 }) {
+  const [stage, setStage] = useState<"picking" | "made">("picking");
   const [pending, setPending] = useState(false);
   const [made, setMade] = useState<MadeLink | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Set the moment the button is pressed, before React has redrawn it as
-  // disabled, so a fast double press still makes one link.
+  // Set the moment a doctor is chosen, before React has redrawn the dropdown
+  // as disabled, so a second choice while the first is on its way makes nothing.
   const busy = useRef(false);
 
-  async function press() {
+  function press() {
     if (busy.current) return;
     if (blocked) {
       setError(blocked);
       return;
     }
-    if (!senderId) {
-      setError("Choose who the link is from, at the top of the page.");
-      return;
-    }
+    setError(null);
+    setStage("picking");
+    onActivate();
+  }
+
+  async function choose(senderUserId: string) {
+    if (!senderUserId || busy.current) return;
     busy.current = true;
     setPending(true);
     setError(null);
     try {
-      const result = await createLinkAction(video.id, senderId);
+      const result = await createLinkAction(video.id, senderUserId);
       if (result.ok) {
         setMade({ code: result.code, senderName: result.senderName });
-        onOpen();
+        setStage("made");
       } else {
         setError(result.error);
       }
@@ -323,16 +278,112 @@ function CreateLink({
         type="button"
         onClick={press}
         disabled={pending}
+        aria-expanded={active}
         className="inline-flex h-11 items-center rounded-lg bg-brand px-5 text-base font-medium text-on-brand transition hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
       >
         {pending ? "Creating..." : "Create link"}
       </button>
-      {error && (
+      {active && stage === "picking" && (
+        <DoctorPicker title={video.title} senders={senders} pending={pending} error={error} onChoose={choose} onClose={onClose} />
+      )}
+      {!active && error && (
         <p role="alert" className="max-w-sm text-sm text-problem lg:text-right">
           {error}
         </p>
       )}
-      {open && made && <LinkMenu key={made.code} title={video.title} link={made} baseUrl={baseUrl} onClose={onClose} />}
+      {active && stage === "made" && made && <LinkMenu key={made.code} title={video.title} link={made} baseUrl={baseUrl} onClose={onClose} />}
+    </div>
+  );
+}
+
+/** Close on Escape and take the keyboard's focus once, when a box opens; `onClose` is read fresh each time. */
+function useBoxBehaviour(box: React.RefObject<HTMLElement | null>, focusTarget: React.RefObject<HTMLElement | null>, onClose: () => void) {
+  // Kept in a ref so the effect below runs once, when the box opens, and does
+  // not take the focus back every time the page redraws (while someone types in the search box).
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  });
+  useEffect(() => {
+    (focusTarget.current ?? box.current)?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [box, focusTarget]);
+}
+
+/**
+ * "Which doctor is this link from?": a dropdown of the people holding a seat,
+ * nothing picked. Choosing one makes the link straight away.
+ */
+function DoctorPicker({
+  title,
+  senders,
+  pending,
+  error,
+  onChoose,
+  onClose,
+}: {
+  title: string;
+  senders: Sender[];
+  pending: boolean;
+  error: string | null;
+  onChoose: (senderUserId: string) => void;
+  onClose: () => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const select = useRef<HTMLSelectElement>(null);
+  useBoxBehaviour(box, select, onClose);
+  const selectId = `doctor-${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+
+  return (
+    <div
+      ref={box}
+      tabIndex={-1}
+      role="group"
+      aria-label={`Choose the doctor for a new ${title} link`}
+      className="w-full max-w-md rounded-xl border border-brand/50 bg-overlay p-4 shadow-panel outline-none"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <label htmlFor={selectId} className="pt-1 text-sm font-semibold text-ink">
+          Which doctor is this link from?
+        </label>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-soft transition hover:bg-wash hover:text-ink"
+        >
+          <CloseIcon className="h-4 w-4" />
+        </button>
+      </div>
+      {/* value is always "" so choosing the same doctor again after a refusal is still a change. */}
+      <select
+        id={selectId}
+        ref={select}
+        value=""
+        disabled={pending}
+        onChange={(event) => onChoose(event.target.value)}
+        className={`${INPUT} mt-2 disabled:opacity-60`}
+      >
+        <option value="" disabled>
+          {pending ? "Creating link..." : "Choose a doctor..."}
+        </option>
+        {senders.map((sender) => (
+          <option key={sender.userId} value={sender.userId}>
+            {doctorLabel(sender)}
+          </option>
+        ))}
+      </select>
+      {error ? (
+        <p role="alert" className="mt-2 text-sm text-problem">
+          {error}
+        </p>
+      ) : (
+        <p className="mt-2 text-xs text-ink-muted">Choosing a doctor makes the link. Only people holding a seat are listed.</p>
+      )}
     </div>
   );
 }
@@ -341,22 +392,9 @@ function CreateLink({
 function LinkMenu({ title, link, baseUrl, onClose }: { title: string; link: MadeLink; baseUrl: string; onClose: () => void }) {
   const address = watchLink(baseUrl, link.code);
   const menu = useRef<HTMLDivElement>(null);
-  // The latest onClose, read when Escape is pressed. Kept in a ref so the effect below runs once, when the menu
-  // opens, and does not take the focus back every time the page redraws (while someone types in the search box).
-  const close = useRef(onClose);
-  useEffect(() => {
-    close.current = onClose;
-  });
-
+  const none = useRef<HTMLElement>(null);
   // Escape closes it, and it takes the keyboard's focus when it opens so the three actions are next.
-  useEffect(() => {
-    menu.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useBoxBehaviour(menu, none, onClose);
 
   return (
     <div

@@ -59,7 +59,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 let currentPath = "/admin";
 
-/** Someone else in the signed-in person's organization, for the "Links are from" picker. */
+/** Someone else in the signed-in person's organization: a doctor to send links from, or an owner without a seat. */
 type OtherMember = { userId: string; firstName: string; lastName: string };
 
 /**
@@ -308,35 +308,16 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(hipHtml).toContain(">Create link<");
   });
 
-  it("offers only the people holding a seat as who the link is from, with the signed-in admin picked when they hold one", async () => {
+  it("draws no doctor picker up front: the choice is made on a row, for each link, with nothing picked in advance", async () => {
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
     const html = await render(LinksPage, "/admin/links");
-    expect(html).toContain("Links are from");
-    const options = [...html.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map((match) => [match[1], match[2]]);
-    expect(options).toEqual([
-      ["", "Choose a surgeon..."],
-      ["user_vitest", "Vi Test"],
-      [HIP_SURGEON.userId, "Jane Smith"],
-    ]);
-    // The owner, who holds no seat, is not offered.
+    // The dropdown only opens when Create link is pressed (checked in the browser); the first draw has none.
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("Links are from");
+    expect(html).toContain("choose the doctor it is from");
+    expect(html).toContain(">Create link<");
+    // Nobody's account id is sent into the page's markup.
     expect(html).not.toContain(HIP_OWNER.userId);
-    // The signed-in admin holds a seat, so they are the pick, and the page says what patients will see.
-    expect(html).toContain("Sent by Dr. Vi Test, Vitest pages clinic (hip)");
-  });
-
-  it("picks nobody when the signed-in admin holds no seat, and says so", async () => {
-    signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
-    const hipClinic = createdClinicIds[3];
-    await prisma.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId: hipClinic, clerkUserId: "user_vitest" } } });
-    try {
-      const html = await render(LinksPage, "/admin/links");
-      expect(html).toContain("Choose who the links are from");
-      expect(html).not.toContain("Sent by Dr. Vi Test");
-      const options = [...html.matchAll(/<option value="([^"]*)"/g)].map((match) => match[1]);
-      expect(options).toEqual(["", HIP_SURGEON.userId]);
-    } finally {
-      await prisma.seatAllocation.create({ data: { clinicId: hipClinic, clerkUserId: "user_vitest", syncState: "SYNCED" } });
-    }
   });
 
   it("says how long a new link works, in the words createShare uses, and lists none of the links already made", async () => {

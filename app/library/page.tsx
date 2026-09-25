@@ -35,13 +35,15 @@ export default async function LibraryPage() {
   // Signed out, or no clinic: sent to the right step. A clinic that is not
   // open (not on a plan yet) sees a calm page instead of the library.
   const clinic = await requireClinicPage();
-  if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
+  // An admin (the account owner of a new clinic, most often) gets a button to
+  // Billing, where a plan is chosen; a member is told to ask an admin.
+  if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink={clinic.isAdmin} />;
 
   const [access, counts, configs] = await Promise.all([getClinicAccess(clinic.id), countPublishedVideosByKind(), getCategoryConfigs()]);
 
   // The clinic was read a moment ago, so it exists; this covers it having
   // been closed since, or removed, without a crash.
-  if (!access || !access.open) return <ClinicClosed status={access?.status ?? clinic.status} clinicName={clinic.name} />;
+  if (!access || !access.open) return <ClinicClosed status={access?.status ?? clinic.status} clinicName={clinic.name} billingLink={clinic.isAdmin} />;
 
   return (
     <main className="px-5 py-6 sm:px-8">

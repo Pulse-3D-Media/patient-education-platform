@@ -36,14 +36,14 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   // Same gate as the library home: signed in, in a clinic, question answered,
   // and the clinic open. Otherwise the right step or a calm page.
   const clinic = await requireClinicPage();
-  if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
+  if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink={clinic.isAdmin} />;
 
   const { category: slug } = await params;
   const category = categoryFromSlug(slug);
   if (!category) notFound();
 
   const access = await getClinicAccess(clinic.id);
-  if (!access || !access.open) return <ClinicClosed status={access?.status ?? clinic.status} clinicName={clinic.name} />;
+  if (!access || !access.open) return <ClinicClosed status={access?.status ?? clinic.status} clinicName={clinic.name} billingLink={clinic.isAdmin} />;
 
   // The usable videos and the published counts for this one category, side
   // by side. The counts are what tell a locked category from an empty one

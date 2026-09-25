@@ -10,6 +10,7 @@ import BrandingPage from "./branding/page";
 import LinksPage from "./links/page";
 import AdminOverviewPage from "./page";
 import PeoplePage from "./people/page";
+import PrintPage from "./print/[code]/page";
 
 /**
  * The admin routes rendered on the server, the way a request would render
@@ -58,22 +59,46 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 let currentPath = "/admin";
 
-/** Pretend Clerk says this person is in this organization, as an admin or a member. */
-function signInAs(orgId: string, role: "admin" | "member", orgName: string) {
+/** Someone else in the signed-in person's organization: a doctor to send links from, or an owner without a seat. */
+type OtherMember = { userId: string; firstName: string; lastName: string };
+
+/**
+ * Pretend Clerk says this person (user_vitest, "Vi Test") is in this
+ * organization, as an admin or a member, along with `others`. The member
+ * list is paged the way Clerk pages it, with a total count.
+ */
+function signInAs(orgId: string, role: "admin" | "member", orgName: string, others: OtherMember[] = []) {
   vi.mocked(auth).mockResolvedValue({
     userId: "user_vitest",
     orgId,
     has: ({ role: wanted }: { role: string }) => role === "admin" && wanted === "org:admin",
   } as never);
   vi.mocked(auth.protect).mockResolvedValue(undefined as never);
+  const organization = { name: orgName, hasImage: false, imageUrl: "" };
+  const membership = (person: OtherMember, memberRole: string) => ({
+    organization,
+    publicMetadata: {},
+    role: memberRole,
+    createdAt: 1,
+    publicUserData: { userId: person.userId, firstName: person.firstName, lastName: person.lastName, identifier: `${person.userId}@example.test`, imageUrl: "" },
+  });
+  const everyone = [
+    membership({ userId: "user_vitest", firstName: "Vi", lastName: "Test" }, role === "admin" ? "org:admin" : "org:member"),
+    ...others.map((person) => membership(person, "org:member")),
+  ];
   vi.mocked(clerkClient).mockResolvedValue({
     organizations: {
-      getOrganizationMembershipList: async () => ({
-        data: [{ organization: { name: orgName, hasImage: false, imageUrl: "" }, publicMetadata: { kind: "staff" }, role: role === "admin" ? "org:admin" : "org:member" }],
-      }),
+      getOrganizationMembershipList: async (params: { userId?: string[] }) => {
+        const data = params.userId ? everyone.filter((entry) => params.userId!.includes(entry.publicUserData.userId)) : everyone;
+        return { data, totalCount: data.length };
+      },
     },
   } as never);
 }
+
+/** Two more people in the Hip clinic: a surgeon holding a seat, and the owner, who holds none. */
+const HIP_SURGEON: OtherMember = { userId: "user_vitesthipsurgeon", firstName: "Jane", lastName: "Smith" };
+const HIP_OWNER: OtherMember = { userId: "user_vitesthipowner", firstName: "Olive", lastName: "Owner" };
 
 function fakeOrgId() {
   return `org_test_${randomBytes(8).toString("hex")}`;
@@ -119,6 +144,20 @@ beforeAll(async () => {
   // and one made now, not yet played. The links page has to describe each by
   // the rule it was made under.
   const hipClinic = createdClinicIds[3];
+  // The Hip clinic's seats: the signed-in admin and one surgeon. Its owner holds none.
+  await prisma.clinic.update({
+    where: { id: hipClinic },
+    data: {
+      surgeonSeats: 3,
+      ownerClerkUserId: HIP_OWNER.userId,
+      seatAllocations: {
+        create: [
+          { clerkUserId: "user_vitest", syncState: "SYNCED" },
+          { clerkUserId: HIP_SURGEON.userId, syncState: "SYNCED", displayName: "Jane Smith, PA-C" },
+        ],
+      },
+    },
+  });
   await prisma.share.create({
     data: { code: `p${randomBytes(3).toString("hex").slice(0, 5)}`, clinicId: hipClinic, videoId: video.id, expiresAt: new Date(Date.now() + 60 * 86_400_000), viewCount: 2 },
   });
@@ -164,7 +203,7 @@ describe("a member", () => {
       expect(html).not.toContain('aria-label="Clinic admin"');
       // Nor the icon that opens the admin menu.
       expect(html).not.toContain('aria-controls="admin-menu"');
-      expect(html).not.toContain("Create share link");
+      expect(html).not.toContain(">Create link<");
       expect(html).not.toContain("Save branding");
       for (const word of PLAN_WORDS) expect(html).not.toContain(word);
       expect(showsAnAmount(html)).toBe(false);
@@ -212,7 +251,7 @@ describe("an admin of a PENDING clinic", () => {
       expect(html).toContain("Choose a plan to start");
       expect(html).toContain('href="/admin/billing"');
       expect(html).toContain("Go to billing");
-      expect(html).not.toContain("Create share link");
+      expect(html).not.toContain(">Create link<");
       expect(html).not.toContain("Save branding");
       expect(html).not.toContain("Surgeon seats");
       // The frame is the page's main landmark; the closed-clinic message inside it must not add a second one.
@@ -233,18 +272,22 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).not.toContain("all links");
     for (const href of ["/admin/links", "/admin/people", "/admin/billing"]) expect(html).toContain(`href="${href}"`);
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin"/);
-    expect(html).not.toContain("Create share link");
+    expect(html).not.toContain(">Create link<");
     for (const word of PLAN_WORDS) expect(html).not.toContain(word);
     expect(showsAnAmount(html)).toBe(false);
   });
 
-  it("gets the links workspace on /admin/links, with no plan words", async () => {
+  it("gets the links workspace on /admin/links, with no list of past links and no plan words", async () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(LinksPage, "/admin/links");
     expect(html).toContain("Shared links");
     expect(html).toContain("Procedures");
-    expect(html).toContain("Existing links");
     expect(html).toContain("Search procedures");
+    expect(html).not.toContain("Existing links");
+    expect(html).not.toContain("Cancel link");
+    // Nobody at this clinic holds a seat, so there is nobody a link can be from, and it says where to fix that.
+    expect(html).toContain("Nobody in your clinic holds a seat yet");
+    expect(html).toContain('href="/admin/people"');
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/links"/);
     for (const word of PLAN_WORDS) expect(html).not.toContain(word);
     expect(showsAnAmount(html)).toBe(false);
@@ -258,45 +301,49 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(kneeHtml).toContain("categories on your clinic");
 
     // Hip clinic: it is, with its placeholder mark and its Create button.
-    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
     const hipHtml = await render(LinksPage, "/admin/links");
     expect(hipHtml).toContain(hipVideoTitle);
     expect(hipHtml).toContain("Placeholder");
-    expect(hipHtml).toContain("Create share link");
+    expect(hipHtml).toContain(">Create link<");
   });
 
-  it("describes each link by the rule it was made under, and says how long a new link works, in the words createShare uses", async () => {
-    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+  it("draws no doctor picker up front: the choice is made on a row, for each link, with nothing picked in advance", async () => {
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
     const html = await render(LinksPage, "/admin/links");
-    // The intro and the helper text beside Create: how a new link works.
-    expect(html).toContain("after the patient first plays it");
-    expect(html).toMatch(/Works for \d+ days after the first play/);
-    // The legacy link: its fixed date, why it will not shorten, and its two play starts.
-    expect(html).toContain("date set when the link was made, playing does not change it");
-    expect(html).toContain("2 play starts");
-    // The new link: not played yet, stops on its unclaimed date unless played first.
-    expect(html).toContain("if never played");
-    expect(html).toContain("Not played yet");
-    // Playback is what is counted, so nothing is called a view or an opening.
-    expect(html).not.toMatch(/\d+ views?\b/);
-    expect(html).not.toContain("Not opened");
+    // The dropdown only opens when Create link is pressed (checked in the browser); the first draw has none.
+    expect(html).not.toContain("<select");
+    expect(html).not.toContain("Links are from");
+    expect(html).toContain("choose the doctor it is from");
+    expect(html).toContain(">Create link<");
+    // Nobody's account id is sent into the page's markup.
+    expect(html).not.toContain(HIP_OWNER.userId);
   });
 
-  it("says links cannot be made, and turns the Create buttons off, when a link setting is out of range, instead of failing", async () => {
+  it("says how long a new link works, in the words createShare uses, and lists none of the links already made", async () => {
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
+    const html = await render(LinksPage, "/admin/links");
+    expect(html).toMatch(/A link works for \d+ days? after the patient first plays it/);
+    // The Hip clinic has two links (made above); the page shows neither.
+    expect(html).not.toContain("2 play starts");
+    expect(html).not.toContain("Not played yet");
+    expect(html).not.toContain("/watch/");
+  });
+
+  it("says links cannot be made when a link setting is out of range, instead of failing", async () => {
     // A number past the limit can only get there by a hand edit; the page must still draw.
     const hipClinic = createdClinicIds[3];
     await prisma.clinic.update({ where: { id: hipClinic }, data: { viewDaysOverride: 366 } });
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+      signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
       const html = await render(LinksPage, "/admin/links");
       expect(html).toContain("Links cannot be made right now");
       expect(html).toContain("Ask Pulse 3D");
       expect(html).not.toContain("after the patient first plays it");
-      expect(html).toMatch(/<button[^>]*disabled[^>]*>Create share link/);
-      // The rest of the page is still there: the procedure, and the existing links with their words.
+      // The rest of the page is still there: the procedure and its button, which says why when pressed (and the action refuses too).
       expect(html).toContain(hipVideoTitle);
-      expect(html).toContain("2 play starts");
+      expect(html).toContain(">Create link<");
       expect(quiet).toHaveBeenCalled();
     } finally {
       quiet.mockRestore();
@@ -513,5 +560,48 @@ describe("an admin of a clinic managed by Pulse", () => {
     // No form and no submit button anywhere on the page (the only buttons are the shell menu).
     expect(html).not.toContain("<form");
     expect(html).not.toContain('type="submit"');
+  });
+});
+
+describe("who a link is from, on People and on the pamphlet", () => {
+  it("People shows the name patients see for each person holding a seat, and none for the owner without one", async () => {
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {}); // the stand-in has no invitation list; the page says so
+    try {
+      const html = await render(PeoplePage, "/admin/people");
+      expect(html).toContain("Patients see: <span");
+      expect(html).toContain("Jane Smith, PA-C");
+      expect(html).toContain("Dr. Vi Test");
+      expect(html).toContain("Change the name patients see for Jane Smith");
+      expect(html).not.toContain("Change the name patients see for Olive Owner");
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+
+  it("the pamphlet says who sent it, carries the placeholder mark, and an older link names only the clinic", async () => {
+    const hipClinic = createdClinicIds[3];
+    const video = createdVideoIds[0];
+    const withSender = await createShare(hipClinic, video, { sender: { clerkUserId: HIP_SURGEON.userId, fallbackName: "Dr. Jane Smith" } });
+    const older = await createShare(hipClinic, video);
+
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    const html = await render(() => PrintPage({ params: Promise.resolve({ code: withSender.code }) } as never), `/admin/print/${withSender.code}`);
+    // Twice: the sheet carries the pamphlet once per half.
+    expect(html.match(/Sent by Jane Smith, PA-C, Vitest pages clinic \(hip\)/g)).toHaveLength(2);
+    expect(html.match(/Placeholder: plays a sample animation, not this procedure/g)).toHaveLength(2);
+
+    const olderHtml = await render(() => PrintPage({ params: Promise.resolve({ code: older.code }) } as never), `/admin/print/${older.code}`);
+    expect(olderHtml).toContain("From Vitest pages clinic (hip)");
+    expect(olderHtml).not.toContain("Sent by");
+  });
+
+  it("the pamphlet is not found for a member, or for another clinic's link", async () => {
+    const hipClinic = createdClinicIds[3];
+    const share = await createShare(hipClinic, createdVideoIds[0]);
+    signInAs(orgHip, "member", "Vitest pages clinic (hip)");
+    await expect(render(() => PrintPage({ params: Promise.resolve({ code: share.code }) } as never), "/admin/print")).rejects.toThrow("notFound");
+    signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+    await expect(render(() => PrintPage({ params: Promise.resolve({ code: share.code }) } as never), "/admin/print")).rejects.toThrow("notFound");
   });
 });

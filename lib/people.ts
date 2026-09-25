@@ -1,6 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { ADMIN_ROLE, clerkRole, type Role } from "./role-names";
 import { SEAT_HOLD_KEY, holdIdFromMetadata } from "./seats";
+import { defaultSenderName } from "./sender-name";
 
 /**
  * The people in a clinic, read from and written to Clerk. Membership, role
@@ -31,6 +32,12 @@ export type Person = {
   joinedAt: number;
   /** The seat hold their membership carries, when they accepted an invitation sent from our People page. See lib/seats.ts. */
   seatHoldId: string | null;
+  /**
+   * "Dr. Jane Smith", from their first and last name in Clerk: what patients
+   * see on links they send unless an admin typed another name for them
+   * (lib/sender-name.ts). Null when Clerk has no name; never their email.
+   */
+  defaultPatientName?: string | null;
 };
 
 /** One Clerk membership, as the app reads it. */
@@ -53,6 +60,7 @@ function toPerson(membership: Membership): Person | null {
     role: membership.role === ADMIN_ROLE ? "admin" : "member",
     joinedAt: membership.createdAt,
     seatHoldId: holdIdFromMetadata(membership.publicMetadata),
+    defaultPatientName: defaultSenderName(user.firstName, user.lastName),
   };
 }
 

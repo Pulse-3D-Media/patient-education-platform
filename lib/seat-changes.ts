@@ -8,10 +8,12 @@ import {
   holdSeatForInvitation,
   linkSeatHold,
   listSeatHolds,
+  listSeatNames,
   listSeatRows,
   releaseSeat,
   releaseSeatHold,
   reserveSeat,
+  setSeatDisplayName,
   type SeatLog,
 } from "./db/seats";
 import {
@@ -40,6 +42,7 @@ import {
   type SeatState,
   type SeatSummary,
 } from "./seats";
+import { effectiveSenderName, parseDisplayName } from "./sender-name";
 
 /**
  * THE ONLY WAY ANYONE'S SEAT, ROLE, INVITATION OR OWNERSHIP IS CHANGED.
@@ -71,6 +74,8 @@ import {
  *                   check sees they have left and lets it go.
  *   Admin on/off    one write to Clerk. Seats are not touched.
  *   Giving a seat   one write here, under the lock. Clerk is not touched.
+ *   Name patients   one write here (on the seat), under the lock, after Clerk
+ *   see             has confirmed the person is in the clinic.
  *   Handing over    one write here (the owner), under the lock, after Clerk
  *   the owner       has confirmed the new owner is an admin of the clinic.
  *
@@ -342,6 +347,37 @@ export async function releaseOwnSeat(args: { clinicId: string; actor: Actor }): 
   return { ok: true };
 }
 
+/**
+ * Set how a seated person's name appears to patients on the links they send
+ * ("Jane Smith, PA-C"), or clear it (an empty box) to go back to "Dr. First
+ * Last" from Clerk. Only for someone holding a seat, since only they send
+ * links. Links already sent keep the name they were made with. Clerk is only
+ * read (is this person in the clinic?), never written.
+ */
+export async function setPatientName(args: { clinicId: string; targetUserId: unknown; name: unknown; actor: Actor }): Promise<Outcome> {
+  const parsed = parseDisplayName(args.name);
+  if (!parsed.ok) return { ok: false, message: parsed.message };
+
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
+  const member = await memberOf(clinic.orgId, typeof args.targetUserId === "string" ? args.targetUserId : "");
+  if (member === null) return { ok: false, message: NOT_SAVED };
+  if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
+
+  const fallback = member.defaultPatientName ?? null;
+  const shown = (name: string | null) => (name ? `"${name}"` : fallback ? `the default, "${fallback}"` : "no name");
+  const result = await setSeatDisplayName(args.clinicId, member.userId, parsed.name, {
+    authorName: byAdmin(args.actor),
+    describe: (before, after) => `Name patients see for ${member.name} changed from ${shown(before)} to ${shown(after)}. Links already sent keep the old name.`,
+  });
+  if (!result.found) return { ok: false, message: `${member.name} does not hold a seat, and only people with a seat send links. Give them a seat first.` };
+  const now = effectiveSenderName(parsed.name, fallback);
+  return {
+    ok: true,
+    message: now ? `Patients will see "${now}" on links from ${member.name} from now on.` : `Links from ${member.name} will name only your clinic until a name is set.`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The account owner
 // ---------------------------------------------------------------------------
@@ -435,7 +471,14 @@ export async function setOwnerByStaff(args: { clinicId: string; toUserId: unknow
 // Checking the seats against the clinic's people
 // ---------------------------------------------------------------------------
 
-export type SeatedPerson = Person & { seat: SeatState; isOwner: boolean };
+export type SeatedPerson = Person & {
+  seat: SeatState;
+  isOwner: boolean;
+  /** For someone holding a seat: the name patients see on links they send (typed, else "Dr. First Last", else null). Null without a seat. */
+  patientName: string | null;
+  /** The name an admin typed for them, or null when they use the default. */
+  typedPatientName: string | null;
+};
 
 /** An open invitation, as the People page shows it. */
 export type InvitationView = OpenInvitation & {
@@ -544,7 +587,18 @@ export async function checkSeats(clinicId: string, now: Date = new Date()): Prom
   }
 
   const heldHoldIds = new Set(holds.map((hold) => hold.id));
-  const seated = people.map((person) => ({ ...person, seat: seatStateOf(person.userId, rows, owner), isOwner: person.userId === owner }));
+  const typed = new Map((await listSeatNames(clinicId)).map((seat) => [seat.clerkUserId, seat.displayName]));
+  const seated = people.map((person) => {
+    const seat = seatStateOf(person.userId, rows, owner);
+    const typedPatientName = typed.get(person.userId) ?? null;
+    return {
+      ...person,
+      seat,
+      isOwner: person.userId === owner,
+      patientName: seat === "held" ? effectiveSenderName(typedPatientName, person.defaultPatientName) : null,
+      typedPatientName,
+    };
+  });
   return {
     people: seated,
     invitations: invitationRead

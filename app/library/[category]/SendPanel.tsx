@@ -73,7 +73,13 @@ export function SendPanel({
         {result === null ? (
           <Creating />
         ) : result.ok ? (
-          <Ready link={result.link} qrImage={result.qrImage} unclaimedUntil={result.unclaimedUntil} daysAfterFirstPlay={result.daysAfterFirstPlay} />
+          <Ready
+            link={result.link}
+            qrImage={result.qrImage}
+            unclaimedUntil={result.unclaimedUntil}
+            daysAfterFirstPlay={result.daysAfterFirstPlay}
+            senderName={result.senderName}
+          />
         ) : (
           <Failed error={result.error} onRetry={onRetry} />
         )}
@@ -111,11 +117,13 @@ function Ready({
   qrImage,
   unclaimedUntil,
   daysAfterFirstPlay,
+  senderName,
 }: {
   link: string;
   qrImage: string;
   unclaimedUntil: string;
   daysAfterFirstPlay: number;
+  senderName: string | null;
 }) {
   // With the year, because a link made in the autumn runs into the next one.
   const until = new Date(unclaimedUntil).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -147,8 +155,8 @@ function Ready({
 
         {/* The same numbers createShare copied onto this link, so this says what the link will actually do. */}
         <p className="mt-5 text-sm text-ink-muted">
-          Once the patient plays it, it works for {daysAfterFirstPlay} {daysAfterFirstPlay === 1 ? "day" : "days"}. If nobody plays it,
-          it stops on {until}. The office can print a pamphlet for it from Shared links.
+          {senderName ? <>The patient will see it is from {senderName}. </> : null}Once the patient plays it, it works for {daysAfterFirstPlay}{" "}
+          {daysAfterFirstPlay === 1 ? "day" : "days"}. If nobody plays it, it stops on {until}.
         </p>
       </div>
     </div>

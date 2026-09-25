@@ -114,6 +114,54 @@ export async function listSeatHolds(clinicId: string): Promise<HoldRow[]> {
   });
 }
 
+/** Whether one person holds a seat at this clinic, with the name typed for them for patients. Null when they hold none. A plain read, for a page deciding what to show. */
+export async function getSeatFor(clinicId: string, clerkUserId: string): Promise<{ displayName: string | null } | null> {
+  if (!isClerkUserId(clerkUserId)) return null;
+  return prisma.seatAllocation.findUnique({ where: { clinicId_clerkUserId: { clinicId, clerkUserId } }, select: { displayName: true } });
+}
+
+/** Everyone holding a seat at one clinic, with the name typed for them for patients (null means the default). */
+export async function listSeatNames(clinicId: string): Promise<{ clerkUserId: string; displayName: string | null }[]> {
+  return prisma.seatAllocation.findMany({
+    where: { clinicId },
+    select: { clerkUserId: true, displayName: true },
+    orderBy: { createdAt: "asc" },
+    take: MAX_ROWS,
+  });
+}
+
+export type DisplayNameResult = { found: false } | { found: true; changed: boolean };
+
+/**
+ * Set how one seated person's name appears to patients (null goes back to
+ * "Dr. First Last"), and log it in the same transaction. The clinic's row is
+ * locked first, like every other seat write, so this and a link being made
+ * for the same person happen one after the other: the link carries the name
+ * as it was before or after, never half of each. Links already made keep the
+ * name they were made with. Saving the name it already has writes nothing.
+ * `found: false` when the person holds no seat here: the name belongs to
+ * the seat, so there is nothing to set.
+ */
+export async function setSeatDisplayName(
+  clinicId: string,
+  clerkUserId: string,
+  displayName: string | null,
+  log: { authorName: string; describe: (before: string | null, after: string | null) => string },
+): Promise<DisplayNameResult> {
+  checkUserId(clerkUserId);
+  return prisma.$transaction(async (tx) => {
+    const clinic = await readClinicLocked(tx, clinicId, { id: true });
+    if (!clinic) throw new Error(`No clinic has the id "${clinicId}".`);
+    const key = { clinicId_clerkUserId: { clinicId, clerkUserId } };
+    const seat = await tx.seatAllocation.findUnique({ where: key, select: { displayName: true } });
+    if (!seat) return { found: false };
+    if (seat.displayName === displayName) return { found: true, changed: false };
+    await tx.seatAllocation.update({ where: key, data: { displayName }, select: { id: true } });
+    await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body: log.describe(seat.displayName, displayName), authorName: log.authorName }, select: { id: true } });
+    return { found: true, changed: true };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // A person's seat
 // ---------------------------------------------------------------------------

@@ -1,13 +1,16 @@
 import { randomInt } from "crypto";
 import { accessRefusalMessage, decideVideoAccess, type AccessDecision, type AccessReason } from "../access";
 import { addDays, canClaimFirstPlay, expiryAfterFirstPlay, isExpired, resolveShareTerms, type ShareTerms } from "../expiry";
-import { lockClinicAccess, lockVideoFacts } from "./access";
+import { isClerkUserId } from "../seats";
+import { effectiveSenderName } from "../sender-name";
+import { lockClinicAccess, lockSenderSeat, lockVideoFacts } from "./access";
 import { prisma } from "./client";
 import { getSettings, lockSettings } from "./settings";
 
 /**
  * Queries for the Share table. A share is one link a clinic gives a patient:
- * /watch/<code>, tied to a procedure video and a clinic, never to a person.
+ * /watch/<code>, tied to a procedure video, a clinic and the surgeon it is
+ * from, never to a patient.
  *
  * Functions used on the clinic side take clinicId as their first argument
  * and filter by it (rule 1 in CLAUDE.md). That is what keeps one clinic from
@@ -35,6 +38,27 @@ export class ShareRefusedError extends Error {
     this.reason = reason;
   }
 }
+
+/**
+ * createShare() was asked to make a link from someone who does not hold a
+ * seat at this clinic right now: never seated, seat let go, in another
+ * clinic, or not a Clerk user id at all. Nothing was written. The message is
+ * the plain sentence to show.
+ */
+export class SenderRefusedError extends Error {
+  constructor() {
+    super("That person does not hold a seat in your clinic right now, so links cannot be sent from them. Choose someone who does.");
+    this.name = "SenderRefusedError";
+  }
+}
+
+/**
+ * Who a new link is from. `clerkUserId` is the surgeon; `fallbackName` is
+ * the name to show when no name has been typed for them on /admin/people
+ * ("Dr. First Last" from Clerk, or null). Worked out on the server
+ * (lib/senders.ts), never taken from the browser as it stands.
+ */
+export type ShareSender = { clerkUserId: string; fallbackName: string | null };
 
 /** The characters a share code is made from: lowercase letters and digits. */
 const CODE_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -103,9 +127,23 @@ export async function getShareTerms(clinicId: string): Promise<ShareTerms | null
  * usable, as issued links do), or landed first and is seen here (the link
  * is refused). A form rendered while a video was on the plan, and
  * submitted after the plan changed, is refused.
+ *
+ * WHO IT IS FROM. Both places that make links (the admin's Create link and
+ * the library's Send) pass `sender`, the surgeon the link is from. Inside
+ * the same transaction their seat at THIS clinic is read with a share lock
+ * (lockSenderSeat); no seat, and a SenderRefusedError is thrown with nothing
+ * written. The name the patient will see is the one typed for them on
+ * /admin/people, else `fallbackName`, and it is copied onto the link with
+ * their user id, so a later name change or their leaving never changes a
+ * link already sent. Only the tests and the seed scripts make links with no
+ * sender; such a link says only which clinic sent it, as every link made
+ * before surgeons were recorded does.
  */
-export async function createShare(clinicId: string, videoId: string, options: { now?: Date } = {}) {
+export async function createShare(clinicId: string, videoId: string, options: { now?: Date; sender?: ShareSender } = {}) {
   const now = options.now ?? new Date();
+  const sender = options.sender;
+  // A malformed id could never match a seat; refused here before any lock is taken.
+  if (sender && !isClerkUserId(sender.clerkUserId)) throw new SenderRefusedError();
 
   return prisma.$transaction(async (tx) => {
     const access = await lockClinicAccess(tx, clinicId, now);
@@ -124,6 +162,15 @@ export async function createShare(clinicId: string, videoId: string, options: { 
     const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { viewDaysOverride: true } });
     const terms = resolveShareTerms(settings, clinic);
 
+    // The surgeon must hold a seat at this clinic at this moment, and the
+    // seat is held against change until the link is written.
+    let senderName: string | null = null;
+    if (sender) {
+      const seat = await lockSenderSeat(tx, clinicId, sender.clerkUserId);
+      if (!seat) throw new SenderRefusedError();
+      senderName = effectiveSenderName(seat.displayName, sender.fallbackName);
+    }
+
     // There are about two billion possible codes, so a clash is very unlikely,
     // but the code column is unique, so check before saving and try again if
     // the code is already taken.
@@ -140,6 +187,8 @@ export async function createShare(clinicId: string, videoId: string, options: { 
           expiryPolicy: "FIRST_PLAY",
           expiresAt: addDays(now, terms.unclaimedDays),
           daysAfterFirstPlay: terms.daysAfterFirstPlay,
+          senderUserId: sender?.clerkUserId ?? null,
+          senderName,
         },
       });
     }
@@ -345,14 +394,15 @@ export async function recordSharePlay(code: string, now: Date = new Date()): Pro
 }
 
 /**
- * One of this clinic's shares, by code, for the admin pages. Returns null if
- * the code does not exist or belongs to another clinic; the admin pages
- * treat both the same way.
+ * One of this clinic's shares, by code, for the admin pages (the QR picture
+ * and the pamphlet), with its video's title and placeholder mark and the
+ * clinic's name for "Sent by ...". Returns null if the code does not exist
+ * or belongs to another clinic; the admin pages treat both the same way.
  */
 export async function getShareForClinic(clinicId: string, code: string) {
   return prisma.share.findFirst({
     where: { code, clinicId },
-    include: { video: { select: { title: true } } },
+    include: { video: { select: { title: true, isPlaceholder: true } }, clinic: { select: { name: true } } },
   });
 }
 

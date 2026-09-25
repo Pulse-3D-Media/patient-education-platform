@@ -75,7 +75,9 @@ const createdVideoIds: string[] = [];
 const orgKnee = fakeOrgId();
 const orgHipFinishedOnly = fakeOrgId();
 const orgPending = fakeOrgId();
+const orgHipAll = fakeOrgId();
 let kneeClinic = "";
+let hipAllClinic = "";
 let hipFinishedOnlyClinic = "";
 const hipTitle = `Vitest library hip video ${randomBytes(4).toString("hex")}`;
 const hipSrc = `https://example.com/vitest-${randomBytes(4).toString("hex")}.mp4`;
@@ -85,6 +87,8 @@ beforeAll(async () => {
     { name: "Vitest library clinic (knee)", clerkOrgId: orgKnee, status: "ACTIVE", categories: ["KNEE"], showPlaceholders: true },
     { name: "Vitest library clinic (hip, finished only)", clerkOrgId: orgHipFinishedOnly, status: "ACTIVE", categories: ["HIP"], showPlaceholders: false },
     { name: "Vitest library clinic (pending)", clerkOrgId: orgPending, status: "PENDING", categories: ["KNEE"], showPlaceholders: true },
+    // Hip on the plan and placeholders shown, so the Hip placeholder made below is always there to send.
+    { name: "Vitest library clinic (hip)", clerkOrgId: orgHipAll, status: "ACTIVE", categories: ["HIP"], showPlaceholders: true },
   ] as const;
   const ids: string[] = [];
   for (const data of clinics) {
@@ -92,7 +96,7 @@ beforeAll(async () => {
     createdClinicIds.push(clinic.id);
     ids.push(clinic.id);
   }
-  [kneeClinic, hipFinishedOnlyClinic] = ids;
+  [kneeClinic, hipFinishedOnlyClinic, , hipAllClinic] = ids;
 
   // A published Hip placeholder, so Hip has something in it whatever else the database holds.
   const video = await prisma.video.create({
@@ -170,6 +174,35 @@ describe("the library home", () => {
 });
 
 describe("a category's own page", () => {
+  it("gives the Send button only to someone holding a seat; everyone else can play, and is told why there is no Send", async () => {
+    signInAs(orgHipAll, "Vitest library clinic (hip)");
+    const noSeat = await renderCategory("hip");
+    expect(noSeat).toContain(hipTitle);
+    expect(noSeat).toContain(`Play ${hipTitle}`);
+    expect(noSeat).not.toContain(`Send ${hipTitle} to a patient`);
+    expect(noSeat).toContain("Sending one to a patient needs a surgeon seat");
+
+    await prisma.seatAllocation.create({ data: { clinicId: hipAllClinic, clerkUserId: "user_vitest", syncState: "SYNCED" } });
+    try {
+      signInAs(orgHipAll, "Vitest library clinic (hip)");
+      const seated = await renderCategory("hip");
+      expect(seated).toContain(`Send ${hipTitle} to a patient`);
+      expect(seated).not.toContain("needs a surgeon seat");
+    } finally {
+      await prisma.seatAllocation.deleteMany({ where: { clinicId: hipAllClinic } });
+    }
+  });
+
+  it("does not count a seat at another clinic", async () => {
+    await prisma.seatAllocation.create({ data: { clinicId: kneeClinic, clerkUserId: "user_vitest", syncState: "SYNCED" } });
+    try {
+      signInAs(orgHipAll, "Vitest library clinic (hip)");
+      expect(await renderCategory("hip")).not.toContain(`Send ${hipTitle} to a patient`);
+    } finally {
+      await prisma.seatAllocation.deleteMany({ where: { clinicId: kneeClinic } });
+    }
+  });
+
   it("says a category off the plan is not on the plan, and sends nothing playable, even when the address is typed", async () => {
     signInAs(orgKnee, "Vitest library clinic (knee)");
     const html = await renderCategory("hip");

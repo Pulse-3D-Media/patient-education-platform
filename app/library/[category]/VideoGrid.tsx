@@ -28,7 +28,9 @@ type Sending = { video: Item; result: SendResult | null };
  *
  * Each card has two actions, both one tap: tapping the thumbnail plays, and
  * the small send icon beside the title creates a patient link and
- * shows it with a QR code, right here, without leaving the page.
+ * shows it with a QR code, right here, without leaving the page. The send
+ * icon is only there for someone holding a seat (`canSend`): a link is
+ * always from a surgeon, and the link is from them automatically.
  *
  * This is a client component because tapping a card has to start playback
  * inside the tap itself. Browsers only allow a video to start with sound when
@@ -54,12 +56,15 @@ export function VideoGrid({
   categoryLabel,
   clinicName,
   logoUrl,
+  canSend,
 }: {
   videos: Item[];
   categoryLabel: string;
   /** The clinic's name and checked logo address, for the strip above the picture. */
   clinicName: string;
   logoUrl: string | null;
+  /** True for someone holding a seat: their cards get the Send button. Everyone else can play but not send. */
+  canSend: boolean;
 }) {
   const [playing, setPlaying] = useState<Item | null>(null);
   const [sending, setSending] = useState<Sending | null>(null);
@@ -115,6 +120,11 @@ export function VideoGrid({
 
   return (
     <>
+      {!canSend && (
+        <p className="mb-5 max-w-2xl text-base text-ink-soft">
+          Play any video here. Sending one to a patient needs a surgeon seat: ask your clinic&apos;s office admin if you should have one.
+        </p>
+      )}
       {videos.length > 1 && (
         <div className="mb-6 max-w-sm">
           <label className="sr-only" htmlFor="library-search">
@@ -137,7 +147,7 @@ export function VideoGrid({
         <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 2xl:grid-cols-3">
           {shown.map((video) => (
             <li key={video.id}>
-              <ProcedureCard video={video} onPlay={() => setPlaying(video)} onSend={() => send(video)} />
+              <ProcedureCard video={video} onPlay={() => setPlaying(video)} onSend={canSend ? () => send(video) : null} />
             </li>
           ))}
         </ul>
@@ -173,7 +183,8 @@ export function VideoGrid({
   );
 }
 
-function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => void; onSend: () => void }) {
+/** One card. `onSend` is null for someone without a seat: the card then has no Send button. */
+function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => void; onSend: (() => void) | null }) {
   const [thumbFailed, setThumbFailed] = useState(false);
 
   return (
@@ -225,15 +236,17 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
       {/* Title on the left, the send icon on the right. Playing is the thumbnail above. */}
       <div className="flex flex-1 items-center justify-between gap-4 px-5 py-4">
         <h3 className="line-clamp-2 min-w-0 text-xl font-semibold leading-snug">{video.title}</h3>
-        <button
-          type="button"
-          onClick={onSend}
-          aria-label={`Send ${video.title} to a patient`}
-          title="Send to a patient"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line-strong text-ink-soft transition hover:border-brand hover:text-ink active:scale-[0.95]"
-        >
-          <ShareIcon className="h-5 w-5" />
-        </button>
+        {onSend && (
+          <button
+            type="button"
+            onClick={onSend}
+            aria-label={`Send ${video.title} to a patient`}
+            title="Send to a patient"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line-strong text-ink-soft transition hover:border-brand hover:text-ink active:scale-[0.95]"
+          >
+            <ShareIcon className="h-5 w-5" />
+          </button>
+        )}
       </div>
     </article>
   );

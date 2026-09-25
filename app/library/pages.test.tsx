@@ -49,7 +49,7 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-/** Pretend Clerk says this person is a member of this organization, with the surgeon question answered. */
+/** Pretend Clerk says this person is a member of this organization. */
 function signInAs(orgId: string, orgName: string) {
   vi.mocked(auth).mockResolvedValue({ userId: "user_vitest", orgId, has: () => false } as never);
   vi.mocked(auth.protect).mockResolvedValue(undefined as never);

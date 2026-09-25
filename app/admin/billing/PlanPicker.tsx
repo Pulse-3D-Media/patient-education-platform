@@ -133,7 +133,8 @@ export function PlanPicker({
           className={INPUT}
         />
         <p id="plan-seats-help" className="mt-1 text-sm text-ink-muted">
-          One for each surgeon who will use the library. Office staff are never charged.
+          One for each person who will use the library. The account owner does not need one: take one only if you will use the library
+          yourself. At least one.
         </p>
       </div>
 

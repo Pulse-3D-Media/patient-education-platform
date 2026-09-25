@@ -5,7 +5,7 @@ import { useActionState, useState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
-import { addNoteAction, saveDetailsAction, setManagedAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
+import { addNoteAction, saveDetailsAction, setManagedAction, setOwnerAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
 import { Outcome, SaveButton } from "../../FormBits";
 
 /**
@@ -222,6 +222,37 @@ export function ManagedForm({ clinicId, managedByPulse }: { clinicId: string; ma
       </label>
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} />
+        <Outcome state={state} />
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Make one current member the account owner (People tab). The list is the
+ * clinic's people as Clerk reported them when the page was drawn; the action
+ * checks with Clerk again before anything is written.
+ */
+export function OwnerForm({ clinicId, people, ownerUserId }: { clinicId: string; people: { userId: string; label: string }[]; ownerUserId: string | null }) {
+  const [state, action, pending] = useActionState(setOwnerAction, null);
+  return (
+    <form action={action} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+      <input type="hidden" name="clinicId" value={clinicId} />
+      <div className="sm:w-96">
+        <label htmlFor="ownerUserId" className={LABEL}>
+          Account owner
+        </label>
+        <select id="ownerUserId" name="ownerUserId" defaultValue={ownerUserId ?? ""} className={INPUT}>
+          {ownerUserId === null && <option value="">Choose a person</option>}
+          {people.map((person) => (
+            <option key={person.userId} value={person.userId}>
+              {person.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <SaveButton pending={pending} label="Make account owner" />
         <Outcome state={state} />
       </div>
     </form>

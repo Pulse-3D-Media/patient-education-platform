@@ -113,38 +113,75 @@ model Clinic {
   billing      ClinicBilling?
   billingPlans BillingPlan[]
 
-  // Who holds one of the surgeon seats above (see lib/seats.ts for the rules, lib/db/seats.ts for the writes).
+  // Who holds one of the surgeon seats above, and which open invitations hold
+  // one (see lib/seats.ts for the rules, lib/db/seats.ts for the writes).
   seatAllocations SeatAllocation[]
+  seatInvitations SeatInvitation[]
+
+  // The account owner: the Clerk user id (user_...) of the one person who
+  // runs this clinic's account. Always an admin, and the only person who does
+  // not need a seat. Set when the clinic is created (the person who created
+  // its Clerk organization), moved by the owner's handoff on /admin/people or
+  // by Pulse staff on /pulse, and cleared when the seat check finds the owner
+  // is no longer in the clinic. Empty for every clinic made before owners
+  // existed, and after an owner leaves: /pulse flags it. An id only.
+  ownerClerkUserId String?
 }
 
-/// Whether Clerk's copy of a seat agrees with ours yet.
+/// Whether Clerk's copy of a seat agrees with ours yet. From the seat model
+/// of September 2026 on, a seat no longer depends on anything written to
+/// Clerk, so every new seat is SYNCED; PENDING is only found on rows written
+/// by the earlier model, and the seat check marks those SYNCED (rule 4 keeps
+/// the enum).
 enum SeatSyncState {
-  PENDING // the seat is reserved here, and the "surgeon" label has not been confirmed on the person's Clerk membership yet (the write is on its way, or it failed)
-  SYNCED // the person's Clerk membership says surgeon too
+  PENDING // written by the earlier model while its Clerk label write was on its way
+  SYNCED // confirmed
 }
 
 /// One surgeon seat, held by one person at one clinic. THIS TABLE IS THE
-/// AUTHORITY on who holds a paid seat, and the number of rows a clinic has
-/// here is what is compared with Clinic.surgeonSeats. A row is only ever
-/// added inside a transaction that holds the clinic's row lock, so two people
-/// reaching for the last seat cannot both get it.
+/// AUTHORITY on who holds a paid seat. The rows here plus the open
+/// invitations in SeatInvitation are what is compared with
+/// Clinic.surgeonSeats, and a row in either is only ever added inside a
+/// transaction that holds the clinic's row lock, so two people reaching for
+/// the last seat cannot both get it.
 ///
 /// It holds two ids and nothing about the person: no name, no email, no role.
-/// The "surgeon" or "staff" label itself lives on the person's Clerk
-/// membership; a person labelled surgeon with no row here is a surgeon
-/// WAITING for a seat, which is how a request made before the clinic has paid
-/// (or while it is full) is represented.
+/// Everyone in the clinic except the account owner needs a seat; a person
+/// with no row here is WAITING for one.
 model SeatAllocation {
   id          String        @id @default(cuid())
   clinicId    String // the tenant column. Always filter by it.
   clinic      Clinic        @relation(fields: [clinicId], references: [id], onDelete: Cascade)
   clerkUserId String // the Clerk user id (user_...) of the person holding the seat. An id only
   syncState   SeatSyncState @default(PENDING)
-  reservedAt  DateTime      @default(now()) // when the seat was last reserved or tried again. A PENDING seat older than a few minutes that Clerk never confirmed is let go
+  reservedAt  DateTime      @default(now()) // when the seat was given
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
   @@unique([clinicId, clerkUserId]) // one seat per person per clinic, which is also what makes a repeated request harmless
+}
+
+/// One seat held by an invitation that has not been accepted yet. It counts
+/// against the clinic's seats exactly like a SeatAllocation row, so an admin
+/// can only have as many open invitations as there are free seats. Written
+/// under the clinic's row lock, like a seat.
+///
+/// The Clerk invitation carries this row's id in its public metadata
+/// ({ seatHold: id }); Clerk copies that onto the person's membership when
+/// they accept, and the seat check then turns this hold into their seat. A
+/// hold is let go when its invitation is revoked or expires, or when it was
+/// reserved and Clerk never made the invitation.
+///
+/// Ids only: the email the invitation went to lives in Clerk, never here.
+model SeatInvitation {
+  id                String   @id @default(cuid())
+  clinicId          String // the tenant column. Always filter by it.
+  clinic            Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  clerkInvitationId String?  @unique // Clerk's invitation id (orginv_...), set once Clerk has made the invitation. Empty for a moment while it is being made
+  reservedAt        DateTime @default(now()) // when the seat was held. A hold whose invitation Clerk never made is let go after a few minutes
+  createdAt         DateTime @default(now())
+
+  @@index([clinicId])
 }
 
 /// What kind of practice a clinic is, for billing. Never guessed from a name.

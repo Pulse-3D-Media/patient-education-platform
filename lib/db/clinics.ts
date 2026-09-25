@@ -4,7 +4,7 @@ import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, brandFontLabel, brandThemeLabe
 import { CATEGORIES } from "../categories";
 import { clinicIsOpen } from "../clinic-status";
 import { formatUsPhone } from "../phone";
-import { checkSeatReduction, overAllocatedWords, seatSummary } from "../seats";
+import { checkSeatReduction, isClerkUserId, overAllocatedWords, seatSummary } from "../seats";
 import { readBillingFacts } from "./billing";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
@@ -45,6 +45,7 @@ const CLINIC_FIELDS = {
   brandColor: true,
   brandFont: true,
   brandTheme: true,
+  ownerClerkUserId: true,
 } as const;
 
 /** What Clerk tells us about an organization that we keep a copy of. */
@@ -52,6 +53,12 @@ export type ClerkOrgDetails = {
   name: string;
   /** The organization's logo address, or null when it has none (Clerk's default avatar does not count). */
   logoUrl: string | null;
+  /**
+   * The account owner to record IF this is the visit that creates the
+   * clinic: the person who created the Clerk organization. Never used to
+   * change the owner of a clinic that already exists.
+   */
+  creatorClerkUserId?: string | null;
 };
 
 /**
@@ -71,7 +78,8 @@ export async function getClinicByClerkOrgId(clerkOrgId: string) {
  * name and logo in step with Clerk. Called on every signed-in visit.
  *
  * The first time an organization is seen, a clinic is created for it with
- * status PENDING (it has not chosen a plan yet). After that, the name and
+ * status PENDING (it has not chosen a plan yet) and the person who created
+ * the organization as its account owner. After that, the name and
  * logo are updated only when Clerk's copy has changed; an unchanged visit
  * writes nothing.
  *
@@ -96,7 +104,15 @@ export async function upsertClinicForClerkOrg(clerkOrgId: string, details: Clerk
 
   return prisma.clinic.upsert({
     where: { clerkOrgId },
-    create: { clerkOrgId, name: details.name, logoUrl, status: "PENDING" },
+    // The owner is written on create only. An existing clinic's owner is
+    // moved by a handoff or by Pulse staff (setClinicOwner below), never here.
+    create: {
+      clerkOrgId,
+      name: details.name,
+      logoUrl,
+      status: "PENDING",
+      ownerClerkUserId: isClerkUserId(details.creatorClerkUserId) ? details.creatorClerkUserId : null,
+    },
     // When Clerk has no image, omit the column entirely. Writing the logo
     // from the earlier read could overwrite a concurrent Pulse branding save.
     update: { name: details.name, ...(details.logoUrl !== null ? { logoUrl: details.logoUrl } : {}) },
@@ -177,6 +193,10 @@ export type PulseClinicRow = {
   managedByPulse: boolean;
   categories: Category[];
   surgeonSeats: number;
+  /** False when the clinic has no account owner on record: made before owners existed, or its owner left. Pulse staff set one on the clinic's page. */
+  hasOwner: boolean;
+  /** Seats taken: held by people plus held by open invitations. From our own tables. */
+  seatsInUse: number;
   createdAt: Date;
   /** Share links made in the last 30 days. */
   recentLinks: number;
@@ -210,8 +230,9 @@ export async function listClinicsForPulse(filter: { query?: string; status?: Cli
       managedByPulse: true,
       categories: true,
       surgeonSeats: true,
+      ownerClerkUserId: true,
       createdAt: true,
-      _count: { select: { shares: { where: { createdAt: { gte: since } } } } },
+      _count: { select: { shares: { where: { createdAt: { gte: since } } }, seatAllocations: true, seatInvitations: true } },
       shares: { select: { createdAt: true }, orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
@@ -224,6 +245,8 @@ export async function listClinicsForPulse(filter: { query?: string; status?: Cli
     managedByPulse: clinic.managedByPulse,
     categories: clinic.categories,
     surgeonSeats: clinic.surgeonSeats,
+    hasOwner: clinic.ownerClerkUserId !== null,
+    seatsInUse: clinic._count.seatAllocations + clinic._count.seatInvitations,
     createdAt: clinic.createdAt,
     recentLinks: clinic._count.shares,
     lastLinkAt: clinic.shares[0]?.createdAt ?? null,
@@ -452,7 +475,7 @@ export async function setClinicPlan(
       const lowering = surgeonSeats < before.surgeonSeats;
       if (lowering && !checkSeatReduction(inUse, surgeonSeats).ok && !options.allowFewerSeatsThanInUse) {
         throw new PlanSeatsRefusedError(
-          `${inUse} ${inUse === 1 ? "person holds" : "people hold"} a surgeon seat at this clinic, so ${surgeonSeats} ${surgeonSeats === 1 ? "seat" : "seats"} would leave it ${inUse - surgeonSeats} over. Nothing was saved. To save it anyway, tick "Allow fewer seats than are in use": nobody is relabelled and no charge is changed, but nobody new can be given a seat until it is settled.`,
+          `${inUse} ${inUse === 1 ? "seat is" : "seats are"} taken at this clinic (people and open invitations), so ${surgeonSeats} ${surgeonSeats === 1 ? "seat" : "seats"} would leave it ${inUse - surgeonSeats} over. Nothing was saved. To save it anyway, tick "Allow fewer seats than are in use": nobody is removed and no charge is changed, but nobody new can be given a seat until it is settled.`,
         );
       }
       over = overAllocatedWords(seatSummary(surgeonSeats, inUse));
@@ -508,6 +531,79 @@ export async function setClinicManagedByPulse(clinicId: string, managedByPulse: 
     changedBy,
   );
   return { clinic, logged, stillCharging };
+}
+
+/** A change of account owner that was refused because the owner had already changed. The message is safe to show. */
+export class OwnerChangeRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OwnerChangeRefusedError";
+  }
+}
+
+/**
+ * Make one person the clinic's account owner, and log it, together.
+ *
+ * Two callers, both in lib/seat-changes.ts, which have already checked with
+ * Clerk that the new owner is in the clinic:
+ *
+ *   a handoff    the current owner gives it to another admin on
+ *                /admin/people. `expectedOwner` is the person handing it
+ *                over; if the owner is no longer them when the clinic's row
+ *                is locked (two tabs, or Pulse staff changed it a moment
+ *                ago), nothing is written and OwnerChangeRefusedError says so.
+ *   Pulse staff  the backup on /pulse, for when an owner left without handing
+ *                over. `expectedOwner` is undefined: whoever it was, it moves.
+ *
+ * THE SEAT MOVES WITH IT (decided by Evan on 2026-09-25). The owner is the
+ * one person who needs no seat, so when `oldOwnerStays` is true (the old
+ * owner is still in the clinic) and the new owner holds a seat that the old
+ * owner does not, that seat passes from the new owner to the old one, in this
+ * same transaction under the clinic's lock. The count never changes and
+ * nobody else can take the seat in between. Otherwise seats are left alone:
+ * an old owner who already has a seat keeps it (and so does the new owner),
+ * and an old owner with no seat to receive waits for one like anyone else.
+ *
+ * `words` names the people for the log (staff names are fine there; it is
+ * never shown to the clinic). Writes nothing when the owner is already that
+ * person.
+ */
+export async function setClinicOwner(
+  clinicId: string,
+  newOwner: string,
+  words: { newOwnerName: string; oldOwnerName: string | null; how: string },
+  changedBy: string,
+  options: { expectedOwner?: string; oldOwnerStays?: boolean } = {},
+) {
+  if (!isClerkUserId(newOwner)) throw new OwnerChangeRefusedError("That person is not in the clinic.");
+  let seatMoved = false;
+  const result = await changeClinicWithLog(
+    clinicId,
+    async (before, tx) => {
+      if (options.expectedOwner !== undefined && before.ownerClerkUserId !== options.expectedOwner) {
+        throw new OwnerChangeRefusedError("You are no longer the account owner, so nothing was changed. Reload the page to see who is.");
+      }
+      const oldOwner = before.ownerClerkUserId;
+      if (options.oldOwnerStays && oldOwner && oldOwner !== newOwner) {
+        const newHolds = await tx.seatAllocation.findUnique({ where: { clinicId_clerkUserId: { clinicId, clerkUserId: newOwner } }, select: { id: true } });
+        const oldHolds = await tx.seatAllocation.findUnique({ where: { clinicId_clerkUserId: { clinicId, clerkUserId: oldOwner } }, select: { id: true } });
+        if (newHolds && !oldHolds) {
+          await tx.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId, clerkUserId: newOwner } }, select: { id: true } });
+          await tx.seatAllocation.create({ data: { clinicId, clerkUserId: oldOwner, syncState: "SYNCED" }, select: { id: true } });
+          seatMoved = true;
+        }
+      }
+      return { ownerClerkUserId: newOwner };
+    },
+    (before) => {
+      if (before.ownerClerkUserId === newOwner) return null;
+      const from = before.ownerClerkUserId === null ? "nobody" : (words.oldOwnerName ?? "someone no longer in the clinic");
+      const seats = seatMoved ? `${words.newOwnerName}'s seat passed to ${from}, so the seat count did not change.` : "Seats were not changed.";
+      return `Account owner changed from ${from} to ${words.newOwnerName} (${words.how}). ${seats}`;
+    },
+    changedBy,
+  );
+  return { ...result, seatMoved };
 }
 
 /**

@@ -11,7 +11,7 @@ import {
   upsertClinicForClerkOrg,
 } from "./clinics";
 import { listNotesForClinic } from "./notes";
-import { confirmSeat, listSeatRows, reserveSeat } from "./seats";
+import { listSeatRows, reserveSeat } from "./seats";
 import { createShare, getShareByCode, getShareForClinic, listSharesForClinic } from "./shares";
 
 /**
@@ -184,7 +184,6 @@ describe("setClinicPlan", () => {
     for (let index = 0; index < held; index += 1) {
       const who = `user_vitestplan${randomBytes(5).toString("hex")}`;
       await reserveSeat(clinic.id, who);
-      await confirmSeat(clinic.id, who);
     }
     return clinic.id;
   }
@@ -194,7 +193,7 @@ describe("setClinicPlan", () => {
 
     const refused = setClinicPlan(clinicId, ["KNEE"], 2, "Evan Miller");
     await expect(refused).rejects.toBeInstanceOf(PlanSeatsRefusedError);
-    await expect(refused).rejects.toThrow("3 people hold a surgeon seat at this clinic, so 2 seats would leave it 1 over. Nothing was saved.");
+    await expect(refused).rejects.toThrow("3 seats are taken at this clinic (people and open invitations), so 2 seats would leave it 1 over. Nothing was saved.");
 
     // Nothing was saved: not the seats, not the categories sent with them, and nothing in the log.
     expect(await prisma.clinic.findUnique({ where: { id: clinicId }, select: { surgeonSeats: true, categories: true } })).toEqual({ surgeonSeats: 4, categories: [] });
@@ -212,7 +211,7 @@ describe("setClinicPlan", () => {
     expect(clinic.surgeonSeats).toBe(1);
     expect(await listSeatRows(clinicId)).toHaveLength(3);
     expect(logged).toBe(
-      "Plan changed: surgeon seats set to 1 (was 4). 3 people hold a surgeon seat, 2 more than the 1 the plan now pays for. Nobody was relabelled and no charge was changed; nobody else can be given a seat until that is settled.",
+      "Plan changed: surgeon seats set to 1 (was 4). 3 seats are taken, 2 more than the 1 the plan now pays for. Nobody was removed and no charge was changed; nobody else can be given a seat until that is settled.",
     );
     expect((await listNotesForClinic(clinicId))[0]).toMatchObject({ authorName: "Evan Miller", body: logged });
   });
@@ -223,7 +222,7 @@ describe("setClinicPlan", () => {
 
     // Two seats is still one short, but it is a step towards settling it, not a new reduction.
     const raised = await setClinicPlan(clinicId, [], 2, "Evan Miller");
-    expect(raised.logged).toContain("surgeon seats set to 2 (was 1). 3 people hold a surgeon seat, 1 more than the 2");
+    expect(raised.logged).toContain("surgeon seats set to 2 (was 1). 3 seats are taken, 1 more than the 2");
 
     // Editing categories alone does not repeat the warning.
     const categories = await setClinicPlan(clinicId, ["HIP"], 2, "Evan Miller");

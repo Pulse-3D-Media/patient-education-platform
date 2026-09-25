@@ -32,9 +32,8 @@ import { ComingSoonTile } from "./ComingSoon";
 export const dynamic = "force-dynamic";
 
 export default async function LibraryPage() {
-  // Signed out, no clinic, or the surgeon question unanswered: sent to the
-  // right step. A clinic that is not open (not on a plan yet) sees a calm
-  // page instead of the library.
+  // Signed out, or no clinic: sent to the right step. A clinic that is not
+  // open (not on a plan yet) sees a calm page instead of the library.
   const clinic = await requireClinicPage();
   if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} />;
 

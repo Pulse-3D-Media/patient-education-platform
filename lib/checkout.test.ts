@@ -286,6 +286,11 @@ describe("startCheckout: who may, and what is refused", () => {
     expect(result).toMatchObject({ message: expect.stringContaining("pulse3dmedia.com/schedulecall") });
   });
 
+  it("zero seats is refused on the server with nothing made: every plan has at least one seat, so the owner alone never buys the library", async () => {
+    const clinicId = await makeClinic("zero seats");
+    expect(await refused(clinicId, pick(["KNEE"], 0, "MONTH", 0))).toMatchObject({ kind: "refused" });
+  });
+
   it("a clinic managed by Pulse cannot start a checkout", async () => {
     const clinicId = await makeClinic("managed");
     await setClinicManagedByPulse(clinicId, true, "Vitest");

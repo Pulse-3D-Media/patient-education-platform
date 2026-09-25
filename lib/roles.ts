@@ -1,45 +1,26 @@
 import { auth } from "@clerk/nextjs/server";
+import { ADMIN_ROLE } from "./role-names";
+
+export { ADMIN_ROLE, MEMBER_ROLE, ROLE_WORDS, clerkRole, parseRole, type Role } from "./role-names";
 
 /**
- * Permission and kind. Two separate things, and they stay separate.
+ * Permission. What a person may DO in their clinic is their Clerk
+ * organization role. Clerk's free plan has exactly two roles, and we use only
+ * those (custom roles are a paid add-on):
  *
- * PERMISSION is the Clerk organization role. Clerk's free plan has exactly
- * two roles, and we use only those (custom roles are a paid add-on):
+ *   org:admin   "Member with admin". The library, plus /admin: people,
+ *               branding, QR codes, billing, cancelling any link.
+ *   org:member  "Member". The library, and sending links to patients.
  *
- *   org:admin   the office admin. /admin, people, branding, QR codes,
- *               billing, cancelling any link. Also everything a member can do.
- *   org:member  a surgeon or anyone else on the team. /library, and sending
- *               links to patients.
+ * Seats are a separate thing and never grant a permission: everyone but the
+ * account owner holds one of the seats the clinic pays for (lib/seats.ts),
+ * whichever role they have, and switching admin on or off never changes the
+ * seat count. The account owner (Clinic.ownerClerkUserId) is always an admin.
  *
- * The person who creates the clinic is its first admin; admins invite the
- * rest and choose each person's role in the People section.
- *
- * KIND says what a person is for billing: a "surgeon" is a seat the clinic
- * pays for, "staff" are free. It lives on the Clerk membership's public
- * metadata as { kind: "surgeon" | "staff" }, and it never grants a
- * permission. An admin can be a surgeon; a member can be staff.
- *
- * Every page and action checks permission on the server with these
- * helpers. Hiding a button is never the check.
+ * Every page and action checks permission on the server with isClinicAdmin().
+ * Hiding a button is never the check. Server only: the role names the
+ * browser needs are in lib/role-names.ts.
  */
-
-/** Clerk's role key for the office admin. */
-export const ADMIN_ROLE = "org:admin";
-
-export type Kind = "surgeon" | "staff";
-
-export const KINDS: Kind[] = ["surgeon", "staff"];
-
-/** Read a kind out of a membership's public metadata. Anything else, or nothing set yet, is null. */
-export function kindFromMetadata(metadata: Record<string, unknown> | null | undefined): Kind | null {
-  const value = metadata?.kind;
-  return value === "surgeon" || value === "staff" ? value : null;
-}
-
-/** Turn a value from a form or a button into a Kind, or null if it is not one. */
-export function parseKind(value: unknown): Kind | null {
-  return value === "surgeon" || value === "staff" ? value : null;
-}
 
 /**
  * Is the signed-in user an admin of their active organization?

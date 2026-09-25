@@ -1,35 +1,50 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
-import { listSeatRows } from "@/lib/db/seats";
+import { listSeatHolds, listSeatRows, reserveSeat } from "@/lib/db/seats";
 import { fakeClerk } from "@/lib/testing/fake-clerk";
-import { setKindAction } from "./actions";
+import {
+  giveSeatAction,
+  handOffOwnerAction,
+  inviteAction,
+  releaseMySeatAction,
+  removePersonAction,
+  revokeInvitationAction,
+  setAdminAction,
+} from "./actions";
 
 /**
- * The Server Action behind the Surgeon / Staff control, as each kind of
- * person. Clerk is a stand-in; the database is real (the testing branch).
+ * The Server Actions behind the People page, as each kind of person. Clerk
+ * is a stand-in; the database is real (the testing branch).
  *
- * What the browser sends is a user id and a kind, and nothing else is
- * trusted: who is asking, which clinic they belong to and whether they may
- * do this all come from the session on the server.
+ * What the browser sends is a person, an invitation, an email and a role,
+ * and nothing else is trusted: who is asking, which clinic they belong to,
+ * whether they may do this, and whether the clinic is open all come from the
+ * session and the database on the server.
  */
 
 vi.mock("@clerk/nextjs/server", async () => (await import("@/lib/testing/fake-clerk")).clerkServerModule());
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// The request's Host header, which only picks among the deployment's own addresses (lib/trusted-origin.ts).
+vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
+// A few round trips to the remote testing database per action.
+vi.setConfig({ testTimeout: 30_000 });
 
 const createdClinicIds: string[] = [];
 const id = () => randomBytes(6).toString("hex");
 const user = () => `user_vitest${id()}`;
 
-async function makeClinic(surgeonSeats: number, status: "ACTIVE" | "PENDING" | "PAUSED", members: Parameters<typeof fakeClerk.addOrg>[2]) {
+/** A clinic whose owner is an admin, plus these other people. */
+async function makeClinic(surgeonSeats: number, status: "ACTIVE" | "PENDING" | "PAUSED", others: Parameters<typeof fakeClerk.addOrg>[2] = []) {
   const orgId = `org_test_${id()}`;
+  const owner = user();
   const clinic = await prisma.clinic.create({
-    data: { name: `Vitest people clinic ${id()}`, status, clerkOrgId: orgId, surgeonSeats },
+    data: { name: `Vitest people clinic ${id()}`, status, clerkOrgId: orgId, surgeonSeats, ownerClerkUserId: owner },
     select: { id: true },
   });
   createdClinicIds.push(clinic.id);
-  fakeClerk.addOrg(orgId, "Vitest people clinic", members);
-  return { clinicId: clinic.id, orgId };
+  fakeClerk.addOrg(orgId, "Vitest people clinic", [{ userId: owner, role: "org:admin" }, ...(others ?? [])], owner);
+  return { clinicId: clinic.id, orgId, owner };
 }
 
 beforeEach(() => {
@@ -42,107 +57,121 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("setKindAction", () => {
-  it("an admin marks a member as a surgeon, within the clinic's seats", async () => {
-    const [admin, dr] = [user(), user()];
-    const { clinicId, orgId } = await makeClinic(1, "ACTIVE", [{ userId: admin, role: "org:admin" }, { userId: dr }]);
-    fakeClerk.signIn(admin, orgId);
+describe("who may use the People actions", () => {
+  it("nobody signed out, and no plain member, can change anything", async () => {
+    const [member, other] = [user(), user()];
+    const { clinicId, orgId } = await makeClinic(3, "ACTIVE", [{ userId: member }, { userId: other }]);
 
-    expect(await setKindAction(dr, "surgeon")).toEqual({});
-    expect(fakeClerk.kindOf(orgId, dr)).toBe("surgeon");
-    expect(await listSeatRows(clinicId)).toMatchObject([{ clerkUserId: dr, syncState: "SYNCED" }]);
-  });
-
-  it("an admin is told plainly when every seat is taken, and the person is not relabelled", async () => {
-    const [admin, a, b] = [user(), user(), user()];
-    const { clinicId, orgId } = await makeClinic(1, "ACTIVE", [{ userId: admin, role: "org:admin" }, { userId: a }, { userId: b }]);
-    fakeClerk.signIn(admin, orgId);
-    await setKindAction(a, "surgeon");
-
-    const result = await setKindAction(b, "surgeon");
-
-    expect(result.error).toContain("All 1 surgeon seat is in use");
-    expect(fakeClerk.kindOf(orgId, b)).toBeUndefined();
-    expect(await listSeatRows(clinicId)).toHaveLength(1);
-  });
-
-  it("an admin may mark themselves, and that goes through the limit too", async () => {
-    const [admin, dr] = [user(), user()];
-    const { orgId } = await makeClinic(1, "ACTIVE", [{ userId: admin, role: "org:admin" }, { userId: dr }]);
-    fakeClerk.signIn(admin, orgId);
-    await setKindAction(dr, "surgeon");
-
-    expect((await setKindAction(admin, "surgeon")).error).toContain("in use"); // being an admin is a permission, not a seat
-    expect(await setKindAction(admin, "staff")).toEqual({});
-  });
-
-  it("a member is refused before anything is read or written", async () => {
-    const [member, dr] = [user(), user()];
-    const { clinicId, orgId } = await makeClinic(3, "ACTIVE", [{ userId: member }, { userId: dr }]);
-    fakeClerk.signIn(member, orgId);
-
-    expect((await setKindAction(dr, "surgeon")).error).toContain("Only your clinic's office admins");
-    expect((await setKindAction(member, "surgeon")).error).toContain("Only your clinic's office admins"); // not even about themselves
+    for (const who of [null, member]) {
+      fakeClerk.signIn(who, who ? orgId : null);
+      // A member cannot switch admin on, for themselves or anyone else.
+      expect((await setAdminAction(member, true)).error).toBe("Only your clinic's office admins can change this.");
+      expect((await setAdminAction(other, true)).error).toBe("Only your clinic's office admins can change this.");
+      expect((await inviteAction("new@example.test", "admin")).error).toBe("Only your clinic's office admins can change this.");
+      expect((await removePersonAction(other)).error).toBe("Only your clinic's office admins can change this.");
+      expect((await giveSeatAction(other)).error).toBe("Only your clinic's office admins can change this.");
+    }
+    expect(fakeClerk.roleOf(orgId, member)).toBe("org:member");
     expect(fakeClerk.writes).toEqual([]);
     expect(await listSeatRows(clinicId)).toEqual([]);
   });
 
-  it("someone signed out is refused", async () => {
-    const dr = user();
-    const { clinicId } = await makeClinic(3, "ACTIVE", [{ userId: dr }]);
-    fakeClerk.signIn(null, null);
-
-    expect((await setKindAction(dr, "surgeon")).error).toBeTruthy();
-    expect(await listSeatRows(clinicId)).toEqual([]);
-  });
-
-  it("an admin of one clinic cannot change a person in another, whatever user id they send", async () => {
-    const [adminA, drB] = [user(), user()];
-    const a = await makeClinic(3, "ACTIVE", [{ userId: adminA, role: "org:admin" }]);
-    const b = await makeClinic(3, "ACTIVE", [{ userId: drB, kind: "staff" }]);
-    fakeClerk.signIn(adminA, a.orgId);
-
-    const result = await setKindAction(drB, "surgeon");
-
-    expect(result.error).toBe("That person is not in your clinic.");
-    expect(fakeClerk.kindOf(b.orgId, drB)).toBe("staff"); // untouched
-    expect(fakeClerk.writes).toEqual([]);
-    expect(await listSeatRows(a.clinicId)).toEqual([]);
-    expect(await listSeatRows(b.clinicId)).toEqual([]);
-  });
-
-  it("an admin of a clinic that is not open cannot change kinds", async () => {
-    const [admin, dr] = [user(), user()];
+  it("nobody is invited, and nothing changed, before the clinic is paid for", async () => {
     for (const status of ["PENDING", "PAUSED"] as const) {
-      const { clinicId, orgId } = await makeClinic(3, status, [{ userId: admin, role: "org:admin" }, { userId: dr }]);
-      fakeClerk.signIn(admin, orgId);
-      expect((await setKindAction(dr, "surgeon")).error).toContain("not open");
-      expect(await listSeatRows(clinicId)).toEqual([]);
+      const { clinicId, orgId, owner } = await makeClinic(3, status);
+      fakeClerk.signIn(owner, orgId);
+      expect((await inviteAction("new@example.test", "member")).error).toContain("Choose a plan on the Billing page first");
+      expect(fakeClerk.invitations(orgId)).toEqual([]);
+      expect(await listSeatHolds(clinicId)).toEqual([]);
     }
   });
 
-  it("refuses a kind it does not know, and a missing person", async () => {
-    const admin = user();
-    const { orgId } = await makeClinic(3, "ACTIVE", [{ userId: admin, role: "org:admin" }]);
-    fakeClerk.signIn(admin, orgId);
+  it("an admin of another clinic cannot reach this clinic's people, whatever id they send", async () => {
+    const theirMember = user();
+    const theirs = await makeClinic(3, "ACTIVE", [{ userId: theirMember }]);
+    const mine = await makeClinic(3, "ACTIVE");
+    fakeClerk.signIn(mine.owner, mine.orgId);
 
-    expect((await setKindAction(admin, "owner")).error).toBe("Choose Surgeon or Staff.");
-    expect((await setKindAction(admin, { kind: "surgeon" })).error).toBe("Choose Surgeon or Staff.");
-    expect((await setKindAction("", "surgeon")).error).toBe("No person was selected.");
-    expect((await setKindAction(42, "surgeon")).error).toBe("No person was selected.");
-    expect(fakeClerk.writes).toEqual([]);
+    expect((await setAdminAction(theirMember, true)).error).toBe("That person is not in your clinic.");
+    expect((await removePersonAction(theirMember)).error).toBe("That person is not in your clinic.");
+    expect((await giveSeatAction(theirMember)).error).toBe("That person is not in your clinic.");
+    expect((await handOffOwnerAction(theirMember)).error).toBe("That person is not in your clinic.");
+    expect(fakeClerk.roleOf(theirs.orgId, theirMember)).toBe("org:member");
+    expect(await listSeatRows(theirs.clinicId)).toEqual([]);
+    expect(await listSeatRows(mine.clinicId)).toEqual([]);
   });
 
-  it("when Clerk fails, the admin sees a plain sentence and no seat is left held", async () => {
-    const [admin, dr] = [user(), user()];
-    const { clinicId, orgId } = await makeClinic(1, "ACTIVE", [{ userId: admin, role: "org:admin" }, { userId: dr }]);
-    fakeClerk.signIn(admin, orgId);
+  it("refuses a value that is not true or false for admin", async () => {
+    const dr = user();
+    const { orgId, owner } = await makeClinic(3, "ACTIVE", [{ userId: dr }]);
+    fakeClerk.signIn(owner, orgId);
+    expect((await setAdminAction(dr, "yes")).error).toBe("Choose Member or Member with admin.");
+    expect(fakeClerk.roleOf(orgId, dr)).toBe("org:member");
+  });
+});
+
+describe("what an admin can do", () => {
+  it("invite, then revoke, and the seat comes back", async () => {
+    const { clinicId, orgId, owner } = await makeClinic(1, "ACTIVE");
+    fakeClerk.signIn(owner, orgId);
+
+    expect(await inviteAction("new@example.test", "member")).toMatchObject({ message: expect.stringContaining("Invitation sent to new@example.test") });
+    // The email's link comes back to our own sign-up page, not Clerk's hosted pages.
+    expect(fakeClerk.invitations(orgId)[0].redirectUrl).toBe("http://localhost:3000/sign-up");
+    expect((await inviteAction("another@example.test", "member")).error).toContain("All 1 seat is taken");
+
+    expect(await revokeInvitationAction(fakeClerk.invitations(orgId)[0].id)).toEqual({ message: "Invitation revoked." });
+    expect(await listSeatHolds(clinicId)).toEqual([]);
+    expect(await inviteAction("another@example.test", "member")).toMatchObject({ message: expect.any(String) });
+  });
+
+  it("switch admin on and off for a member, and give a waiting person a free seat", async () => {
+    const dr = user();
+    const { clinicId, orgId, owner } = await makeClinic(1, "ACTIVE", [{ userId: dr }]);
+    fakeClerk.signIn(owner, orgId);
+
+    expect(await setAdminAction(dr, true)).toEqual({});
+    expect(fakeClerk.roleOf(orgId, dr)).toBe("org:admin");
+    expect(await setAdminAction(dr, false)).toEqual({});
+    expect(await giveSeatAction(dr)).toEqual({});
+    expect((await listSeatRows(clinicId)).map((row) => row.clerkUserId)).toEqual([dr]);
+  });
+
+  it("the owner cannot be removed or made a plain member, by another admin either", async () => {
+    const other = user();
+    const { orgId, owner } = await makeClinic(2, "ACTIVE", [{ userId: other, role: "org:admin" }]);
+    fakeClerk.signIn(other, orgId);
+
+    expect((await removePersonAction(owner)).error).toContain("cannot be removed");
+    expect((await setAdminAction(owner, false)).error).toContain("always has admin");
+    expect(fakeClerk.isMember(orgId, owner)).toBe(true);
+    expect(fakeClerk.roleOf(orgId, owner)).toBe("org:admin");
+  });
+
+  it("only the owner can hand the account over, or give up their own seat", async () => {
+    const other = user();
+    const { clinicId, orgId, owner } = await makeClinic(2, "ACTIVE", [{ userId: other, role: "org:admin" }]);
+
+    fakeClerk.signIn(other, orgId);
+    expect((await handOffOwnerAction(other)).error).toContain("Only the account owner");
+    expect((await releaseMySeatAction()).error).toContain("Only the account owner can go without a seat");
+
+    fakeClerk.signIn(owner, orgId);
+    expect(await giveSeatAction(owner)).toEqual({});
+    expect(await releaseMySeatAction()).toEqual({});
+    expect(await handOffOwnerAction(other)).toMatchObject({ message: expect.stringContaining("is now the account owner") });
+    expect((await prisma.clinic.findUnique({ where: { id: clinicId }, select: { ownerClerkUserId: true } }))?.ownerClerkUserId).toBe(other);
+  });
+
+  it("answers a failure in a plain sentence, with nothing changed", async () => {
+    const dr = user();
+    const { clinicId, orgId, owner } = await makeClinic(2, "ACTIVE", [{ userId: dr }]);
+    await reserveSeat(clinicId, dr);
+    fakeClerk.signIn(owner, orgId);
     fakeClerk.failNextWrites = 1;
 
-    const result = await setKindAction(dr, "surgeon");
-
-    expect(result.error).toBe("That could not be saved just now. Nothing was changed. Try again in a moment.");
-    expect(await listSeatRows(clinicId)).toEqual([]);
-    expect(await setKindAction(dr, "surgeon")).toEqual({}); // and trying again works
+    expect((await removePersonAction(dr)).error).toBe("That could not be saved just now. Nothing was changed. Try again in a moment.");
+    expect(fakeClerk.isMember(orgId, dr)).toBe(true);
+    expect((await listSeatRows(clinicId)).map((row) => row.clerkUserId)).toEqual([dr]);
   });
 });

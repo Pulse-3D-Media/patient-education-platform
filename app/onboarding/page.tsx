@@ -3,6 +3,7 @@ import { CreateOrganization, OrganizationList } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import { LOGO_URL } from "@/lib/brand";
 import { getCurrentClinic } from "@/lib/clinic";
+import { clinicIsOpen } from "@/lib/clinic-status";
 
 /**
  * Step one of onboarding: "Set up your clinic".
@@ -19,19 +20,26 @@ import { getCurrentClinic } from "@/lib/clinic";
  * any invitation waiting to be accepted, and a create form for the rare
  * person who wants a new one anyway.
  *
- * Whoever already has an active clinic is sent on: to the surgeon-or-staff
- * question if they have not answered it, otherwise to the library.
+ * Whoever creates a clinic becomes its account owner (recorded when the
+ * clinic's row is made, in lib/clinic.ts) and goes straight to Billing to
+ * choose a plan: nothing else works until the clinic is paid for. Whoever
+ * joins through an invitation, or picks a clinic they already belong to,
+ * goes to the library (a clinic that is not open yet shows them its "ask
+ * your office admin" note there).
  */
 export const dynamic = "force-dynamic";
 
-const NEXT_STEP = "/onboarding/kind";
+/** Where a new clinic's creator goes. */
+const AFTER_CREATE = "/admin/billing";
+/** Where someone goes after picking a clinic or accepting an invitation. This page then sends them on. */
+const AFTER_SELECT = "/onboarding";
 
 export default async function OnboardingPage() {
   const { userId, orgId } = await auth.protect();
 
   if (orgId) {
     const clinic = await getCurrentClinic();
-    if (clinic) redirect(clinic.kind ? "/library" : NEXT_STEP);
+    if (clinic) redirect(clinic.isOwner && !clinicIsOpen(clinic) ? AFTER_CREATE : "/library");
   }
 
   // Does this person already have a clinic, or an invitation to one? Two
@@ -61,9 +69,9 @@ export default async function OnboardingPage() {
       </div>
 
       {belongsSomewhere ? (
-        <OrganizationList hidePersonal afterSelectOrganizationUrl={NEXT_STEP} afterCreateOrganizationUrl={NEXT_STEP} skipInvitationScreen />
+        <OrganizationList hidePersonal afterSelectOrganizationUrl={AFTER_SELECT} afterCreateOrganizationUrl={AFTER_CREATE} skipInvitationScreen />
       ) : (
-        <CreateOrganization afterCreateOrganizationUrl={NEXT_STEP} skipInvitationScreen />
+        <CreateOrganization afterCreateOrganizationUrl={AFTER_CREATE} skipInvitationScreen />
       )}
     </main>
   );

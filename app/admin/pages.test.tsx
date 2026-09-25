@@ -37,7 +37,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <span data-testid="user-button" />,
   SignOutButton: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  OrganizationProfile: () => <span />,
+  OrganizationProfile: Object.assign(() => <span />, { Page: () => null }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -58,7 +58,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 let currentPath = "/admin";
 
-/** Pretend Clerk says this person is in this organization, as an admin or a member, with the surgeon question answered. */
+/** Pretend Clerk says this person is in this organization, as an admin or a member. */
 function signInAs(orgId: string, role: "admin" | "member", orgName: string) {
   vi.mocked(auth).mockResolvedValue({
     userId: "user_vitest",
@@ -181,7 +181,7 @@ describe("an admin of a PENDING clinic", () => {
     expect(html).toContain("Your plan");
     expect(html).toContain("Knee");
     expect(html).toContain("Shoulder");
-    expect(html).toContain("1 surgeon");
+    expect(html).toContain("1 seat");
     expect(html).toContain("Estimate");
     expect(html).toContain("not an invoice");
     expect(html).toContain("nothing has been charged");
@@ -191,11 +191,20 @@ describe("an admin of a PENDING clinic", () => {
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/billing"/);
   });
 
-  it("gets the closed-clinic page on the overview, Shared links and People, with a way to Billing, no links workspace, and one main landmark", async () => {
+  it("gets 'Choose a plan first' on People, with a way to Billing and no way to invite anyone", async () => {
+    signInAs(orgPending, "admin", "Vitest pages clinic (pending)");
+    const html = await render(PeoplePage, "/admin/people");
+    expect(html).toContain("Choose a plan first");
+    expect(html).toContain('href="/admin/billing"');
+    expect(html).not.toContain("Send invitation");
+    expect(html).not.toContain("Invite someone");
+    expect(html.match(/<main\b/g)).toHaveLength(1);
+  });
+
+  it("gets the closed-clinic page on the overview, Shared links and Branding, with a way to Billing, no links workspace, and one main landmark", async () => {
     for (const [page, path] of [
       [AdminOverviewPage, "/admin"],
       [LinksPage, "/admin/links"],
-      [PeoplePage, "/admin/people"],
       [BrandingPage, "/admin/branding"],
     ] as const) {
       signInAs(orgPending, "admin", "Vitest pages clinic (pending)");
@@ -307,7 +316,7 @@ describe("an admin of an ACTIVE clinic", () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(BillingPage, "/admin/billing");
     expect(html).toContain("Active");
-    expect(html).toContain("2 surgeons");
+    expect(html).toContain("2 seats");
     expect(html).toContain("Per month");
     expect(showsAnAmount(html)).toBe(true);
     expect(html).toContain("not an invoice");

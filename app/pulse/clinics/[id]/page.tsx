@@ -214,7 +214,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
       )}
       {board && board.waiting > 0 && (
         <p className="mb-4 rounded-lg border border-white/15 p-3 text-[15px] text-[#bfbfbf]">
-          {board.waiting} {board.waiting === 1 ? "person has" : "people have"} no seat, because none is free. They can use the library as usual. They get a
+          {board.waiting} {board.waiting === 1 ? "person has" : "people have"} no seat, because none is free. They can watch videos in the library but cannot send links. They get a
           seat, oldest member first, as soon as one is free.
         </p>
       )}

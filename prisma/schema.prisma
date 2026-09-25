@@ -145,8 +145,10 @@ enum SeatSyncState {
 /// transaction that holds the clinic's row lock, so two people reaching for
 /// the last seat cannot both get it.
 ///
-/// It holds two ids and nothing about the person: no name, no email, no role.
-/// Everyone in the clinic except the account owner needs a seat; a person
+/// It holds two ids and, optionally, one thing about the person: the name
+/// patients see on the links they send (displayName), when an admin has set
+/// one. No email, no role. Everyone in the clinic except the account owner
+/// needs a seat; a person
 /// with no row here is WAITING for one.
 model SeatAllocation {
   id          String        @id @default(cuid())
@@ -157,6 +159,7 @@ model SeatAllocation {
   reservedAt  DateTime      @default(now()) // when the seat was given
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+  displayName String? // how this person's name appears to patients on links they send ("Jane Smith, PA-C"). Empty means "Dr. First Last" from Clerk. Staff data, set by an admin on /admin/people; goes with the seat
 
   @@unique([clinicId, clerkUserId]) // one seat per person per clinic, which is also what makes a repeated request harmless
 }
@@ -388,6 +391,13 @@ model Share {
   expiryPolicy       ExpiryPolicy @default(FIXED) // FIXED by default so a link written without it (older code, a hand insert) is a legacy link
   firstPlayedAt      DateTime? // set once, by the first real play of a FIRST_PLAY link; the deadline moved at that moment and never again
   daysAfterFirstPlay Int? // copied from the settings (the clinic's override, else the platform's viewDays) when the link was made, so a later settings edit never changes a link already issued
+
+  // Who the link is from: the surgeon, never the patient (rule 2 is about
+  // patients; this is staff data). Both copied when the link is made, so a
+  // later name change or the surgeon leaving never changes a link already
+  // sent. Empty on every link made before surgeons were recorded.
+  senderUserId String? // the surgeon's Clerk user id
+  senderName   String? // what the patient page and the pamphlet say: "Sent by Dr. Jane Smith". Empty means the older wording, with no name
 
   @@index([clinicId])
 }

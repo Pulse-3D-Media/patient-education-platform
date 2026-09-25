@@ -1,75 +1,82 @@
-import { auth } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
-import { cancelShareAction, createShareAction } from "./actions";
+import { fakeClerk } from "@/lib/testing/fake-clerk";
+import { createLinkAction } from "./actions";
 
 /**
- * The Server Actions behind /admin/links, with Clerk replaced by a stand-in
- * and the database real (the Neon testing branch). What these prove: a
- * member is refused before anything is written, an admin of a clinic that
- * is not open is refused, an admin of one clinic cannot cancel another
- * clinic's link, and an admin of an open clinic can do both.
+ * The Server Action behind Create link on /admin/links, with Clerk replaced
+ * by the in-memory stand-in (lib/testing/fake-clerk.ts) and the database
+ * real (the Neon testing branch). What these prove:
  *
- * The clinic id never comes from the form: it comes from the signed-in
- * user's organization, which is what the stand-in plays.
+ *   - only an admin of an open clinic can make a link, and a refusal writes nothing;
+ *   - every link is from a surgeon, and the server checks the pick: someone
+ *     with no seat, someone from another clinic, or no pick at all is refused
+ *     with a plain sentence and nothing written;
+ *   - the surgeon's id and the name patients see are copied onto the link,
+ *     and a later change to that name does not change a link already made;
+ *   - the clinic's plan still decides what can be shared, checked when the
+ *     button is pressed, not when the page was drawn.
+ *
+ * The clinic never comes from the browser: it comes from the signed-in
+ * admin's organization, which is what the stand-in plays.
  */
 
-vi.mock("@clerk/nextjs/server", () => ({
-  auth: vi.fn(),
-  clerkClient: vi.fn(),
-}));
+vi.mock("@clerk/nextjs/server", async () => (await import("@/lib/testing/fake-clerk")).clerkServerModule());
 
 // revalidatePath only works inside a real request; here it just needs to not throw.
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn(),
 }));
 
-/** Pretend Clerk says this person is signed in to this organization, as an admin or a member. */
-function signInAs(orgId: string | null, role: "admin" | "member") {
-  vi.mocked(auth).mockResolvedValue({
-    userId: "user_vitest",
-    orgId,
-    has: ({ role: wanted }: { role: string }) => role === "admin" && wanted === "org:admin",
-  } as never);
-}
+const tag = () => randomBytes(6).toString("hex");
+const orgId = () => `org_test_${tag()}`;
+const userId = (name: string) => `user_${name}${tag()}`;
 
-/** A form the way the browser would send it. */
-function form(fields: Record<string, string>) {
-  const data = new FormData();
-  for (const [name, value] of Object.entries(fields)) data.append(name, value);
-  return data;
-}
+const orgActive = orgId();
+const orgOther = orgId();
+const orgPending = orgId();
+const orgKneeOnly = orgId();
+const orgFinishedOnly = orgId();
 
-function fakeOrgId() {
-  return `org_test_${randomBytes(8).toString("hex")}`;
-}
+// Clinic A (open, Hip on its plan).
+const adminA = userId("admina"); // an admin who holds a seat, "Pat Lee" in Clerk
+const surgeonA = userId("surgeona"); // a member who holds a seat, "Jane Smith" in Clerk
+const noSeatA = userId("noseata"); // a member who holds no seat
+const nameless = userId("namelessa"); // holds a seat, but Clerk has no name for them
+// Clinic B (open, Hip on its plan).
+const surgeonB = userId("surgeonb");
+// The other clinics each have one admin who holds a seat.
+const adminPending = userId("adminp");
+const adminKnee = userId("admink");
+const adminFinished = userId("adminf");
 
 const createdClinicIds: string[] = [];
 const createdVideoIds: string[] = [];
-const createdShareIds: string[] = [];
-
-const orgActive = fakeOrgId();
-const orgOther = fakeOrgId();
-const orgPending = fakeOrgId();
-const orgKneeOnly = fakeOrgId();
-const orgFinishedOnly = fakeOrgId();
-let activeClinic = "";
-let otherClinic = "";
+let clinicA = "";
+let clinicB = "";
 let kneeOnlyClinic = "";
 let finishedOnlyClinic = "";
 /** A published Hip placeholder. */
 let videoId = "";
 
-/** A clinic with Hip on its plan (the test video is a Hip video), unless told otherwise. */
 async function makeClinic(
   name: string,
   clerkOrgId: string,
   status: "ACTIVE" | "PENDING",
+  seated: string[],
   extra: { categories?: ("HIP" | "KNEE")[]; showPlaceholders?: boolean } = {},
 ) {
   const clinic = await prisma.clinic.create({
-    data: { name, clerkOrgId, status, categories: extra.categories ?? ["HIP"], showPlaceholders: extra.showPlaceholders ?? true },
+    data: {
+      name,
+      clerkOrgId,
+      status,
+      surgeonSeats: 10,
+      categories: extra.categories ?? ["HIP"],
+      showPlaceholders: extra.showPlaceholders ?? true,
+      seatAllocations: { create: seated.map((clerkUserId) => ({ clerkUserId, syncState: "SYNCED" as const })) },
+    },
     select: { id: true },
   });
   createdClinicIds.push(clinic.id);
@@ -77,11 +84,23 @@ async function makeClinic(
 }
 
 beforeAll(async () => {
-  activeClinic = await makeClinic("Vitest links clinic (active)", orgActive, "ACTIVE");
-  otherClinic = await makeClinic("Vitest links clinic (other)", orgOther, "ACTIVE");
-  await makeClinic("Vitest links clinic (pending)", orgPending, "PENDING");
-  kneeOnlyClinic = await makeClinic("Vitest links clinic (knee only)", orgKneeOnly, "ACTIVE", { categories: ["KNEE"] });
-  finishedOnlyClinic = await makeClinic("Vitest links clinic (finished only)", orgFinishedOnly, "ACTIVE", { showPlaceholders: false });
+  fakeClerk.reset();
+  fakeClerk.addOrg(orgActive, "Vitest links clinic A", [
+    { userId: adminA, firstName: "Pat", lastName: "Lee", role: "org:admin" },
+    { userId: surgeonA, firstName: "Jane", lastName: "Smith", role: "org:member" },
+    { userId: noSeatA, firstName: "Sam", lastName: "Doe", role: "org:member" },
+    { userId: nameless, firstName: "", lastName: "", identifier: "nameless@example.com", role: "org:member" },
+  ]);
+  fakeClerk.addOrg(orgOther, "Vitest links clinic B", [{ userId: surgeonB, firstName: "Bo", lastName: "Other", role: "org:admin" }]);
+  fakeClerk.addOrg(orgPending, "Vitest links clinic (pending)", [{ userId: adminPending, firstName: "Pen", lastName: "Ding", role: "org:admin" }]);
+  fakeClerk.addOrg(orgKneeOnly, "Vitest links clinic (knee only)", [{ userId: adminKnee, firstName: "Kay", lastName: "Nee", role: "org:admin" }]);
+  fakeClerk.addOrg(orgFinishedOnly, "Vitest links clinic (finished only)", [{ userId: adminFinished, firstName: "Fin", lastName: "Ished", role: "org:admin" }]);
+
+  clinicA = await makeClinic("Vitest links clinic A", orgActive, "ACTIVE", [adminA, surgeonA, nameless]);
+  clinicB = await makeClinic("Vitest links clinic B", orgOther, "ACTIVE", [surgeonB]);
+  await makeClinic("Vitest links clinic (pending)", orgPending, "PENDING", [adminPending]);
+  kneeOnlyClinic = await makeClinic("Vitest links clinic (knee only)", orgKneeOnly, "ACTIVE", [adminKnee], { categories: ["KNEE"] });
+  finishedOnlyClinic = await makeClinic("Vitest links clinic (finished only)", orgFinishedOnly, "ACTIVE", [adminFinished], { showPlaceholders: false });
 
   const video = await prisma.video.create({
     data: { title: "Vitest links video", category: "HIP", videoUrl: "https://example.com/vitest.mp4", isPublished: true, isPlaceholder: true },
@@ -92,13 +111,16 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  vi.resetAllMocks();
+  fakeClerk.failReads = false;
+  fakeClerk.signIn(null, null);
 });
 
 afterAll(async () => {
-  await prisma.share.deleteMany({ where: { OR: [{ id: { in: createdShareIds } }, { clinicId: { in: createdClinicIds } }] } });
+  await prisma.share.deleteMany({ where: { OR: [{ clinicId: { in: createdClinicIds } }, { videoId: { in: createdVideoIds } }] } });
   await prisma.video.deleteMany({ where: { id: { in: createdVideoIds } } });
+  // Seats and log entries go with their clinic (onDelete: Cascade).
   await prisma.clinic.deleteMany({ where: { id: { in: createdClinicIds } } });
+  fakeClerk.reset();
   await prisma.$disconnect();
 });
 
@@ -106,154 +128,188 @@ async function linksFor(clinicId: string) {
   return prisma.share.count({ where: { clinicId } });
 }
 
-describe("createShareAction", () => {
+async function shareOf(code: string) {
+  return prisma.share.findUniqueOrThrow({
+    where: { code },
+    select: { clinicId: true, senderUserId: true, senderName: true, expiryPolicy: true, firstPlayedAt: true, daysAfterFirstPlay: true },
+  });
+}
+
+describe("who may press Create link", () => {
   it("refuses a member, and writes nothing", async () => {
-    signInAs(orgActive, "member");
-    const before = await linksFor(activeClinic);
-
-    const result = await createShareAction(null, form({ videoId }));
-
-    expect(result).toMatchObject({ error: expect.stringContaining("office admins") });
-    expect(await linksFor(activeClinic)).toBe(before);
+    fakeClerk.signIn(surgeonA, orgActive);
+    const before = await linksFor(clinicA);
+    expect(await createLinkAction(videoId, surgeonA)).toMatchObject({ ok: false, error: expect.stringContaining("office admins") });
+    expect(await linksFor(clinicA)).toBe(before);
   });
 
   it("refuses an admin of a clinic that is not open, and writes nothing", async () => {
-    signInAs(orgPending, "admin");
-    const result = await createShareAction(null, form({ videoId }));
-    expect(result).toMatchObject({ error: expect.stringContaining("on a plan") });
+    fakeClerk.signIn(adminPending, orgPending);
+    expect(await createLinkAction(videoId, adminPending)).toMatchObject({ ok: false, error: expect.stringContaining("on a plan") });
     expect(await prisma.share.count({ where: { clinic: { clerkOrgId: orgPending } } })).toBe(0);
   });
 
   it("refuses a signed-out request", async () => {
-    signInAs(null, "admin");
-    expect(await createShareAction(null, form({ videoId }))).toMatchObject({ error: expect.any(String) });
+    expect(await createLinkAction(videoId, surgeonA)).toMatchObject({ ok: false, error: expect.any(String) });
+  });
+});
+
+describe("who the link is from", () => {
+  it("makes the link from the surgeon picked, with their id and 'Dr. First Last' copied onto it, in the admin's clinic", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const result = await createLinkAction(videoId, surgeonA);
+    expect(result).toEqual({ ok: true, code: expect.stringMatching(/^[a-z0-9]{6}$/), senderName: "Dr. Jane Smith" });
+
+    const share = await shareOf((result as { code: string }).code);
+    expect(share).toMatchObject({ clinicId: clinicA, senderUserId: surgeonA, senderName: "Dr. Jane Smith" });
+    // Made under the first-play rule, with the days copied onto it; the button chose none of this.
+    expect(share.expiryPolicy).toBe("FIRST_PLAY");
+    expect(share.firstPlayedAt).toBeNull();
+    expect(share.daysAfterFirstPlay).toBeGreaterThan(0);
   });
 
-  it("makes the link for an admin of an open clinic, in that clinic and no other", async () => {
-    signInAs(orgActive, "admin");
-    const result = await createShareAction(null, form({ videoId }));
-
-    expect(result).toMatchObject({ code: expect.stringMatching(/^[a-z0-9]{6}$/) });
-    const share = await prisma.share.findUnique({
-      where: { code: result!.code! },
-      select: { id: true, clinicId: true, expiryPolicy: true, firstPlayedAt: true, daysAfterFirstPlay: true },
-    });
-    createdShareIds.push(share!.id);
-    expect(share?.clinicId).toBe(activeClinic);
-    // Made under the first-play rule, with the number of days copied onto it; the form chose none of this.
-    expect(share?.expiryPolicy).toBe("FIRST_PLAY");
-    expect(share?.firstPlayedAt).toBeNull();
-    expect(share?.daysAfterFirstPlay).toBeGreaterThan(0);
+  it("lets an admin who holds a seat send from themselves", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const result = await createLinkAction(videoId, adminA);
+    expect(result).toMatchObject({ ok: true, senderName: "Dr. Pat Lee" });
   });
 
+  it("uses the name typed on People, and a later change to it never changes a link already made", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    await prisma.seatAllocation.update({ where: { clinicId_clerkUserId: { clinicId: clinicA, clerkUserId: surgeonA } }, data: { displayName: "Jane Smith, PA-C" } });
+    try {
+      const first = await createLinkAction(videoId, surgeonA);
+      expect(first).toMatchObject({ ok: true, senderName: "Jane Smith, PA-C" });
+
+      await prisma.seatAllocation.update({ where: { clinicId_clerkUserId: { clinicId: clinicA, clerkUserId: surgeonA } }, data: { displayName: "Jane Smith-Park, PA-C" } });
+      const second = await createLinkAction(videoId, surgeonA);
+      expect(second).toMatchObject({ ok: true, senderName: "Jane Smith-Park, PA-C" });
+
+      // The first link still carries the name it was made with.
+      expect((await shareOf((first as { code: string }).code)).senderName).toBe("Jane Smith, PA-C");
+    } finally {
+      await prisma.seatAllocation.update({ where: { clinicId_clerkUserId: { clinicId: clinicA, clerkUserId: surgeonA } }, data: { displayName: null } });
+    }
+  });
+
+  it("keeps the name on a link after the surgeon's seat is let go", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const made = await createLinkAction(videoId, nameless);
+    expect(made).toMatchObject({ ok: true, senderName: null });
+    const kept = await createLinkAction(videoId, surgeonA);
+    const code = (kept as { code: string }).code;
+    await prisma.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId: clinicA, clerkUserId: surgeonA } } });
+    try {
+      expect(await shareOf(code)).toMatchObject({ senderUserId: surgeonA, senderName: "Dr. Jane Smith" });
+      // And no new link can be made from them.
+      expect(await createLinkAction(videoId, surgeonA)).toMatchObject({ ok: false, error: expect.stringContaining("does not hold a seat") });
+    } finally {
+      await prisma.seatAllocation.create({ data: { clinicId: clinicA, clerkUserId: surgeonA, syncState: "SYNCED" } });
+    }
+  });
+
+  it("makes a link from someone Clerk has no name for, with no name on it (never their email)", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const result = await createLinkAction(videoId, nameless);
+    expect(result).toMatchObject({ ok: true, senderName: null });
+    const share = await shareOf((result as { code: string }).code);
+    expect(share).toMatchObject({ senderUserId: nameless, senderName: null });
+  });
+
+  it("refuses a pick with no seat, and writes nothing", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const before = await linksFor(clinicA);
+    const result = await createLinkAction(videoId, noSeatA);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("does not hold a seat") });
+    expect((result as { error: string }).error).not.toMatch(/error|invalid|403/i);
+    expect(await linksFor(clinicA)).toBe(before);
+  });
+
+  it("refuses a surgeon from another clinic, even one holding a seat there, and writes nothing in either clinic", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const [beforeA, beforeB] = [await linksFor(clinicA), await linksFor(clinicB)];
+    expect(await createLinkAction(videoId, surgeonB)).toMatchObject({ ok: false, error: expect.stringContaining("does not hold a seat") });
+    expect(await linksFor(clinicA)).toBe(beforeA);
+    expect(await linksFor(clinicB)).toBe(beforeB);
+  });
+
+  it("refuses no pick, a made-up id and a value that is not text, and writes nothing", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const before = await linksFor(clinicA);
+    expect(await createLinkAction(videoId, "")).toMatchObject({ ok: false, error: "Choose who the link is from." });
+    expect(await createLinkAction(videoId, null)).toMatchObject({ ok: false, error: "Choose who the link is from." });
+    expect(await createLinkAction(videoId, "user_nobody")).toMatchObject({ ok: false, error: expect.stringContaining("does not hold a seat") });
+    expect(await createLinkAction(videoId, "not-a-user'; drop table")).toMatchObject({ ok: false });
+    expect(await createLinkAction(videoId, { userId: surgeonA })).toMatchObject({ ok: false });
+    expect(await linksFor(clinicA)).toBe(before);
+  });
+
+  it("answers a Clerk outage with a plain sentence and writes nothing", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const before = await linksFor(clinicA);
+    fakeClerk.failReads = true;
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const result = await createLinkAction(videoId, surgeonA);
+      expect(result).toEqual({ ok: false, error: "The link could not be made just now. Nothing was sent to anyone. Try again in a moment." });
+    } finally {
+      errors.mockRestore();
+    }
+    expect(await linksFor(clinicA)).toBe(before);
+  });
+});
+
+describe("Create link and the clinic's plan", () => {
   it("refuses a form with no video", async () => {
-    signInAs(orgActive, "admin");
-    expect(await createShareAction(null, form({}))).toEqual({ error: "No video was selected." });
-  });
-});
-
-describe("cancelShareAction", () => {
-  let code = "";
-
-  beforeAll(async () => {
-    const share = await prisma.share.create({
-      data: { code: `v${randomBytes(3).toString("hex").slice(0, 5)}`, clinicId: activeClinic, videoId, expiresAt: new Date(Date.now() + 86400000) },
-      select: { id: true, code: true },
-    });
-    createdShareIds.push(share.id);
-    code = share.code;
+    fakeClerk.signIn(adminA, orgActive);
+    expect(await createLinkAction("", surgeonA)).toEqual({ ok: false, error: "No video was selected." });
   });
 
-  it("does not let an admin of another clinic cancel it", async () => {
-    signInAs(orgOther, "admin");
-    await cancelShareAction(code);
-    expect(await prisma.share.findUnique({ where: { code } })).not.toBeNull();
-    expect(await linksFor(otherClinic)).toBe(0);
-  });
-
-  it("does not let a member of the same clinic cancel it", async () => {
-    signInAs(orgActive, "member");
-    expect(await cancelShareAction(code)).toMatchObject({ error: expect.any(String) });
-    expect(await prisma.share.findUnique({ where: { code } })).not.toBeNull();
-  });
-
-  it("lets an admin of the clinic cancel it, and the link is gone", async () => {
-    signInAs(orgActive, "admin");
-    expect(await cancelShareAction(code)).toEqual({});
-    expect(await prisma.share.findUnique({ where: { code } })).toBeNull();
-  });
-});
-
-describe("createShareAction and the clinic's plan", () => {
   it("refuses a video whose category is not on the clinic's plan, with a plain message, and writes nothing", async () => {
-    signInAs(orgKneeOnly, "admin");
+    fakeClerk.signIn(adminKnee, orgKneeOnly);
     const before = await linksFor(kneeOnlyClinic);
-
-    const result = await createShareAction(null, form({ videoId }));
-
-    expect(result).toMatchObject({ error: expect.stringContaining("plan") });
-    expect(result?.error).not.toMatch(/error|invalid|403/i);
+    const result = await createLinkAction(videoId, adminKnee);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("plan") });
+    expect((result as { error: string }).error).not.toMatch(/error|invalid|403/i);
     expect(await linksFor(kneeOnlyClinic)).toBe(before);
   });
 
-  it("ignores a clinic id in the form: a forged one cannot borrow another clinic's plan", async () => {
-    // The Knee-only admin sends the Hip video with the Hip clinic's id in the form.
-    signInAs(orgKneeOnly, "admin");
-    const kneeBefore = await linksFor(kneeOnlyClinic);
-    const hipBefore = await linksFor(activeClinic);
-
-    const result = await createShareAction(null, form({ videoId, clinicId: activeClinic }));
-
-    expect(result).toMatchObject({ error: expect.stringContaining("plan") });
-    expect(await linksFor(kneeOnlyClinic)).toBe(kneeBefore);
-    expect(await linksFor(activeClinic)).toBe(hipBefore);
-  });
-
   it("refuses a placeholder for a clinic shown finished animations only, and writes nothing", async () => {
-    signInAs(orgFinishedOnly, "admin");
+    fakeClerk.signIn(adminFinished, orgFinishedOnly);
     const before = await linksFor(finishedOnlyClinic);
-
-    const result = await createShareAction(null, form({ videoId }));
-
-    expect(result).toMatchObject({ error: expect.stringContaining("placeholder") });
+    expect(await createLinkAction(videoId, adminFinished)).toMatchObject({ ok: false, error: expect.stringContaining("placeholder") });
     expect(await linksFor(finishedOnlyClinic)).toBe(before);
   });
 
   it("refuses a video that no longer exists, and an unpublished one", async () => {
-    signInAs(orgActive, "admin");
-    expect(await createShareAction(null, form({ videoId: "video_that_does_not_exist" }))).toMatchObject({ error: expect.stringContaining("no longer exists") });
+    fakeClerk.signIn(adminA, orgActive);
+    expect(await createLinkAction("video_that_does_not_exist", surgeonA)).toMatchObject({ ok: false, error: expect.stringContaining("no longer exists") });
 
     const unpublished = await prisma.video.create({
       data: { title: "Vitest links video (unpublished)", category: "HIP", videoUrl: "https://example.com/vitest.mp4", isPublished: false },
       select: { id: true },
     });
     createdVideoIds.push(unpublished.id);
-    expect(await createShareAction(null, form({ videoId: unpublished.id }))).toMatchObject({ error: expect.stringContaining("not published") });
+    expect(await createLinkAction(unpublished.id, surgeonA)).toMatchObject({ ok: false, error: expect.stringContaining("not published") });
   });
 
-  it("refuses the same form once the category has left the plan: the check happens when the form is sent, not when it was drawn", async () => {
-    signInAs(orgActive, "admin");
-    const stale = form({ videoId });
-
-    // Works while Hip is on the plan.
-    const first = await createShareAction(null, stale);
-    expect(first).toMatchObject({ code: expect.any(String) });
-    const share = await prisma.share.findUnique({ where: { code: first!.code! }, select: { id: true } });
-    createdShareIds.push(share!.id);
-    const after = await linksFor(activeClinic);
+  it("refuses the same press once the category has left the plan: the check happens when the button is pressed", async () => {
+    fakeClerk.signIn(adminA, orgActive);
+    const first = await createLinkAction(videoId, surgeonA);
+    expect(first).toMatchObject({ ok: true });
+    const after = await linksFor(clinicA);
 
     try {
-      // Hip comes off the plan; the very same form is sent again.
-      await prisma.clinic.update({ where: { id: activeClinic }, data: { categories: ["KNEE"] } });
-      expect(await createShareAction(null, stale)).toMatchObject({ error: expect.stringContaining("plan") });
-      expect(await linksFor(activeClinic)).toBe(after);
+      await prisma.clinic.update({ where: { id: clinicA }, data: { categories: ["KNEE"] } });
+      expect(await createLinkAction(videoId, surgeonA)).toMatchObject({ ok: false, error: expect.stringContaining("plan") });
+      expect(await linksFor(clinicA)).toBe(after);
 
       // The link already made keeps working: it is still there, unexpired, and its video still published.
-      const kept = await prisma.share.findUnique({ where: { id: share!.id }, include: { video: { select: { isPublished: true } } } });
+      const kept = await prisma.share.findUnique({ where: { code: (first as { code: string }).code }, include: { video: { select: { isPublished: true } } } });
       expect(kept?.expiresAt.getTime()).toBeGreaterThan(Date.now());
       expect(kept?.video.isPublished).toBe(true);
     } finally {
-      await prisma.clinic.update({ where: { id: activeClinic }, data: { categories: ["HIP"] } });
+      await prisma.clinic.update({ where: { id: clinicA }, data: { categories: ["HIP"] } });
     }
   });
 });

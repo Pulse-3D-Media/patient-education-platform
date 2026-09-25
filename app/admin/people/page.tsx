@@ -10,7 +10,7 @@ import { ROLE_WORDS } from "@/lib/role-names";
 import { checkSeats } from "@/lib/seat-changes";
 import { seatCountWords, seatsFullMessage } from "@/lib/seats";
 import { AdminFrame } from "../AdminFrame";
-import { AdminSwitch, InviteForm, OwnerHandoff, RemoveButton, RevokeButton, SeatButton } from "./PeopleControls";
+import { AdminSwitch, InviteForm, OwnerHandoff, PatientNameEditor, RemoveButton, RevokeButton, SeatButton } from "./PeopleControls";
 
 /**
  * The People section of the clinic admin area, at /admin/people. Admins only.
@@ -25,7 +25,9 @@ import { AdminSwitch, InviteForm, OwnerHandoff, RemoveButton, RevokeButton, Seat
  *      seats than are taken, a clinic with no account owner.
  *   2. Everyone in the clinic, each with Member / Member with admin, where
  *      they stand with a seat, and Remove. The owner's row cannot be switched
- *      to Member or removed; the owner decides whether to take a seat.
+ *      to Member or removed; the owner decides whether to take a seat. A
+ *      person holding a seat sends links to patients, so their row also
+ *      says the name patients see ("Dr. Jane Smith"), with Change.
  *   3. Invite someone (holds a seat until accepted), and the open invitations
  *      with Revoke.
  *   4. For the owner: hand the account to another admin.
@@ -145,8 +147,8 @@ export default async function PeoplePage() {
           )}
           {board.waiting > 0 && (
             <p className={`${NOTICE} text-ink-soft`}>
-              {board.waiting} {board.waiting === 1 ? "person is" : "people are"} waiting for a seat, because none was free. They can use the library as
-              usual. {board.waiting === 1 ? "They get" : "Each gets"} a seat as soon as one is free, whoever joined first going first. To settle it now,
+              {board.waiting} {board.waiting === 1 ? "person is" : "people are"} waiting for a seat, because none was free. They can watch videos in the
+              library, but cannot send links to patients until they hold a seat. {board.waiting === 1 ? "They get" : "Each gets"} a seat as soon as one is free, whoever joined first going first. To settle it now,
               remove someone, revoke an invitation, or add seats on the Billing page.
             </p>
           )}
@@ -174,6 +176,16 @@ export default async function PeoplePage() {
                     <p className={`mt-1 text-sm ${person.seat === "waiting" ? "text-warn" : "text-ink-soft"}`}>
                       {person.seat === "held" ? "Holds a seat" : person.seat === "waiting" ? "Waiting for a seat" : "No seat (the account owner does not need one)"}
                     </p>
+                    {/* Only people with a seat send links, so only they have a name for patients. */}
+                    {person.seat === "held" && (
+                      <PatientNameEditor
+                        userId={person.userId}
+                        personName={person.name}
+                        patientName={person.patientName}
+                        typedName={person.typedPatientName}
+                        defaultName={person.defaultPatientName ?? null}
+                      />
+                    )}
                   </div>
                 </div>
 

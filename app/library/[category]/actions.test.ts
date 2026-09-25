@@ -1,17 +1,19 @@
-import { auth } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { createShare } from "@/lib/db/shares";
 import { ShareTermsError } from "@/lib/expiry";
 import { getCurrentClinicId } from "@/lib/clinic";
+import { fakeClerk } from "@/lib/testing/fake-clerk";
 import { sendShareAction } from "./actions";
 
 /**
  * The Server Action behind the library's Send button, with Clerk replaced
- * by a stand-in and the database real (the Neon testing branch). What
- * these prove: any member of an open clinic can send a video the clinic
- * may use; the same video is refused for a clinic whose plan does not
+ * by the in-memory stand-in (lib/testing/fake-clerk.ts) and the database
+ * real (the Neon testing branch). What these prove: anyone holding a seat
+ * at an open clinic can send a video the clinic may use, and the link is
+ * from them, with their name copied onto it; someone without a seat is
+ * refused and nothing is written; the same video is refused for a clinic whose plan does not
  * include its category, for a clinic shown finished animations only when
  * it is a placeholder, and for a clinic that is not open; a refusal is a
  * plain sentence and writes nothing; and the clinic comes from the
@@ -32,27 +34,25 @@ vi.mock("@/lib/clinic", async (importOriginal) => {
   return { ...real, getCurrentClinicId: vi.fn(real.getCurrentClinicId) };
 });
 
-vi.mock("@clerk/nextjs/server", () => ({
-  auth: vi.fn(),
-  clerkClient: vi.fn(),
-}));
+vi.mock("@clerk/nextjs/server", async () => (await import("@/lib/testing/fake-clerk")).clerkServerModule());
 
 // getBaseUrl() reads the request headers; there is no request here.
 vi.mock("next/headers", () => ({
   headers: async () => new Map([["host", "localhost:3000"]]),
 }));
 
-/** Pretend Clerk says this person is signed in to this organization as a plain member. */
-function signInAs(orgId: string | null) {
-  vi.mocked(auth).mockResolvedValue({
-    userId: "user_vitest",
-    orgId,
-    has: () => false,
-  } as never);
-}
-
 function fakeOrgId() {
   return `org_test_${randomBytes(8).toString("hex")}`;
+}
+
+/** The seated surgeon (a plain member, not an admin) of each organization, by organization id. */
+const surgeonOf = new Map<string, string>();
+/** A member of the Knee clinic who holds no seat. */
+const noSeat = `user_noseat${randomBytes(6).toString("hex")}`;
+
+/** Sign in as that organization's seated surgeon, or as someone else in it, or sign out (null). */
+function signInAs(orgId: string | null, userId?: string) {
+  fakeClerk.signIn(orgId ? (userId ?? surgeonOf.get(orgId) ?? null) : null, orgId);
 }
 
 const createdClinicIds: string[] = [];
@@ -69,9 +69,21 @@ let finishedOnlyClinic = "";
 let placeholderId = "";
 let unpublishedId = "";
 
+/** A clinic, its organization in the stand-in, and one surgeon ("Dr. Jo <n>") who is a plain member holding a seat. */
 async function makeClinic(name: string, clerkOrgId: string, data: { status?: "ACTIVE" | "PENDING"; categories?: ("KNEE" | "HIP")[]; showPlaceholders?: boolean }) {
+  const surgeon = `user_surgeon${randomBytes(6).toString("hex")}`;
+  surgeonOf.set(clerkOrgId, surgeon);
+  fakeClerk.addOrg(clerkOrgId, name, [{ userId: surgeon, firstName: "Jo", lastName: "Seated", role: "org:member" }]);
   const clinic = await prisma.clinic.create({
-    data: { name, clerkOrgId, status: data.status ?? "ACTIVE", categories: data.categories ?? ["KNEE"], showPlaceholders: data.showPlaceholders ?? true },
+    data: {
+      name,
+      clerkOrgId,
+      status: data.status ?? "ACTIVE",
+      categories: data.categories ?? ["KNEE"],
+      showPlaceholders: data.showPlaceholders ?? true,
+      surgeonSeats: 5,
+      seatAllocations: { create: { clerkUserId: surgeon, syncState: "SYNCED" } },
+    },
     select: { id: true },
   });
   createdClinicIds.push(clinic.id);
@@ -79,7 +91,9 @@ async function makeClinic(name: string, clerkOrgId: string, data: { status?: "AC
 }
 
 beforeAll(async () => {
+  fakeClerk.reset();
   kneeClinic = await makeClinic("Vitest send clinic (knee)", orgKnee, {});
+  fakeClerk.addMember(orgKnee, { userId: noSeat, firstName: "No", lastName: "Seat", role: "org:member" });
   hipClinic = await makeClinic("Vitest send clinic (hip)", orgHip, { categories: ["HIP"] });
   finishedOnlyClinic = await makeClinic("Vitest send clinic (finished only)", orgFinishedOnly, { showPlaceholders: false });
   await makeClinic("Vitest send clinic (pending)", orgPending, { status: "PENDING" });
@@ -105,6 +119,7 @@ afterAll(async () => {
   await prisma.share.deleteMany({ where: { clinicId: { in: createdClinicIds } } });
   await prisma.video.deleteMany({ where: { id: { in: createdVideoIds } } });
   await prisma.clinic.deleteMany({ where: { id: { in: createdClinicIds } } });
+  fakeClerk.reset();
   await prisma.$disconnect();
 });
 
@@ -113,7 +128,7 @@ async function linksFor(clinicId: string) {
 }
 
 describe("sendShareAction", () => {
-  it("makes the link for a member of an open clinic with the category on its plan, in that clinic", async () => {
+  it("makes the link for someone holding a seat at an open clinic with the category on its plan, in that clinic, from them", async () => {
     signInAs(orgKnee);
     const result = await sendShareAction(placeholderId);
 
@@ -123,9 +138,35 @@ describe("sendShareAction", () => {
     expect(result.qrImage.startsWith("data:image/svg+xml")).toBe(true);
     expect(result.daysAfterFirstPlay).toBeGreaterThan(0);
     expect(new Date(result.unclaimedUntil).getTime()).toBeGreaterThan(Date.now());
+    expect(result.senderName).toBe("Dr. Jo Seated");
 
-    const share = await prisma.share.findUnique({ where: { code: result.code }, select: { clinicId: true, videoId: true } });
-    expect(share).toEqual({ clinicId: kneeClinic, videoId: placeholderId });
+    // From the signed-in surgeon automatically: the action takes nothing but a video id.
+    const share = await prisma.share.findUnique({ where: { code: result.code }, select: { clinicId: true, videoId: true, senderUserId: true, senderName: true } });
+    expect(share).toEqual({ clinicId: kneeClinic, videoId: placeholderId, senderUserId: surgeonOf.get(orgKnee), senderName: "Dr. Jo Seated" });
+  });
+
+  it("refuses someone in the clinic who holds no seat, in plain words, and writes nothing", async () => {
+    signInAs(orgKnee, noSeat);
+    const before = await linksFor(kneeClinic);
+    const result = await sendShareAction(placeholderId);
+    expect(result).toEqual({
+      ok: false,
+      error: "Sending links to patients needs a surgeon seat, and you do not hold one right now. Ask your clinic's office admin.",
+    });
+    expect(await linksFor(kneeClinic)).toBe(before);
+  });
+
+  it("refuses someone whose seat was let go after the page was drawn, and writes nothing", async () => {
+    const surgeon = surgeonOf.get(orgKnee)!;
+    signInAs(orgKnee);
+    const before = await linksFor(kneeClinic);
+    await prisma.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId: kneeClinic, clerkUserId: surgeon } } });
+    try {
+      expect(await sendShareAction(placeholderId)).toMatchObject({ ok: false, error: expect.stringContaining("needs a surgeon seat") });
+      expect(await linksFor(kneeClinic)).toBe(before);
+    } finally {
+      await prisma.seatAllocation.create({ data: { clinicId: kneeClinic, clerkUserId: surgeon, syncState: "SYNCED" } });
+    }
   });
 
   it("refuses the same video for a clinic whose plan does not include Knee, with a plain message, and writes nothing", async () => {

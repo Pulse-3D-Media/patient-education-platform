@@ -232,3 +232,33 @@ describe("what stays the same", () => {
     expect(html).not.toContain(clinic.id);
   });
 });
+
+describe("who sent the link", () => {
+  it("says 'Sent by' the surgeon and the clinic near the top, for a link that carries a name", async () => {
+    const clinic = await makeClinic({ name: "Vitest Summit Orthopedics" });
+    const share = await prisma.share.create({
+      data: {
+        code: code(),
+        clinicId: clinic.id,
+        videoId,
+        expiresAt: new Date(Date.now() + 30 * 86_400_000),
+        senderUserId: "user_vitestsender",
+        senderName: "Dr. Jane Smith",
+      },
+      select: { code: true },
+    });
+    const html = await render(share.code);
+    expect(html).toContain("Sent by Dr. Jane Smith, Vitest Summit Orthopedics");
+    // It comes before the procedure's name, as "who sent me this" always has.
+    expect(html.indexOf("Sent by Dr. Jane Smith")).toBeLessThan(html.indexOf("Vitest Total Knee Replacement"));
+    // The surgeon's account id is never in the page.
+    expect(html).not.toContain("user_vitestsender");
+  });
+
+  it("keeps the older wording for a link made before surgeons were recorded", async () => {
+    const clinic = await makeClinic({ name: "Vitest Older Orthopedics" });
+    const html = await render(await makeShare(clinic.id, videoId));
+    expect(html).toContain("From Vitest Older Orthopedics");
+    expect(html).not.toContain("Sent by");
+  });
+});

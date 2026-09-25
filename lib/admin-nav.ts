@@ -19,7 +19,7 @@ export type AdminSection = {
 
 export const ADMIN_SECTIONS: AdminSection[] = [
   { href: "/admin", label: "Overview", blurb: "What needs a look, and the way into each section." },
-  { href: "/admin/links", label: "Shared links", blurb: "Create a link for a procedure, copy it, download its QR code, print a pamphlet, or cancel it." },
+  { href: "/admin/links", label: "Shared links", blurb: "Create a link for a procedure, from one of your surgeons, then copy it, download its QR code, or print it." },
   { href: "/admin/people", label: "People", blurb: "Everyone who can sign in, who is a surgeon, and who is an admin." },
   { href: "/admin/branding", label: "Branding", blurb: "Your logo, colour, font and phone, as your team and your patients see them." },
   { href: "/admin/billing", label: "Billing", blurb: "The categories and surgeon seats on your plan, and what it comes to." },

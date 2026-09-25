@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
-import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
+import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { ADMIN_SECTIONS } from "@/lib/admin-nav";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -18,7 +18,9 @@ import { AdminFrame } from "./AdminFrame";
  * for each section, so Shared links, People and Billing are one tap away.
  *
  * Everything on it is bounded: five counts done in the database, and the
- * newest RECENT_LINKS links. The whole history lives on /admin/links.
+ * newest RECENT_LINKS links. There is no full list of links anywhere on the
+ * clinic side, on purpose: the office never needs to find a link again, and
+ * /admin/links is where new ones are made.
  *
  * Plan and price information is not here on purpose; it lives on
  * /admin/billing and nowhere else on the clinic side.
@@ -61,20 +63,17 @@ export default async function AdminOverviewPage() {
   ]);
   const now = new Date();
 
-  // What needs a look. Each line is one sentence and one link.
-  const attention: { text: string; href: string; label: string }[] = [];
+  // What needs a look. Each line is one sentence. Nothing here has a button: there is no list of
+  // past links to send anyone to, and the office cannot change these links anyway.
+  const attention: { text: string }[] = [];
   if (summary.notWorking > 0) {
     attention.push({
       text: `${summary.notWorking} ${summary.notWorking === 1 ? "link points" : "links point"} at a video that is not published right now, so ${summary.notWorking === 1 ? "it does" : "they do"} not work.`,
-      href: "/admin/links",
-      label: "See the links",
     });
   }
   if (summary.expiringSoon > 0) {
     attention.push({
       text: `${summary.expiringSoon} ${summary.expiringSoon === 1 ? "link stops" : "links stop"} working within ${SUMMARY_SOON_DAYS} days.`,
-      href: "/admin/links",
-      label: "See the links",
     });
   }
 
@@ -91,14 +90,8 @@ export default async function AdminOverviewPage() {
         ) : (
           <ul className="mt-3 flex flex-col gap-3">
             {attention.map((item) => (
-              <li
-                key={item.text}
-                className="flex flex-col gap-3 rounded-2xl border border-warn/40 bg-warn/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
-              >
+              <li key={item.text} className="rounded-2xl border border-warn/40 bg-warn/10 px-5 py-4">
                 <p className="text-[15px] text-ink">{item.text}</p>
-                <Link href={item.href} className={SECONDARY_BUTTON}>
-                  {item.label}
-                </Link>
               </li>
             ))}
           </ul>
@@ -127,7 +120,7 @@ export default async function AdminOverviewPage() {
             Newest links
           </h2>
           <Link href="/admin/links" className="text-sm text-brand-bright hover:text-ink">
-            All shared links
+            Create a link
           </Link>
         </div>
         {recent.length === 0 ? (

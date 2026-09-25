@@ -7,6 +7,7 @@ import {
   getShareByCode,
   listRecentSharesForClinic,
   recordSharePlay,
+  SenderRefusedError,
   ShareRefusedError,
   summarizeSharesForClinic,
 } from "./shares";
@@ -259,5 +260,91 @@ describe("a link already issued outlives the plan change that would stop a new o
     expect(after?.video.isPublished).toBe(false);
     expect(after?.viewCount).toBe(0);
     await expectRefused(clinic, video, "unpublished");
+  });
+});
+
+describe("createShare and who the link is from", () => {
+  const tag = () => randomBytes(6).toString("hex");
+
+  /** An open Knee clinic with one person holding a seat, and the name typed for them (or none). */
+  async function clinicWithSurgeon(displayName: string | null = null) {
+    const surgeon = `user_share${tag()}`;
+    const clinic = await makeClinic("Vitest sender clinic", {
+      surgeonSeats: 3,
+      seatAllocations: { create: { clerkUserId: surgeon, syncState: "SYNCED", displayName } },
+    });
+    return { clinic, surgeon };
+  }
+
+  async function linkCount(clinicId: string) {
+    return prisma.share.count({ where: { clinicId } });
+  }
+
+  it("copies the surgeon's id and the name from Clerk onto the link", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon();
+    const share = await createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: "Dr. Jane Smith" } });
+    createdShareIds.push(share.id);
+    expect(share).toMatchObject({ senderUserId: surgeon, senderName: "Dr. Jane Smith" });
+    // And the patient page's read hands it on.
+    expect((await getShareByCode(share.code))?.senderName).toBe("Dr. Jane Smith");
+  });
+
+  it("prefers the name typed on People over the one from Clerk", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon("Jane Smith, PA-C");
+    const share = await createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: "Dr. Jane Smith" } });
+    createdShareIds.push(share.id);
+    expect(share.senderName).toBe("Jane Smith, PA-C");
+  });
+
+  it("keeps the name it was made with when the typed name changes later, or the seat is let go", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon("Jane Smith, PA-C");
+    const share = await createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: null } });
+    createdShareIds.push(share.id);
+
+    await prisma.seatAllocation.update({ where: { clinicId_clerkUserId: { clinicId: clinic, clerkUserId: surgeon } }, data: { displayName: "Jane Park, NP" } });
+    expect((await getShareByCode(share.code))?.senderName).toBe("Jane Smith, PA-C");
+
+    await prisma.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId: clinic, clerkUserId: surgeon } } });
+    expect(await getShareByCode(share.code)).toMatchObject({ senderUserId: surgeon, senderName: "Jane Smith, PA-C" });
+  });
+
+  it("writes no name when there is none to write, and never makes one up", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon();
+    const share = await createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: null } });
+    createdShareIds.push(share.id);
+    expect(share).toMatchObject({ senderUserId: surgeon, senderName: null });
+  });
+
+  it("refuses someone with no seat at this clinic, even with a seat at another one, and writes nothing", async () => {
+    const here = await clinicWithSurgeon();
+    const there = await clinicWithSurgeon();
+    const before = await linkCount(here.clinic);
+
+    await expect(createShare(here.clinic, publishedVideo, { sender: { clerkUserId: there.surgeon, fallbackName: "Dr. Other" } })).rejects.toBeInstanceOf(SenderRefusedError);
+    await expect(createShare(here.clinic, publishedVideo, { sender: { clerkUserId: `user_nobody${tag()}`, fallbackName: null } })).rejects.toBeInstanceOf(SenderRefusedError);
+    expect(await linkCount(here.clinic)).toBe(before);
+    expect(await linkCount(there.clinic)).toBe(0);
+  });
+
+  it("refuses something that is not a Clerk user id before reading anything", async () => {
+    const { clinic } = await clinicWithSurgeon();
+    for (const bad of ["", "user_", "user_x'; drop table \"Share\"", "org_abc", "USER_abc"]) {
+      await expect(createShare(clinic, publishedVideo, { sender: { clerkUserId: bad, fallbackName: null } }), bad).rejects.toBeInstanceOf(SenderRefusedError);
+    }
+    expect(await linkCount(clinic)).toBe(0);
+  });
+
+  it("still applies the access rule first: a seated surgeon cannot send what the plan does not allow", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon();
+    await prisma.clinic.update({ where: { id: clinic }, data: { categories: ["HIP"] } });
+    await expect(createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: null } })).rejects.toBeInstanceOf(ShareRefusedError);
+    expect(await linkCount(clinic)).toBe(0);
+  });
+
+  it("leaves a link with no sender as the older kind: no id, no name", async () => {
+    const { clinic } = await clinicWithSurgeon();
+    const share = await createShare(clinic, publishedVideo);
+    createdShareIds.push(share.id);
+    expect(share).toMatchObject({ senderUserId: null, senderName: null });
   });
 });

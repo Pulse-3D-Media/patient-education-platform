@@ -1,3 +1,4 @@
+import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
@@ -8,6 +9,7 @@ import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
 import { getCategoryConfigs } from "@/lib/db/category-config";
+import { getSeatFor } from "@/lib/db/seats";
 import { countPublishedVideosByKind, listUsableVideosInCategory } from "@/lib/db/videos";
 import { getPlaybackUrl } from "@/lib/video";
 import { EmptyCategory, LockedCategory } from "../CategoryStates";
@@ -26,6 +28,10 @@ import { VideoGrid } from "./VideoGrid";
  * playable. The states (coming soon, locked, nothing yet) are decided by
  * categoryState() in lib/access.ts, the same way the library home decides
  * its tiles.
+ *
+ * Everyone in the clinic can browse and play. Only people holding a seat get
+ * the Send button (a link is always from a surgeon); the Send action checks
+ * the seat again on the server, so a hidden button is never the only check.
  *
  * Rendered fresh on every request, because what it shows depends on who is
  * signed in (see the note on the library home page).
@@ -48,7 +54,12 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   // The usable videos and the published counts for this one category, side
   // by side. The counts are what tell a locked category from an empty one
   // when the list comes back with nothing in it.
-  const [videos, counts] = await Promise.all([listUsableVideosInCategory(access, category.value), countPublishedVideosByKind(category.value)]);
+  const { userId } = await auth();
+  const [videos, counts, seat] = await Promise.all([
+    listUsableVideosInCategory(access, category.value),
+    countPublishedVideosByKind(category.value),
+    userId ? getSeatFor(clinic.id, userId) : null,
+  ]);
   const state = categoryState(access, category.value, counts[category.value]);
 
   // Only plain data crosses into the browser: id, title, duration, whether it
@@ -81,7 +92,14 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
       </header>
 
       {items.length > 0 ? (
-        <VideoGrid videos={items} categoryLabel={category.label} clinicName={clinic.name} logoUrl={parseLogoUrl(clinic.logoUrl)} />
+        <VideoGrid
+          videos={items}
+          categoryLabel={category.label}
+          clinicName={clinic.name}
+          logoUrl={parseLogoUrl(clinic.logoUrl)}
+          // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
+          canSend={seat !== null}
+        />
       ) : configs ? (
         <ComingSoon label={category.label} config={configs[category.value]} />
       ) : state === "locked" ? (

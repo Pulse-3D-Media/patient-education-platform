@@ -108,6 +108,29 @@ export async function lockVideoFacts(tx: Prisma.TransactionClient, videoId: stri
 }
 
 /**
+ * The seat of the surgeon a link is from, read with a share lock, for the
+ * transaction that creates the link. Null when that person holds no seat at
+ * THIS clinic: the clinic id is in the WHERE, so a seat at another clinic
+ * finds nothing here.
+ *
+ * Every write that takes or lets go a seat already waits for createShare,
+ * because it locks the clinic row first (readClinicLocked, readSeatsLocked)
+ * and createShare holds that row FOR SHARE. The lock here holds the seat row
+ * itself as well, so the seat, and the name typed for it on /admin/people,
+ * stay as read until the link is written, whatever path a change comes by.
+ * In the same file as the other two locks so the overlap test can wrap it
+ * (shares.sender.race.test.ts).
+ */
+export async function lockSenderSeat(tx: Prisma.TransactionClient, clinicId: string, clerkUserId: string): Promise<{ displayName: string | null } | null> {
+  const rows = await tx.$queryRaw<{ displayName: string | null }[]>`
+    SELECT "displayName"
+    FROM "SeatAllocation"
+    WHERE "clinicId" = ${clinicId} AND "clerkUserId" = ${clerkUserId}
+    FOR SHARE`;
+  return rows[0] ?? null;
+}
+
+/**
  * What one clinic may use right now: open or not, the categories on its
  * plan, and whether it is shown placeholders. Null for an unknown clinic.
  * One query; the pages then apply the rule to whatever they list.

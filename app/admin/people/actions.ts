@@ -7,11 +7,23 @@ import { getCurrentClinicId } from "@/lib/clinic";
 import { getSignedInName } from "@/lib/people";
 import { isClinicAdmin } from "@/lib/roles";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
-import { giveSeat, handOffOwner, inviteSomeone, releaseOwnSeat, removePerson, revokeInvitation, setAdmin, type Actor, type Outcome } from "@/lib/seat-changes";
+import {
+  giveSeat,
+  handOffOwner,
+  inviteSomeone,
+  releaseOwnSeat,
+  removePerson,
+  revokeInvitation,
+  setAdmin,
+  setPatientName,
+  type Actor,
+  type Outcome,
+} from "@/lib/seat-changes";
 
 /**
  * The Server Actions behind the People page: invite, revoke, admin on or off,
- * remove, give a seat, give up the owner's own seat, hand the account over.
+ * remove, give a seat, give up the owner's own seat, the name patients see
+ * for a seated person, hand the account over.
  *
  * Every one is for office admins only, checked on the server first thing,
  * and only while the clinic is open: nobody is invited, and nothing here is
@@ -89,6 +101,10 @@ export async function giveSeatAction(userId: unknown): Promise<ActionResult> {
 
 export async function releaseMySeatAction(): Promise<ActionResult> {
   return run(({ clinicId, actor }) => releaseOwnSeat({ clinicId, actor }));
+}
+
+export async function setPatientNameAction(userId: unknown, name: unknown): Promise<ActionResult> {
+  return run(({ clinicId, actor }) => setPatientName({ clinicId, targetUserId: userId, name, actor }));
 }
 
 export async function handOffOwnerAction(userId: unknown): Promise<ActionResult> {

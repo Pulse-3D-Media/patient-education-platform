@@ -1,237 +1,499 @@
+import { OwnerChangeRefusedError, setClinicOwner } from "./db/clinics";
 import { addClinicNote } from "./db/notes";
-import { applySeatCheck, confirmSeat, getSeatClinic, getSeatSummary, listSeatRows, releaseSeat, reserveSeat, type SeatLog } from "./db/seats";
-import { getMember, listPeople, writeKindToClerk, type Person } from "./people";
-import type { Kind } from "./roles";
-import { isClerkUserId, planSeatCheck, seatCheckIsEmpty, seatCountWords, seatStateOf, seatSummary, seatsFullMessage, type SeatState, type SeatSummary } from "./seats";
+import {
+  applySeatCheck,
+  getSeatClinic,
+  getSeatHoldForInvitation,
+  getSeatSummary,
+  holdSeatForInvitation,
+  linkSeatHold,
+  listSeatHolds,
+  listSeatRows,
+  releaseSeat,
+  releaseSeatHold,
+  reserveSeat,
+  type SeatLog,
+} from "./db/seats";
+import {
+  getMember,
+  invitationIsOpen,
+  listOpenInvitations,
+  listPeople,
+  parseEmail,
+  removeFromClerk,
+  revokeInvitationInClerk,
+  sendInvitationFromClerk,
+  setRoleInClerk,
+  type OpenInvitation,
+  type Person,
+} from "./people";
+import { ROLE_WORDS, parseRole, type Role } from "./role-names";
+import {
+  isClerkUserId,
+  planSeatCheck,
+  seatCheckIsEmpty,
+  seatCountWords,
+  seatStateOf,
+  seatSummary,
+  seatsFullMessage,
+  type InvitationFacts,
+  type SeatState,
+  type SeatSummary,
+} from "./seats";
 
 /**
- * THE ONLY WAY A PERSON BECOMES A SURGEON OR STAFF. SERVER ONLY.
+ * THE ONLY WAY ANYONE'S SEAT, ROLE, INVITATION OR OWNERSHIP IS CHANGED.
+ * SERVER ONLY.
  *
- * Every route that can change someone's kind comes through changeKind():
- * the surgeon question at /onboarding/kind and the Surgeon / Staff control
- * on /admin/people. Nothing else writes the label (writeKindToClerk in
- * lib/people.ts), and a test checks that nothing else imports it.
- *
- * Read the top of lib/seats.ts first. In short: the LABEL lives in Clerk, the
- * SEAT lives in our SeatAllocation table, and the table is the authority on
- * who holds a paid seat.
+ * Read the top of lib/seats.ts first. In short: everyone in a clinic except
+ * the account owner holds one of the seats the clinic pays for, an open
+ * invitation holds one too, and our own tables are the authority on who
+ * holds what. Membership, roles and invitations live in Clerk. The writes to
+ * Clerk (lib/people.ts) may only be called from here; a test checks that.
  *
  * A database transaction cannot make a call to Clerk part of itself, and this
  * file does not pretend it can. Instead every change is ordered so that each
  * way it can fail halfway leaves something harmless, which checkSeats() then
  * puts right:
  *
- *   Becoming a surgeon   1. reserve a seat in our table, under the clinic's
- *                           lock (refused here if none is free);
- *                        2. write "surgeon" to Clerk, with no lock held;
- *                        3. mark the seat confirmed.
- *                        If 2 fails, the reservation made in 1 is let go. If
- *                        that fails too, or the server dies, a PENDING seat
- *                        is left: the People page shows "Try again", and the
- *                        seat is let go by itself after a few minutes.
- *                        If 3 fails, Clerk says surgeon and the seat is
- *                        PENDING: the next check confirms it.
+ *   Inviting        1. hold a seat in our table, under the clinic's lock
+ *                      (refused here if none is free);
+ *                   2. ask Clerk to send the invitation, carrying the hold's
+ *                      id, with no lock held;
+ *                   3. record Clerk's invitation id on the hold.
+ *                   If 2 fails the hold is let go. If that fails too, or the
+ *                   server dies, the hold lets itself go after a few minutes.
+ *                   If 3 fails, the check finds the invitation by the hold id
+ *                   it carries and records it then.
+ *   Revoking        1. revoke in Clerk; 2. let the hold go. If 2 fails, the
+ *                   check sees Clerk says revoked and lets it go.
+ *   Removing        1. remove in Clerk; 2. let the seat go. If 2 fails, the
+ *                   check sees they have left and lets it go.
+ *   Admin on/off    one write to Clerk. Seats are not touched.
+ *   Giving a seat   one write here, under the lock. Clerk is not touched.
+ *   Handing over    one write here (the owner), under the lock, after Clerk
+ *   the owner       has confirmed the new owner is an admin of the clinic.
  *
- *   Becoming staff       1. write "staff" to Clerk;
- *                        2. let the seat go.
- *                        If 1 fails nothing has changed. If 2 fails, a seat
- *                        is left with a staff label: the next check lets it go.
- *
- * In no order of events can more people hold a seat than the plan pays for,
- * because step 1 of becoming a surgeon is the only thing that adds a seat and
- * it counts under the lock.
+ * In no order of events can more seats be taken than the plan pays for,
+ * because the only things that take one (a hold, a seat given, a waiting
+ * person seated by the check) count under the lock first.
  *
  * The clinic id is always the server's own (the signed-in person's clinic, or
- * a clinic Pulse staff opened). The organization the label is written to is
- * read from that clinic's row here, so the two can never be a mismatched pair,
- * and the person is checked to be a member of THAT organization before
- * anything is written for them.
+ * a clinic Pulse staff opened). The organization is read from that clinic's
+ * row here, so the two can never be a mismatched pair, and every person is
+ * checked to be a member of THAT organization before anything is written.
  */
 
-/** Who is asking. */
-export type KindActor =
-  /** The person themselves, answering the surgeon question. Allowed once, and only about themselves. */
-  | { type: "self" }
-  /** An office admin of the clinic, on the People page. */
-  | { type: "admin"; name: string };
+/** Who is asking: a clinic admin, already checked on the server by the action. */
+export type Actor = { userId: string; name: string };
 
-export type KindChange =
-  | { ok: true; kind: Kind; seat: SeatState; summary: SeatSummary | null }
-  | {
-      ok: false;
-      reason: "no-clinic" | "not-a-member" | "already-answered" | "full" | "not-saved";
-      /** A plain sentence, safe to show. */
-      message: string;
-    };
+export type Outcome = { ok: true; message?: string } | { ok: false; message: string };
 
 const NOT_SAVED = "That could not be saved just now. Nothing was changed. Try again in a moment.";
+const NOT_IN_CLINIC = "That person is not in your clinic.";
 
 /** Only the kind of error goes to the server log: never a message, which could carry an id or an address. */
 function logFailure(what: string, error: unknown) {
   console.error(`Seats: ${what}`, error instanceof Error ? error.name : "unknown error");
 }
 
-export async function changeKind(args: { clinicId: string; targetUserId: string; kind: Kind; actor: KindActor }): Promise<KindChange> {
-  const { clinicId, targetUserId, kind, actor } = args;
+const byAdmin = (actor: Actor) => `${actor.name} (clinic admin)`;
 
-  if (!isClerkUserId(targetUserId)) return { ok: false, reason: "not-a-member", message: "That person is not in your clinic." };
-
+/** The clinic and its organization, or a refusal. */
+async function clinicFor(clinicId: string) {
   const clinic = await getSeatClinic(clinicId);
-  if (!clinic?.clerkOrgId) return { ok: false, reason: "no-clinic", message: "Your clinic could not be found. Sign in again and try once more." };
-  const orgId = clinic.clerkOrgId;
+  return clinic?.clerkOrgId ? { ...clinic, orgId: clinic.clerkOrgId } : null;
+}
 
-  // Is this person in THIS clinic? Asked of Clerk, about the clinic's own
-  // organization, before anything is reserved or written for them.
-  let member: Person | null;
+/** Is this person in the clinic's organization? Asked of Clerk about the clinic's own organization. Null on a failed call. */
+async function memberOf(orgId: string, userId: string): Promise<Person | "not-a-member" | null> {
+  if (!isClerkUserId(userId)) return "not-a-member";
   try {
-    member = await getMember(orgId, targetUserId);
+    return (await getMember(orgId, userId)) ?? "not-a-member";
   } catch (error) {
     logFailure("could not read the person from Clerk", error);
-    return { ok: false, reason: "not-saved", message: NOT_SAVED };
+    return null;
   }
-  if (!member) return { ok: false, reason: "not-a-member", message: "That person is not in your clinic." };
-
-  // The surgeon question is asked once. An answer that is already there is
-  // never changed from here, whatever is sent: that is the admin's job.
-  if (actor.type === "self" && member.kind !== null) {
-    return { ok: false, reason: "already-answered", message: "You have already answered this. Your office admin can change it on the People page." };
-  }
-
-  return kind === "staff" ? makeStaff(clinicId, orgId, member, actor) : makeSurgeon(clinicId, orgId, member, actor);
 }
 
-function authorOf(actor: KindActor, member: Person) {
-  return actor.type === "admin" ? `${actor.name} (clinic admin)` : member.name;
-}
+// ---------------------------------------------------------------------------
+// Inviting and revoking
+// ---------------------------------------------------------------------------
 
-async function makeStaff(clinicId: string, orgId: string, member: Person, actor: KindActor): Promise<KindChange> {
+/**
+ * Invite someone by email, as a Member or a Member with admin. Holds a seat
+ * first; refused, with nothing sent, when none is free.
+ */
+export async function inviteSomeone(args: { clinicId: string; email: unknown; role: unknown; actor: Actor }): Promise<Outcome> {
+  const email = parseEmail(args.email);
+  if (!email) return { ok: false, message: "Enter an email address, like name@clinic.com." };
+  const role = parseRole(args.role);
+  if (!role) return { ok: false, message: "Choose Member or Member with admin." };
+
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
+
+  // Already here, or already invited? A sentence is kinder than Clerk's refusal.
   try {
-    if (member.kind !== "staff") await writeKindToClerk(orgId, member.userId, "staff");
+    const [people, invitations] = await Promise.all([listPeople(clinic.orgId), listOpenInvitations(clinic.orgId)]);
+    if (people.some((person) => person.email.toLowerCase() === email)) return { ok: false, message: `${email} is already in your clinic.` };
+    if (invitations.some((invitation) => invitation.email.toLowerCase() === email)) {
+      return { ok: false, message: `${email} already has an open invitation. Revoke it first to send a new one.` };
+    }
   } catch (error) {
-    logFailure("the staff label could not be written to Clerk", error);
-    return { ok: false, reason: "not-saved", message: NOT_SAVED };
+    logFailure("could not read the clinic's people before inviting", error);
+    return { ok: false, message: NOT_SAVED };
   }
 
-  const log: SeatLog = {
-    authorName: authorOf(actor, member),
-    describe: (summary) => `${member.name} marked as staff, so their surgeon seat was let go. Now ${seatCountWords(summary)}.`,
-  };
-  try {
-    const { summary } = await releaseSeat(clinicId, member.userId, log);
-    return { ok: true, kind: "staff", seat: "none", summary };
-  } catch (error) {
-    // The label is saved. The seat is still held under a staff label, which the next check lets go.
-    logFailure("a seat could not be let go after the staff label was saved", error);
-    return { ok: true, kind: "staff", seat: "none", summary: null };
-  }
-}
-
-async function makeSurgeon(clinicId: string, orgId: string, member: Person, actor: KindActor): Promise<KindChange> {
-  let reserved = await reserveSeat(clinicId, member.userId);
-
-  if (!reserved.held) {
-    // Before saying no: the count may include someone who has left the clinic
-    // since anyone last looked. Check against Clerk once, and try once more.
-    const board = await checkSeats(clinicId).catch((error) => {
+  let hold = await holdSeatForInvitation(args.clinicId);
+  if (!hold.held) {
+    // Before saying no: a seat may be held by someone who has left, or by an
+    // invitation that was revoked in Clerk. Check once, and try once more.
+    const board = await checkSeats(args.clinicId).catch((error) => {
       logFailure("the seats could not be checked against Clerk", error);
       return null;
     });
-    if (board && board.released > 0) reserved = await reserveSeat(clinicId, member.userId);
+    if (board && board.released > 0) hold = await holdSeatForInvitation(args.clinicId);
   }
+  if (!hold.held) return { ok: false, message: seatsFullMessage(hold.summary) };
 
-  if (!reserved.held) {
-    if (actor.type === "admin") return { ok: false, reason: "full", message: seatsFullMessage(reserved.summary) };
-
-    // The person's own first answer, with no seat free (the clinic has not
-    // paid yet, or is full). Their answer is kept and they are let in: a
-    // surgeon WAITING for a seat. No seat is taken and nobody is charged.
-    try {
-      await writeKindToClerk(orgId, member.userId, "surgeon");
-    } catch (error) {
-      logFailure("the surgeon label could not be written to Clerk", error);
-      return { ok: false, reason: "not-saved", message: NOT_SAVED };
-    }
-    const summary = reserved.summary;
-    await addClinicNote(clinicId, {
-      kind: "STATUS",
-      authorName: member.name,
-      body: `${member.name} said they are a surgeon. No seat was free (${seatCountWords(summary)}), so they are waiting for one. No seat was taken and no charge was changed.`,
-    }).catch((error) => logFailure("a waiting surgeon could not be written to the log", error));
-    return { ok: true, kind: "surgeon", seat: "waiting", summary };
-  }
-
+  let invitationId: string;
   try {
-    if (member.kind !== "surgeon") await writeKindToClerk(orgId, member.userId, "surgeon");
+    invitationId = await sendInvitationFromClerk(clinic.orgId, { email, role, inviterUserId: args.actor.userId, seatHoldId: hold.holdId });
   } catch (error) {
-    logFailure("the surgeon label could not be written to Clerk", error);
-    // Only the request that MADE the reservation undoes it. A repeat that
-    // found one already there leaves it for the request it belongs to.
-    if (reserved.fresh) {
-      await releaseSeat(clinicId, member.userId).catch((releaseError) => logFailure("a failed reservation could not be let go; it lets itself go in a few minutes", releaseError));
-    }
-    return { ok: false, reason: "not-saved", message: NOT_SAVED };
+    logFailure("Clerk did not send the invitation", error);
+    await releaseSeatHold(args.clinicId, hold.holdId).catch((releaseError) => logFailure("a hold could not be let go; it lets itself go in a few minutes", releaseError));
+    return { ok: false, message: "The invitation could not be sent. Check the address and try again. No seat was used." };
   }
 
   const log: SeatLog = {
-    authorName: authorOf(actor, member),
-    describe: (summary) =>
-      actor.type === "admin"
-        ? `Surgeon seat given to ${member.name}. Now ${seatCountWords(summary)}.`
-        : `${member.name} said they are a surgeon and was given a seat. Now ${seatCountWords(summary)}.`,
+    authorName: byAdmin(args.actor),
+    describe: (summary) => `Invitation sent as ${ROLE_WORDS[role]}, holding a seat until it is accepted, revoked or expires. Now ${seatCountWords(summary)}.`,
   };
-  try {
-    const confirmed = await confirmSeat(clinicId, member.userId, log);
-    if (confirmed.holdsSeat) return { ok: true, kind: "surgeon", seat: "held", summary: confirmed.summary };
+  await linkSeatHold(args.clinicId, hold.holdId, invitationId, log).catch((error) =>
+    // The invitation is out and carries the hold's id: the next check records it.
+    logFailure("the invitation id could not be recorded on its hold", error),
+  );
+  return { ok: true, message: `Invitation sent to ${email}. It holds a seat until it is accepted, revoked or expires.` };
+}
 
-    // The reservation vanished between steps 1 and 3 (it can only have been
-    // let go as stale, minutes later). The label is saved; take a seat again
-    // if there still is one, and say honestly if there is not.
-    const again = await reserveSeat(clinicId, member.userId);
-    if (!again.held) return { ok: true, kind: "surgeon", seat: "waiting", summary: again.summary };
-    const second = await confirmSeat(clinicId, member.userId, log);
-    return { ok: true, kind: "surgeon", seat: "held", summary: second.summary };
+/** Revoke one of the clinic's open invitations, and free the seat it held. */
+export async function revokeInvitation(args: { clinicId: string; invitationId: unknown; actor: Actor }): Promise<Outcome> {
+  const invitationId = typeof args.invitationId === "string" ? args.invitationId.trim() : "";
+  if (!/^[A-Za-z0-9_]{1,100}$/.test(invitationId)) return { ok: false, message: "That invitation could not be found." };
+
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
+
+  try {
+    // Asked about THIS clinic's organization: another clinic's invitation id is "not open" here.
+    if (!(await invitationIsOpen(clinic.orgId, invitationId))) {
+      // Already gone (revoked, expired or accepted). Free its seat if it still holds one: the check would too.
+      await checkSeats(args.clinicId).catch((error) => logFailure("the seats could not be checked against Clerk", error));
+      return { ok: true, message: "That invitation is no longer open." };
+    }
+    await revokeInvitationInClerk(clinic.orgId, invitationId, args.actor.userId);
   } catch (error) {
-    // The seat is reserved and the label is saved. The next check confirms it.
-    logFailure("a seat could not be confirmed after the surgeon label was saved", error);
-    return { ok: true, kind: "surgeon", seat: "held", summary: null };
+    logFailure("Clerk did not revoke the invitation", error);
+    return { ok: false, message: NOT_SAVED };
   }
+
+  const hold = await getSeatHoldForInvitation(args.clinicId, invitationId).catch(() => null);
+  if (hold) {
+    await releaseSeatHold(args.clinicId, hold.id, {
+      authorName: byAdmin(args.actor),
+      describe: (summary) => `An invitation was revoked, so the seat it held is free. Now ${seatCountWords(summary)}.`,
+    }).catch((error) => logFailure("a revoked invitation's hold could not be let go; the next check does it", error));
+  }
+  return { ok: true, message: "Invitation revoked." };
+}
+
+// ---------------------------------------------------------------------------
+// People already in the clinic
+// ---------------------------------------------------------------------------
+
+/**
+ * Switch admin on or off for one person. Never touches seats. The account
+ * owner cannot have admin switched off (they hand the account over first),
+ * and the last admin cannot be made a plain member.
+ */
+export async function setAdmin(args: { clinicId: string; targetUserId: unknown; admin: boolean; actor: Actor }): Promise<Outcome> {
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
+  const targetUserId = typeof args.targetUserId === "string" ? args.targetUserId : "";
+
+  const member = await memberOf(clinic.orgId, targetUserId);
+  if (member === null) return { ok: false, message: NOT_SAVED };
+  if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
+
+  const role: Role = args.admin ? "admin" : "member";
+  if (member.role === role) return { ok: true };
+
+  if (!args.admin) {
+    if (member.userId === clinic.ownerClerkUserId) {
+      return { ok: false, message: "The account owner always has admin. To switch it off, make someone else the account owner first." };
+    }
+    try {
+      const admins = (await listPeople(clinic.orgId)).filter((person) => person.role === "admin");
+      if (admins.length <= 1) return { ok: false, message: "Your clinic needs at least one admin. Switch admin on for someone else first." };
+    } catch (error) {
+      logFailure("could not count the clinic's admins", error);
+      return { ok: false, message: NOT_SAVED };
+    }
+  }
+
+  try {
+    await setRoleInClerk(clinic.orgId, member.userId, role);
+  } catch (error) {
+    logFailure("Clerk did not change the role", error);
+    return { ok: false, message: NOT_SAVED };
+  }
+  await addClinicNote(args.clinicId, {
+    kind: "STATUS",
+    authorName: byAdmin(args.actor),
+    body: `Admin switched ${args.admin ? "on" : "off"} for ${member.name}. Seats were not changed.`,
+  }).catch((error) => logFailure("a role change could not be written to the log", error));
+  return { ok: true };
+}
+
+/** Take one person out of the clinic and free their seat. Not the account owner, and not yourself. */
+export async function removePerson(args: { clinicId: string; targetUserId: unknown; actor: Actor }): Promise<Outcome> {
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
+  const targetUserId = typeof args.targetUserId === "string" ? args.targetUserId : "";
+
+  const member = await memberOf(clinic.orgId, targetUserId);
+  if (member === null) return { ok: false, message: NOT_SAVED };
+  if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
+  if (member.userId === clinic.ownerClerkUserId) {
+    return { ok: false, message: "The account owner cannot be removed. Make someone else the account owner first." };
+  }
+  if (member.userId === args.actor.userId) return { ok: false, message: "You cannot remove yourself here. Ask another admin to do it." };
+
+  try {
+    await removeFromClerk(clinic.orgId, member.userId);
+  } catch (error) {
+    logFailure("Clerk did not remove the person", error);
+    return { ok: false, message: NOT_SAVED };
+  }
+
+  const authorName = byAdmin(args.actor);
+  try {
+    const { released } = await releaseSeat(args.clinicId, member.userId, {
+      authorName,
+      describe: (summary) => `${member.name} was removed from the clinic, so their seat is free. Now ${seatCountWords(summary)}.`,
+    });
+    if (!released) await addClinicNote(args.clinicId, { kind: "STATUS", authorName, body: `${member.name} was removed from the clinic. They held no seat.` });
+  } catch (error) {
+    // They are out of the clinic; the next check lets their seat go.
+    logFailure("a removed person's seat could not be let go; the next check does it", error);
+  }
+  return { ok: true, message: `${member.name} was removed from your clinic.` };
+}
+
+/**
+ * Give a seat to someone who is waiting for one, if a seat is free. The
+ * account owner decides for themselves: only the owner may give the owner a
+ * seat.
+ */
+export async function giveSeat(args: { clinicId: string; targetUserId: unknown; actor: Actor }): Promise<Outcome> {
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
+  const targetUserId = typeof args.targetUserId === "string" ? args.targetUserId : "";
+
+  if (targetUserId === clinic.ownerClerkUserId && targetUserId !== args.actor.userId) {
+    return { ok: false, message: "Only the account owner decides whether they take a seat." };
+  }
+  const member = await memberOf(clinic.orgId, targetUserId);
+  if (member === null) return { ok: false, message: NOT_SAVED };
+  if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
+
+  const self = member.userId === args.actor.userId;
+  const log: SeatLog = {
+    authorName: byAdmin(args.actor),
+    describe: (summary) => `${self ? `${member.name} took a seat` : `Seat given to ${member.name}`}. Now ${seatCountWords(summary)}.`,
+  };
+  let result = await reserveSeat(args.clinicId, member.userId, log);
+  if (!result.held) {
+    const board = await checkSeats(args.clinicId).catch((error) => {
+      logFailure("the seats could not be checked against Clerk", error);
+      return null;
+    });
+    if (board && board.released > 0) result = await reserveSeat(args.clinicId, member.userId, log);
+  }
+  if (!result.held) return { ok: false, message: seatsFullMessage(result.summary) };
+  return { ok: true };
+}
+
+/**
+ * The account owner gives up their own seat. Only the owner, and only their
+ * own: everyone else needs a seat, and leaves one by being removed.
+ */
+export async function releaseOwnSeat(args: { clinicId: string; actor: Actor }): Promise<Outcome> {
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
+  if (clinic.ownerClerkUserId !== args.actor.userId) {
+    return { ok: false, message: "Only the account owner can go without a seat. Everyone else in the clinic needs one." };
+  }
+  await releaseSeat(args.clinicId, args.actor.userId, {
+    authorName: byAdmin(args.actor),
+    describe: (summary) => `${args.actor.name} (account owner) gave up their seat. Now ${seatCountWords(summary)}.`,
+  });
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// The account owner
+// ---------------------------------------------------------------------------
+
+/**
+ * The owner hands the account to another admin. The free spot moves: the new
+ * owner keeps their seat if they had one, and the old owner now needs a seat
+ * like everyone else (given one by the check that follows, if one is free).
+ */
+export async function handOffOwner(args: { clinicId: string; toUserId: unknown; actor: Actor }): Promise<Outcome> {
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
+  if (clinic.ownerClerkUserId !== args.actor.userId) return { ok: false, message: "Only the account owner can hand the account over." };
+
+  const toUserId = typeof args.toUserId === "string" ? args.toUserId : "";
+  if (toUserId === args.actor.userId) return { ok: false, message: "You are already the account owner." };
+  const member = await memberOf(clinic.orgId, toUserId);
+  if (member === null) return { ok: false, message: NOT_SAVED };
+  if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
+  if (member.role !== "admin") return { ok: false, message: `Switch admin on for ${member.name} first. The account owner is always an admin.` };
+
+  try {
+    await setClinicOwner(
+      args.clinicId,
+      member.userId,
+      { newOwnerName: member.name, oldOwnerName: args.actor.name, how: `handed over by ${args.actor.name}` },
+      byAdmin(args.actor),
+      args.actor.userId,
+    );
+  } catch (error) {
+    if (error instanceof OwnerChangeRefusedError) return { ok: false, message: error.message };
+    logFailure("the account owner could not be changed", error);
+    return { ok: false, message: NOT_SAVED };
+  }
+
+  const board = await checkSeats(args.clinicId).catch((error) => {
+    logFailure("the seats could not be checked after a handoff", error);
+    return null;
+  });
+  const me = board?.people.find((person) => person.userId === args.actor.userId);
+  const waiting = me?.seat === "waiting" ? " You now need a seat like everyone else, and none is free, so you are waiting for one." : "";
+  return { ok: true, message: `${member.name} is now the account owner.${waiting}` };
+}
+
+/**
+ * Pulse staff make any current member the account owner: the backup for an
+ * owner who left without handing over. A member who is not an admin is made
+ * one first, because the owner is always an admin.
+ */
+export async function setOwnerByStaff(args: { clinicId: string; toUserId: unknown; staffName: string }): Promise<Outcome> {
+  const clinic = await clinicFor(args.clinicId);
+  if (!clinic) return { ok: false, message: "This clinic has no Clerk organization, so it has no people to choose from." };
+
+  const member = await memberOf(clinic.orgId, typeof args.toUserId === "string" ? args.toUserId : "");
+  if (member === null) return { ok: false, message: "Could not reach Clerk to check that person. Nothing was changed. Try again in a moment." };
+  if (member === "not-a-member") return { ok: false, message: "That person is not a member of this clinic." };
+
+  if (member.role !== "admin") {
+    try {
+      await setRoleInClerk(clinic.orgId, member.userId, "admin");
+    } catch (error) {
+      logFailure("Clerk did not make the new owner an admin", error);
+      return { ok: false, message: "Could not switch admin on for that person in Clerk. Nothing was changed. Try again in a moment." };
+    }
+    await addClinicNote(args.clinicId, { kind: "STATUS", authorName: args.staffName, body: `Admin switched on for ${member.name}, to make them the account owner.` }).catch(
+      (error) => logFailure("a role change could not be written to the log", error),
+    );
+  }
+
+  let oldOwnerName: string | null = null;
+  if (clinic.ownerClerkUserId) {
+    const old = await memberOf(clinic.orgId, clinic.ownerClerkUserId);
+    oldOwnerName = typeof old === "object" && old !== null ? old.name : null;
+  }
+  const { logged } = await setClinicOwner(args.clinicId, member.userId, { newOwnerName: member.name, oldOwnerName, how: "set by Pulse 3D staff" }, args.staffName);
+  await checkSeats(args.clinicId).catch((error) => logFailure("the seats could not be checked after an owner change", error));
+  return { ok: true, message: logged ? `${member.name} is now the account owner.` : `${member.name} was already the account owner.` };
 }
 
 // ---------------------------------------------------------------------------
 // Checking the seats against the clinic's people
 // ---------------------------------------------------------------------------
 
-export type SeatedPerson = Person & { seat: SeatState };
+export type SeatedPerson = Person & { seat: SeatState; isOwner: boolean };
+
+/** An open invitation, as the People page shows it. */
+export type InvitationView = OpenInvitation & {
+  /** False for an invitation made outside our People page: it holds no seat, and its person arrives waiting for one. */
+  holdsSeat: boolean;
+};
 
 /** Everyone in a clinic with where each stands, after the seats have been brought into line. */
 export type SeatBoard = {
   people: SeatedPerson[];
+  /** Open invitations, or null when Clerk could not list them this time. */
+  invitations: InvitationView[] | null;
   summary: SeatSummary;
-  /** Surgeons with no seat. */
+  /** People who need a seat and have none. */
   waiting: number;
-  /** Reserved seats Clerk has not confirmed: "Try again" on the People page. */
-  pending: number;
-  /** Seats this check let go. */
+  /** The account owner's user id, or null when the clinic has none. */
+  ownerUserId: string | null;
+  /** The owner on record is in the clinic but is not an admin (switched off in Clerk's own panel). */
+  ownerNotAdmin: boolean;
+  /** Seats and holds this check let go. */
   released: number;
 };
 
 /**
- * Read a clinic's people from Clerk, bring its seats into line with them
- * (planSeatCheck in lib/seats.ts says how, applySeatCheck in lib/db/seats.ts
- * does it under the lock), and return everyone with where they stand.
+ * What Clerk says about the invitations behind our holds. Open ones come from
+ * one list call; a held invitation missing from that list is asked about on
+ * its own before it is called closed, so a hold is only ever let go on
+ * Clerk's positive word. Null when the list itself could not be read.
+ */
+async function readInvitationFacts(orgId: string, heldInvitationIds: string[]): Promise<{ facts: InvitationFacts; open: OpenInvitation[] } | null> {
+  let open: OpenInvitation[];
+  try {
+    open = await listOpenInvitations(orgId);
+  } catch (error) {
+    logFailure("the clinic's invitations could not be read from Clerk", error);
+    return null;
+  }
+  const openIds = new Set(open.map((invitation) => invitation.id));
+  const closed: string[] = [];
+  for (const invitationId of heldInvitationIds) {
+    if (openIds.has(invitationId)) continue;
+    try {
+      if (!(await invitationIsOpen(orgId, invitationId))) closed.push(invitationId);
+    } catch (error) {
+      logFailure("an invitation could not be looked up in Clerk; its hold is kept for now", error);
+    }
+  }
+  return { facts: { pending: open.map((invitation) => ({ id: invitation.id, seatHoldId: invitation.seatHoldId })), closed }, open };
+}
+
+/**
+ * Read a clinic's people and invitations from Clerk, bring its seats into
+ * line with them (planSeatCheck in lib/seats.ts says how, applySeatCheck in
+ * lib/db/seats.ts does it under the lock), and return everyone with where
+ * they stand.
  *
- * This is what notices a person removed in Clerk's own panel, a label
- * changed in Clerk's dashboard, a surgeon who arrived already labelled (an
- * invitation can carry the label), surgeons marked before seats existed, and
- * a change of ours that failed halfway. There are no background jobs, so it
- * runs where it matters: whenever the People page or a clinic's /pulse page
- * is opened, and before anyone is told a clinic is full.
+ * This is what turns an accepted invitation into a seat, notices a person
+ * removed or an invitation revoked in Clerk's own panel, seats people who
+ * were waiting when a seat comes free, and notices that the account owner
+ * has left. There are no background jobs, so it runs where it matters:
+ * whenever the People page or a clinic's /pulse page is opened, and before
+ * anyone is told a clinic is full.
  *
  * Safe to run at any time and any number of times: it only ever lets seats
- * go or fills free ones, never relabels anyone, and never goes over the plan.
- * A check that finds nothing to do writes nothing.
+ * go or fills free ones, never removes or relabels anyone, and never goes
+ * over the plan. A check that finds nothing to do writes nothing.
  *
- * Throws when Clerk cannot be read; nothing is changed in that case.
+ * Throws when Clerk's member list cannot be read; nothing is changed then.
  */
 export async function checkSeats(clinicId: string, now: Date = new Date()): Promise<SeatBoard> {
   const clinic = await getSeatClinic(clinicId);
@@ -239,25 +501,49 @@ export async function checkSeats(clinicId: string, now: Date = new Date()): Prom
 
   const people = clinic.clerkOrgId ? await listPeople(clinic.clerkOrgId) : [];
   let rows = await listSeatRows(clinicId);
-  let released = 0;
+  let holds = await listSeatHolds(clinicId);
+  const invitationRead = clinic.clerkOrgId
+    ? await readInvitationFacts(
+        clinic.clerkOrgId,
+        holds.flatMap((hold) => (hold.clerkInvitationId ? [hold.clerkInvitationId] : [])),
+      )
+    : null;
 
-  const plan = planSeatCheck({ seats: clinic.surgeonSeats, members: people, rows, now });
+  let released = 0;
+  let owner = clinic.ownerClerkUserId;
+  const plan = planSeatCheck({
+    seats: clinic.surgeonSeats,
+    ownerUserId: owner,
+    members: people,
+    rows,
+    holds,
+    invitations: invitationRead?.facts ?? null,
+    now,
+  });
   if (!seatCheckIsEmpty(plan)) {
     try {
-      released = (await applySeatCheck(clinicId, plan, now)).released;
+      const result = await applySeatCheck(clinicId, plan, owner, now);
+      released = result.released;
+      if (result.ownerCleared) owner = null;
       rows = await listSeatRows(clinicId);
+      holds = await listSeatHolds(clinicId);
     } catch (error) {
       // The page still shows where everyone stands; the check runs again next time.
       logFailure("the seat check could not be applied", error);
     }
   }
 
-  const seated = people.map((person) => ({ ...person, seat: seatStateOf(person, rows) }));
+  const heldHoldIds = new Set(holds.map((hold) => hold.id));
+  const seated = people.map((person) => ({ ...person, seat: seatStateOf(person.userId, rows, owner), isOwner: person.userId === owner }));
   return {
     people: seated,
-    summary: (await getSeatSummary(clinicId)) ?? seatSummary(clinic.surgeonSeats, rows.length),
+    invitations: invitationRead
+      ? invitationRead.open.map((invitation) => ({ ...invitation, holdsSeat: invitation.seatHoldId !== null && heldHoldIds.has(invitation.seatHoldId) }))
+      : null,
+    summary: (await getSeatSummary(clinicId)) ?? seatSummary(clinic.surgeonSeats, rows.length, holds.length),
     waiting: seated.filter((person) => person.seat === "waiting").length,
-    pending: seated.filter((person) => person.seat === "pending").length,
+    ownerUserId: owner,
+    ownerNotAdmin: seated.some((person) => person.isOwner && person.role !== "admin"),
     released,
   };
 }

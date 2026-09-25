@@ -19,8 +19,8 @@ import { CATEGORIES } from "./categories";
  *   seat for one category, another for two, and so on, whichever
  *   categories they are. A clinic is charged the ladder price for the
  *   number of categories it takes, times its number of surgeon seats.
- *   Yearly billing charges a set number of months for the year. Office
- *   staff are never charged.
+ *   Yearly billing charges a set number of months for the year. Everyone
+ *   in a clinic but its account owner holds a seat (lib/seats.ts).
  *
  *   There are no per-category prices. A count-based price makes the
  *   identity of the categories irrelevant to the amount: Knee and Hip cost
@@ -87,7 +87,7 @@ export type PricingConfig = {
 
 /** What the calculator, and later checkout, asks for. */
 export type QuoteInput = {
-  /** Surgeon seats. A whole number, at least 1. Office staff are not seats. */
+  /** Surgeon seats. A whole number, at least 1. Everyone but the account owner holds one. */
   seats: number;
   /** The categories ticked. A category ticked twice counts once. */
   categories: Category[];

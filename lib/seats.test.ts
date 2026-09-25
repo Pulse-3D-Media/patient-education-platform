@@ -3,6 +3,7 @@ import {
   PENDING_WINDOW_MS,
   checkSeatReduction,
   hasFreeSeat,
+  holdIdFromMetadata,
   isClerkUserId,
   overAllocatedWords,
   planSeatCheck,
@@ -11,27 +12,45 @@ import {
   seatStateOf,
   seatSummary,
   seatsFullMessage,
+  type HoldRow,
+  type InvitationFacts,
   type SeatMember,
   type SeatRow,
 } from "./seats";
 
 /**
- * The surgeon seat rules, with plain values: no database, no Clerk. Every
- * user id here is made up.
+ * The seat rules, with plain values: no database, no Clerk. Every id here is
+ * made up.
  */
 
-const NOW = new Date("2026-09-20T12:00:00Z");
-const YOUNG = new Date(NOW.getTime() - 10_000); // reserved ten seconds ago
+const NOW = new Date("2026-09-24T12:00:00Z");
+const YOUNG = new Date(NOW.getTime() - 10_000); // ten seconds ago
 const OLD = new Date(NOW.getTime() - PENDING_WINDOW_MS - 1_000); // past the window
 
-const member = (userId: string, kind: SeatMember["kind"], joinedAt = 1): SeatMember => ({ userId, kind, joinedAt });
-const row = (clerkUserId: string, syncState: SeatRow["syncState"] = "SYNCED", reservedAt = YOUNG): SeatRow => ({ clerkUserId, syncState, reservedAt });
+const OWNER = "user_owner";
+const member = (userId: string, joinedAt = 1, seatHoldId: string | null = null): SeatMember => ({ userId, joinedAt, seatHoldId });
+const row = (clerkUserId: string, syncState: SeatRow["syncState"] = "SYNCED"): SeatRow => ({ clerkUserId, syncState, reservedAt: YOUNG });
+const hold = (id: string, clerkInvitationId: string | null = null, reservedAt = YOUNG): HoldRow => ({ id, clerkInvitationId, reservedAt });
+const NO_INVITES: InvitationFacts = { pending: [], closed: [] };
+
+/** planSeatCheck with the usual defaults. */
+function plan(input: { seats: number; members: SeatMember[]; rows?: SeatRow[]; holds?: HoldRow[]; invitations?: InvitationFacts | null; owner?: string | null }) {
+  return planSeatCheck({
+    seats: input.seats,
+    ownerUserId: input.owner === undefined ? OWNER : input.owner,
+    members: input.members,
+    rows: input.rows ?? [],
+    holds: input.holds ?? [],
+    invitations: input.invitations === undefined ? NO_INVITES : input.invitations,
+    now: NOW,
+  });
+}
 
 describe("counting seats", () => {
-  it("says what is in use, what is free and how far over", () => {
-    expect(seatSummary(3, 2)).toEqual({ seats: 3, inUse: 2, free: 1, overBy: 0 });
-    expect(seatSummary(3, 3)).toEqual({ seats: 3, inUse: 3, free: 0, overBy: 0 });
-    expect(seatSummary(3, 5)).toEqual({ seats: 3, inUse: 5, free: 0, overBy: 2 });
+  it("counts people and open invitations together against the plan", () => {
+    expect(seatSummary(3, 2)).toEqual({ seats: 3, seated: 2, invited: 0, inUse: 2, free: 1, overBy: 0 });
+    expect(seatSummary(3, 2, 1)).toEqual({ seats: 3, seated: 2, invited: 1, inUse: 3, free: 0, overBy: 0 });
+    expect(seatSummary(3, 4, 1)).toEqual({ seats: 3, seated: 4, invited: 1, inUse: 5, free: 0, overBy: 2 });
   });
 
   it("treats a seat count it cannot read as no seats, never as unlimited", () => {
@@ -41,37 +60,48 @@ describe("counting seats", () => {
     }
   });
 
-  it("has a free seat only while fewer are in use than are paid for", () => {
+  it("has a free seat only while fewer are taken than are paid for, and an invitation takes one", () => {
     expect(hasFreeSeat(seatSummary(1, 0))).toBe(true);
     expect(hasFreeSeat(seatSummary(1, 1))).toBe(false);
+    expect(hasFreeSeat(seatSummary(1, 0, 1))).toBe(false); // the one seat is held by an invitation
     expect(hasFreeSeat(seatSummary(0, 0))).toBe(false); // a clinic that has not paid has none
     expect(hasFreeSeat(seatSummary(2, 3))).toBe(false); // over the plan: nobody new
   });
 
   it("puts the count in words", () => {
-    expect(seatCountWords(seatSummary(3, 2))).toBe("2 of 3 surgeon seats in use");
-    expect(seatCountWords(seatSummary(1, 1))).toBe("1 of 1 surgeon seat in use");
+    expect(seatCountWords(seatSummary(3, 2))).toBe("2 of 3 seats in use");
+    expect(seatCountWords(seatSummary(1, 1))).toBe("1 of 1 seat in use");
+    expect(seatCountWords(seatSummary(3, 1, 1))).toBe("2 of 3 seats in use (1 by an invitation)");
+    expect(seatCountWords(seatSummary(5, 1, 2))).toBe("3 of 5 seats in use (2 by invitations)");
   });
 
   it("tells an admin why nobody else can be given a seat, in plain words", () => {
     expect(seatsFullMessage(seatSummary(0, 0))).toContain("Choose a plan on the Billing page");
-    expect(seatsFullMessage(seatSummary(3, 3))).toContain("All 3 surgeon seats are in use");
-    expect(seatsFullMessage(seatSummary(1, 1))).toContain("All 1 surgeon seat is in use");
-    expect(seatsFullMessage(seatSummary(3, 4))).toContain("4 people hold a surgeon seat and your plan pays for 3");
+    expect(seatsFullMessage(seatSummary(3, 3))).toContain("All 3 seats are taken");
+    expect(seatsFullMessage(seatSummary(1, 1))).toContain("All 1 seat is taken");
+    expect(seatsFullMessage(seatSummary(3, 3))).toContain("Revoke an invitation or remove someone");
+    expect(seatsFullMessage(seatSummary(3, 4))).toContain("4 seats are taken and your plan pays for 3");
   });
 });
 
-describe("a Clerk user id", () => {
-  it("is recognised, and anything else is not", () => {
+describe("ids", () => {
+  it("a Clerk user id is recognised, and anything else is not", () => {
     expect(isClerkUserId("user_2abcDEF123")).toBe(true);
     for (const bad of ["", "org_123", "user_", "user_has space", "user_a'; DROP", 42, null, undefined, `user_${"a".repeat(65)}`]) {
       expect(isClerkUserId(bad)).toBe(false);
     }
   });
+
+  it("a hold id is only read out of metadata when it looks like one of ours", () => {
+    expect(holdIdFromMetadata({ seatHold: "clz1abc2def3ghi4jkl5mno6p" })).toBe("clz1abc2def3ghi4jkl5mno6p");
+    for (const bad of [null, undefined, {}, { seatHold: 42 }, { seatHold: "" }, { seatHold: "has space in it" }, { seatHold: "DROP TABLE;" }, { kind: "surgeon" }]) {
+      expect(holdIdFromMetadata(bad as Record<string, unknown> | null)).toBeNull();
+    }
+  });
 });
 
 describe("lowering the seats on a plan", () => {
-  it("is allowed down to the number of people holding one, and no further", () => {
+  it("is allowed down to the number of seats taken, and no further", () => {
     expect(checkSeatReduction(3, 5)).toEqual({ ok: true });
     expect(checkSeatReduction(3, 3)).toEqual({ ok: true });
     expect(checkSeatReduction(0, 0)).toEqual({ ok: true });
@@ -80,108 +110,121 @@ describe("lowering the seats on a plan", () => {
     expect(refused.ok).toBe(false);
     if (!refused.ok) {
       expect(refused.short).toBe(1);
-      expect(refused.message).toContain("3 people hold a surgeon seat, so the plan needs at least 3 seats");
-      expect(refused.message).toContain("Mark a surgeon as Staff");
+      expect(refused.message).toContain("3 seats are taken, so the plan needs at least 3 seats");
+      expect(refused.message).toContain("Remove someone or revoke an invitation");
     }
   });
 
-  it("names how many surgeons have to be marked staff first", () => {
+  it("names how many have to go first", () => {
     const refused = checkSeatReduction(5, 2);
-    expect(refused.ok === false && refused.message).toContain("Mark 3 surgeons as Staff");
+    expect(refused.ok === false && refused.message).toContain("Remove 3 people or revoke invitations");
   });
 
-  it("has a sentence for the log only when the plan is below what is in use", () => {
+  it("has a sentence for the log only when the plan is below what is taken", () => {
     expect(overAllocatedWords(seatSummary(3, 3))).toBeNull();
-    expect(overAllocatedWords(seatSummary(3, 5))).toContain("5 people hold a surgeon seat, 2 more than the 3 the plan now pays for");
-    expect(overAllocatedWords(seatSummary(3, 5))).toContain("Nobody was relabelled and no charge was changed");
+    expect(overAllocatedWords(seatSummary(3, 5))).toContain("5 seats are taken, 2 more than the 3 the plan now pays for");
+    expect(overAllocatedWords(seatSummary(3, 5))).toContain("Nobody was removed and no charge was changed");
   });
 });
 
 describe("checking the seats against the clinic's people", () => {
-  it("finds nothing to do when everyone who holds a seat is a surgeon and nobody is waiting", () => {
-    const plan = planSeatCheck({ seats: 2, members: [member("user_a", "surgeon"), member("user_b", "staff")], rows: [row("user_a")], now: NOW });
-    expect(seatCheckIsEmpty(plan)).toBe(true);
+  it("changes nothing when everyone who needs a seat has one", () => {
+    const result = plan({ seats: 2, members: [member(OWNER), member("user_a"), member("user_b")], rows: [row("user_a"), row("user_b")] });
+    expect(seatCheckIsEmpty(result)).toBe(true);
   });
 
-  it("lets go of the seat of someone who has left the clinic", () => {
-    const plan = planSeatCheck({ seats: 2, members: [member("user_a", "surgeon")], rows: [row("user_a"), row("user_gone")], now: NOW });
-    expect(plan.release).toEqual([{ userId: "user_gone", reason: "left" }]);
+  it("never gives the account owner a seat: the owner takes one only by choice", () => {
+    const result = plan({ seats: 3, members: [member(OWNER, 0), member("user_a", 1)] });
+    expect(result.adopt).toEqual(["user_a"]);
   });
 
-  it("lets go of a confirmed seat whose holder is now marked staff, or has no label", () => {
-    const plan = planSeatCheck({
-      seats: 3,
-      members: [member("user_a", "staff"), member("user_b", null)],
-      rows: [row("user_a"), row("user_b")],
-      now: NOW,
+  it("gives free seats to the people waiting, oldest member first, and never more than are free", () => {
+    const result = plan({ seats: 2, members: [member(OWNER), member("user_late", 30), member("user_first", 10), member("user_second", 20)] });
+    expect(result.adopt).toEqual(["user_first", "user_second"]);
+  });
+
+  it("gives nobody a seat while the clinic has none (it has not paid)", () => {
+    expect(plan({ seats: 0, members: [member(OWNER), member("user_a")] }).adopt).toEqual([]);
+  });
+
+  it("lets go the seat of someone who has left", () => {
+    const result = plan({ seats: 2, members: [member(OWNER), member("user_here")], rows: [row("user_here"), row("user_gone")] });
+    expect(result.release).toEqual(["user_gone"]);
+  });
+
+  it("treats an empty member list as Clerk not answering, and changes nothing at all", () => {
+    const result = plan({ seats: 2, members: [], rows: [row("user_a")], holds: [hold("holdone00001", null, OLD)] });
+    expect(seatCheckIsEmpty(result)).toBe(true);
+  });
+
+  it("confirms seats the earlier model left unconfirmed, as housekeeping only", () => {
+    expect(plan({ seats: 1, members: [member(OWNER), member("user_a")], rows: [row("user_a", "PENDING")] }).confirm).toEqual(["user_a"]);
+  });
+
+  it("turns an accepted invitation into its person's seat, without counting it twice", () => {
+    const result = plan({
+      seats: 2,
+      members: [member(OWNER), member("user_old", 1), member("user_new", 99, "holdnew00001")],
+      holds: [hold("holdnew00001", "orginv_1")],
     });
-    expect(plan.release).toEqual([
-      { userId: "user_a", reason: "not-surgeon" },
-      { userId: "user_b", reason: "not-surgeon" },
-    ]);
+    expect(result.convert).toEqual([{ holdId: "holdnew00001", userId: "user_new" }]);
+    // The newcomer's seat came from their invitation, so the one seat left goes to the older person waiting.
+    expect(result.adopt).toEqual(["user_old"]);
   });
 
-  it("leaves a reservation alone while it may still be on its way to Clerk, and lets it go once it is stale", () => {
-    const members = [member("user_a", null), member("user_b", null)];
-    const plan = planSeatCheck({ seats: 3, members, rows: [row("user_a", "PENDING", YOUNG), row("user_b", "PENDING", OLD)], now: NOW });
-    expect(plan.release).toEqual([{ userId: "user_b", reason: "stale" }]);
-    expect(plan.confirm).toEqual([]);
+  it("does not hand an invitation's seat to someone else who is waiting", () => {
+    // One seat, held by an open invitation. An older member waiting for a seat does not get it.
+    const result = plan({ seats: 1, members: [member(OWNER), member("user_waiting", 1)], holds: [hold("holdopen0001", "orginv_1")], invitations: { pending: [{ id: "orginv_1", seatHoldId: "holdopen0001" }], closed: [] } });
+    expect(result.adopt).toEqual([]);
+    expect(result.dropHolds).toEqual([]);
   });
 
-  it("confirms a reservation once Clerk says surgeon, however old it is", () => {
-    const plan = planSeatCheck({ seats: 3, members: [member("user_a", "surgeon")], rows: [row("user_a", "PENDING", OLD)], now: NOW });
-    expect(plan.confirm).toEqual(["user_a"]);
-    expect(plan.release).toEqual([]);
+  it("lets a hold go when Clerk says its invitation was revoked or expired, and only then", () => {
+    const facts = { pending: [{ id: "orginv_open", seatHoldId: "holdopen0001" }], closed: ["orginv_closed"] };
+    const result = plan({ seats: 3, members: [member(OWNER)], holds: [hold("holdopen0001", "orginv_open"), hold("holdclosed01", "orginv_closed")], invitations: facts });
+    expect(result.dropHolds).toEqual([{ holdId: "holdclosed01", reason: "closed" }]);
   });
 
-  it("gives free seats to surgeons who are waiting, oldest member first, and no more than are free", () => {
-    const members = [member("user_new", "surgeon", 300), member("user_old", "surgeon", 100), member("user_mid", "surgeon", 200), member("user_seated", "surgeon", 50)];
-    const plan = planSeatCheck({ seats: 3, members, rows: [row("user_seated")], now: NOW });
-    expect(plan.adopt).toEqual(["user_old", "user_mid"]); // two free seats; user_new keeps waiting
+  it("keeps every hold when the invitations could not be read", () => {
+    const result = plan({ seats: 3, members: [member(OWNER)], holds: [hold("holdclosed01", "orginv_closed"), hold("holdnever001", null, OLD)], invitations: null });
+    expect(result.dropHolds).toEqual([]);
   });
 
-  it("counts a seat that is being let go as free for someone who is waiting", () => {
-    const members = [member("user_waiting", "surgeon", 10), member("user_now_staff", "staff", 5)];
-    const plan = planSeatCheck({ seats: 1, members, rows: [row("user_now_staff")], now: NOW });
-    expect(plan.release).toEqual([{ userId: "user_now_staff", reason: "not-surgeon" }]);
-    expect(plan.adopt).toEqual(["user_waiting"]);
+  it("records the invitation a hold belongs to, found by the hold id it carries", () => {
+    const result = plan({ seats: 2, members: [member(OWNER)], holds: [hold("holdlink0001", null, OLD)], invitations: { pending: [{ id: "orginv_9", seatHoldId: "holdlink0001" }], closed: [] } });
+    expect(result.link).toEqual([{ holdId: "holdlink0001", invitationId: "orginv_9" }]);
+    expect(result.dropHolds).toEqual([]);
   });
 
-  it("counts a reservation that is still in flight as taken, so nobody is given its seat", () => {
-    const members = [member("user_inflight", null, 5), member("user_waiting", "surgeon", 10)];
-    const plan = planSeatCheck({ seats: 1, members, rows: [row("user_inflight", "PENDING", YOUNG)], now: NOW });
-    expect(plan.adopt).toEqual([]);
+  it("lets go a hold Clerk never made an invitation for, but only after the window", () => {
+    expect(plan({ seats: 2, members: [member(OWNER)], holds: [hold("holdyoung001", null, YOUNG)] }).dropHolds).toEqual([]);
+    expect(plan({ seats: 2, members: [member(OWNER)], holds: [hold("holdold00001", null, OLD)] }).dropHolds).toEqual([{ holdId: "holdold00001", reason: "never-made" }]);
   });
 
-  it("gives nobody a seat at a clinic that has none, or is over its plan", () => {
-    const surgeons = [member("user_a", "surgeon"), member("user_b", "surgeon")];
-    expect(planSeatCheck({ seats: 0, members: surgeons, rows: [], now: NOW }).adopt).toEqual([]);
-    expect(planSeatCheck({ seats: 1, members: [...surgeons, member("user_c", "surgeon")], rows: [row("user_a"), row("user_b")], now: NOW }).adopt).toEqual([]);
+  it("lets a hold go, rather than giving a second seat, when its person already holds one", () => {
+    const result = plan({ seats: 3, members: [member(OWNER), member("user_a", 1, "holddupe0001")], rows: [row("user_a")], holds: [hold("holddupe0001", "orginv_1")] });
+    expect(result.dropHolds).toEqual([{ holdId: "holddupe0001", reason: "already-seated" }]);
+    expect(result.convert).toEqual([]);
   });
 
-  it("never lets go of a surgeon's seat because the plan is over: that is for people to settle", () => {
-    const plan = planSeatCheck({ seats: 1, members: [member("user_a", "surgeon"), member("user_b", "surgeon")], rows: [row("user_a"), row("user_b")], now: NOW });
-    expect(seatCheckIsEmpty(plan)).toBe(true);
+  it("says when the account owner is no longer in the clinic", () => {
+    expect(plan({ seats: 1, members: [member("user_a")] }).ownerLeft).toBe(true);
+    expect(plan({ seats: 1, members: [member(OWNER)] }).ownerLeft).toBe(false);
+    expect(plan({ seats: 1, members: [member("user_a")], owner: null }).ownerLeft).toBe(false); // no owner on record: nothing to clear
   });
 
-  it("changes nothing when Clerk returns no people at all, rather than letting every seat go", () => {
-    const plan = planSeatCheck({ seats: 2, members: [], rows: [row("user_a"), row("user_b")], now: NOW });
-    expect(seatCheckIsEmpty(plan)).toBe(true);
-  });
-
-  it("never suggests a change of label: staff stay staff and are never given a seat", () => {
-    const plan = planSeatCheck({ seats: 5, members: [member("user_staff", "staff"), member("user_unasked", null)], rows: [], now: NOW });
-    expect(seatCheckIsEmpty(plan)).toBe(true);
+  it("with no owner on record, everyone needs a seat", () => {
+    expect(plan({ seats: 5, members: [member("user_creator", 0), member("user_a", 1)], owner: null }).adopt).toEqual(["user_creator", "user_a"]);
   });
 });
 
 describe("where one person stands", () => {
-  it("is worked out from their label and whether they hold a seat", () => {
-    const rows = [row("user_held"), row("user_pending", "PENDING")];
-    expect(seatStateOf({ userId: "user_held", kind: "surgeon" }, rows)).toBe("held");
-    expect(seatStateOf({ userId: "user_waiting", kind: "surgeon" }, rows)).toBe("waiting");
-    expect(seatStateOf({ userId: "user_pending", kind: null }, rows)).toBe("pending");
-    expect(seatStateOf({ userId: "user_staff", kind: "staff" }, rows)).toBe("none");
-    expect(seatStateOf({ userId: "user_unasked", kind: null }, rows)).toBe("none");
+  it("holds a seat, waits for one, or is the owner without one", () => {
+    const rows = [row("user_held"), row(OWNER)];
+    expect(seatStateOf("user_held", rows, OWNER)).toBe("held");
+    expect(seatStateOf("user_waiting", rows, OWNER)).toBe("waiting");
+    expect(seatStateOf(OWNER, rows, OWNER)).toBe("held"); // an owner who took a seat
+    expect(seatStateOf(OWNER, [], OWNER)).toBe("none");
+    expect(seatStateOf("user_creator", [], null)).toBe("waiting"); // no owner on record
   });
 });

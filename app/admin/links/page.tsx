@@ -55,7 +55,7 @@ import { ShareLists } from "./ShareLists";
 export const dynamic = "force-dynamic";
 
 export default async function LinksPage() {
-  // Signed out, no clinic, or the surgeon question unanswered: sent to the
+  // Signed out, or no clinic: sent to the
   // right step (proxy.ts already sends signed-out visitors away, but Clerk's
   // guidance is that every page reading protected data keeps its own check).
   const clinic = await requireClinicPage();

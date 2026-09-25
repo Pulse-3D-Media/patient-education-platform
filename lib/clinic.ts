@@ -4,7 +4,7 @@ import { cache } from "react";
 import { readBranding, type Branding } from "./branding";
 import { clinicIsOpen } from "./clinic-status";
 import { getClinicByClerkOrgId, upsertClinicForClerkOrg } from "./db/clinics";
-import { ADMIN_ROLE, isClinicAdmin, kindFromMetadata, type Kind } from "./roles";
+import { ADMIN_ROLE, isClinicAdmin } from "./roles";
 import type { ClinicStatus, PracticeType } from "@prisma/client";
 
 /**
@@ -36,11 +36,23 @@ export type CurrentClinic = {
   branding: Branding;
   /** True when the logo is the one uploaded to the clinic's Clerk organization, false when Pulse staff set it (or there is none). */
   logoIsFromClerk: boolean;
-  /** Surgeon or staff, or null if this person has not been asked yet. See lib/roles.ts. */
-  kind: Kind | null;
+  /** Is this person the clinic's account owner (Clinic.ownerClerkUserId)? See lib/seats.ts. */
+  isOwner: boolean;
   /** Is this person an org:admin of the clinic? */
   isAdmin: boolean;
 };
+
+/**
+ * Who created a Clerk organization, to record as the new clinic's account
+ * owner. Clerk's organization carries its creator; when that is missing, the
+ * person signed in counts only if they are an admin of an organization with
+ * nobody else in it yet, which is exactly the moment after they created it.
+ * Otherwise nobody, and Pulse staff set the owner on /pulse.
+ */
+function creatorOf(organization: { createdBy?: string | null; membersCount?: number | null }, userId: string, isAdmin: boolean): string | null {
+  if (organization.createdBy) return organization.createdBy;
+  return isAdmin && organization.membersCount === 1 ? userId : null;
+}
 
 /**
  * The clinic for the signed-in user's active organization, creating it on
@@ -72,12 +84,15 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
   if (!membership) return null;
 
   const organization = membership.organization;
+  const isAdmin = has({ role: ADMIN_ROLE });
   const clinic = await upsertClinicForClerkOrg(orgId, {
     name: organization.name,
     // Clerk gives every organization an image address; hasImage says whether
     // it is a real uploaded logo or the generated initials. Only a real logo
     // is kept.
     logoUrl: organization.hasImage ? organization.imageUrl : null,
+    // Only used if this visit creates the clinic.
+    creatorClerkUserId: creatorOf(organization, userId, isAdmin),
   });
 
   return {
@@ -92,8 +107,8 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     phone: clinic.phone,
     branding: readBranding(clinic),
     logoIsFromClerk: organization.hasImage,
-    kind: kindFromMetadata(membership.publicMetadata),
-    isAdmin: has({ role: ADMIN_ROLE }),
+    isOwner: clinic.ownerClerkUserId === userId,
+    isAdmin,
   };
 });
 
@@ -137,13 +152,14 @@ export async function getBillingClinicId(): Promise<string | null> {
 }
 
 /**
- * What every staff page calls first. Makes sure someone is signed in, has a
- * clinic, and has answered the surgeon-or-staff question, sending them to
- * the right step if not:
+ * What every staff page calls first. Makes sure someone is signed in and has
+ * a clinic, sending them to the right step if not:
  *
  *   signed out            -> /sign-in (and back here afterwards)
  *   no clinic yet         -> /onboarding, to create or choose one
- *   kind not answered     -> /onboarding/kind, asked once
+ *
+ * (There is no surgeon-or-staff question any more: everyone but the account
+ * owner holds a seat. See lib/seats.ts.)
  *
  * Returns the clinic otherwise. It does NOT check that the clinic is open:
  * a PENDING clinic reaches the page and the page shows it the "choose a
@@ -155,7 +171,6 @@ export async function requireClinicPage(): Promise<CurrentClinic> {
 
   const clinic = await getCurrentClinic();
   if (!clinic) redirect("/onboarding");
-  if (!clinic.kind) redirect("/onboarding/kind");
 
   return clinic;
 }

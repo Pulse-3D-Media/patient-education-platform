@@ -5,7 +5,7 @@ import { BillingRefusedError, acceptPlanForCheckout, getCheckoutFacts, setStripe
 import { prisma } from "./client";
 import { setClinicManagedByPulse, setClinicPracticeType, setClinicStatusByStaff } from "./clinics";
 import { createPricingVersion } from "./pricing";
-import { confirmSeat, reserveSeat } from "./seats";
+import { reserveSeat } from "./seats";
 
 /**
  * acceptPlanForCheckout against the real test database: the write that
@@ -173,12 +173,11 @@ describe("acceptPlanForCheckout", () => {
     await prisma.clinic.update({ where: { id: clinicId }, data: { surgeonSeats: 5 } });
     for (const who of ["user_vitestseatA", "user_vitestseatB", "user_vitestseatC"]) {
       await reserveSeat(clinicId, who);
-      await confirmSeat(clinicId, who);
     }
 
     const refused = acceptPlanForCheckout(clinicId, planInput({ surgeonSeats: 2, totalCents: 17800 }));
     await expect(refused).rejects.toBeInstanceOf(BillingRefusedError);
-    await expect(refused).rejects.toThrow("3 people hold a surgeon seat, so the plan needs at least 3 seats");
+    await expect(refused).rejects.toThrow("3 seats are taken, so the plan needs at least 3 seats");
     expect(await countPlans(clinicId)).toBe(0);
 
     // Exactly as many seats as are in use is fine.

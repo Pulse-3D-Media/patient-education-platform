@@ -23,7 +23,7 @@ import { SEAT_STATE_WORDS, seatCountWords, seatSummary } from "@/lib/seats";
 import { saveBrandingAction } from "../../actions";
 import { Section, StatusBadge, formatDate, formatDateTime } from "../../ui";
 import { ClinicTabs } from "./ClinicTabs";
-import { DetailsForm, ManagedForm, NoteForm, PlanForm, PracticeTypeForm, StatusForm } from "./forms";
+import { DetailsForm, ManagedForm, NoteForm, OwnerForm, PlanForm, PracticeTypeForm, StatusForm } from "./forms";
 
 /**
  * One clinic, everything Pulse staff can see and change about it, in seven
@@ -31,16 +31,19 @@ import { DetailsForm, ManagedForm, NoteForm, PlanForm, PracticeTypeForm, StatusF
  * Pulse), Plan, Details, Branding, People, Links, Notes.
  *
  * The editable sections are forms in forms.tsx, each saving through its own
- * Server Action. People come from Clerk, with who holds a surgeon seat from
- * our own table; links are the same list the clinic's own admin console
+ * Server Action. People come from Clerk, with who holds a seat and who is
+ * the account owner from our own tables; links are the same list the clinic's own admin console
  * shows; Notes is the running log, newest first, to which every change saved
  * on this page adds an entry of its own.
  *
  * Opening this page also brings the clinic's seats into line with its people
- * (checkSeats in lib/seat-changes.ts): it lets go the seat of someone who has
- * left and fills free seats with surgeons who were waiting. It never relabels
- * anyone and never goes over the plan, and it writes nothing when there is
- * nothing to put right.
+ * (checkSeats in lib/seat-changes.ts): an accepted invitation becomes its
+ * person's seat, the seat of someone who has left is let go, and free seats
+ * go to people who were waiting. It never removes anyone and never goes over
+ * the plan, and it writes nothing when there is nothing to put right. If the
+ * account owner has left, it clears the owner, and this page says so and
+ * offers "Make account owner" (the backup for an owner who left without
+ * handing over).
  *
  * Staff only. Rendered fresh on every request so a save is seen at once.
  */
@@ -71,6 +74,8 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   const people = board?.people ?? null;
   // The seats in use come from our own table, so they are known even when Clerk cannot be read.
   const seats = board?.summary ?? storedSeats ?? seatSummary(clinic.surgeonSeats, 0);
+  // Read from our own row, so it is known even when Clerk cannot be read. The seat check above clears it if the owner has left.
+  const ownerMissing = board ? board.ownerUserId === null : clinic.ownerClerkUserId === null;
 
   const overview = (
     <>
@@ -186,22 +191,50 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
       blurb={
         people === null
           ? `Could not read this clinic's people from Clerk right now. From our own records: ${seatCountWords(seats)}.`
-          : `${people.length} ${people.length === 1 ? "person" : "people"}. ${seatCountWords(seats)}. Staff are free and never take a seat.`
+          : `${people.length} ${people.length === 1 ? "person" : "people"}. ${seatCountWords(seats)}. Everyone but the account owner needs a seat; an open invitation holds one.`
       }
     >
+      {ownerMissing && (
+        <p className="mb-4 rounded-lg border border-[#f3b94d]/40 bg-[#f3b94d]/10 p-3 text-[15px] text-[#f3b94d]">
+          No account owner. Either this clinic was made before owners existed, or its owner left without handing over. Choose one below.
+        </p>
+      )}
+      {board?.ownerNotAdmin && (
+        <p className="mb-4 rounded-lg border border-[#f3b94d]/40 bg-[#f3b94d]/10 p-3 text-[15px] text-[#f3b94d]">
+          The account owner&apos;s admin was switched off in Clerk&apos;s own panel. The owner should always be an admin: choose them again below to switch it
+          back on.
+        </p>
+      )}
       {seats.overBy > 0 && (
         <p className="mb-4 rounded-lg border border-[#f3b94d]/40 bg-[#f3b94d]/10 p-3 text-[15px] text-[#f3b94d]">
-          {seats.inUse} people hold a surgeon seat and the plan pays for {seats.seats}: {seats.overBy} over. Nobody has been relabelled and nothing extra is
-          being charged. Nobody new can be given a seat until a surgeon is marked as staff or the seats are raised on the Plan tab.
+          {seats.inUse} seats are taken (people and open invitations) and the plan pays for {seats.seats}: {seats.overBy} over. Nobody has been removed and
+          nothing extra is being charged. Nobody new can be given a seat until someone is removed, an invitation is revoked, or the seats are raised on the
+          Plan tab.
         </p>
       )}
       {board && board.waiting > 0 && (
         <p className="mb-4 rounded-lg border border-white/15 p-3 text-[15px] text-[#bfbfbf]">
-          {board.waiting} {board.waiting === 1 ? "person says they are a surgeon and has" : "people say they are surgeons and have"} no seat, because none is
-          free. They can use the library as usual. They get a seat, oldest member first, as soon as one is free.
+          {board.waiting} {board.waiting === 1 ? "person has" : "people have"} no seat, because none is free. They can use the library as usual. They get a
+          seat, oldest member first, as soon as one is free.
         </p>
       )}
       {people && people.length > 0 ? <PeopleTable people={people} /> : <p className="text-sm text-[#667085]">Nobody yet.</p>}
+      {board?.invitations && board.invitations.length > 0 && (
+        <p className="mt-3 text-sm text-[#bfbfbf]">
+          Open invitations: {board.invitations.length}, of which {board.invitations.filter((invitation) => invitation.holdsSeat).length} hold a seat.
+        </p>
+      )}
+      {people && people.length > 0 && (
+        <div className="mt-6 border-t border-white/10 pt-5">
+          <h3 className="text-base font-semibold">Account owner</h3>
+          <p className="mt-1 max-w-2xl text-sm text-[#bfbfbf]">
+            The backup for when an owner leaves without handing over, or a clinic made before owners existed. The owner is made an admin if they are not
+            one. Seats are not changed. Logged under your name.
+          </p>
+          {/* Keyed by the owner, so the picker starts again from the new owner after a save. */}
+          <OwnerForm key={board?.ownerUserId ?? "none"} clinicId={clinic.id} people={people.map(({ userId, name, email }) => ({ userId, label: `${name} (${email})` }))} ownerUserId={board?.ownerUserId ?? null} />
+        </div>
+      )}
     </Section>
   );
 
@@ -346,18 +379,19 @@ function PeopleTable({ people }: { people: SeatedPerson[] }) {
             <th className="px-3 py-2 font-medium">Name</th>
             <th className="px-3 py-2 font-medium">Email</th>
             <th className="px-3 py-2 font-medium">Role</th>
-            <th className="px-3 py-2 font-medium">Kind</th>
-            <th className="px-3 py-2 font-medium">Surgeon seat</th>
+            <th className="px-3 py-2 font-medium">Seat</th>
           </tr>
         </thead>
         <tbody>
           {people.map((person) => (
             <tr key={person.userId} className="border-b border-white/5 last:border-b-0">
-              <td className="px-3 py-2">{person.name}</td>
+              <td className="px-3 py-2">
+                {person.name}
+                {person.isOwner && <span className="ml-2 rounded bg-[#2a829b]/20 px-1.5 py-0.5 text-xs text-[#5fb8d4]">Account owner</span>}
+              </td>
               <td className="px-3 py-2 text-[#bfbfbf]">{person.email}</td>
               <td className="px-3 py-2 text-[#bfbfbf]">{person.role === "admin" ? "Admin" : "Member"}</td>
-              <td className="px-3 py-2 text-[#bfbfbf]">{person.kind === "surgeon" ? "Surgeon" : person.kind === "staff" ? "Staff" : "Not set"}</td>
-              <td className={`px-3 py-2 ${person.seat === "waiting" || person.seat === "pending" ? "text-[#f3b94d]" : "text-[#bfbfbf]"}`}>
+              <td className={`px-3 py-2 ${person.seat === "waiting" ? "text-[#f3b94d]" : "text-[#bfbfbf]"}`}>
                 {SEAT_STATE_WORDS[person.seat]}
               </td>
             </tr>

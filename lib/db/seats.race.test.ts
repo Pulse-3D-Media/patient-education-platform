@@ -4,11 +4,13 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "./client";
 import { PlanSeatsRefusedError, setClinicPlan } from "./clinics";
 import * as seatLock from "./seat-lock";
-import { listSeatRows, reserveSeat } from "./seats";
+import { holdSeatForInvitation, listSeatHolds, listSeatRows, reserveSeat } from "./seats";
 
 /**
- * The forced overlap for surgeon seats: two people reach for the LAST seat
- * at the same moment, and a plan is lowered while a seat is being given.
+ * The forced overlap for seats: two people, or two invitations, reach for
+ * the LAST seat at the same moment, and a plan is lowered while a seat is
+ * being given. (People and open invitations are counted together, so the
+ * same lock protects both.)
  *
  * Counting the seats in use and then writing one more is two steps. If a
  * second request can get in between the first one's COUNT and its WRITE,
@@ -42,8 +44,13 @@ vi.mock("./seat-lock", async (importOriginal) => {
 
 const real = await vi.importActual<typeof import("./seat-lock")>("./seat-lock");
 
-/** How long request A holds still while B tries to get through. An unblocked reservation finishes in tens of milliseconds. */
-const WAIT_MS = 600;
+/**
+ * How long request A holds still while B tries to get through. An unblocked
+ * request is a handful of round trips to the remote testing database (a few
+ * hundred milliseconds); this leaves it several times that, so the control
+ * cannot fail for slowness and the locked case cannot pass for it.
+ */
+const WAIT_MS = 2000;
 
 const createdClinicIds: string[] = [];
 
@@ -71,9 +78,11 @@ type Read = typeof real.readSeatsLocked;
 
 /** The same count as readSeatsLocked, without the lock. What the control uses. */
 const readSeatsWithoutLock: Read = async (tx: Prisma.TransactionClient, clinicId: string) => {
-  const clinic = await tx.clinic.findUnique({ where: { id: clinicId }, select: { surgeonSeats: true } });
+  const clinic = await tx.clinic.findUnique({ where: { id: clinicId }, select: { surgeonSeats: true, ownerClerkUserId: true } });
   if (!clinic) return null;
-  return { surgeonSeats: clinic.surgeonSeats, inUse: await tx.seatAllocation.count({ where: { clinicId } }) };
+  const seated = await tx.seatAllocation.count({ where: { clinicId } });
+  const invited = await tx.seatInvitation.count({ where: { clinicId } });
+  return { surgeonSeats: clinic.surgeonSeats, seated, invited, ownerClerkUserId: clinic.ownerClerkUserId };
 };
 
 /**
@@ -139,6 +148,53 @@ describe("two people reaching for the last seat at the same moment", () => {
   });
 });
 
+describe("two invitations sent at the same moment for the last seat", () => {
+  it("the second waits for the first, counts the seat its hold took, and is refused: one seat, one invitation", async () => {
+    const clinicId = await makeClinic(1);
+
+    const { a, b, secondFinishedDuringWait } = await overlap(
+      real.readSeatsLocked,
+      () => holdSeatForInvitation(clinicId),
+      () => holdSeatForInvitation(clinicId),
+    );
+
+    expect(secondFinishedDuringWait).toBe(false); // B could not get through while A held the row
+    expect(a).toMatchObject({ held: true });
+    expect(b).toMatchObject({ held: false, summary: { seats: 1, invited: 1, inUse: 1 } });
+    expect(await listSeatHolds(clinicId)).toHaveLength(1);
+  });
+
+  it("control: without the lock, the second slips into the gap and BOTH invitations hold the one seat", async () => {
+    const clinicId = await makeClinic(1);
+
+    const { a, b, secondFinishedDuringWait } = await overlap(
+      readSeatsWithoutLock,
+      () => holdSeatForInvitation(clinicId),
+      () => holdSeatForInvitation(clinicId),
+    );
+
+    expect(secondFinishedDuringWait).toBe(true);
+    expect(b).toMatchObject({ held: true });
+    expect(a).toMatchObject({ held: true });
+    expect(await listSeatHolds(clinicId)).toHaveLength(2); // two invitations out for one seat: the bug the lock prevents
+  });
+
+  it("an invitation and a person reaching for the last seat: one gets it, the other waits and is refused", async () => {
+    const clinicId = await makeClinic(1);
+
+    const { a, b, secondFinishedDuringWait } = await overlap(
+      real.readSeatsLocked,
+      () => holdSeatForInvitation(clinicId),
+      () => reserveSeat(clinicId, user()),
+    );
+
+    expect(secondFinishedDuringWait).toBe(false);
+    expect(a).toMatchObject({ held: true });
+    expect(b).toMatchObject({ held: false, summary: { inUse: 1 } });
+    expect(await listSeatRows(clinicId)).toHaveLength(0);
+  });
+});
+
 describe("a plan being lowered while a seat is being given", () => {
   it("the plan change waits, then counts the seat that was just given, and is refused", async () => {
     const clinicId = await makeClinic(2);
@@ -156,7 +212,7 @@ describe("a plan being lowered while a seat is being given", () => {
     expect(a).toMatchObject({ held: true, summary: { inUse: 2 } });
     // It saw BOTH seats in use, not the one that was there when it was sent.
     expect(b).toBeInstanceOf(PlanSeatsRefusedError);
-    expect((b as Error).message).toContain("2 people hold a surgeon seat");
+    expect((b as Error).message).toContain("2 seats are taken at this clinic");
     const row = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { surgeonSeats: true } });
     expect(row?.surgeonSeats).toBe(2);
   });

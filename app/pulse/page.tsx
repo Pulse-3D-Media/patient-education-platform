@@ -1,8 +1,7 @@
 import { ClinicStatus } from "@prisma/client";
 import Link from "next/link";
 import { INPUT, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
-import { listClinicsForPulse, type PulseClinicRow } from "@/lib/db/clinics";
-import { listPeople } from "@/lib/people";
+import { listClinicsForPulse } from "@/lib/db/clinics";
 import { requirePulseStaff } from "@/lib/pulse";
 import { StatusBadge, formatDate, statusLabel } from "./ui";
 
@@ -12,14 +11,12 @@ import { StatusBadge, formatDate, statusLabel } from "./ui";
  * status through the form at the top (a plain GET form, so the address bar
  * carries the search and a page reload keeps it).
  *
- * "Surgeons / seats paid": how many people the clinic has marked as surgeons
- * in Clerk, over the seats on its plan. That is the number of people
- * LABELLED surgeon, which includes anyone waiting for a seat, so a row
- * reading 4 / 3 is a clinic with a gap to settle. Who actually HOLDS a seat
- * is on the clinic's own page, People tab (see lib/seats.ts). The number
- * comes from Clerk one clinic at a time; with the handful of clinics we have
- * that is quick, and a clinic Clerk cannot answer for shows a dash rather
- * than breaking the page.
+ * "Seats taken / paid": seats held by people plus seats held by open
+ * invitations, over the seats on the plan, from our own tables (see
+ * lib/seats.ts). A row reading 4 / 3 is a clinic over its plan. People
+ * waiting for a seat are not in the first number; they are on the clinic's
+ * own page, People tab, which also brings the seats into line with Clerk.
+ * "No account owner" beside a name means the clinic has none on record.
  *
  * Staff only. Rendered fresh on every request.
  */
@@ -37,7 +34,6 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
   const filtering = Boolean(query) || Boolean(status);
 
   const clinics = await listClinicsForPulse({ query, status });
-  const seatsInUse = await Promise.all(clinics.map(countSurgeons));
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -99,19 +95,21 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Managed</th>
                   <th className="px-4 py-3 text-right font-medium">Categories</th>
-                  <th className="px-4 py-3 text-right font-medium">Surgeons / seats paid</th>
+                  <th className="px-4 py-3 text-right font-medium">Seats taken / paid</th>
                   <th className="px-4 py-3 text-right font-medium">Links, 30 days</th>
                   <th className="px-4 py-3 font-medium">Last link</th>
                   <th className="px-4 py-3 font-medium">Created</th>
                 </tr>
               </thead>
               <tbody>
-                {clinics.map((clinic, index) => (
+                {clinics.map((clinic) => (
                   <tr key={clinic.id} className="border-b border-white/5 last:border-b-0 hover:bg-white/[.03]">
                     <td className="px-4 py-3">
                       <Link href={`/pulse/clinics/${clinic.id}`} className="font-medium text-white hover:text-[#5fb8d4]">
                         {clinic.name}
                       </Link>
+                      {/* Made before owners existed, or its owner left without handing over. Set one on the clinic's People tab. */}
+                      {!clinic.hasOwner && clinic.clerkOrgId && <span className="ml-2 whitespace-nowrap text-xs text-[#f3b94d]">No account owner</span>}
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={clinic.status} />
@@ -119,7 +117,7 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
                     <td className="px-4 py-3 text-[#bfbfbf]">{clinic.managedByPulse ? "By Pulse" : "Self-serve"}</td>
                     <td className="px-4 py-3 text-right text-[#bfbfbf]">{clinic.categories.length}</td>
                     <td className="px-4 py-3 text-right text-[#bfbfbf]">
-                      {seatsInUse[index] ?? "–"} / {clinic.surgeonSeats}
+                      {clinic.seatsInUse} / {clinic.surgeonSeats}
                     </td>
                     <td className="px-4 py-3 text-right text-[#bfbfbf]">{clinic.recentLinks}</td>
                     <td className="px-4 py-3 text-[#bfbfbf]">{clinic.lastLinkAt ? formatDate(clinic.lastLinkAt) : "Never"}</td>
@@ -135,13 +133,3 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
   );
 }
 
-/** How many people this clinic has marked as surgeons in Clerk, or null when Clerk cannot say. */
-async function countSurgeons(clinic: PulseClinicRow): Promise<number | null> {
-  if (!clinic.clerkOrgId) return null;
-  try {
-    const people = await listPeople(clinic.clerkOrgId);
-    return people.filter((person) => person.kind === "surgeon").length;
-  } catch {
-    return null;
-  }
-}

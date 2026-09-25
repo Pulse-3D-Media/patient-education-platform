@@ -26,6 +26,7 @@ import { parseDuration } from "@/lib/format";
 import { renameClerkOrganization } from "@/lib/organization";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
+import { setOwnerByStaff } from "@/lib/seat-changes";
 
 /**
  * Server Actions for the Pulse 3D master dashboard.
@@ -207,6 +208,33 @@ export async function setManagedAction(_previous: FormState, formData: FormData)
   refreshClinic(clinic.id);
   refreshClinicScreens();
   return { ok: (managed ? "This clinic is now managed by Pulse." : "This clinic now manages itself.") + (stillCharging ? STILL_CHARGING : "") };
+}
+
+/**
+ * Make one current member of a clinic its account owner: the backup for an
+ * owner who left without handing over, or a clinic made before owners
+ * existed. lib/seat-changes.ts checks with Clerk that the person is in THIS
+ * clinic, makes them an admin if they are not one, and logs it under the
+ * staff member's name. Seats are not changed.
+ */
+export async function setOwnerAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePulseStaff();
+
+  const clinic = await clinicFromForm(formData);
+  if (!clinic) return { error: "That clinic no longer exists." };
+
+  const userId = String(formData.get("ownerUserId") ?? "").trim();
+  if (!userId) return { error: "Choose a person." };
+
+  try {
+    const outcome = await setOwnerByStaff({ clinicId: clinic.id, toUserId: userId, staffName: staff.name });
+    if (!outcome.ok) return { error: outcome.message };
+    refreshClinic(clinic.id);
+    return { ok: outcome.message ?? "Saved." };
+  } catch (error) {
+    console.error("Pulse: the account owner could not be set", error instanceof Error ? error.name : "unknown error");
+    return { error: "That could not be saved just now. Nothing was changed. Try again in a moment." };
+  }
 }
 
 /** Save a clinic's name, notice, placeholder setting and view-days override. (Its logo and phone are branding: see saveBrandingAction.) */

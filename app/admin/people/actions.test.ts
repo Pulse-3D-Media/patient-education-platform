@@ -25,6 +25,8 @@ import {
 
 vi.mock("@clerk/nextjs/server", async () => (await import("@/lib/testing/fake-clerk")).clerkServerModule());
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// The request's Host header, which only picks among the deployment's own addresses (lib/trusted-origin.ts).
+vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
 // A few round trips to the remote testing database per action.
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -114,6 +116,8 @@ describe("what an admin can do", () => {
     fakeClerk.signIn(owner, orgId);
 
     expect(await inviteAction("new@example.test", "member")).toMatchObject({ message: expect.stringContaining("Invitation sent to new@example.test") });
+    // The email's link comes back to our own sign-up page, not Clerk's hosted pages.
+    expect(fakeClerk.invitations(orgId)[0].redirectUrl).toBe("http://localhost:3000/sign-up");
     expect((await inviteAction("another@example.test", "member")).error).toContain("All 1 seat is taken");
 
     expect(await revokeInvitationAction(fakeClerk.invitations(orgId)[0].id)).toEqual({ message: "Invitation revoked." });

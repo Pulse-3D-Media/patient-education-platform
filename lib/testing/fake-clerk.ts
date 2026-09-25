@@ -47,6 +47,8 @@ type StoredInvitation = {
   status: "pending" | "accepted" | "revoked" | "expired";
   publicMetadata: Record<string, unknown>;
   createdAt: number;
+  /** Where the email's link lands after Clerk has checked it, as the app asked. */
+  redirectUrl?: string;
 };
 
 /** What Clerk throws for something it does not have. */
@@ -243,7 +245,7 @@ class FakeClerk {
         if (!invitation) throw notFound();
         return { ...invitation };
       },
-      createOrganizationInvitation: async (params: { organizationId: string; emailAddress: string; role: string; publicMetadata?: Record<string, unknown> }) =>
+      createOrganizationInvitation: async (params: { organizationId: string; emailAddress: string; role: string; publicMetadata?: Record<string, unknown>; redirectUrl?: string }) =>
         this.write("invite", params.organizationId, params.emailAddress, () => {
           const org = this.org(params.organizationId);
           if (org.invitations.some((invitation) => invitation.status === "pending" && invitation.emailAddress === params.emailAddress)) {
@@ -257,6 +259,7 @@ class FakeClerk {
             status: "pending",
             publicMetadata: { ...(params.publicMetadata ?? {}) },
             createdAt: Date.now(),
+            redirectUrl: params.redirectUrl,
           };
           org.invitations.push(invitation);
           return { ...invitation };

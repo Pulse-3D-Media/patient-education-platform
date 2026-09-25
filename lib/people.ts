@@ -178,8 +178,21 @@ export function parseEmail(value: unknown): string | null {
 // The writes. ONLY lib/seat-changes.ts may call these (see the top of this file).
 // ---------------------------------------------------------------------------
 
-/** Ask Clerk to send an invitation carrying one of our seat holds. Returns Clerk's invitation id. */
-export async function sendInvitationFromClerk(clerkOrgId: string, args: { email: string; role: Role; inviterUserId: string; seatHoldId: string }) {
+/**
+ * Ask Clerk to send an invitation carrying one of our seat holds. Returns
+ * Clerk's invitation id.
+ *
+ * `acceptUrl` is our own /sign-up page on this deployment. The link in the
+ * email goes to Clerk first, which checks it and then sends the person there
+ * with the invitation's ticket; the sign-up page finishes accepting it (or
+ * hands a person who already has an account to /sign-in). Without it Clerk
+ * uses its own hosted pages, which end on a page of Clerk's that does not
+ * lead back to the app.
+ */
+export async function sendInvitationFromClerk(
+  clerkOrgId: string,
+  args: { email: string; role: Role; inviterUserId: string; seatHoldId: string; acceptUrl: string | null },
+) {
   const client = await clerkClient();
   const invitation = await client.organizations.createOrganizationInvitation({
     organizationId: clerkOrgId,
@@ -189,6 +202,7 @@ export async function sendInvitationFromClerk(clerkOrgId: string, args: { email:
     // Clerk copies this onto the membership when the invitation is accepted,
     // which is how the seat check knows whose seat the hold was.
     publicMetadata: { [SEAT_HOLD_KEY]: args.seatHoldId },
+    ...(args.acceptUrl ? { redirectUrl: args.acceptUrl } : {}),
   });
   return invitation.id;
 }

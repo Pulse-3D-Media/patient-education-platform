@@ -246,8 +246,8 @@ export function OwnerHandoff({ admins }: { admins: { userId: string; name: strin
           <>
             <p>They will run the clinic&apos;s account, and you will not. You stay in the clinic with admin on.</p>
             <p className="mt-3">
-              The owner is the one person who does not need a seat. From now on you need one like everyone else: if none is free, you will be
-              waiting for one. {name} keeps their seat if they have one, and can give it up afterwards.
+              The owner is the one person who does not need a seat, so from now on you need one like everyone else. If {name} has a seat, it
+              passes to you and the seat count stays the same. If not, you get a free seat if there is one, or wait for one.
             </p>
           </>
         }

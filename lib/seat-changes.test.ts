@@ -93,12 +93,13 @@ describe("signing up", () => {
 });
 
 describe("inviting", () => {
-  it("holds a seat, sends the invitation carrying the hold, and logs it", async () => {
+  it("holds a seat, sends the invitation carrying the hold and our sign-up page as its landing, and logs it", async () => {
     const { clinicId, orgId, actor } = await makeClinic(2);
 
-    expect(await inviteSomeone({ clinicId, email: "New.Person@Example.test", role: "member", actor })).toMatchObject({ ok: true });
+    expect(await inviteSomeone({ clinicId, email: "New.Person@Example.test", role: "member", actor, acceptUrl: "https://app.example.test/sign-up" })).toMatchObject({ ok: true });
 
     const [invitation] = fakeClerk.invitations(orgId);
+    expect(invitation.redirectUrl).toBe("https://app.example.test/sign-up");
     expect(invitation).toMatchObject({ emailAddress: "new.person@example.test", role: "org:member", status: "pending" });
     const holds = await holdsOf(clinicId);
     expect(holds).toEqual([expect.objectContaining({ clerkInvitationId: invitation.id })]);
@@ -348,21 +349,37 @@ describe("people already in the clinic", () => {
 });
 
 describe("handing over the account owner", () => {
-  it("moves the free spot: the new owner keeps their seat, the old one needs a seat and gets a free one", async () => {
+  it("moves the free spot: the new owner's seat passes to the old owner in the same save, even with no seat free", async () => {
     const next = user();
-    const { clinicId, owner, actor } = await makeClinic(2, [{ userId: next, firstName: "Nia", lastName: "Next", role: "org:admin" }]);
+    const { clinicId, owner, actor } = await makeClinic(1, [{ userId: next, firstName: "Nia", lastName: "Next", role: "org:admin" }]);
     await seatsDb.reserveSeat(clinicId, next);
 
     expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: true, message: "Nia Next is now the account owner." });
     expect(await ownerOf(clinicId)).toBe(next);
-    expect(await seatsOf(clinicId)).toEqual([next, owner].sort());
-    expect(await logOf(clinicId)).toContainEqual("Olive Owner (clinic admin): Account owner changed from Olive Owner to Nia Next (handed over by Olive Owner). Seats were not changed.");
+    expect(await seatsOf(clinicId)).toEqual([owner]);
+    const board = await checkSeats(clinicId);
+    expect(board.people.find((person) => person.userId === owner)?.seat).toBe("held");
+    expect(board.people.find((person) => person.userId === next)?.seat).toBe("none");
+    expect(await logOf(clinicId)).toContainEqual(
+      "Olive Owner (clinic admin): Account owner changed from Olive Owner to Nia Next (handed over by Olive Owner). Nia Next's seat passed to Olive Owner, so the seat count did not change.",
+    );
   });
 
-  it("says so when the old owner now has to wait for a seat", async () => {
+  it("an old owner who already has a seat keeps it, and so does the new owner", async () => {
     const next = user();
-    const { clinicId, owner, actor } = await makeClinic(1, [{ userId: next, role: "org:admin" }]);
+    const { clinicId, owner, actor } = await makeClinic(2, [{ userId: next, role: "org:admin" }]);
     await seatsDb.reserveSeat(clinicId, next);
+    await seatsDb.reserveSeat(clinicId, owner);
+
+    expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: true });
+    expect(await seatsOf(clinicId)).toEqual([next, owner].sort());
+    expect((await logOf(clinicId)).at(-1)).toContain("Seats were not changed.");
+  });
+
+  it("says so when the new owner had no seat to pass on and none is free, so the old owner waits", async () => {
+    const [next, dr] = [user(), user()];
+    const { clinicId, owner, actor } = await makeClinic(1, [{ userId: next, role: "org:admin" }, { userId: dr }]);
+    await seatsDb.reserveSeat(clinicId, dr);
 
     expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: true, message: expect.stringContaining("you are waiting for one") });
     expect((await checkSeats(clinicId)).people.find((person) => person.userId === owner)?.seat).toBe("waiting");
@@ -401,6 +418,16 @@ describe("Pulse staff setting the owner", () => {
       "Evan Miller: Admin switched on for Mo Member, to make them the account owner.",
       "Evan Miller: Account owner changed from nobody to Mo Member (set by Pulse 3D staff). Seats were not changed.",
     ]);
+  });
+
+  it("passes the new owner's seat to the old owner when the old owner is still in the clinic", async () => {
+    const member = user();
+    const { clinicId, owner } = await makeClinic(1, [{ userId: member, firstName: "Mo", lastName: "Member" }]);
+    await seatsDb.reserveSeat(clinicId, member);
+
+    expect(await setOwnerByStaff({ clinicId, toUserId: member, staffName: "Evan Miller" })).toMatchObject({ ok: true });
+    expect(await ownerOf(clinicId)).toBe(member);
+    expect(await seatsOf(clinicId)).toEqual([owner]);
   });
 
   it("refuses someone who is not a member of this clinic, and changes nothing if Clerk will not make them an admin", async () => {

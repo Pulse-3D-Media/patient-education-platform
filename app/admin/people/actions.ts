@@ -2,9 +2,11 @@
 
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { getSignedInName } from "@/lib/people";
 import { isClinicAdmin } from "@/lib/roles";
+import { pickTrustedOrigin } from "@/lib/trusted-origin";
 import { giveSeat, handOffOwner, inviteSomeone, releaseOwnSeat, removePerson, revokeInvitation, setAdmin, type Actor, type Outcome } from "@/lib/seat-changes";
 
 /**
@@ -59,7 +61,13 @@ async function run(change: (who: { clinicId: string; actor: Actor }) => Promise<
 }
 
 export async function inviteAction(email: unknown, role: unknown): Promise<ActionResult> {
-  return run(({ clinicId, actor }) => inviteSomeone({ clinicId, email, role, actor }));
+  return run(async ({ clinicId, actor }) => {
+    // Where the email's link lands after Clerk has checked it: our own sign-up
+    // page on this deployment, chosen only from addresses the deployment knows
+    // are its own (never from what the browser sent), as checkout does for Stripe.
+    const origin = pickTrustedOrigin((await headers()).get("host"), process.env);
+    return inviteSomeone({ clinicId, email, role, actor, acceptUrl: origin ? `${origin}/sign-up` : null });
+  });
 }
 
 export async function revokeInvitationAction(invitationId: unknown): Promise<ActionResult> {

@@ -124,7 +124,7 @@ async function memberOf(orgId: string, userId: string): Promise<Person | "not-a-
  * Invite someone by email, as a Member or a Member with admin. Holds a seat
  * first; refused, with nothing sent, when none is free.
  */
-export async function inviteSomeone(args: { clinicId: string; email: unknown; role: unknown; actor: Actor }): Promise<Outcome> {
+export async function inviteSomeone(args: { clinicId: string; email: unknown; role: unknown; actor: Actor; acceptUrl?: string | null }): Promise<Outcome> {
   const email = parseEmail(args.email);
   if (!email) return { ok: false, message: "Enter an email address, like name@clinic.com." };
   const role = parseRole(args.role);
@@ -159,7 +159,7 @@ export async function inviteSomeone(args: { clinicId: string; email: unknown; ro
 
   let invitationId: string;
   try {
-    invitationId = await sendInvitationFromClerk(clinic.orgId, { email, role, inviterUserId: args.actor.userId, seatHoldId: hold.holdId });
+    invitationId = await sendInvitationFromClerk(clinic.orgId, { email, role, inviterUserId: args.actor.userId, seatHoldId: hold.holdId, acceptUrl: args.acceptUrl ?? null });
   } catch (error) {
     logFailure("Clerk did not send the invitation", error);
     await releaseSeatHold(args.clinicId, hold.holdId).catch((releaseError) => logFailure("a hold could not be let go; it lets itself go in a few minutes", releaseError));
@@ -347,9 +347,12 @@ export async function releaseOwnSeat(args: { clinicId: string; actor: Actor }): 
 // ---------------------------------------------------------------------------
 
 /**
- * The owner hands the account to another admin. The free spot moves: the new
- * owner keeps their seat if they had one, and the old owner now needs a seat
- * like everyone else (given one by the check that follows, if one is free).
+ * The owner hands the account to another admin. The free spot moves: if the
+ * new owner holds a seat and the old owner does not, that seat passes to the
+ * old owner in the same save (setClinicOwner in lib/db/clinics.ts), so nobody
+ * ends up waiting. If the new owner has no seat to pass on, the old owner
+ * waits for one like everyone else (given one by the check that follows, if
+ * one is free).
  */
 export async function handOffOwner(args: { clinicId: string; toUserId: unknown; actor: Actor }): Promise<Outcome> {
   const clinic = await clinicFor(args.clinicId);
@@ -369,7 +372,7 @@ export async function handOffOwner(args: { clinicId: string; toUserId: unknown; 
       member.userId,
       { newOwnerName: member.name, oldOwnerName: args.actor.name, how: `handed over by ${args.actor.name}` },
       byAdmin(args.actor),
-      args.actor.userId,
+      { expectedOwner: args.actor.userId, oldOwnerStays: true },
     );
   } catch (error) {
     if (error instanceof OwnerChangeRefusedError) return { ok: false, message: error.message };
@@ -411,12 +414,19 @@ export async function setOwnerByStaff(args: { clinicId: string; toUserId: unknow
     );
   }
 
+  // The old owner, if still in the clinic, gets the new owner's seat the same way as in a handoff.
   let oldOwnerName: string | null = null;
-  if (clinic.ownerClerkUserId) {
+  if (clinic.ownerClerkUserId && clinic.ownerClerkUserId !== member.userId) {
     const old = await memberOf(clinic.orgId, clinic.ownerClerkUserId);
     oldOwnerName = typeof old === "object" && old !== null ? old.name : null;
   }
-  const { logged } = await setClinicOwner(args.clinicId, member.userId, { newOwnerName: member.name, oldOwnerName, how: "set by Pulse 3D staff" }, args.staffName);
+  const { logged } = await setClinicOwner(
+    args.clinicId,
+    member.userId,
+    { newOwnerName: member.name, oldOwnerName, how: "set by Pulse 3D staff" },
+    args.staffName,
+    { oldOwnerStays: oldOwnerName !== null },
+  );
   await checkSeats(args.clinicId).catch((error) => logFailure("the seats could not be checked after an owner change", error));
   return { ok: true, message: logged ? `${member.name} is now the account owner.` : `${member.name} was already the account owner.` };
 }

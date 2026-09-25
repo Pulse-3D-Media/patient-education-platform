@@ -555,9 +555,14 @@ export class OwnerChangeRefusedError extends Error {
  *   Pulse staff  the backup on /pulse, for when an owner left without handing
  *                over. `expectedOwner` is undefined: whoever it was, it moves.
  *
- * Nothing about seats changes here. The new owner keeps a seat if they had
- * one; the old owner now needs one like everyone else, which the seat check
- * after this gives them if one is free.
+ * THE SEAT MOVES WITH IT (decided by Evan on 2026-09-25). The owner is the
+ * one person who needs no seat, so when `oldOwnerStays` is true (the old
+ * owner is still in the clinic) and the new owner holds a seat that the old
+ * owner does not, that seat passes from the new owner to the old one, in this
+ * same transaction under the clinic's lock. The count never changes and
+ * nobody else can take the seat in between. Otherwise seats are left alone:
+ * an old owner who already has a seat keeps it (and so does the new owner),
+ * and an old owner with no seat to receive waits for one like anyone else.
  *
  * `words` names the people for the log (staff names are fine there; it is
  * never shown to the clinic). Writes nothing when the owner is already that
@@ -568,24 +573,37 @@ export async function setClinicOwner(
   newOwner: string,
   words: { newOwnerName: string; oldOwnerName: string | null; how: string },
   changedBy: string,
-  expectedOwner?: string,
+  options: { expectedOwner?: string; oldOwnerStays?: boolean } = {},
 ) {
   if (!isClerkUserId(newOwner)) throw new OwnerChangeRefusedError("That person is not in the clinic.");
-  return changeClinicWithLog(
+  let seatMoved = false;
+  const result = await changeClinicWithLog(
     clinicId,
-    async (before) => {
-      if (expectedOwner !== undefined && before.ownerClerkUserId !== expectedOwner) {
+    async (before, tx) => {
+      if (options.expectedOwner !== undefined && before.ownerClerkUserId !== options.expectedOwner) {
         throw new OwnerChangeRefusedError("You are no longer the account owner, so nothing was changed. Reload the page to see who is.");
+      }
+      const oldOwner = before.ownerClerkUserId;
+      if (options.oldOwnerStays && oldOwner && oldOwner !== newOwner) {
+        const newHolds = await tx.seatAllocation.findUnique({ where: { clinicId_clerkUserId: { clinicId, clerkUserId: newOwner } }, select: { id: true } });
+        const oldHolds = await tx.seatAllocation.findUnique({ where: { clinicId_clerkUserId: { clinicId, clerkUserId: oldOwner } }, select: { id: true } });
+        if (newHolds && !oldHolds) {
+          await tx.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId, clerkUserId: newOwner } }, select: { id: true } });
+          await tx.seatAllocation.create({ data: { clinicId, clerkUserId: oldOwner, syncState: "SYNCED" }, select: { id: true } });
+          seatMoved = true;
+        }
       }
       return { ownerClerkUserId: newOwner };
     },
     (before) => {
       if (before.ownerClerkUserId === newOwner) return null;
       const from = before.ownerClerkUserId === null ? "nobody" : (words.oldOwnerName ?? "someone no longer in the clinic");
-      return `Account owner changed from ${from} to ${words.newOwnerName} (${words.how}). Seats were not changed.`;
+      const seats = seatMoved ? `${words.newOwnerName}'s seat passed to ${from}, so the seat count did not change.` : "Seats were not changed.";
+      return `Account owner changed from ${from} to ${words.newOwnerName} (${words.how}). ${seats}`;
     },
     changedBy,
   );
+  return { ...result, seatMoved };
 }
 
 /**

@@ -1,0 +1,67 @@
+# Automatic checks on every pull request to main: install, lint, type check
+# and a production build. The same commands a person runs before saying a
+# change is done (CLAUDE.md, "Before you say it is done"), minus the tests.
+#
+# No secrets. The build needs no database, no Clerk key and no Stripe key to
+# compile, so none is given. If a later change makes it need a value, give it
+# a clearly fake one here, never a real key: this repository is public
+# (CLAUDE.md, rule 7).
+#
+# The tests (npm test) do not run here yet: they need the Neon testing
+# database, and its connection string is not stored in GitHub. See "Automatic
+# checks" in CLAUDE.md for what adding it would take.
+
+name: Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+# Read the code, nothing else.
+permissions:
+  contents: read
+
+# A new push to the same pull request stops the run for the older push.
+concurrency:
+  group: checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # This name is what appears on the pull request, and what is picked when
+    # the check is made required in GitHub's ruleset.
+    name: Lint, types and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Do not send Next.js usage statistics from these runs.
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Get the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Generate the database client
+        run: npx prisma generate
+
+      - name: Generate the route types
+        run: npx next typegen
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Production build
+        run: npm run build

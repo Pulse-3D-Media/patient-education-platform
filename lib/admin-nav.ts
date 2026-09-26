@@ -28,14 +28,16 @@ export const ADMIN_SECTIONS: AdminSection[] = [
 
 /**
  * Which section an address under /admin belongs to, so the navigation can
- * mark it as the current page. The overview matches only its own address;
- * every other section matches itself and everything under it. The QR
- * picture and the printable pamphlet belong to Shared links, since that is
- * where their buttons are. Null for an address that is not in the admin
- * area at all.
+ * mark it as the current page. The overview matches only its own address,
+ * plus the page that turns a paused link back on (/admin/reactivate), since
+ * the overview's "Links waiting to be reactivated" is where that page is
+ * reached from; every other section matches itself and everything under
+ * it. The QR picture and the printable pamphlet belong to Shared links,
+ * since that is where their buttons are. Null for an address that is not
+ * in the admin area at all.
  */
 export function activeAdminSection(pathname: string): AdminSection["href"] | null {
-  if (pathname === "/admin") return "/admin";
+  if (pathname === "/admin" || under(pathname, "/admin/reactivate")) return "/admin";
   if (under(pathname, "/admin/links") || under(pathname, "/admin/print") || under(pathname, "/admin/qr")) return "/admin/links";
   for (const section of ADMIN_SECTIONS) {
     if (section.href !== "/admin" && under(pathname, section.href)) return section.href;

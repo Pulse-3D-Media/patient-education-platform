@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import { INPUT, PRIMARY_BUTTON } from "@/components/ui/styles";
 import { SETTINGS_DEFAULTS, SETTINGS_HELP, type Settings } from "@/lib/db/settings";
-import { MAX_LINK_DAYS } from "@/lib/expiry";
+import { MAX_LINK_DAYS, MAX_RENEWALS, MIN_RENEWALS } from "@/lib/expiry";
 import { saveSettingsAction } from "../actions";
 
 /**
@@ -12,10 +12,11 @@ import { saveSettingsAction } from "../actions";
  * saveSettingsAction and shows the answer under the button.
  */
 
-const FIELDS: { name: keyof Settings; label: string; unit: string; max?: number }[] = [
-  // The two link day counts stop at a year; the browser's max is a courtesy, the action checks it (rule 8).
+const FIELDS: { name: keyof Settings; label: string; unit: string; min?: number; max?: number }[] = [
+  // The two link day counts stop at a year, and the renewal count runs from 0 to 10; the browser's min and max are a courtesy, the action checks them (rule 8).
   { name: "unclaimedDays", label: "Unclaimed link days", unit: "days", max: MAX_LINK_DAYS },
   { name: "viewDays", label: "Days after first play", unit: "days", max: MAX_LINK_DAYS },
+  { name: "maxRenewals", label: "Maximum renewals", unit: "times", min: MIN_RENEWALS, max: MAX_RENEWALS },
   { name: "graceDays", label: "Grace days", unit: "days" },
   { name: "qrDailyFlag", label: "QR scans per day to flag", unit: "scans" },
 ];
@@ -39,7 +40,7 @@ export function SettingsForm({ settings }: { settings: Settings }) {
                 id={field.name}
                 name={field.name}
                 type="number"
-                min={1}
+                min={field.min ?? 1}
                 max={field.max}
                 step={1}
                 required

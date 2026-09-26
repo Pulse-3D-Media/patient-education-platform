@@ -367,8 +367,8 @@ describe("saveBrandingAction", () => {
 });
 
 describe("saveSettingsAction", () => {
-  const typed = (over: Partial<Record<"unclaimedDays" | "viewDays" | "graceDays" | "qrDailyFlag", string>> = {}) =>
-    form({ unclaimedDays: "90", viewDays: "7", graceDays: "14", qrDailyFlag: "200", ...over });
+  const typed = (over: Partial<Record<"unclaimedDays" | "viewDays" | "graceDays" | "qrDailyFlag" | "maxRenewals", string>> = {}) =>
+    form({ unclaimedDays: "90", viewDays: "7", graceDays: "14", qrDailyFlag: "200", maxRenewals: "3", ...over });
 
   it("refuses a user who is not Pulse staff with not-found, and saves nothing", async () => {
     signInAs("user_clinic_admin", { kind: "staff" });
@@ -379,7 +379,7 @@ describe("saveSettingsAction", () => {
   it("accepts a year for both link day counts, the limit itself, and hands the save exactly what was typed", async () => {
     signInAs("user_staff", { pulseStaff: true });
     expect(await saveSettingsAction(null, typed({ unclaimedDays: String(MAX_LINK_DAYS), viewDays: String(MAX_LINK_DAYS) }))).toEqual({ ok: "Settings saved." });
-    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 200 });
+    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 200, maxRenewals: 3 });
   });
 
   it("refuses a day count past a year, or of zero, for either link setting, naming the field, without saving", async () => {
@@ -404,6 +404,20 @@ describe("saveSettingsAction", () => {
     expect(await saveSettingsAction(null, typed({ graceDays: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
     expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
     expect(await saveSettingsAction(null, typed({ graceDays: String(MAX_GRACE_DAYS) }))).toEqual({ ok: "Settings saved." });
+  });
+
+  it("holds the maximum renewals to 0 through 10: zero is allowed (no link can be turned back on), eleven and minus one are not", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await saveSettingsAction(null, typed({ maxRenewals: "0" }))).toEqual({ ok: "Settings saved." });
+    expect(vi.mocked(saveSettings)).toHaveBeenLastCalledWith(expect.objectContaining({ maxRenewals: 0 }));
+    expect(await saveSettingsAction(null, typed({ maxRenewals: "10" }))).toEqual({ ok: "Settings saved." });
+    expect(vi.mocked(saveSettings)).toHaveBeenLastCalledWith(expect.objectContaining({ maxRenewals: 10 }));
+
+    vi.mocked(saveSettings).mockClear();
+    for (const bad of ["11", "-1", "2.5", "", "three"]) {
+      expect(await saveSettingsAction(null, typed({ maxRenewals: bad }))).toEqual({ error: "Maximum renewals must be a whole number from 0 to 10." });
+    }
+    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
   });
 });
 

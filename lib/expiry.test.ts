@@ -2,16 +2,25 @@ import { describe, expect, it } from "vitest";
 import {
   addDays,
   canClaimFirstPlay,
+  canRequestRenewal,
   DAY_MS,
   daysLeftText,
   expiryAfterFirstPlay,
+  expiryAfterRenewal,
+  finishedLinkMessage,
   isExpired,
   isValidLinkDays,
+  isValidRenewalCount,
   MAX_LINK_DAYS,
+  MAX_RENEWALS,
   MIN_LINK_DAYS,
+  MIN_RENEWALS,
+  RENEWAL_REQUEST_GAP_MS,
+  renewalState,
   resolveShareTerms,
   shareExpiryState,
   ShareTermsError,
+  type RenewalFacts,
   type ShareExpiryFacts,
 } from "./expiry";
 
@@ -166,6 +175,95 @@ describe("shareExpiryState", () => {
     const legacy = facts({ expiryPolicy: "FIXED", daysAfterFirstPlay: null, expiresAt: addDays(T, 60) });
     expect(shareExpiryState(legacy, T)).toEqual({ kind: "fixed", expiresAt: addDays(T, 60) });
     expect(shareExpiryState(facts({ daysAfterFirstPlay: null }), T)).toEqual({ kind: "fixed", expiresAt: addDays(T, 90) });
+  });
+});
+
+/** A first-play link played at T with ten days, so it has run out from T + 10 days on. */
+function renewal(over: Partial<RenewalFacts> = {}): RenewalFacts {
+  return { expiryPolicy: "FIRST_PLAY", expiresAt: addDays(T, 10), firstPlayedAt: T, daysAfterFirstPlay: 10, renewalsUsed: 0, ...over };
+}
+
+describe("renewalState", () => {
+  const ranOut = addDays(T, 11);
+
+  it("is working before the link runs out, whatever else is true of it", () => {
+    expect(renewalState(renewal(), 3, addDays(T, 9))).toEqual({ kind: "working" });
+    expect(renewalState(renewal({ renewalsUsed: 3 }), 3, addDays(T, 9))).toEqual({ kind: "working" });
+    expect(renewalState(renewal({ expiryPolicy: "FIXED" }), 3, addDays(T, 9))).toEqual({ kind: "working" });
+  });
+
+  it("is paused once a played link has run out, with the renewals left and the days each one gives", () => {
+    expect(renewalState(renewal(), 3, ranOut)).toEqual({ kind: "paused", renewalsLeft: 3, daysPerRenewal: 10 });
+    expect(renewalState(renewal({ renewalsUsed: 2 }), 3, ranOut)).toEqual({ kind: "paused", renewalsLeft: 1, daysPerRenewal: 10 });
+    // At the deadline itself the link has run out, as isExpired draws the line.
+    expect(renewalState(renewal(), 3, addDays(T, 10))).toEqual({ kind: "paused", renewalsLeft: 3, daysPerRenewal: 10 });
+  });
+
+  it("is finished once the renewals are used up, and when the maximum is zero or cannot be read", () => {
+    expect(renewalState(renewal({ renewalsUsed: 3 }), 3, ranOut)).toEqual({ kind: "finished", reason: "no-renewals-left" });
+    expect(renewalState(renewal(), 0, ranOut)).toEqual({ kind: "finished", reason: "no-renewals-left" });
+    for (const bad of [-1, 11, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(renewalState(renewal(), bad, ranOut)).toEqual({ kind: "finished", reason: "no-renewals-left" });
+    }
+  });
+
+  it("reads the maximum as it is now, so a change applies to a link already sent", () => {
+    const used = renewal({ renewalsUsed: 3 });
+    expect(renewalState(used, 3, ranOut).kind).toBe("finished");
+    expect(renewalState(used, 5, ranOut)).toEqual({ kind: "paused", renewalsLeft: 2, daysPerRenewal: 10 });
+  });
+
+  it("is finished for a link nobody ever played: there is nothing to give back", () => {
+    expect(renewalState(renewal({ firstPlayedAt: null, expiresAt: addDays(T, 365) }), 3, addDays(T, 366))).toEqual({ kind: "finished", reason: "never-played" });
+  });
+
+  it("is finished for a legacy link, played or not: its date was always final", () => {
+    expect(renewalState(renewal({ expiryPolicy: "FIXED" }), 3, ranOut)).toEqual({ kind: "finished", reason: "legacy" });
+    expect(renewalState(renewal({ expiryPolicy: "FIXED", firstPlayedAt: null, daysAfterFirstPlay: null }), 3, ranOut)).toEqual({ kind: "finished", reason: "legacy" });
+  });
+
+  it("is finished for a link with no usable number of days, so a bad number never becomes a deadline", () => {
+    expect(renewalState(renewal({ daysAfterFirstPlay: null }), 3, ranOut)).toEqual({ kind: "finished", reason: "no-days" });
+    expect(renewalState(renewal({ daysAfterFirstPlay: 0 }), 3, ranOut)).toEqual({ kind: "finished", reason: "no-days" });
+    expect(renewalState(renewal({ daysAfterFirstPlay: MAX_LINK_DAYS + 1 }), 3, ranOut)).toEqual({ kind: "finished", reason: "no-days" });
+  });
+
+  it("has a plain sentence for every finished reason", () => {
+    expect(finishedLinkMessage("legacy", 0)).toContain("older rule");
+    expect(finishedLinkMessage("never-played", 0)).toContain("never played");
+    expect(finishedLinkMessage("no-renewals-left", 3)).toContain("3 times already, the maximum");
+    expect(finishedLinkMessage("no-renewals-left", 1)).toContain("1 time already");
+    expect(finishedLinkMessage("no-renewals-left", 0)).toContain("set to zero");
+    expect(finishedLinkMessage("no-days", 0)).toContain("no number of days");
+    for (const reason of ["legacy", "never-played", "no-renewals-left", "no-days"] as const) {
+      expect(finishedLinkMessage(reason, 2)).toContain("Make the patient a new link.");
+    }
+  });
+});
+
+describe("expiryAfterRenewal", () => {
+  it("is the moment of the reactivation plus the days the link was issued with", () => {
+    expect(expiryAfterRenewal({ daysAfterFirstPlay: 10 }, T)).toEqual(addDays(T, 10));
+    expect(expiryAfterRenewal({ daysAfterFirstPlay: 1 }, T).getTime() - T.getTime()).toBe(DAY_MS);
+  });
+});
+
+describe("isValidRenewalCount", () => {
+  it("accepts whole numbers from 0 to 10 and nothing else", () => {
+    expect(MIN_RENEWALS).toBe(0);
+    expect(MAX_RENEWALS).toBe(10);
+    for (const ok of [0, 1, 3, 10]) expect(isValidRenewalCount(ok)).toBe(true);
+    for (const bad of [-1, 11, 1.5, "3", null, undefined, Number.NaN]) expect(isValidRenewalCount(bad)).toBe(false);
+  });
+});
+
+describe("canRequestRenewal", () => {
+  it("allows the first request, refuses a second within a day, and allows one from a day on", () => {
+    expect(RENEWAL_REQUEST_GAP_MS).toBe(DAY_MS);
+    expect(canRequestRenewal({ renewalRequestedAt: null }, T)).toBe(true);
+    expect(canRequestRenewal({ renewalRequestedAt: T }, T)).toBe(false);
+    expect(canRequestRenewal({ renewalRequestedAt: T }, new Date(T.getTime() + DAY_MS - 1))).toBe(false);
+    expect(canRequestRenewal({ renewalRequestedAt: T }, addDays(T, 1))).toBe(true);
   });
 });
 

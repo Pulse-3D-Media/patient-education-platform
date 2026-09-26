@@ -26,6 +26,20 @@ import type { ExpiryPolicy } from "@prisma/client";
  *               changes links made from then on, not a link already given
  *               to a patient.
  *
+ * PAUSING AND REACTIVATION (from September 2026; the build plan calls a
+ * paused link "dormant"). When a FIRST_PLAY link that has been played runs
+ * out, it is not over: it PAUSES. The patient page offers one button, "ask
+ * my clinic", and an office admin can turn the link back on for the same
+ * number of days it was issued with (Share.daysAfterFirstPlay), up to the
+ * platform's maximum number of renewals (AppSettings.maxRenewals, read at
+ * the moment it is needed, so a change applies to every link at once). A
+ * link that has used them all is FINISHED: the calm page with no button. A
+ * link nobody ever played that ran out is finished too (decided by Evan on
+ * 2026-09-25): it was never opened, so there is nothing to give back. And a
+ * FIXED (legacy) link is never paused: expired means expired, exactly as
+ * before. The rule is renewalState() below; lib/db/shares.ts asks it before
+ * every request and every reactivation.
+ *
  * Time here is the server's UTC clock, and a "day" is 24 elapsed hours, not
  * a calendar day. Every function takes `now` so the tests can hand in a
  * clock of their own.
@@ -183,4 +197,113 @@ export function daysLeftText(expiresAt: Date, now: Date): string {
   const days = Math.round((expiresAt.getTime() - now.getTime()) / DAY_MS);
   if (days < 1) return "Less than a day left";
   return `${days} ${days === 1 ? "day" : "days"} left`;
+}
+
+// ---------------------------------------------------------------------------
+// Pausing and reactivation.
+// ---------------------------------------------------------------------------
+
+/**
+ * The smallest and largest number the "maximum renewals" setting may hold.
+ * Zero is allowed and means no link can ever be turned back on. The
+ * settings form refuses anything outside this, and renewalState() below
+ * treats a stored number outside it as zero: a setting that cannot be read
+ * means no renewals, never unlimited ones.
+ */
+export const MIN_RENEWALS = 0;
+export const MAX_RENEWALS = 10;
+
+/** True for a whole number from MIN_RENEWALS to MAX_RENEWALS. */
+export function isValidRenewalCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= MIN_RENEWALS && value <= MAX_RENEWALS;
+}
+
+/**
+ * How long after one "ask my clinic" tap the next one counts: one day. A
+ * second tap inside that time shows the same confirmation and sends nothing.
+ */
+export const RENEWAL_REQUEST_GAP_MS = DAY_MS;
+
+/** The fields the reactivation rule reads. A Share row from Prisma satisfies this as it is. */
+export type RenewalFacts = ShareExpiryFacts & {
+  /** How many times the clinic has turned this link back on. */
+  renewalsUsed: number;
+};
+
+/**
+ * What can happen to a link that has run out:
+ *
+ *   working    it has not run out; nothing to reactivate.
+ *   paused     it ran out after being played, and the clinic may turn it
+ *              back on `renewalsLeft` more times, `daysPerRenewal` days
+ *              each time (the days the link was issued with).
+ *   finished   it ran out and cannot be turned back on. `reason` says why,
+ *              for the admin page and the tests; the patient is only told
+ *              to ask the practice for a new link:
+ *                legacy            a FIXED link, made before the first-play
+ *                                  rule: its date was always final.
+ *                never-played      nobody ever played it, so there is
+ *                                  nothing to give back (decided 2026-09-25).
+ *                no-renewals-left  it has been turned back on the maximum
+ *                                  number of times already (or the maximum
+ *                                  is zero, or could not be read).
+ *                no-days           it carries no usable number of days to
+ *                                  give (nothing in the app writes such a
+ *                                  link; the case exists so a bad number
+ *                                  can never become a deadline).
+ */
+export type RenewalState =
+  | { kind: "working" }
+  | { kind: "paused"; renewalsLeft: number; daysPerRenewal: number }
+  | { kind: "finished"; reason: "legacy" | "never-played" | "no-renewals-left" | "no-days" };
+
+/**
+ * The reactivation rule. `maxRenewals` is the platform setting as it is
+ * right now, not a number copied onto the link: raising or lowering it
+ * changes what every paused link may do, at once.
+ */
+export function renewalState(share: RenewalFacts, maxRenewals: number, now: Date): RenewalState {
+  if (!isExpired(share, now)) return { kind: "working" };
+  if (share.expiryPolicy !== "FIRST_PLAY") return { kind: "finished", reason: "legacy" };
+  if (share.firstPlayedAt === null) return { kind: "finished", reason: "never-played" };
+  if (!isValidLinkDays(share.daysAfterFirstPlay)) return { kind: "finished", reason: "no-days" };
+  const allowed = isValidRenewalCount(maxRenewals) ? maxRenewals : 0;
+  if (share.renewalsUsed >= allowed) return { kind: "finished", reason: "no-renewals-left" };
+  return { kind: "paused", renewalsLeft: allowed - share.renewalsUsed, daysPerRenewal: share.daysAfterFirstPlay };
+}
+
+/**
+ * The sentence an office admin reads for a link that cannot be turned back
+ * on. `renewalsUsed` is how many times it already was, for the wording.
+ * Plain words, no technical terms: it is shown on the screen as it is.
+ */
+export function finishedLinkMessage(reason: Extract<RenewalState, { kind: "finished" }>["reason"], renewalsUsed: number): string {
+  switch (reason) {
+    case "legacy":
+      return "This link was made under the older rule, with a fixed date, so it cannot be turned back on. Make the patient a new link.";
+    case "never-played":
+      return "This link was never played, so it cannot be turned back on. Make the patient a new link.";
+    case "no-renewals-left":
+      return renewalsUsed === 0
+        ? "Links cannot be turned back on right now: the maximum number of renewals is set to zero. Make the patient a new link."
+        : `This link has been turned back on ${renewalsUsed} ${renewalsUsed === 1 ? "time" : "times"} already, the maximum, so it cannot be turned back on again. Make the patient a new link.`;
+    case "no-days":
+      return "This link carries no number of days to give, so it cannot be turned back on. Make the patient a new link.";
+  }
+}
+
+/** Where the deadline moves to when the clinic turns a paused link back on at `now`: that moment plus the days the link was issued with. */
+export function expiryAfterRenewal(share: { daysAfterFirstPlay: number }, now: Date): Date {
+  return addDays(now, share.daysAfterFirstPlay);
+}
+
+/**
+ * May a tap on "ask my clinic" send a request right now? Yes when the link
+ * has never been asked about, or the last request is at least a day old.
+ * The database write asks the same question in its WHERE, so two taps at
+ * once send one request.
+ */
+export function canRequestRenewal(share: { renewalRequestedAt: Date | null }, now: Date): boolean {
+  if (share.renewalRequestedAt === null) return true;
+  return share.renewalRequestedAt.getTime() + RENEWAL_REQUEST_GAP_MS <= now.getTime();
 }

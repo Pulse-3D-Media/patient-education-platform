@@ -2,13 +2,16 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { patientLook, type Look } from "@/app/brand-look";
 import { ClinicLogo } from "@/components/ui/ClinicLogo";
-import { ClockIcon, PhoneIcon, SearchIcon } from "@/components/ui/icons";
+import { ClockIcon, PauseIcon, SearchIcon } from "@/components/ui/icons";
 import { LOGO_URL } from "@/lib/brand";
+import { getSettings } from "@/lib/db/settings";
 import { getShareByCode } from "@/lib/db/shares";
-import { isExpired } from "@/lib/expiry";
+import { canRequestRenewal, isExpired, renewalState } from "@/lib/expiry";
 import { describeDuration } from "@/lib/format";
 import { sentByLine } from "@/lib/sender-name";
 import { getPlaybackUrl } from "@/lib/video";
+import { AskClinic } from "./AskClinic";
+import { CallButton } from "./CallButton";
 import { WatchPlayer } from "./WatchPlayer";
 
 /**
@@ -95,7 +98,23 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   const look = patientLook(share.clinic);
 
   // At the deadline itself the link is over (lib/expiry.ts draws that line, and the play recording draws it in the same place).
-  if (isExpired(share, new Date())) {
+  const now = new Date();
+  if (isExpired(share, now)) {
+    // A first-play link that was played is not finished when its days run out:
+    // it has PAUSED, and the patient can ask the clinic to turn it back on, as
+    // long as renewals are left (renewalState in lib/expiry.ts). The settings
+    // row is read only here, on a link that has already run out, so the
+    // working path pays nothing for it. A link nobody ever played, a legacy
+    // link, and a link out of renewals are finished: the calm page, no button.
+    const settings = await getSettings();
+    const state = renewalState(share, settings.maxRenewals, now);
+    if (state.kind === "paused" && share.video.isPublished) {
+      return (
+        <Unavailable look={look} icon={<PauseIcon className="h-8 w-8" />}>
+          <AskClinic code={share.code} alreadyAsked={!canRequestRenewal(share, now)} call={look.call} />
+        </Unavailable>
+      );
+    }
     return (
       <Unavailable
         look={look}
@@ -193,24 +212,37 @@ function BrandBand() {
  * When the clinic is known and has a valid phone number, the one thing left
  * to do gets one large button: call the office. It is a plain tel: link, so
  * the phone asks before it dials.
+ *
+ * The paused page is the same frame with its own middle (`children`): the
+ * "ask my clinic" piece, which changes its own words after the tap.
  */
-function Unavailable({ look, icon, heading, body, note }: { look: Look; icon: ReactNode; heading: string; body: string; note?: string }) {
+function Unavailable({
+  look,
+  icon,
+  heading,
+  body,
+  note,
+  children,
+}: {
+  look: Look;
+  icon: ReactNode;
+  heading?: string;
+  body?: string;
+  note?: string;
+  children?: ReactNode;
+}) {
   return (
     <main className={`flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a] ${look.fontClass}`} style={look.style}>
       <BrandBand />
       <div className="flex flex-1 flex-col items-center justify-center px-8 pb-10 pt-[46px] text-center">
         <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#f0ece3] text-[#74664c]">{icon}</div>
-        <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
-        <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">{body}</p>
-        {note && <p className="mt-3 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">{note}</p>}
-        {look.call && (
-          <a
-            href={look.call.href}
-            className="mt-7 flex min-h-14 items-center gap-3 rounded-full bg-brand px-8 text-[19px] font-semibold text-on-brand shadow-[0_6px_18px_-8px_rgba(18,32,42,.45)] transition active:scale-[0.98] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#12202a]"
-          >
-            <PhoneIcon className="h-6 w-6 shrink-0" />
-            Call {look.call.label}
-          </a>
+        {children ?? (
+          <>
+            <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
+            <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">{body}</p>
+            {note && <p className="mt-3 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">{note}</p>}
+            {look.call && <CallButton call={look.call} />}
+          </>
         )}
         {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
         <img src={LOGO_URL} alt="Pulse 3D" className="mt-12 h-6 w-auto" />

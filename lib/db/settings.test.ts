@@ -70,7 +70,7 @@ describe("getSettings", () => {
   });
 
   it("returns the saved values once the row exists", async () => {
-    const values = { unclaimedDays: 60, viewDays: 10, graceDays: 21, qrDailyFlag: 500 };
+    const values = { unclaimedDays: 60, viewDays: 10, graceDays: 21, qrDailyFlag: 500, maxRenewals: 5 };
     expect(await saveSettings(values)).toEqual(values);
     expect(table.row?.id).toBe(SETTINGS_ID);
     expect(await getSettings()).toEqual(values);
@@ -86,6 +86,6 @@ describe("getSettings", () => {
   it("never returns null, even before anything was saved", async () => {
     const settings = await getSettings();
     expect(settings).not.toBeNull();
-    expect(Object.keys(settings).sort()).toEqual(["graceDays", "qrDailyFlag", "unclaimedDays", "viewDays"]);
+    expect(Object.keys(settings).sort()).toEqual(["graceDays", "maxRenewals", "qrDailyFlag", "unclaimedDays", "viewDays"]);
   });
 });

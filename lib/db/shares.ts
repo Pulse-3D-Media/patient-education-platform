@@ -1,9 +1,22 @@
 import { randomInt } from "crypto";
 import { accessRefusalMessage, decideVideoAccess, type AccessDecision, type AccessReason } from "../access";
-import { addDays, canClaimFirstPlay, expiryAfterFirstPlay, isExpired, resolveShareTerms, type ShareTerms } from "../expiry";
+import {
+  addDays,
+  canClaimFirstPlay,
+  canRequestRenewal,
+  expiryAfterFirstPlay,
+  expiryAfterRenewal,
+  finishedLinkMessage,
+  isExpired,
+  isValidRenewalCount,
+  RENEWAL_REQUEST_GAP_MS,
+  renewalState,
+  resolveShareTerms,
+  type ShareTerms,
+} from "../expiry";
 import { isClerkUserId } from "../seats";
 import { effectiveSenderName } from "../sender-name";
-import { lockClinicAccess, lockSenderSeat, lockVideoFacts } from "./access";
+import { lockClinicAccess, lockSenderSeat, lockShareForRenewal, lockVideoFacts } from "./access";
 import { prisma } from "./client";
 import { getSettings, lockSettings } from "./settings";
 
@@ -14,14 +27,18 @@ import { getSettings, lockSettings } from "./settings";
  *
  * Functions used on the clinic side take clinicId as their first argument
  * and filter by it (rule 1 in CLAUDE.md). That is what keeps one clinic from
- * ever seeing another clinic's links. The two exceptions, getShareByCode and
- * recordSharePlay, serve the public patient page, where there is no clinic.
+ * ever seeing another clinic's links. The three exceptions, getShareByCode,
+ * recordSharePlay and requestShareRenewal, serve the public patient page,
+ * where there is no clinic.
  *
  * How long a link works is decided by the rule in lib/expiry.ts. A link made
  * here stops after the platform's unclaimed days if nobody plays it, and the
  * first real play (recordSharePlay) moves its deadline to that moment plus
- * the days copied onto the link when it was made. Links made before that
- * rule keep the fixed date they were issued with.
+ * the days copied onto the link when it was made. When those days run out
+ * the link pauses, the patient can ask the clinic to turn it back on
+ * (requestShareRenewal), and an office admin can (renewShareForClinic), a
+ * limited number of times. Links made before the first-play rule keep the
+ * fixed date they were issued with and are never paused.
  */
 
 /**
@@ -402,8 +419,302 @@ export async function recordSharePlay(code: string, now: Date = new Date()): Pro
 export async function getShareForClinic(clinicId: string, code: string) {
   return prisma.share.findFirst({
     where: { code, clinicId },
-    include: { video: { select: { title: true, isPlaceholder: true } }, clinic: { select: { name: true } } },
+    include: { video: { select: { title: true, isPlaceholder: true, isPublished: true } }, clinic: { select: { name: true } } },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Pausing and reactivation. The rule is renewalState() in lib/expiry.ts;
+// everything here asks it, so the patient page, the request, the admin page
+// and the reactivation cannot disagree about whether a link is paused.
+// ---------------------------------------------------------------------------
+
+/** How many times a link may be turned back on, from the setting as it is now; a setting that cannot be read means zero. */
+function renewalsAllowed(settings: { maxRenewals: number }): number {
+  return isValidRenewalCount(settings.maxRenewals) ? settings.maxRenewals : 0;
+}
+
+/** The fields the reactivation rule reads, plus what the request needs to tell the clinic. */
+const RENEWAL_REQUEST_FIELDS = {
+  code: true,
+  createdAt: true,
+  expiryPolicy: true,
+  expiresAt: true,
+  firstPlayedAt: true,
+  daysAfterFirstPlay: true,
+  renewalsUsed: true,
+  renewalRequestedAt: true,
+  senderName: true,
+  video: { select: { title: true, isPublished: true } },
+  clinic: { select: { id: true, name: true, clerkOrgId: true } },
+} as const;
+
+/**
+ * What the clinic is told when a patient asks for a paused link back. All
+ * of it is about the link, the video, the surgeon and the clinic; nothing
+ * about the patient exists to include (rule 2).
+ */
+export type RenewalRequestFacts = {
+  code: string;
+  videoTitle: string;
+  /** "Dr. Jane Smith", or null for a link made before surgeons were recorded. */
+  senderName: string | null;
+  /** When the link was made. */
+  createdAt: Date;
+  /** How many more times the clinic may turn it back on, this time included. */
+  renewalsLeft: number;
+  /** How many days each reactivation gives. */
+  daysPerRenewal: number;
+  /** When this request was recorded. */
+  requestedAt: Date;
+  clinic: { id: string; name: string; clerkOrgId: string | null };
+};
+
+/** What requestShareRenewal() did. */
+export type RenewalRequestOutcome =
+  /** The request was written just now; the clinic should be told. */
+  | { kind: "requested"; facts: RenewalRequestFacts }
+  /** The link was asked about within the last day (by this tap's twin, or earlier). Nothing written; the patient sees the same confirmation. */
+  | { kind: "already-asked" }
+  /** No request can be made: the code is nobody's, the link is not paused, or its video is not available. */
+  | { kind: "refused"; reason: "no-such-link" | "not-paused" | "unpublished" };
+
+/**
+ * A patient tapped "ask my clinic to turn it back on" on a paused link.
+ * Records the request on the link (Share.renewalRequestedAt) and says
+ * whether the clinic should be told.
+ *
+ * Public on purpose: the patient is not signed in and belongs to no clinic,
+ * so this is the third function here that takes no clinicId (with
+ * getShareByCode and recordSharePlay). It writes one timestamp on the link
+ * and nothing else: no name, no address, nothing typed, because there is
+ * nothing to type (rule 2).
+ *
+ * One request per link per day (RENEWAL_REQUEST_GAP_MS). The write is a
+ * single UPDATE whose WHERE says "still paused, and not asked about within
+ * the last day", so two taps at once, or a page opened twice, record one
+ * request and the clinic is told once. A tap inside the day answers
+ * already-asked and writes nothing; the patient page shows the same calm
+ * confirmation either way.
+ *
+ * Only a paused link can be asked about (renewalState in lib/expiry.ts): a
+ * working link, a finished one, a legacy link, one nobody played, and a
+ * link whose video is not published right now are all refused, with the
+ * reason for the page and the tests. `now` is the server's clock unless a
+ * test hands in its own.
+ */
+export async function requestShareRenewal(code: string, now: Date = new Date()): Promise<RenewalRequestOutcome> {
+  const [settings, share] = await Promise.all([getSettings(), prisma.share.findUnique({ where: { code }, select: RENEWAL_REQUEST_FIELDS })]);
+  if (!share) return { kind: "refused", reason: "no-such-link" };
+
+  const allowed = renewalsAllowed(settings);
+  const state = renewalState(share, allowed, now);
+  if (state.kind !== "paused") return { kind: "refused", reason: "not-paused" };
+  if (!share.video.isPublished) return { kind: "refused", reason: "unpublished" };
+  if (!canRequestRenewal(share, now)) return { kind: "already-asked" };
+
+  // The same conditions again, in the WHERE of the one write, so what was
+  // read a moment ago cannot have changed under it: the link must still be
+  // paused, and nobody may have asked within the last day.
+  const written = await prisma.share.updateMany({
+    where: {
+      code,
+      expiryPolicy: "FIRST_PLAY",
+      firstPlayedAt: { not: null },
+      expiresAt: { lte: now },
+      renewalsUsed: { lt: allowed },
+      video: { isPublished: true },
+      OR: [{ renewalRequestedAt: null }, { renewalRequestedAt: { lte: new Date(now.getTime() - RENEWAL_REQUEST_GAP_MS) } }],
+    },
+    data: { renewalRequestedAt: now },
+  });
+  // Nothing written means another tap got there first, or the clinic turned
+  // the link back on in between. Either way the calm confirmation is right.
+  if (written.count !== 1) return { kind: "already-asked" };
+
+  return {
+    kind: "requested",
+    facts: {
+      code: share.code,
+      videoTitle: share.video.title,
+      senderName: share.senderName,
+      createdAt: share.createdAt,
+      renewalsLeft: state.renewalsLeft,
+      daysPerRenewal: state.daysPerRenewal,
+      requestedAt: now,
+      clinic: share.clinic,
+    },
+  };
+}
+
+/** What renewShareForClinic() did, or why it did nothing. Every message is a plain sentence for the admin's screen. */
+export type RenewalOutcome =
+  | { ok: true; expiresAt: Date; renewalsUsed: number; renewalsLeft: number; message: string }
+  | { ok: false; reason: "no-such-link" | "clinic-closed" | "working" | "unpublished" | "finished"; message: string };
+
+/** "Oct 6, 2026", in Utah time like the rest of the admin area, for the log entry and the message. */
+function dayWords(date: Date): string {
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Denver" });
+}
+
+/**
+ * An office admin pressed Confirm on /admin/reactivate/<code>: turn one of
+ * this clinic's paused links back on for the days it was issued with, and
+ * count the renewal. Returns what happened, with a sentence for the screen.
+ *
+ * Takes clinicId first (rule 1): the code is looked up WITHIN this clinic,
+ * so another clinic's admin, or a forged code, finds no link. `actorName`
+ * is the admin's name from Clerk, for the clinic log; never from the browser.
+ *
+ * Read, decide and write in one transaction, under locks, because the
+ * decision depends on what is read:
+ *
+ *   - the clinic row is read with a share lock (lockClinicAccess), so the
+ *     clinic is open at this moment and a pause arriving now waits;
+ *   - the link's row is read FOR NO KEY UPDATE (lockShareForRenewal), so a
+ *     second reactivation of the same link, from another admin or a double
+ *     click, waits until this one has committed, then finds the link
+ *     already working and does nothing: two presses renew once;
+ *   - the settings are read with the settings lock held shared, so the
+ *     maximum renewals is the number in force at this moment.
+ *
+ * Then the rule (renewalState) decides. Only a PAUSED link is changed: its
+ * deadline moves to now plus its own days, its renewals-used count goes up
+ * by one, the patient's request is cleared (so the link is not listed as
+ * waiting again the moment it next pauses), and one entry goes in the
+ * clinic log, in the same transaction. A working link, a finished one, a
+ * legacy link, one nobody played, one whose video is not published, or a
+ * clinic that is not open: nothing is written, and the reason is returned.
+ */
+export async function renewShareForClinic(clinicId: string, code: string, actorName: string, now: Date = new Date()): Promise<RenewalOutcome> {
+  return prisma.$transaction(async (tx) => {
+    const access = await lockClinicAccess(tx, clinicId, now);
+    if (!access || !access.open) {
+      return {
+        ok: false,
+        reason: "clinic-closed",
+        message: "Your clinic is not open right now, so links cannot be turned back on. The Billing page says where things stand.",
+      };
+    }
+
+    const share = await lockShareForRenewal(tx, clinicId, code);
+    if (!share) return { ok: false, reason: "no-such-link", message: "We couldn't find that link for your clinic." };
+
+    const settings = await lockSettings(tx);
+    const allowed = renewalsAllowed(settings);
+    const state = renewalState(share, allowed, now);
+    if (state.kind === "working") {
+      return { ok: false, reason: "working", message: `This link is already working. It works until ${dayWords(share.expiresAt)}; nothing to do.` };
+    }
+    if (state.kind === "finished") return { ok: false, reason: "finished", message: finishedLinkMessage(state.reason, share.renewalsUsed) };
+    if (!share.videoIsPublished) {
+      return {
+        ok: false,
+        reason: "unpublished",
+        message: "The video behind this link is not available right now, so the link cannot be turned back on. Ask Pulse 3D about the video.",
+      };
+    }
+
+    const expiresAt = expiryAfterRenewal({ daysAfterFirstPlay: state.daysPerRenewal }, now);
+    const renewalsUsed = share.renewalsUsed + 1;
+    // An increment rather than the number worked out above: under the lock
+    // the two are the same, and an increment stays an honest count even if
+    // the lock were ever lost (the overlap test's control shows that case).
+    await tx.share.update({
+      where: { id: share.id },
+      data: { expiresAt, renewalsUsed: { increment: 1 }, lastRenewedAt: now, renewalRequestedAt: null },
+      select: { id: true },
+    });
+    await tx.clinicNote.create({
+      data: {
+        clinicId,
+        kind: "STATUS",
+        body: `Link ${share.code} (${share.videoTitle}) turned back on: renewal ${renewalsUsed} of ${allowed}. It works until ${dayWords(expiresAt)}.`,
+        authorName: `${actorName} (clinic admin)`,
+      },
+      select: { id: true },
+    });
+
+    const renewalsLeft = allowed - renewalsUsed;
+    return {
+      ok: true,
+      expiresAt,
+      renewalsUsed,
+      renewalsLeft,
+      message: `Done. The link works again until ${dayWords(expiresAt)}. ${
+        renewalsLeft === 0 ? "That was its last renewal." : `It can be turned back on ${renewalsLeft} more ${renewalsLeft === 1 ? "time" : "times"}.`
+      }`,
+    };
+  });
+}
+
+/** One paused link a patient has asked about, for the overview's "Links waiting to be reactivated". */
+export type RenewalRequestRow = {
+  code: string;
+  videoTitle: string;
+  isPlaceholder: boolean;
+  senderName: string | null;
+  createdAt: Date;
+  /** When the patient last asked. */
+  requestedAt: Date;
+  renewalsLeft: number;
+  daysPerRenewal: number;
+};
+
+/**
+ * This clinic's paused links that a patient has asked about and nobody has
+ * turned back on yet, most recently asked first. This is where an admin
+ * finds a request when no email reached them (no email service set up, or
+ * an email missed). A link drops off the moment it is turned back on
+ * (the request is cleared then) or can no longer be (finished). Bounded:
+ * at most `limit` rows are read.
+ */
+export async function listRenewalRequestsForClinic(clinicId: string, limit: number, now: Date = new Date()): Promise<RenewalRequestRow[]> {
+  const settings = await getSettings();
+  const allowed = renewalsAllowed(settings);
+  const rows = await prisma.share.findMany({
+    where: {
+      clinicId,
+      expiryPolicy: "FIRST_PLAY",
+      firstPlayedAt: { not: null },
+      expiresAt: { lte: now },
+      renewalRequestedAt: { not: null },
+      renewalsUsed: { lt: allowed },
+      video: { isPublished: true },
+    },
+    select: {
+      code: true,
+      createdAt: true,
+      renewalRequestedAt: true,
+      senderName: true,
+      expiryPolicy: true,
+      expiresAt: true,
+      firstPlayedAt: true,
+      daysAfterFirstPlay: true,
+      renewalsUsed: true,
+      video: { select: { title: true, isPlaceholder: true } },
+    },
+    orderBy: { renewalRequestedAt: "desc" },
+    take: Math.max(1, Math.min(limit, 20)),
+  });
+
+  // The query narrowed the rows; the rule itself has the last word, so the list and the page can never disagree.
+  const waiting: RenewalRequestRow[] = [];
+  for (const row of rows) {
+    const state = renewalState(row, allowed, now);
+    if (state.kind !== "paused" || row.renewalRequestedAt === null) continue;
+    waiting.push({
+      code: row.code,
+      videoTitle: row.video.title,
+      isPlaceholder: row.video.isPlaceholder,
+      senderName: row.senderName,
+      createdAt: row.createdAt,
+      requestedAt: row.renewalRequestedAt,
+      renewalsLeft: state.renewalsLeft,
+      daysPerRenewal: state.daysPerRenewal,
+    });
+  }
+  return waiting;
 }
 
 /**

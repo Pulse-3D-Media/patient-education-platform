@@ -3,12 +3,19 @@ import type { ReactNode } from "react";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
-import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
+import { PLACEHOLDER_BADGE, PRIMARY_BUTTON } from "@/components/ui/styles";
 import { ADMIN_SECTIONS } from "@/lib/admin-nav";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
-import { listRecentSharesForClinic, summarizeSharesForClinic, SUMMARY_RECENT_DAYS, SUMMARY_SOON_DAYS } from "@/lib/db/shares";
-import { shareExpiryState } from "@/lib/expiry";
+import {
+  listRecentSharesForClinic,
+  listRenewalRequestsForClinic,
+  summarizeSharesForClinic,
+  SUMMARY_RECENT_DAYS,
+  SUMMARY_SOON_DAYS,
+} from "@/lib/db/shares";
+import { getSettings } from "@/lib/db/settings";
+import { renewalState, shareExpiryState } from "@/lib/expiry";
 import { AdminFrame } from "./AdminFrame";
 
 /**
@@ -34,6 +41,9 @@ export const dynamic = "force-dynamic";
 /** How many of the newest links the overview shows. */
 const RECENT_LINKS = 5;
 
+/** How many paused links a patient has asked about the overview lists at once (the most recently asked first). */
+const WAITING_LINKS = 10;
+
 export default async function AdminOverviewPage() {
   const clinic = await requireClinicPage();
 
@@ -57,11 +67,14 @@ export default async function AdminOverviewPage() {
     );
   }
 
-  const [summary, recent] = await Promise.all([
+  const now = new Date();
+  const [summary, recent, waiting, settings] = await Promise.all([
     summarizeSharesForClinic(clinic.id),
     listRecentSharesForClinic(clinic.id, RECENT_LINKS),
+    listRenewalRequestsForClinic(clinic.id, WAITING_LINKS, now),
+    // For the word on a link that has run out: "Paused" while it can be turned back on, "Expired" once it cannot.
+    getSettings(),
   ]);
-  const now = new Date();
 
   // What needs a look. Each line is one sentence. Nothing here has a button: there is no list of
   // past links to send anyone to, and the office cannot change these links anyway.
@@ -92,6 +105,41 @@ export default async function AdminOverviewPage() {
             {attention.map((item) => (
               <li key={item.text} className="rounded-2xl border border-warn/40 bg-warn/10 px-5 py-4">
                 <p className="text-[15px] text-ink">{item.text}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* A paused link a patient has asked about, until an admin turns it back on. This is where a request lands
+          when no email reached the office (email not set up, or one missed). Bounded, and never a list of past links:
+          a link leaves the moment it is turned back on or can no longer be. */}
+      <section aria-labelledby="waiting-heading" className="mt-8">
+        <h2 id="waiting-heading" className="text-lg font-semibold">
+          Links waiting to be reactivated
+        </h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          A patient asked for one of these paused links to be turned back on. Each stays here until an admin does it.
+        </p>
+        {waiting.length === 0 ? (
+          <p className="mt-2 text-ink-soft">None right now.</p>
+        ) : (
+          <ul className="mt-3 divide-y divide-line rounded-2xl border border-line bg-surface">
+            {waiting.map((request) => (
+              <li key={request.code} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="flex flex-wrap items-center gap-2 text-[15px] text-ink">
+                    {request.videoTitle}
+                    {request.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
+                  </p>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    {request.senderName ? `From ${request.senderName}` : "No surgeon recorded"} &middot; made {formatDate(request.createdAt)} &middot; asked{" "}
+                    {formatDate(request.requestedAt)} &middot; {request.renewalsLeft} {request.renewalsLeft === 1 ? "renewal" : "renewals"} left
+                  </p>
+                </div>
+                <Link href={`/admin/reactivate/${request.code}`} className={PRIMARY_BUTTON}>
+                  Turn it back on
+                </Link>
               </li>
             ))}
           </ul>
@@ -137,10 +185,13 @@ export default async function AdminOverviewPage() {
               const works = state.kind !== "expired" && share.video.isPublished;
               // One short line per link; the full wording is on /admin/links. A link nobody has
               // played yet shows the date it stops on if that stays true, since its deadline
-              // moves at the first play (lib/expiry.ts).
+              // moves at the first play (lib/expiry.ts). A played link that ran out is "Paused"
+              // while the clinic can still turn it back on, and "Expired" once it cannot.
               const when = !works
                 ? share.video.isPublished
-                  ? "Expired"
+                  ? renewalState(share, settings.maxRenewals, now).kind === "paused"
+                    ? "Paused"
+                    : "Expired"
                   : "Not working"
                 : state.kind === "awaiting"
                   ? `Open until ${formatDate(state.unclaimedUntil)} if never played`

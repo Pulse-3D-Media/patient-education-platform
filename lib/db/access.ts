@@ -130,6 +130,46 @@ export async function lockSenderSeat(tx: Prisma.TransactionClient, clinicId: str
   return rows[0] ?? null;
 }
 
+/** What the locking share read returns: the facts the reactivation rule reads, plus what the log entry and the email say. */
+export type LockedShareRow = {
+  id: string;
+  code: string;
+  expiryPolicy: "FIXED" | "FIRST_PLAY";
+  expiresAt: Date;
+  firstPlayedAt: Date | null;
+  daysAfterFirstPlay: number | null;
+  renewalsUsed: number;
+  renewalRequestedAt: Date | null;
+  videoTitle: string;
+  videoIsPublished: boolean;
+};
+
+/**
+ * One of this clinic's share links, read for a reactivation with the row
+ * held against every other change until the transaction ends. Null when no
+ * link of THIS clinic has that code: the clinic id is in the WHERE, so
+ * another clinic's link finds nothing, and so does a code nobody has.
+ *
+ * "FOR NO KEY UPDATE" is the lock an ordinary UPDATE takes, on the Share
+ * row only (the video row is joined for its title and published flag, but
+ * not locked: an unpublish that lands a moment later stops the link like
+ * any other, as issued links always follow the video). A second
+ * reactivation of the same link, from another admin or a double click,
+ * waits here until the first has committed, then reads the link already
+ * turned back on and does nothing. In this file with the other locking
+ * reads so the overlap test can wrap it (shares.renewal.race.test.ts).
+ */
+export async function lockShareForRenewal(tx: Prisma.TransactionClient, clinicId: string, code: string): Promise<LockedShareRow | null> {
+  const rows = await tx.$queryRaw<LockedShareRow[]>`
+    SELECT s."id", s."code", s."expiryPolicy"::text AS "expiryPolicy", s."expiresAt", s."firstPlayedAt", s."daysAfterFirstPlay",
+           s."renewalsUsed", s."renewalRequestedAt", v."title" AS "videoTitle", v."isPublished" AS "videoIsPublished"
+    FROM "Share" s
+    JOIN "Video" v ON v."id" = s."videoId"
+    WHERE s."code" = ${code} AND s."clinicId" = ${clinicId}
+    FOR NO KEY UPDATE OF s`;
+  return rows[0] ?? null;
+}
+
 /**
  * What one clinic may use right now: open or not, the categories on its
  * plan, and whether it is shown placeholders. Null for an unknown clinic.

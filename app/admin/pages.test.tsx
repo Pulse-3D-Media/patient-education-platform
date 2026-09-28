@@ -11,6 +11,7 @@ import LinksPage from "./links/page";
 import AdminOverviewPage from "./page";
 import PeoplePage from "./people/page";
 import PrintPage from "./print/[code]/page";
+import ReactivatePage from "./reactivate/[code]/page";
 
 /**
  * The admin routes rendered on the server, the way a request would render
@@ -603,5 +604,106 @@ describe("who a link is from, on People and on the pamphlet", () => {
     await expect(render(() => PrintPage({ params: Promise.resolve({ code: share.code }) } as never), "/admin/print")).rejects.toThrow("notFound");
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     await expect(render(() => PrintPage({ params: Promise.resolve({ code: share.code }) } as never), "/admin/print")).rejects.toThrow("notFound");
+  });
+});
+
+describe("a paused link a patient has asked about", () => {
+  /** A first-play link of the Hip clinic, played 20 days ago with 10 days, so it paused 10 days ago, asked about an hour ago. */
+  async function makeAskedAbout(over: Partial<Prisma.ShareUncheckedCreateInput> = {}) {
+    const share = await prisma.share.create({
+      data: {
+        code: `r${randomBytes(3).toString("hex").slice(0, 5)}`,
+        clinicId: createdClinicIds[3],
+        videoId: createdVideoIds[0],
+        expiryPolicy: "FIRST_PLAY",
+        firstPlayedAt: new Date(Date.now() - 20 * DAY_MS),
+        daysAfterFirstPlay: 10,
+        expiresAt: new Date(Date.now() - 10 * DAY_MS),
+        renewalRequestedAt: new Date(Date.now() - 60 * 60 * 1000),
+        senderName: "Dr. Jane Smith",
+        viewCount: 1,
+        ...over,
+      },
+      select: { code: true },
+    });
+    return share.code;
+  }
+
+  const reactivate = (code: string) => () => ReactivatePage({ params: Promise.resolve({ code }) } as never);
+
+  it("is listed on the overview under 'Links waiting to be reactivated', with a way to the page that turns it back on", async () => {
+    const code = await makeAskedAbout();
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    const html = await render(AdminOverviewPage, "/admin");
+
+    expect(html).toContain("Links waiting to be reactivated");
+    expect(html).toContain(hipVideoTitle);
+    expect(html).toContain("From Dr. Jane Smith");
+    expect(html).toContain(`href="/admin/reactivate/${code}"`);
+    expect(html).toContain("Turn it back on");
+    // Another clinic sees none of it.
+    signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+    const other = await render(AdminOverviewPage, "/admin");
+    expect(other).toContain("Links waiting to be reactivated");
+    expect(other).toContain("None right now.");
+    expect(other).not.toContain(`/admin/reactivate/${code}`);
+  });
+
+  it("gets its own page for the clinic's admin: the details, where it stands, and one Confirm button that is a form, nothing else", async () => {
+    const code = await makeAskedAbout();
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    const html = await render(reactivate(code), `/admin/reactivate/${code}`);
+
+    expect(html).toContain("Turn a link back on");
+    expect(html).toContain("Nothing changes until you press Confirm.");
+    expect(html).toContain(hipVideoTitle);
+    expect(html).toContain("Dr. Jane Smith");
+    expect(html).toContain("Paused since");
+    expect(html).toContain("Confirm: turn this link back on");
+    expect(html).toMatch(/<form[^>]*>[\s\S]*name="code"[^>]*value="/);
+    // The one thing that submits is Confirm (the shell's own menu buttons are not forms).
+    expect(html.match(/<button[^>]*type="submit"/g)).toHaveLength(1);
+    expect(html.match(/<form/g)).toHaveLength(1);
+    // The navigation marks the overview, where the waiting list lives.
+    expect(html).toMatch(/aria-current="page"[^>]*href="\/admin"/);
+  });
+
+  it("offers no Confirm for a link that is working, finished, or made under the older rule, and says why", async () => {
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+
+    const working = await makeAskedAbout({ expiresAt: new Date(Date.now() + 5 * DAY_MS), renewalRequestedAt: null });
+    const workingHtml = await render(reactivate(working), `/admin/reactivate/${working}`);
+    expect(workingHtml).toContain("Working until");
+    expect(workingHtml).not.toContain("Confirm: turn this link back on");
+
+    const finished = await makeAskedAbout({ renewalsUsed: 10 });
+    const finishedHtml = await render(reactivate(finished), `/admin/reactivate/${finished}`);
+    expect(finishedHtml).toContain("the maximum");
+    expect(finishedHtml).toContain("Make a new link");
+    expect(finishedHtml).not.toContain("Confirm: turn this link back on");
+
+    const legacy = await makeAskedAbout({ expiryPolicy: "FIXED", firstPlayedAt: null, daysAfterFirstPlay: null, renewalRequestedAt: null });
+    const legacyHtml = await render(reactivate(legacy), `/admin/reactivate/${legacy}`);
+    expect(legacyHtml).toContain("older rule");
+    expect(legacyHtml).not.toContain("Confirm: turn this link back on");
+  });
+
+  it("is admins-only, not found for another clinic's admin, and closed with a reason for a clinic that is not open", async () => {
+    const code = await makeAskedAbout();
+
+    signInAs(orgHip, "member", "Vitest pages clinic (hip)");
+    const member = await render(reactivate(code), `/admin/reactivate/${code}`);
+    expect(member).toContain("This page is for your clinic");
+    expect(member).not.toContain("Confirm");
+
+    signInAs(orgActive, "admin", "Vitest pages clinic (active)");
+    await expect(render(reactivate(code), `/admin/reactivate/${code}`)).rejects.toThrow("notFound");
+
+    signInAs(orgPending, "admin", "Vitest pages clinic (pending)");
+    const pending = await render(reactivate(code), `/admin/reactivate/${code}`);
+    expect(pending).toContain("Links cannot be turned back on while your clinic is not open");
+    expect(pending).toContain("Choose a plan to start");
+    expect(pending).toContain('href="/admin/billing"');
+    expect(pending).not.toContain("Confirm");
   });
 });

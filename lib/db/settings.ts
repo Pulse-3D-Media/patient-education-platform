@@ -25,6 +25,12 @@ export type Settings = {
   graceDays: number;
   /** Scans of one QR code in a day that get flagged for a look. */
   qrDailyFlag: number;
+  /**
+   * How many times a clinic may turn a paused patient link back on (0 to 10;
+   * 0 means never). Read when it is needed, never copied onto a link, so a
+   * change applies to every link at once (lib/expiry.ts).
+   */
+  maxRenewals: number;
 };
 
 /** The id of the one row. Never any other value. */
@@ -36,19 +42,23 @@ export const SETTINGS_DEFAULTS: Settings = {
   viewDays: 7,
   graceDays: 14,
   qrDailyFlag: 200,
+  maxRenewals: 3,
 };
 
 /** The one line a staff member reads beside each setting on /pulse/settings. */
 export const SETTINGS_HELP: Record<keyof Settings, string> = {
-  unclaimedDays: "How many days a patient link stays open if nobody ever plays it. After that it stops working. Applies to links made from now on.",
+  unclaimedDays:
+    "How many days a patient link stays open if nobody ever plays it. After that it is finished: a link that was never played cannot be turned back on. Applies to links made from now on.",
   viewDays:
-    "Once a patient first plays their video, how many more days the link keeps working. A clinic can be given its own number. Applies to links made from now on; a link already sent keeps the number it was made with.",
+    "Once a patient first plays their video, how many more days the link works. Then it pauses, and the clinic can turn it back on for the same number of days again (see Maximum renewals). A clinic can be given its own number. Applies to links made from now on; a link already sent keeps the number it was made with.",
   graceDays: "How many days a clinic keeps using the library after a payment fails, before it is switched off.",
   qrDailyFlag: "If one QR code is scanned more than this many times in a day, it is flagged on the reports for a look.",
+  maxRenewals:
+    "How many times a clinic can turn a paused patient link back on. 0 means never. Unlike the day counts, this is not copied onto each link: a change applies to every link at once, links already sent included.",
 };
 
-/** The four columns, as every read here asks for them. */
-const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true } as const;
+/** The five columns, as every read here asks for them. */
+const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true, maxRenewals: true } as const;
 
 /**
  * The current settings. Returns the row when it exists, and the defaults
@@ -112,10 +122,10 @@ export async function lockSettings(tx: Prisma.TransactionClient): Promise<Settin
 }
 
 /**
- * Save all four settings at once, creating the row the first time. Returns
+ * Save all five settings at once, creating the row the first time. Returns
  * the settings as they now are. Callers check the values first (whole
- * numbers, at least 1, and the day counts no more than a year, see
- * lib/expiry.ts); this function trusts them.
+ * numbers, at least 1, the day counts no more than a year, and the renewal
+ * count from 0 to 10, see lib/expiry.ts); this function trusts them.
  *
  * The write waits for the exclusive settings lock (see above), so it never
  * lands in the middle of a link being made.

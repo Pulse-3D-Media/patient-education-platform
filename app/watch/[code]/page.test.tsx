@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
+import { getSettings } from "@/lib/db/settings";
 import WatchPage from "./page";
 
 /**
@@ -26,6 +27,10 @@ import WatchPage from "./page";
 
 // The play count is a Server Action the player imports; rendering never calls it.
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// The "ask my clinic" piece refreshes the page after a tap that did not go through; a render never taps.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
+// The request action reads the request's host to build the email's address; a render never asks.
+vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
 
 const createdClinicIds: string[] = [];
 const createdVideoIds: string[] = [];
@@ -260,5 +265,104 @@ describe("who sent the link", () => {
     const html = await render(await makeShare(clinic.id, videoId));
     expect(html).toContain("From Vitest Older Orthopedics");
     expect(html).not.toContain("Sent by");
+  });
+});
+
+describe("a link that has paused", () => {
+  const DAY = 86_400_000;
+  let maxRenewals = 0;
+
+  beforeAll(async () => {
+    maxRenewals = (await getSettings()).maxRenewals;
+    // The testing branch's settings decide the maximum; the paused page needs at least one renewal to exist.
+    expect(maxRenewals).toBeGreaterThanOrEqual(1);
+  });
+
+  /** A first-play link played 20 days ago with 10 days, so it ran out 10 days ago; `over` changes what kind of link it is. */
+  async function makeRanOut(clinicId: string, video: string, over: Partial<Prisma.ShareUncheckedCreateInput> = {}) {
+    const share = await prisma.share.create({
+      data: {
+        code: code(),
+        clinicId,
+        videoId: video,
+        expiryPolicy: "FIRST_PLAY",
+        firstPlayedAt: new Date(Date.now() - 20 * DAY),
+        daysAfterFirstPlay: 10,
+        expiresAt: new Date(Date.now() - 10 * DAY),
+        viewCount: 1,
+        ...over,
+      },
+      select: { code: true },
+    });
+    return share.code;
+  }
+
+  it("shows one button, Ask my clinic, and nothing to type into: no box, no form, no field of any kind", async () => {
+    const clinic = await makeClinic({ phone: "8015550123" });
+    const html = await render(await makeRanOut(clinic.id, videoId));
+
+    expect(html).toContain("This link has paused");
+    expect(html).toContain("Tap below to ask your clinic to turn it back on.");
+    expect(html).toContain("Ask my clinic");
+    expect(html.match(/<button/g)).toHaveLength(1);
+    expect(html).not.toContain("<input");
+    expect(html).not.toContain("<textarea");
+    expect(html).not.toContain("<form");
+    // Before the tap the button is the only thing to do: no number to call, no video, and no technical words.
+    expect(html).not.toContain("tel:");
+    expect(html).not.toContain("<video");
+    expect(html).not.toMatch(/expired|error|invalid|renewal/i);
+  });
+
+  it("shows the confirmation instead of the button when the clinic was asked within the last day, with the office's number", async () => {
+    const clinic = await makeClinic({ phone: "8015550123" });
+    const html = await render(await makeRanOut(clinic.id, videoId, { renewalRequestedAt: new Date(Date.now() - 60 * 60 * 1000) }));
+
+    expect(html).toContain("Your clinic has been asked");
+    expect(html).toContain("Try this same link again in a day or so.");
+    expect(html).not.toContain("Ask my clinic");
+    expect(html).not.toContain("<button");
+    expect(html).toContain('href="tel:+18015550123"');
+  });
+
+  it("offers the button again once a day has passed since the last request", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeRanOut(clinic.id, videoId, { renewalRequestedAt: new Date(Date.now() - 25 * 60 * 60 * 1000) }));
+    expect(html).toContain("Ask my clinic");
+  });
+
+  it("is the calm expired page, with no button, once the renewals are used up", async () => {
+    const clinic = await makeClinic({ phone: "8015550123" });
+    const html = await render(await makeRanOut(clinic.id, videoId, { renewalsUsed: maxRenewals }));
+
+    expect(html).toContain("This link has expired");
+    expect(html).toContain("can send you a fresh one");
+    expect(html).not.toContain("Ask my clinic");
+    expect(html).not.toContain("<button");
+    expect(html).toContain('href="tel:+18015550123"');
+  });
+
+  it("never offers the button on a link nobody played, a legacy link, or a paused link whose video is taken down", async () => {
+    const clinic = await makeClinic({});
+
+    const neverPlayed = await render(await makeRanOut(clinic.id, videoId, { firstPlayedAt: null, viewCount: 0 }));
+    expect(neverPlayed).toContain("This link has expired");
+    expect(neverPlayed).not.toContain("Ask my clinic");
+
+    const legacy = await render(await makeShare(clinic.id, videoId, true));
+    expect(legacy).toContain("This link has expired");
+    expect(legacy).not.toContain("Ask my clinic");
+
+    const takenDown = await render(await makeRanOut(clinic.id, unpublishedVideoId));
+    expect(takenDown).toContain("This link has expired");
+    expect(takenDown).not.toContain("Ask my clinic");
+  });
+
+  it("wears the clinic's colour and writes nothing internal on the paused page", async () => {
+    const clinic = await makeClinic({ brandColor: "#7a1f2b", noticeText: "INTERNAL-NOTICE" });
+    const html = await render(await makeRanOut(clinic.id, videoId));
+    expect(html).toContain("--brand-accent:#7a1f2b");
+    expect(html).not.toContain("INTERNAL-");
+    expect(html).not.toContain(clinic.id);
   });
 });

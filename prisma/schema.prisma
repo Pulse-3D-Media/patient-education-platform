@@ -358,6 +358,7 @@ model AppSettings {
   viewDays      Int      @default(7) // days a patient link keeps working after the first play; copied onto each new link as Share.daysAfterFirstPlay
   graceDays     Int      @default(14) // days a clinic keeps access after a missed payment
   qrDailyFlag   Int      @default(200) // scans of one QR code in a day that get flagged for a look
+  maxRenewals   Int      @default(3) // times a clinic may turn a paused patient link back on (0 to 10; 0 means never). Read live, so a change applies to every link at once
   updatedAt     DateTime @updatedAt
 }
 
@@ -398,6 +399,14 @@ model Share {
   // sent. Empty on every link made before surgeons were recorded.
   senderUserId String? // the surgeon's Clerk user id
   senderName   String? // what the patient page and the pamphlet say: "Sent by Dr. Jane Smith". Empty means the older wording, with no name
+
+  // Pausing and reactivation (see lib/expiry.ts). A FIRST_PLAY link that has
+  // been played PAUSES when its days run out, and the clinic can turn it back
+  // on up to AppSettings.maxRenewals times, each time for the days the link
+  // was issued with. Nothing here is about the patient: no name, no address.
+  renewalsUsed       Int       @default(0) // how many times the clinic has turned this link back on
+  renewalRequestedAt DateTime? // when the patient last tapped "ask my clinic"; one request per link per day. Cleared when the link is turned back on
+  lastRenewedAt      DateTime? // when the clinic last turned it back on
 
   @@index([clinicId])
 }

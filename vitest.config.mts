@@ -21,7 +21,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "app/**/*.test.tsx", "components/**/*.test.tsx", "vitest.guard.test.ts"],
+    include: ["lib/**/*.test.ts", "app/**/*.test.ts", "app/**/*.test.tsx", "components/**/*.test.tsx", "vitest.guard.test.ts", "instrumentation.test.ts"],
     setupFiles: ["./vitest.setup.ts"],
     // One test file at a time. They share one database, so running files side
     // by side would only make failures harder to read.

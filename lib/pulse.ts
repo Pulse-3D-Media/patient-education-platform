@@ -1,6 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { notFound } from "next/navigation";
 import { cache } from "react";
+import { askClerk } from "./clerk-timeout";
 
 /**
  * Who may open /pulse, the Pulse 3D master dashboard.
@@ -36,13 +37,17 @@ export function pulseStaffFromMetadata(metadata: Record<string, unknown> | null 
  * The signed-in user if they are Pulse staff, otherwise null. Never throws
  * for a signed-out or ordinary user. Cached for the length of one request,
  * so a page that asks and then its actions ask again pay for one Clerk call.
+ *
+ * The one Clerk call has the same time limit as the clinic lookup
+ * (lib/clerk-timeout.ts): a Clerk that does not answer ends in the "could
+ * not reach sign-in" error page, not a dashboard that never loads.
  */
 export const getPulseStaffUser = cache(async (): Promise<PulseStaffUser | null> => {
   const { userId } = await auth();
   if (!userId) return null;
 
   const client = await clerkClient();
-  const user = await client.users.getUser(userId);
+  const user = await askClerk(client.users.getUser(userId), "the staff user");
   if (!pulseStaffFromMetadata(user.publicMetadata)) return null;
 
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ");

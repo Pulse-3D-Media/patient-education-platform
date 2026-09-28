@@ -3,7 +3,7 @@ import { brandFontFamily } from "@/app/brand-fonts";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { StaffClerkProvider } from "@/components/ui/StaffClerkProvider";
 import { staffTheme } from "@/lib/branding";
-import { getCurrentClinic } from "@/lib/clinic";
+import { getClinicForShell } from "@/lib/clinic";
 
 /**
  * Every library page sits inside the shared shell: thin top banner, icon
@@ -28,9 +28,15 @@ import { getCurrentClinic } from "@/lib/clinic";
  * library page calls it too (through requireClinicPage), so reading it here
  * costs nothing extra. When there is no clinic yet (the page is about to
  * send the person to onboarding), the plain Pulse 3D shell is drawn.
+ *
+ * The same plain shell is drawn when the clinic cannot be read at all
+ * (sign-in or the database not answering): getClinicForShell() answers
+ * null instead of failing, the page inside fails in the same way, and the
+ * error page next to it (error.tsx) says so inside this shell, with Try
+ * again. A layout that failed would leave no banner and no way back.
  */
 export default async function LibraryLayout({ children }: LayoutProps<"/library">) {
-  const clinic = await getCurrentClinic();
+  const clinic = await getClinicForShell();
   // Clerk's own pieces take the accent worked out for the clinic's mode, light or dark.
   const accent = staffTheme(clinic?.branding.color ?? null, clinic?.branding.theme);
   return (

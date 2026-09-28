@@ -1,5 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CLERK_TIMEOUT_MS, SignInUnavailableError } from "./clerk-timeout";
 import { getPulseStaffUser, isPulseStaff, pulseStaffFromMetadata, requirePulseStaff } from "./pulse";
 
 /**
@@ -77,5 +78,23 @@ describe("requirePulseStaff", () => {
   it("returns the staff user otherwise", async () => {
     signInAs("user_staff", { pulseStaff: true }, { firstName: "Van" });
     expect(await requirePulseStaff()).toEqual({ userId: "user_staff", name: "Van" });
+  });
+});
+
+describe("when Clerk does not answer", () => {
+  it("gives up after the time limit with the sign-in error: not a hang, and not not-found", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      vi.mocked(auth).mockResolvedValue({ userId: "user_staff" } as never);
+      vi.mocked(clerkClient).mockResolvedValue({ users: { getUser: () => new Promise(() => {}) } } as never);
+      const asked = requirePulseStaff();
+      const outcome = expect(asked).rejects.toBeInstanceOf(SignInUnavailableError);
+      await vi.advanceTimersByTimeAsync(CLERK_TIMEOUT_MS);
+      await outcome;
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
   });
 });

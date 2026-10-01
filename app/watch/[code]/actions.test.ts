@@ -99,14 +99,17 @@ describe("recordPlay", () => {
     expect(await recordPlay("nope00")).toEqual({ recorded: false });
   });
 
-  it("answers recorded: false when the server fails, and logs the detail there instead of throwing it at the page", async () => {
-    vi.mocked(shares.recordSharePlay).mockRejectedValueOnce(new Error("the database went away"));
+  it("answers recorded: false when the server fails, and logs the kind of error there instead of throwing it at the page", async () => {
+    // A failure whose message holds the link's code, the way a database error can.
+    vi.mocked(shares.recordSharePlay).mockRejectedValueOnce(new Error(`the database went away looking up ${code}`));
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
     expect(await recordPlay(code)).toEqual({ recorded: false });
     expect(log).toHaveBeenCalledOnce();
-    // The log line names what happened, not the code of the link.
-    expect(String(log.mock.calls[0][0])).not.toContain(code);
+    // Only words go to the log: what happened and the kind of error. Never
+    // the error object, whose message and stack would print the code.
+    expect(log).toHaveBeenCalledWith("Could not record a play start on a share link.", "Error");
+    expect(log.mock.calls[0].every((part) => typeof part === "string" && !part.includes(code))).toBe(true);
   });
 });
 
@@ -178,6 +181,6 @@ describe("requestReactivation", () => {
 
     expect(await requestReactivation(paused)).toEqual({ asked: false });
     expect(log).toHaveBeenCalledOnce();
-    expect(JSON.stringify(log.mock.calls)).not.toContain(paused);
+    expect(log.mock.calls[0].every((part) => typeof part === "string" && !part.includes(paused))).toBe(true);
   });
 });

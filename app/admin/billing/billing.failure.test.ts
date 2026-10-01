@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe("getBillingView when the prices cannot be read", () => {
-  it("still returns the plan, with a plain problem instead of an estimate, and logs the detail", async () => {
+  it("still returns the plan, with a plain problem instead of an estimate, and logs the kind of error", async () => {
     vi.mocked(getClinicPlan).mockResolvedValue({ categories: ["KNEE"], surgeonSeats: 2, managedByPulse: false, practiceType: "CLINIC" });
     vi.mocked(getPricingForClinic).mockRejectedValue(new Error('The table "public.PricingVersion" does not exist'));
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -37,6 +37,8 @@ describe("getBillingView when the prices cannot be read", () => {
       problem: "We could not work out an estimate right now. Your plan is unchanged.",
     });
     expect(log).toHaveBeenCalledTimes(1);
-    expect(log.mock.calls[0][0]).toContain("does not exist");
+    // The kind of error only (a real database would give its Prisma code), never its message.
+    expect(log).toHaveBeenCalledWith("Billing estimate for clinic clinic_1: Error");
+    expect(log.mock.calls[0][0]).not.toContain("does not exist");
   });
 });

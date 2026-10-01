@@ -1,4 +1,3 @@
-import { Prisma } from "@prisma/client";
 import {
   beginBillingAttempt,
   findClinicIdByStripeCustomer,
@@ -11,6 +10,7 @@ import {
   setBillingEventClinic,
   type BillingEventRow,
 } from "./db/billing";
+import { errorKind } from "./error-kind";
 import { eventRefs, fetchSubscriptionSnapshot, isHandledEventType, type FetchSubscription } from "./stripe";
 
 /**
@@ -57,21 +57,6 @@ const REAL_DEPS: BillingDeps = { fetchSubscription: fetchSubscriptionSnapshot };
 
 /** The smallest part of a Stripe event this file reads. */
 export type IncomingEvent = { id: string; type: string; livemode: boolean; data: { object: unknown } };
-
-/**
- * The kind of an error, never its message: a Stripe error's type, a Prisma
- * error's code, or the class name. Safe to store and show to staff.
- */
-export function errorCode(error: unknown): string {
-  if (error instanceof Prisma.PrismaClientKnownRequestError) return `Prisma ${error.code}`;
-  if (error && typeof error === "object") {
-    const type = (error as { type?: unknown }).type;
-    if (typeof type === "string" && type.startsWith("Stripe")) return type;
-    const name = (error as { name?: unknown }).name;
-    if (typeof name === "string" && name) return name;
-  }
-  return "Error";
-}
 
 export async function handleStripeEvent(event: IncomingEvent, deps: BillingDeps = REAL_DEPS): Promise<HandleResult> {
   if (!isHandledEventType(event.type)) return { status: "skipped", outcome: "Not a kind of notification this app uses." };
@@ -136,7 +121,7 @@ async function processRow(row: BillingEventRow, deps: BillingDeps): Promise<Hand
   } catch (error) {
     // The kind of failure goes on the row; the detail goes to the server
     // log, which is not shown to anyone. Neither holds the notification's body.
-    const code = errorCode(error);
+    const code = errorKind(error);
     console.error(`Billing notification ${row.stripeEventId} (${row.type}) failed: ${code}`);
     await markBillingEventFailed(row.id, code).catch(() => undefined);
     throw error;

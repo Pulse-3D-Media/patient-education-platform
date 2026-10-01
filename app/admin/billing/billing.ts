@@ -2,6 +2,7 @@ import type { Category } from "@prisma/client";
 import { getClinicPlan, type ClinicPlan } from "@/lib/db/clinics";
 import { getPricingForClinic } from "@/lib/db/pricing";
 import { getSeatSummary } from "@/lib/db/seats";
+import { errorKind } from "@/lib/error-kind";
 import { quote, type Band } from "@/lib/pricing";
 
 /**
@@ -75,8 +76,7 @@ export async function getBillingView(clinicId: string): Promise<BillingView | nu
   try {
     pricing = await getPricingForClinic(clinicId);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    console.error(`Billing estimate for clinic ${clinicId}: ${detail}`);
+    console.error(`Billing estimate for clinic ${clinicId}: ${errorKind(error)}`);
     return { plan, hasPlan, seatsInUse, estimate: null, problem: "We could not work out an estimate right now. Your plan is unchanged." };
   }
 

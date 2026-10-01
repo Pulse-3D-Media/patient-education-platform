@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { errorCode } from "@/lib/billing-events";
+import { errorKind } from "@/lib/error-kind";
 import { checkPayment, startCheckout } from "@/lib/checkout";
 import { readPlanSelection } from "@/lib/checkout-rules";
 import { getBillingClinicId } from "@/lib/clinic";
@@ -76,7 +76,7 @@ export async function startCheckoutAction(_previous: CheckoutFormState, formData
     return { error: result.message };
   } catch (error) {
     // The kind of failure only: a Stripe or database message can carry an id.
-    console.error(`Starting checkout failed: ${errorCode(error)}`);
+    console.error(`Starting checkout failed: ${errorKind(error)}`);
     return { error: "Checkout could not be started just now. Nothing was charged. Try again in a moment." };
   }
 }
@@ -99,7 +99,7 @@ export async function checkPaymentAction(): Promise<CheckPaymentState> {
     revalidatePath("/admin/billing/return");
     return { message: result.message };
   } catch (error) {
-    console.error(`Checking a payment failed: ${errorCode(error)}`);
+    console.error(`Checking a payment failed: ${errorKind(error)}`);
     return { error: "We could not reach Stripe just now. Nothing has changed. Try again in a moment." };
   }
 }

@@ -212,8 +212,9 @@ describe("when the save itself fails", () => {
 
     expect(result).toEqual({ error: "That did not save. Nothing was changed. Try again in a moment." });
     expect(JSON.stringify(result)).not.toContain("10.0.0.12");
-    // The detail went to the server log instead.
-    expect(logged).toHaveBeenCalled();
+    // The kind of error went to the server log instead, never the error itself.
+    expect(logged).toHaveBeenCalledWith("Saving a clinic's branding failed", "Error");
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("10.0.0.12");
     expect(await brandingOf(mine)).toEqual(UNTOUCHED);
     logged.mockRestore();
   });

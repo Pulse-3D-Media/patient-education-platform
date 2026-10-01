@@ -227,8 +227,10 @@ describe("when making the link fails for a reason the person can do nothing abou
 
         expect(result).toEqual({ ok: false, error: "The link could not be made just now. Nothing was sent to anyone. Try again in a moment." });
         if (!result.ok) expect(result.error).not.toMatch(TECHNICAL_WORDS);
-        // The detail is not lost: it is in the server log, for Pulse 3D to read.
-        expect(log).toHaveBeenLastCalledWith("Making a share link from the library failed", failure);
+        // The server log gets the kind of error only, never the error itself,
+        // whose message and stack could hold a share code.
+        expect(log).toHaveBeenLastCalledWith("Making a share link from the library failed", "Error");
+        expect(log.mock.lastCall!.join(" ")).not.toMatch(TECHNICAL_WORDS);
         expect(await prisma.share.count({ where: { clinicId: kneeClinic } })).toBe(before);
       }
     } finally {

@@ -79,9 +79,16 @@ export type ShareSender = { clerkUserId: string; fallbackName: string | null };
 
 /** The characters a share code is made from: lowercase letters and digits. */
 const CODE_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
-const CODE_LENGTH = 6;
+/**
+ * Ten characters gives about 3.6 million billion possible codes, so a script
+ * trying codes at random practically never lands on a real link, however many
+ * internet addresses it uses. Links made before October 2026 have six
+ * characters; they keep their codes and keep working, because a code is only
+ * ever looked up, never checked for length.
+ */
+const CODE_LENGTH = 10;
 
-/** A random six-character code such as "k7m2xq". */
+/** A random ten-character code such as "k7m2xq4v9p". */
 function randomCode() {
   let code = "";
   for (let i = 0; i < CODE_LENGTH; i++) {

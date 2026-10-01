@@ -21,10 +21,11 @@
  * should be able to mistake one for finished work.
  *
  * This file is deliberately separate from seed-video.ts, which holds the one
- * real animation and is never touched by this script. When the finished
- * animations arrive, delete this file and its npm script, and remove the rows
- * (they are the ones with isPlaceholder = true; delete their share links
- * first, since a share points at its video).
+ * real animation and is never touched by this script. When a finished
+ * animation arrives, it REPLACES the sample in the same row: edit the video
+ * on /pulse/videos, put in the new file's address and untick "Placeholder".
+ * Never delete a placeholder row or its share links, because every link and
+ * QR code already sent points at that row and keeps working after the swap.
  *
  * Safe to run more than once: a placeholder that already exists (same title
  * and category) is updated to match this file rather than duplicated. A real

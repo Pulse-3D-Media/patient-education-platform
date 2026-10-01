@@ -3,7 +3,7 @@
 import type { Category } from "@prisma/client";
 import { useActionState } from "react";
 import { INPUT } from "@/components/ui/styles";
-import { DEFAULT_COMING_SOON, type CategoryConfig } from "@/lib/db/category-config";
+import { DEFAULT_COMING_SOON, type CategoryConfig } from "@/lib/categories";
 import { saveCategoryConfigAction } from "../actions";
 import { Outcome, SaveButton } from "../FormBits";
 

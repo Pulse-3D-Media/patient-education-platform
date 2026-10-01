@@ -10,18 +10,19 @@ import { CATEGORIES } from "@/lib/categories";
 import { getClinicBilling } from "@/lib/db/billing";
 import { getCategoryAvailability } from "@/lib/db/category-config";
 import { getClinicForPulse } from "@/lib/db/clinics";
-import { listNotesForClinic } from "@/lib/db/notes";
+import { NOTES_PAGE_SIZE, countNotesForClinic, listNotesForClinic } from "@/lib/db/notes";
 import { getSeatSummary } from "@/lib/db/seats";
 import { getSettings } from "@/lib/db/settings";
-import { listSharesForClinic } from "@/lib/db/shares";
+import { countSharesForClinic, listRecentSharesForClinic } from "@/lib/db/shares";
 import { shareExpiryState } from "@/lib/expiry";
+import { pageInfo, readPage } from "@/lib/paging";
 import { formatUsPhone } from "@/lib/phone";
 import { formatCents } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 import { checkSeats, type SeatedPerson } from "@/lib/seat-changes";
 import { SEAT_STATE_WORDS, seatCountWords, seatSummary } from "@/lib/seats";
 import { saveBrandingAction } from "../../actions";
-import { Section, StatusBadge, formatDate, formatDateTime } from "../../ui";
+import { Pager, Section, StatusBadge, formatDate, formatDateTime } from "../../ui";
 import { ClinicTabs } from "./ClinicTabs";
 import { DetailsForm, ManagedForm, NoteForm, OwnerForm, PlanForm, PracticeTypeForm, StatusForm } from "./forms";
 
@@ -36,6 +37,11 @@ import { DetailsForm, ManagedForm, NoteForm, OwnerForm, PlanForm, PracticeTypeFo
  * shows; Notes is the running log, newest first, to which every change saved
  * on this page adds an entry of its own.
  *
+ * The two lists that keep growing are never read whole. Links shows the
+ * newest RECENT_LINK_LIMIT and a count. Notes shows one page
+ * (NOTES_PAGE_SIZE entries) with Newer and Older under it; which page is in
+ * the address (?notes=2#notes).
+ *
  * Opening this page also brings the clinic's seats into line with its people
  * (checkSeats in lib/seat-changes.ts): an accepted invitation becomes its
  * person's seat, the seat of someone who has left is let go, and free seats
@@ -49,10 +55,10 @@ import { DetailsForm, ManagedForm, NoteForm, OwnerForm, PlanForm, PracticeTypeFo
  */
 export const dynamic = "force-dynamic";
 
-/** How many of the clinic's newest links to show. The admin console shows them all. */
+/** How many of the clinic's newest links to show. */
 const RECENT_LINK_LIMIT = 20;
 
-export default async function PulseClinicPage({ params }: PageProps<"/pulse/clinics/[id]">) {
+export default async function PulseClinicPage({ params, searchParams }: PageProps<"/pulse/clinics/[id]">) {
   await requirePulseStaff();
 
   const { id } = await params;
@@ -62,14 +68,18 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   // First, because it may add an entry to the log that is read just below. Null when Clerk cannot be read.
   const board = clinic.clerkOrgId ? await checkSeats(clinic.id).catch(() => null) : null;
 
-  const [settings, shares, notes, availability, billing, storedSeats] = await Promise.all([
+  const [settings, shares, shareCount, noteCount, availability, billing, storedSeats] = await Promise.all([
     getSettings(),
-    listSharesForClinic(clinic.id),
-    listNotesForClinic(clinic.id),
+    listRecentSharesForClinic(clinic.id, RECENT_LINK_LIMIT),
+    countSharesForClinic(clinic.id),
+    countNotesForClinic(clinic.id),
     getCategoryAvailability(),
     getClinicBilling(clinic.id),
     getSeatSummary(clinic.id),
   ]);
+  // One page of the log, never the whole of it. A typed-in page number past the end lands on the last page.
+  const notesInfo = pageInfo(readPage((await searchParams).notes), noteCount, NOTES_PAGE_SIZE);
+  const notes = await listNotesForClinic(clinic.id, notesInfo.page);
   const now = new Date();
   const people = board?.people ?? null;
   // The seats in use come from our own table, so they are known even when Clerk cannot be read.
@@ -241,7 +251,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
   const links = (
     <Section
       title="Recent links"
-      blurb={`The newest ${Math.min(shares.length, RECENT_LINK_LIMIT)} of ${shares.length} share ${shares.length === 1 ? "link" : "links"}, as the clinic's admin console lists them.`}
+      blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made.`}
     >
       {shares.length === 0 ? (
         <p className="text-sm text-[#667085]">No links yet.</p>
@@ -259,7 +269,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
               </tr>
             </thead>
             <tbody>
-              {shares.slice(0, RECENT_LINK_LIMIT).map((share) => {
+              {shares.map((share) => {
                 const state = shareExpiryState(share, now);
                 const expired = state.kind === "expired";
                 // Expires: the date, plus how it got there (lib/expiry.ts). A link
@@ -305,24 +315,38 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
       {notes.length === 0 ? (
         <p className="mt-6 text-sm text-[#667085]">No notes yet.</p>
       ) : (
-        <ol className="mt-6 flex flex-col gap-3">
-          {notes.map((note) => (
-            <li key={note.id} className="rounded-xl border border-white/10 bg-[#07090b] p-4">
-              <p className="flex flex-wrap items-center gap-2 text-sm text-[#667085]">
-                <span
-                  className={`rounded-md px-2 py-0.5 text-[12px] font-medium uppercase tracking-wide ${
-                    note.kind === "STATUS" ? "bg-[#2a829b]/20 text-[#5fb8d4]" : "bg-white/10 text-[#bfbfbf]"
-                  }`}
-                >
-                  {note.kind === "STATUS" ? "Change" : "Note"}
-                </span>
-                <span className="text-[#bfbfbf]">{note.authorName}</span>
-                <span>{formatDateTime(note.createdAt)}</span>
-              </p>
-              <p className="mt-2 whitespace-pre-wrap text-[15px] text-white">{note.body}</p>
-            </li>
-          ))}
-        </ol>
+        <div className="mt-6">
+          {notesInfo.pages > 1 && (
+            <p className="mb-3 text-sm text-[#667085]">
+              Showing {notesInfo.from} to {notesInfo.to} of {notesInfo.total}, newest first.
+            </p>
+          )}
+          <ol className="flex flex-col gap-3">
+            {notes.map((note) => (
+              <li key={note.id} className="rounded-xl border border-white/10 bg-[#07090b] p-4">
+                <p className="flex flex-wrap items-center gap-2 text-sm text-[#667085]">
+                  <span
+                    className={`rounded-md px-2 py-0.5 text-[12px] font-medium uppercase tracking-wide ${
+                      note.kind === "STATUS" ? "bg-[#2a829b]/20 text-[#5fb8d4]" : "bg-white/10 text-[#bfbfbf]"
+                    }`}
+                  >
+                    {note.kind === "STATUS" ? "Change" : "Note"}
+                  </span>
+                  <span className="text-[#bfbfbf]">{note.authorName}</span>
+                  <span>{formatDateTime(note.createdAt)}</span>
+                </p>
+                <p className="mt-2 whitespace-pre-wrap text-[15px] text-white">{note.body}</p>
+              </li>
+            ))}
+          </ol>
+          {/* The #notes at the end keeps the Notes pill pressed after the page changes. */}
+          <Pager
+            info={notesInfo}
+            hrefFor={(target) => `/pulse/clinics/${clinic.id}${target > 1 ? `?notes=${target}` : ""}#notes`}
+            previousLabel="Newer"
+            nextLabel="Older"
+          />
+        </div>
       )}
     </Section>
   );
@@ -362,7 +386,7 @@ export default async function PulseClinicPage({ params }: PageProps<"/pulse/clin
             { id: "branding", label: "Branding", content: branding },
             { id: "people", label: "People", content: peopleSection },
             { id: "links", label: "Links", content: links },
-            { id: "notes", label: `Notes${notes.length ? ` (${notes.length})` : ""}`, content: notesSection },
+            { id: "notes", label: `Notes${noteCount ? ` (${noteCount})` : ""}`, content: notesSection },
           ]}
         />
       </div>

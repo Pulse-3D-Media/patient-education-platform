@@ -23,6 +23,7 @@ import { saveSettings, type Settings } from "@/lib/db/settings";
 import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/lib/db/videos";
 import { isValidRenewalCount, MAX_LINK_DAYS, MAX_RENEWALS, MIN_LINK_DAYS, MIN_RENEWALS } from "@/lib/expiry";
 import { parseDuration } from "@/lib/format";
+import { NOTE_MAX_LENGTH, cleanNote } from "@/lib/note-form";
 import { renameClerkOrganization } from "@/lib/organization";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
@@ -60,9 +61,6 @@ const ALL_CATEGORIES = Object.values(Category);
 
 /** The longest a notice or reason may be. Keeps the admin banner one line or two. */
 const SHORT_TEXT_LIMIT = 300;
-
-/** The longest one note may be. */
-const NOTE_LIMIT = 2000;
 
 /** The clinic id from a form, checked to exist. Null means the form was tampered with or the clinic is gone. */
 async function clinicFromForm(formData: FormData) {
@@ -317,9 +315,10 @@ export async function addNoteAction(_previous: FormState, formData: FormData): P
   const clinic = await clinicFromForm(formData);
   if (!clinic) return { error: "That clinic no longer exists." };
 
-  const body = String(formData.get("body") ?? "").trim();
+  // Measured the way the box counts it: a line break is one character (see cleanNote).
+  const body = cleanNote(String(formData.get("body") ?? ""));
   if (!body) return { error: "Type the note first." };
-  if (body.length > NOTE_LIMIT) return { error: `Keep a note under ${NOTE_LIMIT} characters.` };
+  if (body.length > NOTE_MAX_LENGTH) return { error: `Keep a note to ${NOTE_MAX_LENGTH} characters or fewer.` };
 
   await addClinicNote(clinic.id, { kind: "STAFF", body, authorName: staff.name });
   revalidatePath(`/pulse/clinics/${clinic.id}`);

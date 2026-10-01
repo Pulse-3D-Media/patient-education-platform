@@ -1,10 +1,12 @@
 "use client";
 
 import type { Category, PracticeType, StaffAccess } from "@prisma/client";
+import { unstable_rethrow } from "next/navigation";
 import { useActionState, useState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
+import { NOTE_MAX_LENGTH, saveNoteDraft, type NoteOutcome } from "@/lib/note-form";
 import { addNoteAction, saveDetailsAction, setManagedAction, setOwnerAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
 import { Outcome, SaveButton } from "../../FormBits";
 
@@ -325,12 +327,28 @@ export function DetailsForm({ clinicId, values }: { clinicId: string; values: De
 }
 
 /**
- * Add one entry to the clinic's log. The box empties itself once the note
- * is saved (React resets a form after its action succeeds), and the list
- * under it refreshes with the new entry on top.
+ * Add one entry to the clinic's log.
+ *
+ * What is typed is kept here (`draft`), not left to the browser, because
+ * React empties a form's boxes after every send, refused or not. The box is
+ * emptied only when the server says the note was saved; a refusal or a
+ * failed connection leaves every character in place with a plain line under
+ * the button (the rules are in lib/note-form.ts). The list under the box
+ * refreshes with the new entry on top.
+ *
+ * The box stops at NOTE_MAX_LENGTH characters and counts down beside the
+ * button. That is a courtesy: the server checks the length again.
  */
 export function NoteForm({ clinicId }: { clinicId: string }) {
-  const [state, action, pending] = useActionState(addNoteAction, null);
+  const [draft, setDraft] = useState("");
+  const [state, action, pending] = useActionState(async (previous: NoteOutcome, formData: FormData) => {
+    const typed = String(formData.get("body") ?? "");
+    const result = await saveNoteDraft(typed, () => addNoteAction(previous, formData), unstable_rethrow);
+    // Empty the box only if nothing more was typed while the note was being sent.
+    setDraft((now) => (now === typed ? result.draft : now));
+    return result.outcome;
+  }, null);
+  const left = NOTE_MAX_LENGTH - draft.length;
   return (
     <form action={action} className="flex flex-col gap-3">
       <input type="hidden" name="clinicId" value={clinicId} />
@@ -342,12 +360,22 @@ export function NoteForm({ clinicId }: { clinicId: string }) {
         name="body"
         rows={3}
         required
+        maxLength={NOTE_MAX_LENGTH}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        aria-describedby="body-count"
         placeholder="Who we talked to, what they asked for, what was agreed."
         className={TEXTAREA}
       />
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} label="Add note" />
         <Outcome state={state} />
+        <p id="body-count" className={`ml-auto text-sm ${left <= 100 ? "text-[#f3b94d]" : "text-[#667085]"}`}>
+          {/* The box cannot be typed past the limit, so "over" only shows for a note put there some other way. */}
+          {left >= 0
+            ? `${left.toLocaleString("en-US")} of ${NOTE_MAX_LENGTH.toLocaleString("en-US")} characters left`
+            : `${(-left).toLocaleString("en-US")} over the limit of ${NOTE_MAX_LENGTH.toLocaleString("en-US")} characters`}
+        </p>
       </div>
     </form>
   );

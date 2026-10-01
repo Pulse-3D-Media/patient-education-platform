@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { comingSoonSentence, type CategoryConfig } from "@/lib/db/category-config";
+import { comingSoonSentence, type CategoryConfig } from "@/lib/categories";
 
 /**
  * What the library shows for a category that has nothing published yet,

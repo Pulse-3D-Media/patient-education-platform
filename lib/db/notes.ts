@@ -28,13 +28,29 @@ export type NewNote = {
 
 const NOTE_FIELDS = { id: true, kind: true, body: true, authorName: true, createdAt: true } as const;
 
-/** Every note on one clinic, newest first. */
-export async function listNotesForClinic(clinicId: string) {
+/** How many notes one page of a clinic's log holds. */
+export const NOTES_PAGE_SIZE = 50;
+
+/**
+ * One page of a clinic's notes, newest first: the newest NOTES_PAGE_SIZE by
+ * default, older ones on page 2, 3 and so on. Never the whole log: a clinic's
+ * log only ever grows (every change saved writes an entry), so it is read a
+ * page at a time. Notes written in the same instant come back in a steady
+ * order (by id), so a note is never on two pages or on none.
+ */
+export async function listNotesForClinic(clinicId: string, page = 1) {
   return prisma.clinicNote.findMany({
     where: { clinicId },
     select: NOTE_FIELDS,
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: (Math.max(1, Math.floor(page)) - 1) * NOTES_PAGE_SIZE,
+    take: NOTES_PAGE_SIZE,
   });
+}
+
+/** How many notes one clinic's log holds, counted in the database. */
+export async function countNotesForClinic(clinicId: string) {
+  return prisma.clinicNote.count({ where: { clinicId } });
 }
 
 /** Add one entry to a clinic's log. Returns the new row. Throws if the clinic does not exist. */

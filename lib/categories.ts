@@ -88,6 +88,27 @@ export function availabilityLabel(availability: CategoryAvailability): string | 
   return null;
 }
 
+/** What one category's row in the CategoryConfig table says (read and saved in lib/db/category-config.ts). */
+export type CategoryConfig = {
+  /** False takes the category off the price list. It still shows in the library. */
+  sellable: boolean;
+  /** The sentence on the library's "Coming soon" tile. Null means the default sentence. */
+  comingSoonText: string | null;
+};
+
+/** What a category says while it has no published video and no sentence of its own. */
+export const DEFAULT_COMING_SOON = "Animations for this category are in production and will appear here when they are released.";
+
+/**
+ * The sentence the library shows on a category's "Coming soon" tile: the
+ * one staff wrote, or the default. Pure, so the library pages can call it
+ * without another query.
+ */
+export function comingSoonSentence(config: CategoryConfig | undefined) {
+  const text = config?.comingSoonText?.trim();
+  return text ? text : DEFAULT_COMING_SOON;
+}
+
 /** Look a category up by its URL slug. Returns undefined for an unknown slug. */
 export function categoryFromSlug(slug: string) {
   return CATEGORIES.find((c) => c.slug === slug);

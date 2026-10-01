@@ -1,8 +1,9 @@
-import type { Category, ClinicStatus, PracticeType, Prisma, StaffAccess } from "@prisma/client";
+import { Prisma, type Category, type ClinicStatus, type PracticeType, type StaffAccess } from "@prisma/client";
 import { PRACTICE_TYPE_WORDS, STAFF_ACCESS_WORDS, effectiveAccess, hasLiveSubscription } from "../billing-state";
 import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, brandFontLabel, brandThemeLabel, parseBrandFont, parseBrandTheme } from "../branding";
 import { CATEGORIES } from "../categories";
 import { clinicIsOpen } from "../clinic-status";
+import { clampPage } from "../paging";
 import { formatUsPhone } from "../phone";
 import { checkSeatReduction, isClerkUserId, overAllocatedWords, seatSummary } from "../seats";
 import { readBillingFacts } from "./billing";
@@ -204,24 +205,64 @@ export type PulseClinicRow = {
   lastLinkAt: Date | null;
 };
 
+/** How many clinics one page of the clinics table holds. */
+export const PULSE_CLINICS_PAGE_SIZE = 50;
+
+/** One page of the clinics table, and where it sits in the whole list. */
+export type PulseClinicPage = {
+  rows: PulseClinicRow[];
+  /** How many clinics match the search in all, on every page together. */
+  total: number;
+  /** The page these rows are. The page asked for, pulled back to the last page when it was past the end. */
+  page: number;
+};
+
 /**
- * Every clinic, for the clinics table on /pulse, with its link activity.
+ * One page of the clinics table on /pulse, with each clinic's link activity.
  * Sorted by last activity: the clinic that most recently made a link comes
  * first, clinics that never made one last, newest of those first.
  *
  * Optionally narrowed by a name search (any part of the name, any case) and
- * by one status. The search happens in the database, so the list stays
- * quick as clinics accumulate.
+ * by one status.
+ *
+ * Never the whole table. The search, the sort and the cut into pages all
+ * happen in the database, in three small steps:
+ *   1. count the clinics that match;
+ *   2. ask for the ids of one page of them, in order. Prisma's query builder
+ *      cannot sort clinics by "their newest link", so this one is written as
+ *      SQL (the values are bound as parameters, never pasted into the text);
+ *   3. read those clinics, at most PULSE_CLINICS_PAGE_SIZE of them, with
+ *      their counts.
+ * Nothing here asks Clerk anything: the seats come from our own tables.
  */
-export async function listClinicsForPulse(filter: { query?: string; status?: ClinicStatus } = {}): Promise<PulseClinicRow[]> {
+export async function listClinicsForPulse(filter: { query?: string; status?: ClinicStatus; page?: number } = {}): Promise<PulseClinicPage> {
   const since = new Date(Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000);
   const query = filter.query?.trim();
+  // The name search as a LIKE pattern, or null for no search. The three
+  // characters LIKE treats specially (\ % _) are escaped, so a search for
+  // "50%" finds exactly that and not everything.
+  const namePattern = query ? `%${query.replace(/[\\%_]/g, "\\$&")}%` : null;
+  const status = filter.status ?? null;
+
+  // Which clinics match. Written once and used by both the count and the page of ids, so the two cannot disagree.
+  const matching = Prisma.sql`
+    FROM "Clinic" c
+    WHERE (${namePattern}::text IS NULL OR c."name" ILIKE ${namePattern})
+      AND (${status}::text IS NULL OR c."status"::text = ${status})`;
+
+  const counted = await prisma.$queryRaw<{ total: number }[]>`SELECT COUNT(*)::int AS "total" ${matching}`;
+  const total = counted[0]?.total ?? 0;
+  const page = clampPage(filter.page ?? 1, total, PULSE_CLINICS_PAGE_SIZE);
+
+  const ordered = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT c."id"
+    ${matching}
+    ORDER BY (SELECT MAX(s."createdAt") FROM "Share" s WHERE s."clinicId" = c."id") DESC NULLS LAST, c."createdAt" DESC, c."id" DESC
+    LIMIT ${PULSE_CLINICS_PAGE_SIZE} OFFSET ${(page - 1) * PULSE_CLINICS_PAGE_SIZE}`;
+  const ids = ordered.map((row) => row.id);
 
   const clinics = await prisma.clinic.findMany({
-    where: {
-      ...(query ? { name: { contains: query, mode: "insensitive" } } : {}),
-      ...(filter.status ? { status: filter.status } : {}),
-    },
+    where: { id: { in: ids } },
     select: {
       id: true,
       name: true,
@@ -237,27 +278,30 @@ export async function listClinicsForPulse(filter: { query?: string; status?: Cli
     },
   });
 
-  const rows: PulseClinicRow[] = clinics.map((clinic) => ({
-    id: clinic.id,
-    name: clinic.name,
-    clerkOrgId: clinic.clerkOrgId,
-    status: clinic.status,
-    managedByPulse: clinic.managedByPulse,
-    categories: clinic.categories,
-    surgeonSeats: clinic.surgeonSeats,
-    hasOwner: clinic.ownerClerkUserId !== null,
-    seatsInUse: clinic._count.seatAllocations + clinic._count.seatInvitations,
-    createdAt: clinic.createdAt,
-    recentLinks: clinic._count.shares,
-    lastLinkAt: clinic.shares[0]?.createdAt ?? null,
-  }));
+  // The database returns them in no particular order; put them back in the order of the ids.
+  const byId = new Map(clinics.map((clinic) => [clinic.id, clinic]));
+  const rows: PulseClinicRow[] = [];
+  for (const id of ids) {
+    const clinic = byId.get(id);
+    // A clinic deleted between the two reads is simply not on the page.
+    if (!clinic) continue;
+    rows.push({
+      id: clinic.id,
+      name: clinic.name,
+      clerkOrgId: clinic.clerkOrgId,
+      status: clinic.status,
+      managedByPulse: clinic.managedByPulse,
+      categories: clinic.categories,
+      surgeonSeats: clinic.surgeonSeats,
+      hasOwner: clinic.ownerClerkUserId !== null,
+      seatsInUse: clinic._count.seatAllocations + clinic._count.seatInvitations,
+      createdAt: clinic.createdAt,
+      recentLinks: clinic._count.shares,
+      lastLinkAt: clinic.shares[0]?.createdAt ?? null,
+    });
+  }
 
-  return rows.sort((a, b) => {
-    const activityA = a.lastLinkAt?.getTime() ?? 0;
-    const activityB = b.lastLinkAt?.getTime() ?? 0;
-    if (activityA !== activityB) return activityB - activityA;
-    return b.createdAt.getTime() - a.createdAt.getTime();
-  });
+  return { rows, total, page };
 }
 
 /** One clinic with every field /pulse shows, or null if the id is unknown. */

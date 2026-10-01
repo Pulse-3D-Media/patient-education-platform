@@ -374,3 +374,76 @@ describe("link codes", () => {
     expect((await getShareByCode(code))?.viewCount).toBe(1);
   });
 });
+
+/**
+ * A code that is already taken. createShare() does not look a code up before
+ * using it: the unique column refuses a taken one and the link is tried again
+ * with another. These tests hand in the codes (makeCode) so a clash, which
+ * random codes practically never produce, happens on demand.
+ */
+describe("a link code that is already taken", () => {
+  /** A made-up ten-character code nobody else has. */
+  const freshCode = () => `vt${randomBytes(4).toString("hex")}`;
+
+  /** A maker that hands out the given codes in order, and counts how often it was asked. */
+  function codesInOrder(codes: string[]) {
+    let asked = 0;
+    const makeCode = () => codes[Math.min(asked++, codes.length - 1)];
+    return { makeCode, asked: () => asked };
+  }
+
+  it("tries again with a new code, and leaves the link that has the code alone", async () => {
+    const clinic = await makeClinic("Vitest code clash clinic");
+    const first = await createShare(clinic, publishedVideo);
+    createdShareIds.push(first.id);
+
+    const next = freshCode();
+    const codes = codesInOrder([first.code, next]);
+    const second = await createShare(clinic, publishedVideo, { makeCode: codes.makeCode });
+    createdShareIds.push(second.id);
+
+    expect(second.code).toBe(next);
+    expect(codes.asked()).toBe(2);
+    // The link that already had the code is still the one the code opens.
+    expect((await getShareByCode(first.code))?.id).toBe(first.id);
+    expect(await prisma.share.count({ where: { clinicId: clinic } })).toBe(2);
+  });
+
+  it("two links made at the same moment with the same code both get made, with different codes", async () => {
+    const clinic = await makeClinic("Vitest code overlap clinic");
+    const contested = freshCode();
+    const one = codesInOrder([contested, freshCode()]);
+    const two = codesInOrder([contested, freshCode()]);
+
+    const [a, b] = await Promise.all([
+      createShare(clinic, publishedVideo, { makeCode: one.makeCode }),
+      createShare(clinic, publishedVideo, { makeCode: two.makeCode }),
+    ]);
+    createdShareIds.push(a.id, b.id);
+
+    expect(a.code).not.toBe(b.code);
+    // Exactly one of them kept the contested code; the other was refused it by the database and took its second code.
+    expect([a.code, b.code].filter((code) => code === contested)).toHaveLength(1);
+    expect(one.asked() + two.asked()).toBe(3);
+    expect(await prisma.share.count({ where: { clinicId: clinic } })).toBe(2);
+  });
+
+  it("gives up after five taken codes with a plain message, and writes nothing", async () => {
+    const clinic = await makeClinic("Vitest code exhausted clinic");
+    const first = await createShare(clinic, publishedVideo);
+    createdShareIds.push(first.id);
+
+    const codes = codesInOrder([first.code]);
+    await expect(createShare(clinic, publishedVideo, { makeCode: codes.makeCode })).rejects.toThrow("Could not find an unused share code");
+    expect(codes.asked()).toBe(5);
+    expect(await prisma.share.count({ where: { clinicId: clinic } })).toBe(1);
+  });
+
+  it("does not try again when the link was refused for any other reason", async () => {
+    const closed = await makeClinic("Vitest code refused clinic", { status: "PAUSED" });
+    const codes = codesInOrder([freshCode()]);
+    await expect(createShare(closed, publishedVideo, { makeCode: codes.makeCode })).rejects.toBeInstanceOf(ShareRefusedError);
+    expect(codes.asked()).toBe(1);
+    expect(await prisma.share.count({ where: { clinicId: closed } })).toBe(0);
+  });
+});

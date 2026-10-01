@@ -158,7 +158,7 @@ describe("who the link is from", () => {
   it("makes the link from the surgeon picked, with their id and 'Dr. First Last' copied onto it, in the admin's clinic", async () => {
     fakeClerk.signIn(adminA, orgActive);
     const result = await createLinkAction(videoId, surgeonA);
-    expect(result).toEqual({ ok: true, code: expect.stringMatching(/^[a-z0-9]{6}$/), senderName: "Dr. Jane Smith" });
+    expect(result).toEqual({ ok: true, code: expect.stringMatching(/^[a-z0-9]{10}$/), senderName: "Dr. Jane Smith" });
 
     const share = await shareOf((result as { code: string }).code);
     expect(share).toMatchObject({ clinicId: clinicA, senderUserId: surgeonA, senderName: "Dr. Jane Smith" });

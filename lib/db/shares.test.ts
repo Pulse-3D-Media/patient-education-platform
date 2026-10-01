@@ -348,3 +348,29 @@ describe("createShare and who the link is from", () => {
     expect(share).toMatchObject({ senderUserId: null, senderName: null });
   });
 });
+
+describe("link codes", () => {
+  it("gives every new link a ten-character code of lowercase letters and digits", async () => {
+    const clinic = await makeClinic("Vitest code length clinic");
+    for (let i = 0; i < 3; i++) {
+      const share = await createShare(clinic, publishedVideo);
+      createdShareIds.push(share.id);
+      expect(share.code).toMatch(/^[a-z0-9]{10}$/);
+    }
+  });
+
+  it("still finds and counts a six-character link made before codes got longer", async () => {
+    const clinic = await makeClinic("Vitest legacy code clinic");
+    // Written the way an older copy of the app wrote it: a six-character code.
+    const code = randomBytes(3).toString("hex");
+    const legacy = await prisma.share.create({
+      data: { code, clinicId: clinic, videoId: publishedVideo, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+      select: { id: true },
+    });
+    createdShareIds.push(legacy.id);
+
+    expect((await getShareByCode(code))?.id).toBe(legacy.id);
+    await recordSharePlay(code);
+    expect((await getShareByCode(code))?.viewCount).toBe(1);
+  });
+});

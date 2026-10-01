@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getBaseUrl } from "@/lib/base-url";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { createShare, SenderRefusedError, ShareRefusedError } from "@/lib/db/shares";
+import { errorKind } from "@/lib/error-kind";
 import { ShareTermsError } from "@/lib/expiry";
 import { qrSvg } from "@/lib/qr";
 import { resolveSender } from "@/lib/senders";
@@ -116,7 +117,7 @@ export async function sendShareAction(videoId: string): Promise<SendResult> {
 
     // Anything else is ours to read, not the surgeon's. The detail goes to the
     // server log (it holds no patient information and no link), never to the screen.
-    console.error("Making a share link from the library failed", error);
+    console.error("Making a share link from the library failed", errorKind(error));
     return { ok: false, error: COULD_NOT_MAKE_LINK };
   }
 }

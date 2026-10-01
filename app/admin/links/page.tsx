@@ -11,6 +11,7 @@ import { formatDuration } from "@/lib/format";
 import { getClinicAccess } from "@/lib/db/access";
 import { getShareTerms } from "@/lib/db/shares";
 import { listUsableVideos } from "@/lib/db/videos";
+import { errorKind } from "@/lib/error-kind";
 import { listSenders, type Sender } from "@/lib/senders";
 import { AdminFrame } from "../AdminFrame";
 import { LinkRows } from "./LinkRows";
@@ -144,7 +145,7 @@ async function readShareTerms(clinicId: string): Promise<ShareTerms | null> {
     return await getShareTerms(clinicId);
   } catch (error) {
     if (!(error instanceof ShareTermsError)) throw error;
-    console.error("Shared links could not read the clinic's share terms.", error);
+    console.error("Shared links could not read the clinic's share terms.", errorKind(error));
     return null;
   }
 }

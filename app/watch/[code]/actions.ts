@@ -2,6 +2,7 @@
 
 import { headers } from "next/headers";
 import { recordSharePlay, requestShareRenewal } from "@/lib/db/shares";
+import { errorKind } from "@/lib/error-kind";
 import { notifyClinicOfRenewalRequest } from "@/lib/renewal-email";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
 
@@ -25,8 +26,9 @@ export async function recordPlay(code: string): Promise<{ recorded: boolean }> {
     const result = await recordSharePlay(code);
     return { recorded: result.recorded };
   } catch (error) {
-    // The detail goes to the server log, never to the patient's screen.
-    console.error("Could not record a play start on a share link.", error);
+    // The kind of failure goes to the server log, never to the patient's
+    // screen, and never the error itself: its message could hold the code.
+    console.error("Could not record a play start on a share link.", errorKind(error));
     return { recorded: false };
   }
 }
@@ -68,7 +70,7 @@ export async function requestReactivation(code: string): Promise<{ asked: boolea
     if (!told.told) console.log("A request to turn a link back on was recorded; the clinic was not emailed:", told.reason);
     return { asked: true };
   } catch (error) {
-    console.error("Could not record a request to turn a link back on.", error instanceof Error ? error.name : "unknown error");
+    console.error("Could not record a request to turn a link back on.", errorKind(error));
     return { asked: false };
   }
 }

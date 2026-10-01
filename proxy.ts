@@ -21,7 +21,8 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
  * getCurrentClinicId()). Keep both.
  *
  * Everything not listed in STAFF_PATHS is public. That covers the patient
- * page (/watch), the sign-in and sign-up pages, and later /q and /api/webhooks.
+ * page (/watch), the sign-in and sign-up pages, the health check
+ * (/api/health, for an uptime monitor), /api/webhooks, and later /q.
  */
 
 /** The path prefixes that need a signed-in user. Everything under them too. */

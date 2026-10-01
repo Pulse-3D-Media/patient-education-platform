@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { CreateOrganization, OrganizationList } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import { LOGO_URL } from "@/lib/brand";
+import { askClerk } from "@/lib/clerk-timeout";
 import { getCurrentClinic } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 
@@ -44,11 +45,12 @@ export default async function OnboardingPage() {
 
   // Does this person already have a clinic, or an invitation to one? Two
   // small Clerk lookups, only on this page, only for people with no active
-  // organization.
+  // organization. Each has the time limit from lib/clerk-timeout.ts, so a
+  // slow Clerk ends in the calm error page rather than a page that never loads.
   const client = await clerkClient();
   const [memberships, invitations] = await Promise.all([
-    client.users.getOrganizationMembershipList({ userId, limit: 1 }),
-    client.users.getOrganizationInvitationList({ userId, status: "pending", limit: 1 }),
+    askClerk(client.users.getOrganizationMembershipList({ userId, limit: 1 }), "the person's clinics"),
+    askClerk(client.users.getOrganizationInvitationList({ userId, status: "pending", limit: 1 }), "the person's invitations"),
   ]);
   const belongsSomewhere = memberships.totalCount > 0 || invitations.totalCount > 0;
 

@@ -148,8 +148,59 @@ describe("the library home", () => {
       else expect(html).not.toContain(link);
     }
     expect(html).toContain("Not on your plan");
-    // The locked tile does not carry the locked category's video.
+    // The locked line does not carry the locked category's video.
     expect(html).not.toContain(hipSrc);
+  });
+
+  it("puts the clinic's own categories first, the locked ones in a closed More categories section, and leaves out coming soon ones not on the plan", async () => {
+    signInAs(orgKnee, "Vitest library clinic (knee)");
+    const html = renderToStaticMarkup(await LibraryPage());
+    const states = await expectedStates(kneeClinic);
+
+    // Split the page at the More categories section: the main grid is everything before it.
+    const at = html.indexOf("<details");
+    expect(at).toBeGreaterThan(-1);
+    const main = html.slice(0, at);
+    const more = html.slice(at);
+
+    // Closed until tapped, because this clinic has a category of its own.
+    expect(more).not.toMatch(/^<details[^>]*\sopen/);
+    expect(more).toContain("More categories");
+
+    for (const category of CATEGORIES) {
+      const label = `>${category.label.replace("&", "&amp;")}<`; // as React writes it
+      if (category.value === "KNEE") {
+        // On the plan: in the main grid, whatever state it is in, and not listed again below.
+        expect(main).toContain(label);
+        expect(more).not.toContain(label);
+      } else if (states[category.value] === "locked") {
+        expect(more).toContain(label);
+        expect(main).not.toContain(label);
+      } else {
+        // Not on the plan and nothing in it: not on the page at all.
+        expect(states[category.value]).toBe("coming-soon");
+        expect(html).not.toContain(label);
+      }
+    }
+    const locked = CATEGORIES.filter((c) => states[c.value] === "locked").length;
+    expect(more).toContain(`(${locked} not on your plan)`);
+  });
+
+  it("opens More categories, and says so, for an open clinic with nothing on its plan", async () => {
+    const orgNone = fakeOrgId();
+    const clinic = await prisma.clinic.create({
+      data: { name: "Vitest library clinic (no categories)", clerkOrgId: orgNone, status: "ACTIVE", categories: [] },
+      select: { id: true },
+    });
+    createdClinicIds.push(clinic.id);
+    signInAs(orgNone, "Vitest library clinic (no categories)");
+    const html = renderToStaticMarkup(await LibraryPage());
+
+    expect(html).toContain("Your clinic&#x27;s plan has no categories yet.");
+    // Hip has a published video, so it is listed, and the section starts open.
+    expect(html).toMatch(/<details[^>]*\sopen/);
+    expect(html).toContain(">Hip<");
+    expect(html).not.toContain('href="/library/');
   });
 
   it("shows a clinic that is not open the calm page, not the tiles; a member is told to ask an admin and gets no Billing button", async () => {

@@ -202,6 +202,41 @@ describe("the tap-to-call button", () => {
     const html = await render(await makeShare(clinic.id, videoId));
 
     expect(html).not.toContain("tel:");
+    expect(html).not.toContain("Call your clinic:");
+  });
+
+  it("is a button on a phone and plain words on a computer, chosen by the browser, so the page is the same for everyone", async () => {
+    const clinic = await makeClinic({ phone: "8015550123" });
+    const html = await render(await makeShare(clinic.id, videoId, true));
+
+    // The button hides itself on a computer (a mouse or trackpad that can hover: the "computer:" variant in app/globals.css).
+    expect(html).toMatch(/<a[^>]*href="tel:\+18015550123"[^>]*computer:hidden/);
+    // The number as words, not a link, hidden everywhere else.
+    expect(html).toMatch(/<p class="hidden[^"]*computer:flex[^"]*">.*?Call your clinic: <span[^>]*>\(801\) 555-0123<\/span>/);
+    expect(html).not.toMatch(/<a[^>]*>[^<]*Call your clinic/);
+  });
+});
+
+describe("the education line", () => {
+  const SENTENCE = "This video is for education only. It is not medical advice. Ask your doctor about anything you are unsure of.";
+
+  it("sits under the video as plain text, at the page's smallest size or larger, and never says consent", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+
+    expect(html).toContain(SENTENCE);
+    // Under the video, not a step before it.
+    expect(html.indexOf(SENTENCE)).toBeGreaterThan(html.indexOf("<video"));
+    // A paragraph of words, 16px: nothing to tap, nothing to tick.
+    expect(html).toMatch(new RegExp(`<p class="[^"]*text-\\[16px\\][^"]*">${SENTENCE.replace(/\./g, "\\.")}</p>`));
+    expect(html.toLowerCase()).not.toContain("consent");
+  });
+
+  it("is on a placeholder link too", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, placeholderVideoId));
+
+    expect(html).toContain(SENTENCE);
   });
 });
 

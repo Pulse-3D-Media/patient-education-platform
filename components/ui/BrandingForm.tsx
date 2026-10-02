@@ -162,7 +162,7 @@ export function BrandingForm({
                 <span
                   aria-hidden="true"
                   className={`flex h-10 w-14 shrink-0 flex-col justify-center gap-1 rounded-md border px-2 ${
-                    choice.key === "light" ? "border-[#7f796c] bg-[#fbfaf7]" : "border-white/30 bg-black"
+                    choice.key === "light" ? "border-[#737b83] bg-white" : "border-white/30 bg-black"
                   }`}
                 >
                   <span className={`h-1.5 w-8 rounded-full ${choice.key === "light" ? "bg-[#12202a]" : "bg-white"}`} />

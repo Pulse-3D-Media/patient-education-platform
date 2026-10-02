@@ -1,13 +1,12 @@
 import Link from "next/link";
-import { LockIcon } from "@/components/ui/icons";
 
 /**
  * What the library shows for a category a clinic cannot open right now,
  * other than "Coming soon" (which has its own file, ComingSoon.tsx):
  *
  *   Locked   something is published in it, but the category is not on
- *            this clinic's plan. The tile is dimmed and carries a lock;
- *            the page says so and points at Billing. Nothing playable is
+ *            this clinic's plan. The library home lists it by name under
+ *            "More categories"; its page says so and points at Billing. Nothing playable is
  *            sent to the browser for a locked category, whether it was
  *            reached from a tile or by typing the address.
  *
@@ -22,14 +21,7 @@ import { LockIcon } from "@/components/ui/icons";
  * Calm and plain, like the rest of the library: nothing here is an error.
  */
 
-/** The dimmed tile on the library home for a category that is not on the plan. Not a link. */
-export function LockedTile({ label, image }: { label: string; image: string }) {
-  return (
-    <QuietTile label={label} image={image} badge="Not on your plan" sentence={`Your clinic's admin can see the plan under Billing, and ask Pulse 3D about adding ${label}.`} lock />
-  );
-}
-
-/** The same message on the category's own page, for someone who typed the address or tapped it in the drawer. */
+/** A category's own page when it is not on the plan, for someone who typed the address or tapped it in the drawer. (On the library home it is one line under "More categories".) */
 export function LockedCategory({ label }: { label: string }) {
   return (
     <QuietBlock eyebrow="Not on your plan" heading={`${label} is not on your clinic's plan.`}>
@@ -61,7 +53,7 @@ export function EmptyCategory({ label }: { label: string }) {
 }
 
 /** A dimmed, non-link tile: the picture faded and grey, the label, a badge, and one sentence. */
-function QuietTile({ label, image, badge, sentence, lock = false }: { label: string; image: string; badge: string; sentence: string; lock?: boolean }) {
+function QuietTile({ label, image, badge, sentence }: { label: string; image: string; badge: string; sentence: string }) {
   return (
     <div aria-disabled="true" className="relative block aspect-[16/9] overflow-hidden rounded-2xl border border-dashed border-line-strong bg-surface">
       {/* eslint-disable-next-line @next/next/no-img-element -- CDN still, no resizing needed */}
@@ -71,7 +63,6 @@ function QuietTile({ label, image, badge, sentence, lock = false }: { label: str
         <span className="flex items-center justify-between gap-3">
           <span className="text-2xl font-semibold text-ink-soft sm:text-[26px]">{label}</span>
           <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-veil/50 px-3 py-1 text-sm text-ink-soft backdrop-blur">
-            {lock && <LockIcon className="h-4 w-4" />}
             {badge}
           </span>
         </span>

@@ -7,6 +7,7 @@ import { LOGO_URL } from "@/lib/brand";
 import { getSettings } from "@/lib/db/settings";
 import { getShareByCode } from "@/lib/db/shares";
 import { canRequestRenewal, isExpired, renewalState } from "@/lib/expiry";
+import { EDUCATION_ONLY } from "@/lib/education-note";
 import { describeDuration } from "@/lib/format";
 import { sentByLine } from "@/lib/sender-name";
 import { getPlaybackUrl } from "@/lib/video";
@@ -32,7 +33,9 @@ import { WatchPlayer } from "./WatchPlayer";
  * Top to bottom it answers the questions an anxious person has, in order: who
  * sent me this ("Sent by Dr. Jane Smith, Summit Orthopedics": the surgeon's
  * name was copied onto the link when it was made; a link made before that
- * says "From Summit Orthopedics"), what is it, why, how long will it take. The Pulse 3D logo sits
+ * says "From Summit Orthopedics"), what is it, why, how long will it take. Under the video, one
+ * quiet sentence says it is for education only, not medical advice (lib/education-note.ts): plain
+ * text, never a step before the video. The Pulse 3D logo sits
  * at the very bottom, small, because the practice sent this, not us.
  *
  * THE CLINIC'S OWN LOOK. The page belongs to the practice that sent it, so
@@ -187,6 +190,9 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
         <p className="mt-4 border-t border-[#e6e2da] pt-4 text-[19px] leading-[1.52] text-[#3a4c56]">
           Watch it as many times as you like, and show it to anyone coming with you.
         </p>
+
+        {/* Plain words only: never a screen, a popup or a box to tick before the video. The wording is Van's, approved by Evan; ask before changing it. */}
+        <p className="mt-4 text-[16px] leading-[1.5] text-[#46555e]">{EDUCATION_ONLY}</p>
 
         {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
         <div className="mt-auto pt-10">

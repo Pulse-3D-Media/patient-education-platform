@@ -8,13 +8,17 @@ import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
 import { NOTE_MAX_LENGTH, saveNoteDraft, type NoteOutcome } from "@/lib/note-form";
 import { addNoteAction, saveDetailsAction, setManagedAction, setOwnerAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
-import { Outcome, SaveButton } from "../../FormBits";
+import { Outcome, SaveButton, useKeptForm } from "../../FormBits";
 
 /**
  * The editable sections of one clinic's page, each a small form that calls
  * its own Server Action (app/pulse/actions.ts) and shows the answer under
  * its button. They are client components because a form needs to know
  * whether it is still sending and what came back.
+ *
+ * Every one of them keeps what was typed when a save is refused or fails
+ * (useKeptForm in app/pulse/FormBits.tsx): the boxes, ticks and choices stay
+ * as they were left, with a plain sentence under the button.
  *
  * Every form carries the clinic id in a hidden field. The action looks that
  * id up before using it, so a changed hidden field gets "no longer exists",
@@ -30,9 +34,12 @@ const STATUS_CHOICES: { value: StaffAccess | "FOLLOW"; label: string; hint: stri
 ];
 
 export function StatusForm({ clinicId, staffAccess }: { clinicId: string; staffAccess: StaffAccess | null }) {
-  const [state, action, pending] = useActionState(setStatusAction, null);
+  // The reason is kept here so it can be emptied once the change is saved (a
+  // reason belongs to one change). A refused or failed save leaves it as typed.
+  const [reason, setReason] = useState("");
+  const { state, pending, form } = useKeptForm(setStatusAction, () => setReason(""));
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <fieldset>
         <legend className={LABEL}>Set the status to</legend>
@@ -59,7 +66,15 @@ export function StatusForm({ clinicId, staffAccess }: { clinicId: string; staffA
         <label htmlFor="reason" className={LABEL}>
           Why (required, kept with the change)
         </label>
-        <input id="reason" name="reason" required className={INPUT} placeholder="Paid by invoice through March" />
+        <input
+          id="reason"
+          name="reason"
+          required
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          className={INPUT}
+          placeholder="Paid by invoice through March"
+        />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} label="Set status" />
@@ -80,9 +95,9 @@ const PRACTICE_CHOICES: { value: PracticeType; label: string; hint: string }[] =
 ];
 
 export function PracticeTypeForm({ clinicId, practiceType }: { clinicId: string; practiceType: PracticeType }) {
-  const [state, action, pending] = useActionState(setPracticeTypeAction, null);
+  const { state, pending, form } = useKeptForm(setPracticeTypeAction);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <fieldset>
         <legend className={LABEL}>What kind of practice this is</legend>
@@ -122,7 +137,7 @@ export function PlanForm({
   /** Which categories can be bought right now. The others get a small label; they can still be ticked. */
   availability: Record<Category, CategoryAvailability>;
 }) {
-  const [state, action, pending] = useActionState(setPlanAction, null);
+  const { state, pending, form } = useKeptForm(setPlanAction);
   // What is typed is kept here, not in the page, so a save that is refused
   // (fewer seats than are in use) leaves the draft exactly as it was.
   const [picked, setPicked] = useState<Category[]>(categories);
@@ -131,7 +146,7 @@ export function PlanForm({
   const wanted = /^\d+$/.test(seatsText.trim()) ? Number(seatsText.trim()) : null;
   const wouldBeOver = wanted !== null && wanted < seatsInUse && wanted < surgeonSeats;
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <fieldset>
         <legend className={LABEL}>Categories on the plan</legend>
@@ -207,9 +222,9 @@ export function PlanForm({
 }
 
 export function ManagedForm({ clinicId, managedByPulse }: { clinicId: string; managedByPulse: boolean }) {
-  const [state, action, pending] = useActionState(setManagedAction, null);
+  const { state, pending, form } = useKeptForm(setManagedAction);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <label className="flex min-h-12 cursor-pointer items-start gap-3">
         <input type="checkbox" name="managedByPulse" defaultChecked={managedByPulse} className="mt-1 h-5 w-5 accent-[#2a829b]" />
@@ -236,9 +251,9 @@ export function ManagedForm({ clinicId, managedByPulse }: { clinicId: string; ma
  * checks with Clerk again before anything is written.
  */
 export function OwnerForm({ clinicId, people, ownerUserId }: { clinicId: string; people: { userId: string; label: string }[]; ownerUserId: string | null }) {
-  const [state, action, pending] = useActionState(setOwnerAction, null);
+  const { state, pending, form } = useKeptForm(setOwnerAction);
   return (
-    <form action={action} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+    <form {...form} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
       <input type="hidden" name="clinicId" value={clinicId} />
       <div className="sm:w-96">
         <label htmlFor="ownerUserId" className={LABEL}>
@@ -272,9 +287,9 @@ export type DetailsValues = {
 };
 
 export function DetailsForm({ clinicId, values }: { clinicId: string; values: DetailsValues }) {
-  const [state, action, pending] = useActionState(saveDetailsAction, null);
+  const { state, pending, form } = useKeptForm(saveDetailsAction);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <div className="grid gap-4 md:grid-cols-2">
         <div>

@@ -1,12 +1,12 @@
 "use client";
 
 import type { Category } from "@prisma/client";
-import { useActionState, type FormEvent } from "react";
+import type { FormEvent } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
 import { formatDuration } from "@/lib/format";
 import { saveVideoAction } from "../actions";
-import { Outcome, SaveButton } from "../FormBits";
+import { Outcome, SaveButton, useKeptForm } from "../FormBits";
 
 /** What the form starts from when it is editing. Absent when adding. */
 export type VideoValues = {
@@ -35,9 +35,12 @@ export const REPLACE_PLACEHOLDER_CONFIRM = "Links already sent will now play the
  * untick "Placeholder", save. Because links already sent will start playing
  * the new file at once, unticking the box asks for a yes before the form is
  * sent.
+ *
+ * A refused or failed save leaves every box as typed (useKeptForm), so a
+ * long address or a note is never typed twice.
  */
 export function VideoForm({ video }: { video?: VideoValues }) {
-  const [state, action, pending] = useActionState(saveVideoAction, null);
+  const { state, pending, form } = useKeptForm(saveVideoAction);
 
   function confirmBeforeSend(event: FormEvent<HTMLFormElement>) {
     if (!video?.isPlaceholder) return;
@@ -48,7 +51,7 @@ export function VideoForm({ video }: { video?: VideoValues }) {
   }
 
   return (
-    <form action={action} onSubmit={confirmBeforeSend} className="flex flex-col gap-4">
+    <form {...form} onSubmit={confirmBeforeSend} className="flex flex-col gap-4">
       {video && <input type="hidden" name="id" value={video.id} />}
 
       <div className="grid gap-4 md:grid-cols-2">

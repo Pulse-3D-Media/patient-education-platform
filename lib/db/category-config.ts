@@ -1,6 +1,12 @@
 import { Category } from "@prisma/client";
-import type { CategoryAvailability } from "../categories";
+import type { CategoryAvailability, CategoryConfig } from "../categories";
 import { prisma } from "./client";
+
+// The row's shape, the default sentence and comingSoonSentence() have no
+// database in them, so they live in lib/categories.ts, where the category
+// form in the browser can import them too. Passed along here so server code
+// keeps one import.
+export { DEFAULT_COMING_SOON, comingSoonSentence, type CategoryConfig } from "../categories";
 
 /**
  * The CategoryConfig table: one row per library category, saying whether the
@@ -15,28 +21,7 @@ import { prisma } from "./client";
  * clinicId (rule 1 only requires it for clinic-owned data).
  */
 
-/** What one category's row says. */
-export type CategoryConfig = {
-  /** False takes the category off the price list. It still shows in the library. */
-  sellable: boolean;
-  /** The sentence on the library's "Coming soon" tile. Null means the default sentence. */
-  comingSoonText: string | null;
-};
-
-/** What a category says while it has no published video and no sentence of its own. */
-export const DEFAULT_COMING_SOON = "Animations for this category are in production and will appear here when they are released.";
-
 const ALL_CATEGORIES = Object.values(Category);
-
-/**
- * The sentence the library shows on a category's "Coming soon" tile: the
- * one staff wrote, or the default. Pure, so the library pages can call it
- * without another query.
- */
-export function comingSoonSentence(config: CategoryConfig | undefined) {
-  const text = config?.comingSoonText?.trim();
-  return text ? text : DEFAULT_COMING_SOON;
-}
 
 /**
  * Every category's row, keyed by category. Creates any row that is missing

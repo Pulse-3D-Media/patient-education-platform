@@ -1,15 +1,24 @@
 "use client";
 
-import { useActionState } from "react";
 import { INPUT, PRIMARY_BUTTON } from "@/components/ui/styles";
-import { SETTINGS_DEFAULTS, SETTINGS_HELP, type Settings } from "@/lib/db/settings";
 import { MAX_LINK_DAYS, MAX_RENEWALS, MIN_RENEWALS } from "@/lib/expiry";
+import { SETTINGS_DEFAULTS, SETTINGS_HELP, SETTINGS_NOT_ACTIVE, type Settings } from "@/lib/settings-defaults";
 import { saveSettingsAction } from "../actions";
+import { useKeptForm } from "../FormBits";
 
 /**
  * The settings form: one row per setting, with the field, its default and
- * a plain sentence about what it does. Saves all four at once through
+ * a plain sentence about what it does. Saves all five at once through
  * saveSettingsAction and shows the answer under the button.
+ *
+ * A setting that nothing in the app reads yet carries an amber "Not active
+ * yet" line (SETTINGS_NOT_ACTIVE), so a saved number is never taken for one
+ * that is doing something.
+ *
+ * A refused or failed save leaves every number as typed (useKeptForm).
+ *
+ * This file runs in the browser, so it imports the shape, defaults and help
+ * text from lib/settings-defaults.ts, never from lib/db.
  */
 
 const FIELDS: { name: keyof Settings; label: string; unit: string; min?: number; max?: number }[] = [
@@ -22,10 +31,10 @@ const FIELDS: { name: keyof Settings; label: string; unit: string; min?: number;
 ];
 
 export function SettingsForm({ settings }: { settings: Settings }) {
-  const [state, action, pending] = useActionState(saveSettingsAction, null);
+  const { state, pending, form } = useKeptForm(saveSettingsAction);
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       {FIELDS.map((field) => (
         <div key={field.name} className="rounded-2xl border border-white/10 bg-[#0d1113] p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -34,6 +43,7 @@ export function SettingsForm({ settings }: { settings: Settings }) {
                 {field.label}
               </label>
               <p className="mt-1 text-sm text-[#bfbfbf]">{SETTINGS_HELP[field.name]}</p>
+              {SETTINGS_NOT_ACTIVE[field.name] && <p className="mt-2 text-sm font-medium text-[#f3b94d]">{SETTINGS_NOT_ACTIVE[field.name]}</p>}
             </div>
             <div className="flex shrink-0 items-center gap-3">
               <input

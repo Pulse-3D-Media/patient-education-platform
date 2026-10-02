@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { randomInt } from "crypto";
 import { accessRefusalMessage, decideVideoAccess, type AccessDecision, type AccessReason } from "../access";
 import {
@@ -163,12 +164,44 @@ export async function getShareTerms(clinicId: string): Promise<ShareTerms | null
  * sender; such a link says only which clinic sent it, as every link made
  * before surgeons were recorded does.
  */
-export async function createShare(clinicId: string, videoId: string, options: { now?: Date; sender?: ShareSender } = {}) {
+export async function createShare(clinicId: string, videoId: string, options: { now?: Date; sender?: ShareSender; makeCode?: () => string } = {}) {
   const now = options.now ?? new Date();
   const sender = options.sender;
+  // The code is random unless a test hands in its own maker, to force a clash.
+  const makeCode = options.makeCode ?? randomCode;
   // A malformed id could never match a seat; refused here before any lock is taken.
   if (sender && !isClerkUserId(sender.clerkUserId)) throw new SenderRefusedError();
 
+  // THE CODE. The code column is unique, so the database itself refuses a
+  // code that is already taken (Prisma reports that as error P2002). There is
+  // no "is it free?" look-up first: two links being made at the same moment
+  // could both be told "free" and one would still fail. Instead the link is
+  // simply written, and if the database refuses the code, the whole attempt
+  // is made again with a new one. It is the whole attempt, not just the
+  // insert, because Postgres ends a transaction when a statement in it fails:
+  // the next attempt opens a new one and makes every check again. With ten
+  // random characters a clash practically never happens; this is for the day
+  // it does.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await writeShare(clinicId, videoId, now, sender, makeCode());
+    } catch (error) {
+      if (!isCodeClash(error)) throw error;
+      if (attempt >= CODE_ATTEMPTS) throw new Error("Could not find an unused share code. Please try again.");
+    }
+  }
+}
+
+/** How many codes createShare() tries before giving up. */
+const CODE_ATTEMPTS = 5;
+
+/** True when the database refused an insert because a unique value (here, the share code) is already taken. */
+function isCodeClash(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+/** One attempt at createShare(): every check and the insert, in one transaction, with the code it was handed. */
+async function writeShare(clinicId: string, videoId: string, now: Date, sender: ShareSender | undefined, code: string) {
   return prisma.$transaction(async (tx) => {
     const access = await lockClinicAccess(tx, clinicId, now);
     // An unknown clinic id has nothing to grant, so it answers as closed.
@@ -195,29 +228,20 @@ export async function createShare(clinicId: string, videoId: string, options: { 
       senderName = effectiveSenderName(seat.displayName, sender.fallbackName);
     }
 
-    // There are about two billion possible codes, so a clash is very unlikely,
-    // but the code column is unique, so check before saving and try again if
-    // the code is already taken.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const code = randomCode();
-      const taken = await tx.share.findUnique({ where: { code }, select: { id: true } });
-      if (taken) continue;
-
-      return tx.share.create({
-        data: {
-          code,
-          clinicId,
-          videoId,
-          expiryPolicy: "FIRST_PLAY",
-          expiresAt: addDays(now, terms.unclaimedDays),
-          daysAfterFirstPlay: terms.daysAfterFirstPlay,
-          senderUserId: sender?.clerkUserId ?? null,
-          senderName,
-        },
-      });
-    }
-
-    throw new Error("Could not find an unused share code. Please try again.");
+    // No look-up for the code first: the unique column refuses a taken one,
+    // and createShare() tries again with another (see "THE CODE" above).
+    return tx.share.create({
+      data: {
+        code,
+        clinicId,
+        videoId,
+        expiryPolicy: "FIRST_PLAY",
+        expiresAt: addDays(now, terms.unclaimedDays),
+        daysAfterFirstPlay: terms.daysAfterFirstPlay,
+        senderUserId: sender?.clerkUserId ?? null,
+        senderName,
+      },
+    });
   });
 }
 
@@ -250,6 +274,11 @@ export async function listRecentSharesForClinic(clinicId: string, limit: number)
     orderBy: { createdAt: "desc" },
     take: Math.max(1, Math.min(limit, 20)),
   });
+}
+
+/** How many share links this clinic has on the list, counted in the database. For the clinic's /pulse page, which shows the newest few and this number. */
+export async function countSharesForClinic(clinicId: string) {
+  return prisma.share.count({ where: { clinicId } });
 }
 
 /** How far back "links made recently" looks on the admin overview, and how soon "expiring soon" is. */

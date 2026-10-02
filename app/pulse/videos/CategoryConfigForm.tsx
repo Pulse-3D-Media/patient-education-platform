@@ -1,18 +1,18 @@
 "use client";
 
 import type { Category } from "@prisma/client";
-import { useActionState } from "react";
 import { INPUT } from "@/components/ui/styles";
-import { DEFAULT_COMING_SOON, type CategoryConfig } from "@/lib/db/category-config";
+import { DEFAULT_COMING_SOON, type CategoryConfig } from "@/lib/categories";
 import { saveCategoryConfigAction } from "../actions";
-import { Outcome, SaveButton } from "../FormBits";
+import { Outcome, SaveButton, useKeptForm } from "../FormBits";
 
 /**
  * One row of the Categories panel on /pulse/videos: the category's name,
  * how many videos are published in it, the "for sale" switch and the
  * optional coming-soon sentence. Each row is its own small form, saving
  * through saveCategoryConfigAction, so one category can be changed
- * without touching the others.
+ * without touching the others. A refused or failed save leaves the switch
+ * and the sentence as typed (useKeptForm).
  */
 export function CategoryConfigForm({
   category,
@@ -25,11 +25,11 @@ export function CategoryConfigForm({
   publishedCount: number;
   config: CategoryConfig;
 }) {
-  const [state, action, pending] = useActionState(saveCategoryConfigAction, null);
+  const { state, pending, form } = useKeptForm(saveCategoryConfigAction);
   const textId = `coming-${category}`;
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="category" value={category} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>

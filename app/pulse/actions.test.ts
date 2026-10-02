@@ -7,6 +7,7 @@ import { saveSettings } from "@/lib/db/settings";
 import { MAX_GRACE_DAYS } from "@/lib/billing-state";
 import { recordAcceptedPlan, setStripeCustomer } from "@/lib/db/billing";
 import { MAX_LINK_DAYS } from "@/lib/expiry";
+import { NOTE_MAX_LENGTH } from "@/lib/note-form";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
   activatePricingVersionAction,
@@ -234,6 +235,29 @@ describe("addNoteAction", () => {
 
     const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { kind: true, body: true, authorName: true } });
     expect(notes).toEqual([{ kind: "STAFF", body: "Spoke to the office manager.", authorName: "Evan Miller" }]);
+  });
+
+  it("refuses a note one character over the limit with a plain message, and writes nothing", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+
+    const result = await addNoteAction(null, form({ clinicId, body: "x".repeat(NOTE_MAX_LENGTH + 1) }));
+    expect(result).toEqual({ error: "Keep a note to 2000 characters or fewer." });
+    expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(0);
+  });
+
+  it("takes a note of exactly the limit, counting each line break once however the browser sent it", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+
+    // 2,000 characters as the box counts them; a browser sends each line break as two, so more than 2,000 arrive.
+    const typed = Array.from({ length: 1000 }, () => "a").join("\n") + "b";
+    expect(typed.length).toBe(NOTE_MAX_LENGTH);
+    const sent = typed.replace(/\n/g, "\r\n");
+
+    expect(await addNoteAction(null, form({ clinicId, body: sent }))).toEqual({ ok: "Note added." });
+    const saved = await prisma.clinicNote.findFirstOrThrow({ where: { clinicId }, select: { body: true } });
+    expect(saved.body).toBe(typed);
   });
 });
 

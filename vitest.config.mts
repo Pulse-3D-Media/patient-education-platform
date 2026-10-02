@@ -17,6 +17,8 @@ export default defineConfig({
       "@": fileURLToPath(new URL(".", import.meta.url)),
       // Next.js's font loader only works inside its own compiler; the tests get a stand-in (see vitest.fonts.ts).
       "next/font/google": fileURLToPath(new URL("./vitest.fonts.ts", import.meta.url)),
+      // "server-only" refuses to load anywhere but inside Next.js's server build; the tests get an empty stand-in (see vitest.server-only.ts).
+      "server-only": fileURLToPath(new URL("./vitest.server-only.ts", import.meta.url)),
     },
   },
   test: {

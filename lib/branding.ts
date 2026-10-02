@@ -85,7 +85,7 @@ export function brandFontLabel(key: BrandFontKey): string {
  */
 export const BRAND_THEMES = [
   { key: "dark", label: "Dark", note: "White words on black." },
-  { key: "light", label: "Light", note: "Dark words on warm white." },
+  { key: "light", label: "Light", note: "Dark words on white." },
 ] as const;
 
 export type BrandTheme = (typeof BRAND_THEMES)[number]["key"];

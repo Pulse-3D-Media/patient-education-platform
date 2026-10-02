@@ -267,7 +267,7 @@ export function BrandingForm({
             className={`${INPUT} max-w-xs`}
           />
           <p id="brand-phone-help" className="mt-1 text-xs text-ink-muted">
-            Patients get a tap-to-call button with this number when their link has expired or the video will not load. Leave it empty
+            Patients get a tap-to-call button with this number (on a computer, the number written out) when their link has expired or the video will not load. Leave it empty
             for no button.
           </p>
           {phoneIsBad && <p className="mt-1 text-sm text-warn">A US number has ten digits. Any format is fine.</p>}

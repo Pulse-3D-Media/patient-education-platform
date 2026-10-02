@@ -7,6 +7,7 @@ import {
   getShareByCode,
   listRecentSharesForClinic,
   recordSharePlay,
+  SenderRefusedError,
   ShareRefusedError,
   summarizeSharesForClinic,
 } from "./shares";
@@ -259,5 +260,190 @@ describe("a link already issued outlives the plan change that would stop a new o
     expect(after?.video.isPublished).toBe(false);
     expect(after?.viewCount).toBe(0);
     await expectRefused(clinic, video, "unpublished");
+  });
+});
+
+describe("createShare and who the link is from", () => {
+  const tag = () => randomBytes(6).toString("hex");
+
+  /** An open Knee clinic with one person holding a seat, and the name typed for them (or none). */
+  async function clinicWithSurgeon(displayName: string | null = null) {
+    const surgeon = `user_share${tag()}`;
+    const clinic = await makeClinic("Vitest sender clinic", {
+      surgeonSeats: 3,
+      seatAllocations: { create: { clerkUserId: surgeon, syncState: "SYNCED", displayName } },
+    });
+    return { clinic, surgeon };
+  }
+
+  async function linkCount(clinicId: string) {
+    return prisma.share.count({ where: { clinicId } });
+  }
+
+  it("copies the surgeon's id and the name from Clerk onto the link", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon();
+    const share = await createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: "Dr. Jane Smith" } });
+    createdShareIds.push(share.id);
+    expect(share).toMatchObject({ senderUserId: surgeon, senderName: "Dr. Jane Smith" });
+    // And the patient page's read hands it on.
+    expect((await getShareByCode(share.code))?.senderName).toBe("Dr. Jane Smith");
+  });
+
+  it("prefers the name typed on People over the one from Clerk", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon("Jane Smith, PA-C");
+    const share = await createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: "Dr. Jane Smith" } });
+    createdShareIds.push(share.id);
+    expect(share.senderName).toBe("Jane Smith, PA-C");
+  });
+
+  it("keeps the name it was made with when the typed name changes later, or the seat is let go", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon("Jane Smith, PA-C");
+    const share = await createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: null } });
+    createdShareIds.push(share.id);
+
+    await prisma.seatAllocation.update({ where: { clinicId_clerkUserId: { clinicId: clinic, clerkUserId: surgeon } }, data: { displayName: "Jane Park, NP" } });
+    expect((await getShareByCode(share.code))?.senderName).toBe("Jane Smith, PA-C");
+
+    await prisma.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId: clinic, clerkUserId: surgeon } } });
+    expect(await getShareByCode(share.code)).toMatchObject({ senderUserId: surgeon, senderName: "Jane Smith, PA-C" });
+  });
+
+  it("writes no name when there is none to write, and never makes one up", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon();
+    const share = await createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: null } });
+    createdShareIds.push(share.id);
+    expect(share).toMatchObject({ senderUserId: surgeon, senderName: null });
+  });
+
+  it("refuses someone with no seat at this clinic, even with a seat at another one, and writes nothing", async () => {
+    const here = await clinicWithSurgeon();
+    const there = await clinicWithSurgeon();
+    const before = await linkCount(here.clinic);
+
+    await expect(createShare(here.clinic, publishedVideo, { sender: { clerkUserId: there.surgeon, fallbackName: "Dr. Other" } })).rejects.toBeInstanceOf(SenderRefusedError);
+    await expect(createShare(here.clinic, publishedVideo, { sender: { clerkUserId: `user_nobody${tag()}`, fallbackName: null } })).rejects.toBeInstanceOf(SenderRefusedError);
+    expect(await linkCount(here.clinic)).toBe(before);
+    expect(await linkCount(there.clinic)).toBe(0);
+  });
+
+  it("refuses something that is not a Clerk user id before reading anything", async () => {
+    const { clinic } = await clinicWithSurgeon();
+    for (const bad of ["", "user_", "user_x'; drop table \"Share\"", "org_abc", "USER_abc"]) {
+      await expect(createShare(clinic, publishedVideo, { sender: { clerkUserId: bad, fallbackName: null } }), bad).rejects.toBeInstanceOf(SenderRefusedError);
+    }
+    expect(await linkCount(clinic)).toBe(0);
+  });
+
+  it("still applies the access rule first: a seated surgeon cannot send what the plan does not allow", async () => {
+    const { clinic, surgeon } = await clinicWithSurgeon();
+    await prisma.clinic.update({ where: { id: clinic }, data: { categories: ["HIP"] } });
+    await expect(createShare(clinic, publishedVideo, { sender: { clerkUserId: surgeon, fallbackName: null } })).rejects.toBeInstanceOf(ShareRefusedError);
+    expect(await linkCount(clinic)).toBe(0);
+  });
+
+  it("leaves a link with no sender as the older kind: no id, no name", async () => {
+    const { clinic } = await clinicWithSurgeon();
+    const share = await createShare(clinic, publishedVideo);
+    createdShareIds.push(share.id);
+    expect(share).toMatchObject({ senderUserId: null, senderName: null });
+  });
+});
+
+describe("link codes", () => {
+  it("gives every new link a ten-character code of lowercase letters and digits", async () => {
+    const clinic = await makeClinic("Vitest code length clinic");
+    for (let i = 0; i < 3; i++) {
+      const share = await createShare(clinic, publishedVideo);
+      createdShareIds.push(share.id);
+      expect(share.code).toMatch(/^[a-z0-9]{10}$/);
+    }
+  });
+
+  it("still finds and counts a six-character link made before codes got longer", async () => {
+    const clinic = await makeClinic("Vitest legacy code clinic");
+    // Written the way an older copy of the app wrote it: a six-character code.
+    const code = randomBytes(3).toString("hex");
+    const legacy = await prisma.share.create({
+      data: { code, clinicId: clinic, videoId: publishedVideo, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+      select: { id: true },
+    });
+    createdShareIds.push(legacy.id);
+
+    expect((await getShareByCode(code))?.id).toBe(legacy.id);
+    await recordSharePlay(code);
+    expect((await getShareByCode(code))?.viewCount).toBe(1);
+  });
+});
+
+/**
+ * A code that is already taken. createShare() does not look a code up before
+ * using it: the unique column refuses a taken one and the link is tried again
+ * with another. These tests hand in the codes (makeCode) so a clash, which
+ * random codes practically never produce, happens on demand.
+ */
+describe("a link code that is already taken", () => {
+  /** A made-up ten-character code nobody else has. */
+  const freshCode = () => `vt${randomBytes(4).toString("hex")}`;
+
+  /** A maker that hands out the given codes in order, and counts how often it was asked. */
+  function codesInOrder(codes: string[]) {
+    let asked = 0;
+    const makeCode = () => codes[Math.min(asked++, codes.length - 1)];
+    return { makeCode, asked: () => asked };
+  }
+
+  it("tries again with a new code, and leaves the link that has the code alone", async () => {
+    const clinic = await makeClinic("Vitest code clash clinic");
+    const first = await createShare(clinic, publishedVideo);
+    createdShareIds.push(first.id);
+
+    const next = freshCode();
+    const codes = codesInOrder([first.code, next]);
+    const second = await createShare(clinic, publishedVideo, { makeCode: codes.makeCode });
+    createdShareIds.push(second.id);
+
+    expect(second.code).toBe(next);
+    expect(codes.asked()).toBe(2);
+    // The link that already had the code is still the one the code opens.
+    expect((await getShareByCode(first.code))?.id).toBe(first.id);
+    expect(await prisma.share.count({ where: { clinicId: clinic } })).toBe(2);
+  });
+
+  it("two links made at the same moment with the same code both get made, with different codes", async () => {
+    const clinic = await makeClinic("Vitest code overlap clinic");
+    const contested = freshCode();
+    const one = codesInOrder([contested, freshCode()]);
+    const two = codesInOrder([contested, freshCode()]);
+
+    const [a, b] = await Promise.all([
+      createShare(clinic, publishedVideo, { makeCode: one.makeCode }),
+      createShare(clinic, publishedVideo, { makeCode: two.makeCode }),
+    ]);
+    createdShareIds.push(a.id, b.id);
+
+    expect(a.code).not.toBe(b.code);
+    // Exactly one of them kept the contested code; the other was refused it by the database and took its second code.
+    expect([a.code, b.code].filter((code) => code === contested)).toHaveLength(1);
+    expect(one.asked() + two.asked()).toBe(3);
+    expect(await prisma.share.count({ where: { clinicId: clinic } })).toBe(2);
+  });
+
+  it("gives up after five taken codes with a plain message, and writes nothing", async () => {
+    const clinic = await makeClinic("Vitest code exhausted clinic");
+    const first = await createShare(clinic, publishedVideo);
+    createdShareIds.push(first.id);
+
+    const codes = codesInOrder([first.code]);
+    await expect(createShare(clinic, publishedVideo, { makeCode: codes.makeCode })).rejects.toThrow("Could not find an unused share code");
+    expect(codes.asked()).toBe(5);
+    expect(await prisma.share.count({ where: { clinicId: clinic } })).toBe(1);
+  });
+
+  it("does not try again when the link was refused for any other reason", async () => {
+    const closed = await makeClinic("Vitest code refused clinic", { status: "PAUSED" });
+    const codes = codesInOrder([freshCode()]);
+    await expect(createShare(closed, publishedVideo, { makeCode: codes.makeCode })).rejects.toBeInstanceOf(ShareRefusedError);
+    expect(codes.asked()).toBe(1);
+    expect(await prisma.share.count({ where: { clinicId: closed } })).toBe(0);
   });
 });

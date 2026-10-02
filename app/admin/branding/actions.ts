@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { readBrandingForm } from "@/lib/branding-form";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { updateClinicBranding } from "@/lib/db/clinics";
+import { errorKind } from "@/lib/error-kind";
 import { getSignedInName } from "@/lib/people";
 import { isClinicAdmin } from "@/lib/roles";
 
@@ -58,7 +59,7 @@ export async function saveClinicBrandingAction(_previous: BrandingFormState, for
     const { logged } = await updateClinicBranding(clinicId, checked.values, `${name} (clinic admin)`);
     if (!logged) return { ok: "Nothing changed, so nothing was saved." };
   } catch (error) {
-    console.error("Saving a clinic's branding failed", error);
+    console.error("Saving a clinic's branding failed", errorKind(error));
     return { error: "That did not save. Nothing was changed. Try again in a moment." };
   }
 

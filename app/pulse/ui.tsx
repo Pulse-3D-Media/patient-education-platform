@@ -1,5 +1,8 @@
 import type { ClinicStatus } from "@prisma/client";
+import Link from "next/link";
 import type { ReactNode } from "react";
+import { SECONDARY_BUTTON } from "@/components/ui/styles";
+import type { PageInfo } from "@/lib/paging";
 
 /**
  * Small pieces the dashboard pages share: the status badge, a titled
@@ -36,6 +39,44 @@ export function Section({ title, blurb, children }: { title: string; blurb?: str
       {blurb && <p className="mt-1 max-w-2xl text-sm text-[#bfbfbf]">{blurb}</p>}
       <div className="mt-4">{children}</div>
     </section>
+  );
+}
+
+/**
+ * The two links under a list that is shown a page at a time, with "Page 2 of
+ * 5" between them. Draws nothing when the whole list fits on one page.
+ * `hrefFor` builds the address of a page, so each list keeps its own search
+ * in the address. The words on the links are the caller's: Previous and Next
+ * for a table, Newer and Older for a log.
+ */
+export function Pager({
+  info,
+  hrefFor,
+  previousLabel = "Previous",
+  nextLabel = "Next",
+}: {
+  info: PageInfo;
+  hrefFor: (page: number) => string;
+  previousLabel?: string;
+  nextLabel?: string;
+}) {
+  if (info.pages <= 1) return null;
+  return (
+    <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center gap-3">
+      {info.previous !== null && (
+        <Link href={hrefFor(info.previous)} className={`${SECONDARY_BUTTON} h-11`}>
+          {previousLabel}
+        </Link>
+      )}
+      <span className="text-sm text-[#bfbfbf]">
+        Page {info.page} of {info.pages}
+      </span>
+      {info.next !== null && (
+        <Link href={hrefFor(info.next)} className={`${SECONDARY_BUTTON} h-11`}>
+          {nextLabel}
+        </Link>
+      )}
+    </nav>
   );
 }
 

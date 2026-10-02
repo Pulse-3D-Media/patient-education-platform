@@ -111,11 +111,12 @@ describe("startCheckoutAction", () => {
     expect(vi.mocked(startCheckout).mock.lastCall?.[0].clinicId).toBe(own.clinicId);
   });
 
-  it("hands the flow what was picked and what was on screen, and nothing else: no amount, no discount, no founding flag", async () => {
-    const { orgId } = await makeClinic();
+  it("hands the flow what was picked and what was on screen, and nothing else: no amount, no discount, no founding flag, no practice type", async () => {
+    const { clinicId, orgId } = await makeClinic();
     signInAs(orgId, "admin");
 
-    await startCheckoutAction(null, form({ ...GOOD, amount: "1", perSeatCents: "1", unit_amount: "1", founding: "on", foundingDiscountBp: "10000", coupon: "FREE", practiceType: "clinic" }));
+    // A practiceType field in the form is never read: there is no question on the page any more, and only Pulse staff set it.
+    await startCheckoutAction(null, form({ ...GOOD, amount: "1", perSeatCents: "1", unit_amount: "1", founding: "on", foundingDiscountBp: "10000", coupon: "FREE", practiceType: "HOSPITAL" }));
 
     expect(vi.mocked(startCheckout).mock.lastCall?.[0].selection).toEqual({
       categories: ["KNEE", "HIP"],
@@ -124,6 +125,7 @@ describe("startCheckoutAction", () => {
       seenVersionId: GOOD.seenVersionId,
       seenTotalCents: 26700,
     });
+    expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { practiceType: true } })).practiceType).toBe("CLINIC");
   });
 
   it("refuses a malformed form before starting anything", async () => {

@@ -197,20 +197,25 @@ describe("/admin/billing: who is offered the plan picker", () => {
     expect(html).toMatch(/name="seats"[^>]*value="10"|value="10"[^>]*name="seats"/);
   });
 
-  it("a practice that has not answered gets the question first, and no picker", async () => {
+  it("a clinic Pulse staff never marked (UNKNOWN) gets the picker like a clinic, and there is no practice question anywhere on the page", async () => {
     signInAs(await makeClinic({ practiceType: "UNKNOWN" }), "admin");
     const html = await renderBilling();
-    expect(html).toContain("Which describes your practice?");
-    expect(html).toContain("Answer the question above first.");
-    expect(html).not.toContain("Continue to payment");
+    expect(html).toContain("Choose a plan");
+    expect(html).toContain("Continue to payment");
+    expect(html).not.toContain("Which describes your practice?");
+    expect(html).not.toContain("Your practice");
+    expect(html).not.toContain("Answer the question");
+    expect(html).not.toContain('name="practiceType"');
   });
 
-  it("a hospital is pointed at Pulse 3D, with no picker and no amount", async () => {
+  it("a hospital is pointed at Pulse 3D, with no picker, no amount and no way to say it is a clinic", async () => {
     signInAs(await makeClinic({ practiceType: "HOSPITAL" }), "admin");
     const html = await renderBilling();
+    expect(html).toContain("Set up by Pulse 3D");
     expect(html).toContain("Schedule a call with Pulse 3D");
     expect(html).toContain("https://www.pulse3dmedia.com/schedulecall");
     expect(html).not.toContain("Continue to payment");
+    expect(html).not.toContain('name="practiceType"');
     expect(showsAnAmount(html)).toBe(false);
   });
 

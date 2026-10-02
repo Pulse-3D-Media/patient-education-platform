@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { prisma } from "./client";
 import { setClinicManagedByPulse, setClinicPlan, setClinicStatusByStaff, updateClinicDetails, upsertClinicForClerkOrg } from "./clinics";
-import { addClinicNote, listNotesForClinic } from "./notes";
+import { NOTES_PAGE_SIZE, addClinicNote, countNotesForClinic, listNotesForClinic } from "./notes";
 
 /**
  * The clinic log, against the real test database: notes are added and come
@@ -124,6 +124,48 @@ describe("addClinicNote and listNotesForClinic", () => {
     );
 
     expect(await listNotesForClinic(clinicId)).toHaveLength(2);
+  });
+
+  it("reads the log a page at a time, newest first, with every note on exactly one page", async () => {
+    const clinicId = await makeClinic("paged");
+    const other = await makeClinic("paged other");
+    const total = NOTES_PAGE_SIZE + 3;
+    const base = Date.now() - 60 * 60 * 1000;
+    // One insert. Note 0 is the oldest; the last three share one instant, which is where an unsteady order would show.
+    await prisma.clinicNote.createMany({
+      data: Array.from({ length: total }, (_, i) => ({
+        clinicId,
+        kind: "STAFF" as const,
+        body: `Note ${String(i).padStart(2, "0")}`,
+        authorName: "Evan Miller",
+        createdAt: new Date(base + Math.min(i, total - 3) * 1000),
+      })),
+    });
+    await addClinicNote(other, { kind: "STAFF", body: "Belongs to the other clinic.", authorName: "Evan Miller" });
+
+    expect(await countNotesForClinic(clinicId)).toBe(total);
+    expect(await countNotesForClinic(other)).toBe(1);
+
+    const first = await listNotesForClinic(clinicId);
+    const second = await listNotesForClinic(clinicId, 2);
+    expect(first).toHaveLength(NOTES_PAGE_SIZE);
+    expect(second).toHaveLength(3);
+    // The oldest three are on the second page, oldest last.
+    expect(second.map((note) => note.body)).toEqual(["Note 02", "Note 01", "Note 00"]);
+    // Newest first on the first page: its last entry is older than its first.
+    expect(first[0].createdAt.getTime()).toBeGreaterThanOrEqual(first[NOTES_PAGE_SIZE - 1].createdAt.getTime());
+
+    // No note twice, none missing, and nothing from the other clinic.
+    const bodies = [...first, ...second].map((note) => note.body);
+    expect(new Set(bodies).size).toBe(total);
+    expect(bodies).not.toContain("Belongs to the other clinic.");
+
+    // Asking again gives the same order, even for the notes written in the same instant.
+    expect((await listNotesForClinic(clinicId)).map((note) => note.id)).toEqual(first.map((note) => note.id));
+
+    // A page past the end is empty, and a page number that makes no sense is the first page.
+    expect(await listNotesForClinic(clinicId, 3)).toEqual([]);
+    expect((await listNotesForClinic(clinicId, 0)).map((note) => note.id)).toEqual(first.map((note) => note.id));
   });
 
   it("deleting a clinic takes its notes with it", async () => {

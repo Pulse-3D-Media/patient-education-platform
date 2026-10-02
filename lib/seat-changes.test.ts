@@ -6,7 +6,7 @@ import { getCurrentClinic } from "./clinic";
 import { prisma } from "./db/client";
 import { listNotesForClinic } from "./db/notes";
 import * as seatsDb from "./db/seats";
-import { checkSeats, giveSeat, handOffOwner, inviteSomeone, releaseOwnSeat, removePerson, revokeInvitation, setAdmin, setOwnerByStaff } from "./seat-changes";
+import { checkSeats, giveSeat, handOffOwner, inviteSomeone, releaseOwnSeat, removePerson, revokeInvitation, setAdmin, setOwnerByStaff, setPatientName } from "./seat-changes";
 import { PENDING_WINDOW_MS } from "./seats";
 import { fakeClerk } from "./testing/fake-clerk";
 
@@ -345,6 +345,64 @@ describe("people already in the clinic", () => {
     expect(fakeClerk.isMember(theirs.orgId, theirMember.userId)).toBe(true);
     expect(await seatsOf(mine.clinicId)).toEqual([]);
     expect(await ownerOf(mine.clinicId)).toBe(mine.owner);
+  });
+});
+
+describe("the name patients see", () => {
+  it("is Dr. First Last by default; an admin can type another, it is logged, and clearing it goes back to the default", async () => {
+    const dr = user();
+    const { clinicId, orgId, actor } = await makeClinic(2, [{ userId: dr, firstName: "Jane", lastName: "Smith" }]);
+    await seatsDb.reserveSeat(clinicId, dr);
+
+    let board = await checkSeats(clinicId);
+    expect(board.people.find((person) => person.userId === dr)).toMatchObject({ patientName: "Dr. Jane Smith", typedPatientName: null, defaultPatientName: "Dr. Jane Smith" });
+
+    expect(await setPatientName({ clinicId, targetUserId: dr, name: "  Jane Smith,  PA-C ", actor })).toEqual({
+      ok: true,
+      message: `Patients will see "Jane Smith, PA-C" on links from Jane Smith from now on.`,
+    });
+    board = await checkSeats(clinicId);
+    expect(board.people.find((person) => person.userId === dr)).toMatchObject({ patientName: "Jane Smith, PA-C", typedPatientName: "Jane Smith, PA-C" });
+    expect((await logOf(clinicId)).at(-1)).toBe(
+      `Olive Owner (clinic admin): Name patients see for Jane Smith changed from the default, "Dr. Jane Smith" to "Jane Smith, PA-C". Links already sent keep the old name.`,
+    );
+
+    // Saving the same name again writes nothing.
+    const entries = (await logOf(clinicId)).length;
+    expect(await setPatientName({ clinicId, targetUserId: dr, name: "Jane Smith, PA-C", actor })).toMatchObject({ ok: true });
+    expect(await logOf(clinicId)).toHaveLength(entries);
+
+    expect(await setPatientName({ clinicId, targetUserId: dr, name: "", actor })).toMatchObject({ ok: true });
+    expect((await checkSeats(clinicId)).people.find((person) => person.userId === dr)).toMatchObject({ patientName: "Dr. Jane Smith", typedPatientName: null });
+    // Nothing was written to Clerk.
+    expect(fakeClerk.writes.filter((write) => write.orgId === orgId)).toEqual([]);
+  });
+
+  it("refuses a bad name, someone without a seat, and someone in another clinic, changing nothing", async () => {
+    const dr = user();
+    const waiting = user();
+    const { clinicId, actor } = await makeClinic(1, [{ userId: dr, firstName: "Jane", lastName: "Smith" }, { userId: waiting, firstName: "Wait", lastName: "Ing" }]);
+    await seatsDb.reserveSeat(clinicId, dr);
+    const elsewhere = await makeClinic(2, [{ userId: user() }]);
+    const entries = (await logOf(clinicId)).length;
+
+    expect(await setPatientName({ clinicId, targetUserId: dr, name: "<b>Jane</b>", actor })).toMatchObject({ ok: false, message: expect.stringContaining("letters") });
+    expect(await setPatientName({ clinicId, targetUserId: waiting, name: "Wait Ing, NP", actor })).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("does not hold a seat"),
+    });
+    expect(await setPatientName({ clinicId, targetUserId: elsewhere.owner, name: "Olive", actor })).toEqual({ ok: false, message: "That person is not in your clinic." });
+    expect(await setPatientName({ clinicId: elsewhere.clinicId, targetUserId: dr, name: "Jane", actor: elsewhere.actor })).toEqual({ ok: false, message: "That person is not in your clinic." });
+
+    expect((await seatsDb.listSeatNames(clinicId)).map((seat) => seat.displayName)).toEqual([null]);
+    expect(await logOf(clinicId)).toHaveLength(entries);
+  });
+
+  it("has no default for someone Clerk has no name for, and never uses their email", async () => {
+    const dr = user();
+    const { clinicId } = await makeClinic(1, [{ userId: dr, firstName: "", lastName: "", identifier: "private@example.test" }]);
+    await seatsDb.reserveSeat(clinicId, dr);
+    expect((await checkSeats(clinicId)).people.find((person) => person.userId === dr)).toMatchObject({ patientName: null, defaultPatientName: null });
   });
 });
 

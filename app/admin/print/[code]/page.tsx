@@ -5,6 +5,7 @@ import { getBaseUrl } from "@/lib/base-url";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { getShareForClinic } from "@/lib/db/shares";
 import { qrSvg } from "@/lib/qr";
+import { sentByLine } from "@/lib/sender-name";
 import { isClinicAdmin } from "@/lib/roles";
 import { watchLink } from "@/lib/share-link";
 import { PrintButton } from "./PrintButton";
@@ -16,8 +17,12 @@ import { PrintButton } from "./PrintButton";
  * Letter sheet (8.5 by 11 inches) carrying the pamphlet twice, one per half,
  * with a dashed line to cut along, so one sheet makes two pamphlets.
  *
- * Each half-page pamphlet has the procedure name, the QR code, and one line
- * of instructions (plus the typed-out link for anyone who cannot scan).
+ * Each half-page pamphlet has the procedure name, who sent it ("Sent by Dr.
+ * Jane Smith, Summit Orthopedics", or "From Summit Orthopedics" for a link
+ * made before surgeons were recorded), the QR code, and one line of
+ * instructions (plus the typed-out link for anyone who cannot scan). A
+ * placeholder video carries its mark on the paper too, so a pamphlet for a
+ * sample animation can never pass for the real one.
  */
 export const dynamic = "force-dynamic";
 
@@ -53,6 +58,13 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
   const link = watchLink(await getBaseUrl(), share.code);
   // The QR code as a picture the browser can show: SVG, so it prints sharp.
   const qrImage = "data:image/svg+xml;utf8," + encodeURIComponent(await qrSvg(link));
+  const pamphlet = {
+    title: share.video.title,
+    from: sentByLine(share.senderName, share.clinic.name),
+    placeholder: share.video.isPlaceholder,
+    link,
+    qrImage,
+  };
 
   return (
     <div className="min-h-screen bg-[#e4ebf3] text-black print:bg-white">
@@ -68,9 +80,9 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
 
       {/* The sheet of paper: the pamphlet twice, one per half */}
       <div className="sheet mx-auto bg-white shadow-[0_8px_40px_rgba(0,0,0,.15)] print:shadow-none">
-        <Pamphlet title={share.video.title} link={link} qrImage={qrImage} />
+        <Pamphlet {...pamphlet} />
         <div className="cut-line" aria-hidden="true" />
-        <Pamphlet title={share.video.title} link={link} qrImage={qrImage} />
+        <Pamphlet {...pamphlet} />
       </div>
 
       <p className="py-4 text-center text-sm text-[#667085] print:hidden">
@@ -80,13 +92,23 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
   );
 }
 
-/** One half-page pamphlet: 8.5 by 5.5 inches. */
-function Pamphlet({ title, link, qrImage }: { title: string; link: string; qrImage: string }) {
+/**
+ * One half-page pamphlet: 8.5 by 5.5 inches. The placeholder line is plain
+ * dark text in a bordered box, not a coloured fill, so it survives a
+ * black-and-white printer.
+ */
+function Pamphlet({ title, from, placeholder, link, qrImage }: { title: string; from: string; placeholder: boolean; link: string; qrImage: string }) {
   return (
     <section className="pamphlet flex items-center gap-[0.5in]">
       <div className="min-w-0 flex-1">
+        {placeholder && (
+          <p className="mb-[0.15in] inline-block border-2 border-black px-[0.1in] py-[0.03in] text-[10pt] font-bold uppercase tracking-wider">
+            Placeholder: plays a sample animation, not this procedure
+          </p>
+        )}
         <p className="text-[11pt] font-medium uppercase tracking-wider text-[#667085]">Your procedure</p>
         <h1 className="mt-[0.1in] text-[26pt] font-semibold leading-tight">{title}</h1>
+        <p className="mt-[0.08in] text-[12pt] font-medium">{from}</p>
         <p className="mt-[0.3in] text-[13pt] leading-snug">
           Scan this code with your phone&rsquo;s camera to watch a short animation about your procedure.
         </p>

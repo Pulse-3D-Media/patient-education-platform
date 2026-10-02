@@ -7,6 +7,7 @@ import { saveSettings } from "@/lib/db/settings";
 import { MAX_GRACE_DAYS } from "@/lib/billing-state";
 import { recordAcceptedPlan, setStripeCustomer } from "@/lib/db/billing";
 import { MAX_LINK_DAYS } from "@/lib/expiry";
+import { NOTE_MAX_LENGTH } from "@/lib/note-form";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
   activatePricingVersionAction,
@@ -198,7 +199,7 @@ describe("setPracticeTypeAction", () => {
 
     expect((await prisma.clinic.findUnique({ where: { id: clinicId }, select: { practiceType: true } }))?.practiceType).toBe("HOSPITAL");
     const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { body: true } });
-    expect(notes).toEqual([{ body: 'Practice type changed from "Not answered yet" to "Hospital or health system".' }]);
+    expect(notes).toEqual([{ body: 'Practice type changed from "Not set (counts as a clinic)" to "Hospital or health system".' }]);
   });
 });
 
@@ -234,6 +235,29 @@ describe("addNoteAction", () => {
 
     const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { kind: true, body: true, authorName: true } });
     expect(notes).toEqual([{ kind: "STAFF", body: "Spoke to the office manager.", authorName: "Evan Miller" }]);
+  });
+
+  it("refuses a note one character over the limit with a plain message, and writes nothing", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+
+    const result = await addNoteAction(null, form({ clinicId, body: "x".repeat(NOTE_MAX_LENGTH + 1) }));
+    expect(result).toEqual({ error: "Keep a note to 2000 characters or fewer." });
+    expect(await prisma.clinicNote.count({ where: { clinicId } })).toBe(0);
+  });
+
+  it("takes a note of exactly the limit, counting each line break once however the browser sent it", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+
+    // 2,000 characters as the box counts them; a browser sends each line break as two, so more than 2,000 arrive.
+    const typed = Array.from({ length: 1000 }, () => "a").join("\n") + "b";
+    expect(typed.length).toBe(NOTE_MAX_LENGTH);
+    const sent = typed.replace(/\n/g, "\r\n");
+
+    expect(await addNoteAction(null, form({ clinicId, body: sent }))).toEqual({ ok: "Note added." });
+    const saved = await prisma.clinicNote.findFirstOrThrow({ where: { clinicId }, select: { body: true } });
+    expect(saved.body).toBe(typed);
   });
 });
 
@@ -367,8 +391,8 @@ describe("saveBrandingAction", () => {
 });
 
 describe("saveSettingsAction", () => {
-  const typed = (over: Partial<Record<"unclaimedDays" | "viewDays" | "graceDays" | "qrDailyFlag", string>> = {}) =>
-    form({ unclaimedDays: "90", viewDays: "7", graceDays: "14", qrDailyFlag: "200", ...over });
+  const typed = (over: Partial<Record<"unclaimedDays" | "viewDays" | "graceDays" | "qrDailyFlag" | "maxRenewals", string>> = {}) =>
+    form({ unclaimedDays: "90", viewDays: "7", graceDays: "14", qrDailyFlag: "200", maxRenewals: "3", ...over });
 
   it("refuses a user who is not Pulse staff with not-found, and saves nothing", async () => {
     signInAs("user_clinic_admin", { kind: "staff" });
@@ -379,7 +403,7 @@ describe("saveSettingsAction", () => {
   it("accepts a year for both link day counts, the limit itself, and hands the save exactly what was typed", async () => {
     signInAs("user_staff", { pulseStaff: true });
     expect(await saveSettingsAction(null, typed({ unclaimedDays: String(MAX_LINK_DAYS), viewDays: String(MAX_LINK_DAYS) }))).toEqual({ ok: "Settings saved." });
-    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 200 });
+    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 200, maxRenewals: 3 });
   });
 
   it("refuses a day count past a year, or of zero, for either link setting, naming the field, without saving", async () => {
@@ -404,6 +428,20 @@ describe("saveSettingsAction", () => {
     expect(await saveSettingsAction(null, typed({ graceDays: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
     expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
     expect(await saveSettingsAction(null, typed({ graceDays: String(MAX_GRACE_DAYS) }))).toEqual({ ok: "Settings saved." });
+  });
+
+  it("holds the maximum renewals to 0 through 10: zero is allowed (no link can be turned back on), eleven and minus one are not", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await saveSettingsAction(null, typed({ maxRenewals: "0" }))).toEqual({ ok: "Settings saved." });
+    expect(vi.mocked(saveSettings)).toHaveBeenLastCalledWith(expect.objectContaining({ maxRenewals: 0 }));
+    expect(await saveSettingsAction(null, typed({ maxRenewals: "10" }))).toEqual({ ok: "Settings saved." });
+    expect(vi.mocked(saveSettings)).toHaveBeenLastCalledWith(expect.objectContaining({ maxRenewals: 10 }));
+
+    vi.mocked(saveSettings).mockClear();
+    for (const bad of ["11", "-1", "2.5", "", "three"]) {
+      expect(await saveSettingsAction(null, typed({ maxRenewals: bad }))).toEqual({ error: "Maximum renewals must be a whole number from 0 to 10." });
+    }
+    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
   });
 });
 

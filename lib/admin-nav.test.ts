@@ -22,6 +22,11 @@ describe("activeAdminSection", () => {
     expect(activeAdminSection("/admin/qr/k7m2xq")).toBe("/admin/links");
   });
 
+  it("counts the page that turns a paused link back on as the overview, where its list lives", () => {
+    expect(activeAdminSection("/admin/reactivate/k7m2xq")).toBe("/admin");
+    expect(activeAdminSection("/admin/reactivate")).toBe("/admin");
+  });
+
   it("does not confuse a longer name for a section", () => {
     expect(activeAdminSection("/admin/peoples")).toBeNull();
     expect(activeAdminSection("/library")).toBeNull();

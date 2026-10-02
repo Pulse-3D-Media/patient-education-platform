@@ -21,8 +21,9 @@ import { addClinicNote } from "@/lib/db/notes";
 import { PricingError, activatePricingVersion, createPricingVersion } from "@/lib/db/pricing";
 import { saveSettings, type Settings } from "@/lib/db/settings";
 import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/lib/db/videos";
-import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
+import { isValidRenewalCount, MAX_LINK_DAYS, MAX_RENEWALS, MIN_LINK_DAYS, MIN_RENEWALS } from "@/lib/expiry";
 import { parseDuration } from "@/lib/format";
+import { NOTE_MAX_LENGTH, cleanNote } from "@/lib/note-form";
 import { renameClerkOrganization } from "@/lib/organization";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
@@ -60,9 +61,6 @@ const ALL_CATEGORIES = Object.values(Category);
 
 /** The longest a notice or reason may be. Keeps the admin banner one line or two. */
 const SHORT_TEXT_LIMIT = 300;
-
-/** The longest one note may be. */
-const NOTE_LIMIT = 2000;
 
 /** The clinic id from a form, checked to exist. Null means the form was tampered with or the clinic is gone. */
 async function clinicFromForm(formData: FormData) {
@@ -317,9 +315,10 @@ export async function addNoteAction(_previous: FormState, formData: FormData): P
   const clinic = await clinicFromForm(formData);
   if (!clinic) return { error: "That clinic no longer exists." };
 
-  const body = String(formData.get("body") ?? "").trim();
+  // Measured the way the box counts it: a line break is one character (see cleanNote).
+  const body = cleanNote(String(formData.get("body") ?? ""));
   if (!body) return { error: "Type the note first." };
-  if (body.length > NOTE_LIMIT) return { error: `Keep a note under ${NOTE_LIMIT} characters.` };
+  if (body.length > NOTE_MAX_LENGTH) return { error: `Keep a note to ${NOTE_MAX_LENGTH} characters or fewer.` };
 
   await addClinicNote(clinic.id, { kind: "STAFF", body, authorName: staff.name });
   revalidatePath(`/pulse/clinics/${clinic.id}`);
@@ -329,14 +328,22 @@ export async function addNoteAction(_previous: FormState, formData: FormData): P
 /** The two settings that become link deadlines. They may not exceed a year (MAX_LINK_DAYS), the limit the clinic override already has. */
 const DAY_LIMITED: (keyof Settings)[] = ["unclaimedDays", "viewDays"];
 
-/** Save the four platform settings. Each must be a whole number, at least 1; the two day counts no more than a year. */
+/** Save the five platform settings. Each must be a whole number: at least 1, the two day counts no more than a year, the renewal count from 0 to 10. */
 export async function saveSettingsAction(_previous: FormState, formData: FormData): Promise<FormState> {
   await requirePulseStaff();
 
-  const fields: (keyof Settings)[] = ["unclaimedDays", "viewDays", "graceDays", "qrDailyFlag"];
+  const fields: (keyof Settings)[] = ["unclaimedDays", "viewDays", "graceDays", "qrDailyFlag", "maxRenewals"];
   const values: Partial<Settings> = {};
   for (const field of fields) {
     const value = wholeNumber(formData.get(field));
+    // The renewal count is the one setting that may be zero (no link can ever be turned back on); the rule refuses anything past ten.
+    if (field === "maxRenewals") {
+      if (value === null || !isValidRenewalCount(value)) {
+        return { error: `${LABELS[field]} must be a whole number from ${MIN_RENEWALS} to ${MAX_RENEWALS}.` };
+      }
+      values[field] = value;
+      continue;
+    }
     if (value === null || value < 1) return { error: `${LABELS[field]} must be a whole number, at least 1.` };
     if (DAY_LIMITED.includes(field) && value > MAX_LINK_DAYS) {
       return { error: `${LABELS[field]} must be a whole number of days from ${MIN_LINK_DAYS} to ${MAX_LINK_DAYS}.` };
@@ -359,6 +366,7 @@ const LABELS: Record<keyof Settings, string> = {
   viewDays: "Days after first play",
   graceDays: "Grace days",
   qrDailyFlag: "QR scans per day to flag",
+  maxRenewals: "Maximum renewals",
 };
 
 // ---------------------------------------------------------------------------

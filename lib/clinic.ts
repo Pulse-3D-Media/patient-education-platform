@@ -1,7 +1,8 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { cache } from "react";
 import { readBranding, type Branding } from "./branding";
+import { askClerk } from "./clerk-timeout";
 import { clinicIsOpen } from "./clinic-status";
 import { getClinicByClerkOrgId, upsertClinicForClerkOrg } from "./db/clinics";
 import { ADMIN_ROLE, isClinicAdmin } from "./roles";
@@ -69,17 +70,27 @@ function creatorOf(organization: { createdBy?: string | null; membersCount?: num
  * choosing an organization, as signed out), when no organization is active,
  * or when the user is no longer a member of the active one. The caller
  * decides what to show; pages send those people to /onboarding.
+ *
+ * The one thing it does throw: SignInUnavailableError (lib/clerk-timeout.ts)
+ * when Clerk does not answer within its time limit, or answers with a
+ * failure. The error pages recognise that and show "We could not reach
+ * sign-in just now" with a Try again button, so a slow Clerk never leaves
+ * a staff page loading forever. React's cache() remembers the failure too,
+ * so a layout and its page asking in the same request wait once, not twice.
  */
 export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> => {
   const { userId, orgId, has } = await auth();
   if (!userId || !orgId) return null;
 
   const client = await clerkClient();
-  const memberships = await client.organizations.getOrganizationMembershipList({
-    organizationId: orgId,
-    userId: [userId],
-    limit: 1,
-  });
+  const memberships = await askClerk(
+    client.organizations.getOrganizationMembershipList({
+      organizationId: orgId,
+      userId: [userId],
+      limit: 1,
+    }),
+    "the clinic membership",
+  );
   const membership = memberships.data[0];
   if (!membership) return null;
 
@@ -111,6 +122,30 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     isAdmin,
   };
 });
+
+/**
+ * The clinic for the app shell (the layouts of /library and /admin), or
+ * null when it cannot be read right now: sign-in did not answer, or the
+ * database did not. A layout must not fail on that, or the person would
+ * get a bare page with no banner and no way back. So the layout draws the
+ * plain Pulse shell instead, and the page inside asks getCurrentClinic()
+ * again: the answer is cached for the request, so the page fails the same
+ * way at once, and its own error page (error.tsx next to it) says what
+ * happened, inside the shell, with Try again.
+ *
+ * Only for a layout's looks. Never for deciding what a person may do.
+ */
+export async function getClinicForShell(): Promise<CurrentClinic | null> {
+  try {
+    return await getCurrentClinic();
+  } catch (error) {
+    // Next.js signals a redirect, a not-found and "this needs the request"
+    // by throwing errors of its own. Those are not failures and must reach
+    // Next.js; this hands them back before treating anything else as one.
+    unstable_rethrow(error);
+    return null;
+  }
+}
 
 /**
  * The id of the current clinic, for Server Actions and Route Handlers, but

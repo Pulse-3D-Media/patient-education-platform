@@ -110,7 +110,8 @@ export async function startCheckout(args: {
     // No founding offer has an approved rule for who gets it or for how long,
     // so checkout never applies one. Nothing the browser sends can ask for it.
     founding: false,
-    // The practice type was checked above: only a clinic gets this far.
+    // A hospital was refused above (selfServeEligibility), so what gets
+    // this far is a clinic, including one Pulse staff never marked (UNKNOWN).
     practiceType: "clinic",
     sellable,
   });

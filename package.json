@@ -10,12 +10,12 @@
     "test": "vitest run",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx --env-file=.env prisma/seed.ts",
-    "db:seed-video": "tsx --env-file=.env prisma/seed-video.ts",
-    "db:seed-placeholders": "tsx --env-file=.env prisma/seed-placeholders.ts",
-    "db:link-clinic": "tsx --env-file=.env prisma/link-clinic.ts",
-    "db:set-status": "tsx --env-file=.env prisma/set-status.ts",
-    "db:set-plan": "tsx --env-file=.env prisma/set-plan.ts"
+    "db:seed": "tsx --conditions=react-server --env-file=.env prisma/seed.ts",
+    "db:seed-video": "tsx --conditions=react-server --env-file=.env prisma/seed-video.ts",
+    "db:seed-placeholders": "tsx --conditions=react-server --env-file=.env prisma/seed-placeholders.ts",
+    "db:link-clinic": "tsx --conditions=react-server --env-file=.env prisma/link-clinic.ts",
+    "db:set-status": "tsx --conditions=react-server --env-file=.env prisma/set-status.ts",
+    "db:set-plan": "tsx --conditions=react-server --env-file=.env prisma/set-plan.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.2",
@@ -24,6 +24,7 @@
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "server-only": "0.0.1",
     "stripe": "^22.6.2"
   },
   "devDependencies": {
@@ -41,6 +42,6 @@
     "vitest": "^5.0.0"
   },
   "prisma": {
-    "seed": "tsx --env-file=.env prisma/seed.ts"
+    "seed": "tsx --conditions=react-server --env-file=.env prisma/seed.ts"
   }
 }

@@ -12,8 +12,10 @@ import {
   removePersonAction,
   revokeInvitationAction,
   setAdminAction,
+  setPatientNameAction,
   type ActionResult,
 } from "./actions";
+import { MAX_DISPLAY_NAME } from "@/lib/sender-name";
 
 /**
  * The controls on the People page. Each one only ASKS: the Server Actions in
@@ -200,6 +202,113 @@ export function InviteForm() {
         </p>
       )}
       {result?.message && <p className="basis-full text-sm text-ink-soft">{result.message}</p>}
+    </form>
+  );
+}
+
+/**
+ * "Patients see: Dr. Jane Smith" on a seated person's row, with Change. The
+ * box opens with the name typed for them (empty when they use the default);
+ * saving it empty goes back to "Dr. First Last" from their account. The
+ * draft stays in the box when the server says no, with its sentence, and
+ * the box closes only after the server has saved. The server checks the
+ * name again (lib/sender-name.ts) and that the person holds a seat.
+ */
+export function PatientNameEditor({
+  userId,
+  personName,
+  patientName,
+  typedName,
+  defaultName,
+}: {
+  userId: string;
+  /** Their name for the office, for the labels. */
+  personName: string;
+  /** What patients see now, or null when there is no name at all. */
+  patientName: string | null;
+  /** The name typed for them, or null when they use the default. */
+  typedName: string | null;
+  /** "Dr. First Last" from their account, or null. Shown as the box's hint. */
+  defaultName: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(typedName ?? "");
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const [pending, startTransition] = useTransition();
+  const inputId = `patient-name-${userId}`;
+
+  function save(event: FormEvent) {
+    event.preventDefault();
+    if (pending) return;
+    setResult(null);
+    startTransition(async () => {
+      const answer = await setPatientNameAction(userId, draft);
+      setResult(answer);
+      if (!answer.error) setOpen(false);
+    });
+  }
+
+  if (!open) {
+    return (
+      <div className="mt-1 text-sm">
+        <p className="text-ink-soft">
+          {patientName ? (
+            <>
+              Patients see: <span className="font-medium text-ink">{patientName}</span>
+            </>
+          ) : (
+            <span className="text-warn">No name for patients yet: links from them name only your clinic.</span>
+          )}{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(typedName ?? "");
+              setResult(null);
+              setOpen(true);
+            }}
+            aria-label={`Change the name patients see for ${personName}`}
+            className="font-medium text-brand-bright underline underline-offset-2 hover:text-ink"
+          >
+            Change
+          </button>
+        </p>
+        {result?.message && <p className="mt-1 text-ink-muted">{result.message}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={save} className="mt-2 flex max-w-md flex-col gap-2">
+      <label htmlFor={inputId} className="text-sm text-ink-soft">
+        Name patients see on links from {personName}
+      </label>
+      <input
+        id={inputId}
+        type="text"
+        autoComplete="off"
+        maxLength={MAX_DISPLAY_NAME}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        placeholder={defaultName ?? "Jane Smith, PA-C"}
+        className={INPUT}
+      />
+      <p className="text-xs text-ink-muted">
+        {defaultName ? `Leave it empty to use "${defaultName}".` : "Their account has no name, so type one, for example Jane Smith, PA-C."} Links already sent keep
+        the name they were made with.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="submit" disabled={pending} className={`${PRIMARY_BUTTON} h-10 disabled:opacity-60`}>
+          {pending ? "Saving..." : "Save name"}
+        </button>
+        <button type="button" disabled={pending} onClick={() => setOpen(false)} className={`${SECONDARY_BUTTON} disabled:opacity-60`}>
+          Cancel
+        </button>
+      </div>
+      {result?.error && (
+        <p role="alert" className="text-sm text-warn">
+          {result.error}
+        </p>
+      )}
     </form>
   );
 }

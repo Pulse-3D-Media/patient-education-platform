@@ -1,15 +1,21 @@
 import { ClinicStatus } from "@prisma/client";
 import Link from "next/link";
 import { INPUT, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
-import { listClinicsForPulse } from "@/lib/db/clinics";
+import { PULSE_CLINICS_PAGE_SIZE, listClinicsForPulse } from "@/lib/db/clinics";
+import { pageInfo, readPage } from "@/lib/paging";
 import { requirePulseStaff } from "@/lib/pulse";
-import { StatusBadge, formatDate, statusLabel } from "./ui";
+import { Pager, StatusBadge, formatDate, statusLabel } from "./ui";
 
 /**
  * The clinics table: every clinic on the platform, one row each, sorted by
  * whoever made a share link most recently. Search by name and filter by
  * status through the form at the top (a plain GET form, so the address bar
  * carries the search and a page reload keeps it).
+ *
+ * Shown a page at a time (PULSE_CLINICS_PAGE_SIZE rows), with Previous and
+ * Next under the table; the page number is in the address too (?page=2). The
+ * search, the sort and the paging all happen in the database, so this page
+ * never loads every clinic, however many there are.
  *
  * "Seats taken / paid": seats held by people plus seats held by open
  * invitations, over the seats on the plan, from our own tables (see
@@ -33,7 +39,18 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
   const status = (STATUSES as string[]).includes(statusParam) ? (statusParam as ClinicStatus) : undefined;
   const filtering = Boolean(query) || Boolean(status);
 
-  const clinics = await listClinicsForPulse({ query, status });
+  const { rows: clinics, total, page } = await listClinicsForPulse({ query, status, page: readPage(params.page) });
+  const info = pageInfo(page, total, PULSE_CLINICS_PAGE_SIZE);
+
+  /** The address of another page of the same search. */
+  function hrefFor(target: number) {
+    const search = new URLSearchParams();
+    if (query) search.set("q", query);
+    if (status) search.set("status", status);
+    if (target > 1) search.set("page", String(target));
+    const text = search.toString();
+    return text ? `/pulse?${text}` : "/pulse";
+  }
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -76,8 +93,9 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
         </form>
 
         <p className="mt-6 text-sm text-[#667085]">
-          {clinics.length} {clinics.length === 1 ? "clinic" : "clinics"}
-          {filtering ? " match" : ""}
+          {total} {total === 1 ? "clinic" : "clinics"}
+          {filtering ? (total === 1 ? " matches" : " match") : ""}
+          {info.pages > 1 ? `. Showing ${info.from} to ${info.to}.` : ""}
         </p>
 
         {clinics.length === 0 ? (
@@ -128,6 +146,7 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
             </table>
           </div>
         )}
+        <Pager info={info} hrefFor={hrefFor} />
       </div>
     </main>
   );

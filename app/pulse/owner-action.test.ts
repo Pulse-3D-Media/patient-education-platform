@@ -61,7 +61,7 @@ describe("setOwnerAction", () => {
   it("lets Pulse staff make a current member the owner, and the /pulse table stops flagging it", async () => {
     const member = user();
     const { clinicId, orgId } = await makeClinic([{ userId: member, firstName: "Mo", lastName: "Member" }]);
-    const flagged = async () => (await listClinicsForPulse({ query: "Vitest owner clinic" })).find((row) => row.id === clinicId)?.hasOwner;
+    const flagged = async () => (await listClinicsForPulse({ query: "Vitest owner clinic" })).rows.find((row) => row.id === clinicId)?.hasOwner;
     expect(await flagged()).toBe(false);
     fakeClerk.signIn(STAFF, null);
 

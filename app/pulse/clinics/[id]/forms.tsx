@@ -1,18 +1,24 @@
 "use client";
 
 import type { Category, PracticeType, StaffAccess } from "@prisma/client";
+import { unstable_rethrow } from "next/navigation";
 import { useActionState, useState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
+import { NOTE_MAX_LENGTH, saveNoteDraft, type NoteOutcome } from "@/lib/note-form";
 import { addNoteAction, saveDetailsAction, setManagedAction, setOwnerAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
-import { Outcome, SaveButton } from "../../FormBits";
+import { Outcome, SaveButton, useKeptForm } from "../../FormBits";
 
 /**
  * The editable sections of one clinic's page, each a small form that calls
  * its own Server Action (app/pulse/actions.ts) and shows the answer under
  * its button. They are client components because a form needs to know
  * whether it is still sending and what came back.
+ *
+ * Every one of them keeps what was typed when a save is refused or fails
+ * (useKeptForm in app/pulse/FormBits.tsx): the boxes, ticks and choices stay
+ * as they were left, with a plain sentence under the button.
  *
  * Every form carries the clinic id in a hidden field. The action looks that
  * id up before using it, so a changed hidden field gets "no longer exists",
@@ -28,9 +34,12 @@ const STATUS_CHOICES: { value: StaffAccess | "FOLLOW"; label: string; hint: stri
 ];
 
 export function StatusForm({ clinicId, staffAccess }: { clinicId: string; staffAccess: StaffAccess | null }) {
-  const [state, action, pending] = useActionState(setStatusAction, null);
+  // The reason is kept here so it can be emptied once the change is saved (a
+  // reason belongs to one change). A refused or failed save leaves it as typed.
+  const [reason, setReason] = useState("");
+  const { state, pending, form } = useKeptForm(setStatusAction, () => setReason(""));
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <fieldset>
         <legend className={LABEL}>Set the status to</legend>
@@ -57,7 +66,15 @@ export function StatusForm({ clinicId, staffAccess }: { clinicId: string; staffA
         <label htmlFor="reason" className={LABEL}>
           Why (required, kept with the change)
         </label>
-        <input id="reason" name="reason" required className={INPUT} placeholder="Paid by invoice through March" />
+        <input
+          id="reason"
+          name="reason"
+          required
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          className={INPUT}
+          placeholder="Paid by invoice through March"
+        />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} label="Set status" />
@@ -72,15 +89,15 @@ export function StatusForm({ clinicId, staffAccess }: { clinicId: string; staffA
 }
 
 const PRACTICE_CHOICES: { value: PracticeType; label: string; hint: string }[] = [
-  { value: "UNKNOWN", label: "Not answered", hint: "Cannot check out until it is." },
+  { value: "UNKNOWN", label: "Not set", hint: "Counts as a clinic: may pay by card." },
   { value: "CLINIC", label: "Clinic or practice", hint: "May pay by card." },
   { value: "HOSPITAL", label: "Hospital or health system", hint: "Always Enterprise, set up by Pulse." },
 ];
 
 export function PracticeTypeForm({ clinicId, practiceType }: { clinicId: string; practiceType: PracticeType }) {
-  const [state, action, pending] = useActionState(setPracticeTypeAction, null);
+  const { state, pending, form } = useKeptForm(setPracticeTypeAction);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <fieldset>
         <legend className={LABEL}>What kind of practice this is</legend>
@@ -120,7 +137,7 @@ export function PlanForm({
   /** Which categories can be bought right now. The others get a small label; they can still be ticked. */
   availability: Record<Category, CategoryAvailability>;
 }) {
-  const [state, action, pending] = useActionState(setPlanAction, null);
+  const { state, pending, form } = useKeptForm(setPlanAction);
   // What is typed is kept here, not in the page, so a save that is refused
   // (fewer seats than are in use) leaves the draft exactly as it was.
   const [picked, setPicked] = useState<Category[]>(categories);
@@ -129,7 +146,7 @@ export function PlanForm({
   const wanted = /^\d+$/.test(seatsText.trim()) ? Number(seatsText.trim()) : null;
   const wouldBeOver = wanted !== null && wanted < seatsInUse && wanted < surgeonSeats;
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <fieldset>
         <legend className={LABEL}>Categories on the plan</legend>
@@ -205,9 +222,9 @@ export function PlanForm({
 }
 
 export function ManagedForm({ clinicId, managedByPulse }: { clinicId: string; managedByPulse: boolean }) {
-  const [state, action, pending] = useActionState(setManagedAction, null);
+  const { state, pending, form } = useKeptForm(setManagedAction);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <label className="flex min-h-12 cursor-pointer items-start gap-3">
         <input type="checkbox" name="managedByPulse" defaultChecked={managedByPulse} className="mt-1 h-5 w-5 accent-[#2a829b]" />
@@ -234,9 +251,9 @@ export function ManagedForm({ clinicId, managedByPulse }: { clinicId: string; ma
  * checks with Clerk again before anything is written.
  */
 export function OwnerForm({ clinicId, people, ownerUserId }: { clinicId: string; people: { userId: string; label: string }[]; ownerUserId: string | null }) {
-  const [state, action, pending] = useActionState(setOwnerAction, null);
+  const { state, pending, form } = useKeptForm(setOwnerAction);
   return (
-    <form action={action} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+    <form {...form} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
       <input type="hidden" name="clinicId" value={clinicId} />
       <div className="sm:w-96">
         <label htmlFor="ownerUserId" className={LABEL}>
@@ -270,9 +287,9 @@ export type DetailsValues = {
 };
 
 export function DetailsForm({ clinicId, values }: { clinicId: string; values: DetailsValues }) {
-  const [state, action, pending] = useActionState(saveDetailsAction, null);
+  const { state, pending, form } = useKeptForm(saveDetailsAction);
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form {...form} className="flex flex-col gap-4">
       <input type="hidden" name="clinicId" value={clinicId} />
       <div className="grid gap-4 md:grid-cols-2">
         <div>
@@ -325,12 +342,28 @@ export function DetailsForm({ clinicId, values }: { clinicId: string; values: De
 }
 
 /**
- * Add one entry to the clinic's log. The box empties itself once the note
- * is saved (React resets a form after its action succeeds), and the list
- * under it refreshes with the new entry on top.
+ * Add one entry to the clinic's log.
+ *
+ * What is typed is kept here (`draft`), not left to the browser, because
+ * React empties a form's boxes after every send, refused or not. The box is
+ * emptied only when the server says the note was saved; a refusal or a
+ * failed connection leaves every character in place with a plain line under
+ * the button (the rules are in lib/note-form.ts). The list under the box
+ * refreshes with the new entry on top.
+ *
+ * The box stops at NOTE_MAX_LENGTH characters and counts down beside the
+ * button. That is a courtesy: the server checks the length again.
  */
 export function NoteForm({ clinicId }: { clinicId: string }) {
-  const [state, action, pending] = useActionState(addNoteAction, null);
+  const [draft, setDraft] = useState("");
+  const [state, action, pending] = useActionState(async (previous: NoteOutcome, formData: FormData) => {
+    const typed = String(formData.get("body") ?? "");
+    const result = await saveNoteDraft(typed, () => addNoteAction(previous, formData), unstable_rethrow);
+    // Empty the box only if nothing more was typed while the note was being sent.
+    setDraft((now) => (now === typed ? result.draft : now));
+    return result.outcome;
+  }, null);
+  const left = NOTE_MAX_LENGTH - draft.length;
   return (
     <form action={action} className="flex flex-col gap-3">
       <input type="hidden" name="clinicId" value={clinicId} />
@@ -342,12 +375,22 @@ export function NoteForm({ clinicId }: { clinicId: string }) {
         name="body"
         rows={3}
         required
+        maxLength={NOTE_MAX_LENGTH}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        aria-describedby="body-count"
         placeholder="Who we talked to, what they asked for, what was agreed."
         className={TEXTAREA}
       />
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} label="Add note" />
         <Outcome state={state} />
+        <p id="body-count" className={`ml-auto text-sm ${left <= 100 ? "text-[#f3b94d]" : "text-[#667085]"}`}>
+          {/* The box cannot be typed past the limit, so "over" only shows for a note put there some other way. */}
+          {left >= 0
+            ? `${left.toLocaleString("en-US")} of ${NOTE_MAX_LENGTH.toLocaleString("en-US")} characters left`
+            : `${(-left).toLocaleString("en-US")} over the limit of ${NOTE_MAX_LENGTH.toLocaleString("en-US")} characters`}
+        </p>
       </div>
     </form>
   );

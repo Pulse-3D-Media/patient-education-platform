@@ -274,9 +274,22 @@ describe("startCheckout: who may, and what is refused", () => {
     return result;
   }
 
-  it("a hospital is refused, whatever seats it asks for, and so is a practice that has not answered", async () => {
+  it("a hospital is refused, whatever seats it asks for", async () => {
     expect(await refused(await makeClinic("hospital", { practiceType: "HOSPITAL" }))).toMatchObject({ kind: "refused", message: expect.stringContaining("Hospitals") });
-    expect(await refused(await makeClinic("unknown", { practiceType: "UNKNOWN" }))).toMatchObject({ kind: "refused", message: expect.stringContaining("clinic or a hospital") });
+    expect(await refused(await makeClinic("hospital, more seats", { practiceType: "HOSPITAL" }), pick(["KNEE"], 4, "MONTH", 23600))).toMatchObject({ kind: "refused", message: expect.stringContaining("Hospitals") });
+  });
+
+  it("a clinic Pulse staff never marked (UNKNOWN) counts as a clinic and can check out: there is no practice question any more (decided 2026-09-25)", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("unknown", { practiceType: "UNKNOWN" });
+
+    const result = await startCheckout({ clinicId, selection: knee(), actor, origin: ORIGIN, deps: depsFor(fake) });
+
+    expect(result.kind).toBe("redirect");
+    expect(fake.sessions).toHaveLength(1);
+    expect(await plansOf(clinicId)).toHaveLength(1);
+    // Checking out records nothing about what kind of practice it is: only Pulse staff set that.
+    expect((await clinicOf(clinicId)).practiceType).toBe("UNKNOWN");
   });
 
   it("more seats than the Clinic limit is refused on the server and pointed at Pulse, even though the practice says it is a clinic", async () => {

@@ -19,7 +19,7 @@ export type AdminSection = {
 
 export const ADMIN_SECTIONS: AdminSection[] = [
   { href: "/admin", label: "Overview", blurb: "What needs a look, and the way into each section." },
-  { href: "/admin/links", label: "Shared links", blurb: "Create a link for a procedure, copy it, download its QR code, print a pamphlet, or cancel it." },
+  { href: "/admin/links", label: "Shared links", blurb: "Create a link for a procedure, from one of your surgeons, then copy it, download its QR code, or print it." },
   { href: "/admin/people", label: "People", blurb: "Everyone who can sign in, who is a surgeon, and who is an admin." },
   { href: "/admin/branding", label: "Branding", blurb: "Your logo, colour, font and phone, as your team and your patients see them." },
   { href: "/admin/billing", label: "Billing", blurb: "The categories and surgeon seats on your plan, and what it comes to." },
@@ -28,14 +28,16 @@ export const ADMIN_SECTIONS: AdminSection[] = [
 
 /**
  * Which section an address under /admin belongs to, so the navigation can
- * mark it as the current page. The overview matches only its own address;
- * every other section matches itself and everything under it. The QR
- * picture and the printable pamphlet belong to Shared links, since that is
- * where their buttons are. Null for an address that is not in the admin
- * area at all.
+ * mark it as the current page. The overview matches only its own address,
+ * plus the page that turns a paused link back on (/admin/reactivate), since
+ * the overview's "Links waiting to be reactivated" is where that page is
+ * reached from; every other section matches itself and everything under
+ * it. The QR picture and the printable pamphlet belong to Shared links,
+ * since that is where their buttons are. Null for an address that is not
+ * in the admin area at all.
  */
 export function activeAdminSection(pathname: string): AdminSection["href"] | null {
-  if (pathname === "/admin") return "/admin";
+  if (pathname === "/admin" || under(pathname, "/admin/reactivate")) return "/admin";
   if (under(pathname, "/admin/links") || under(pathname, "/admin/print") || under(pathname, "/admin/qr")) return "/admin/links";
   for (const section of ADMIN_SECTIONS) {
     if (section.href !== "/admin" && under(pathname, section.href)) return section.href;

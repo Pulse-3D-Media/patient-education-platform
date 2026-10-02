@@ -49,8 +49,10 @@
  *                                 staff set a new one on /pulse.
  *
  * Letting a seat go is always safe: it can never put a clinic over its
- * limit and never changes a bill. No seat is ever a permission: what a
- * person may DO is their Clerk role (org:admin or org:member).
+ * limit and never changes a bill. What a person may DO is their Clerk role
+ * (org:admin or org:member), with one exception: only someone holding a
+ * seat sends links to patients, because every link is from a surgeon
+ * (lib/senders.ts; createShare checks the seat when a link is made).
  */
 
 /** How long a held seat may wait for Clerk to make its invitation before it is let go. Far longer than any request lasts. */

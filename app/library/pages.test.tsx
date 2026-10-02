@@ -49,14 +49,18 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-/** Pretend Clerk says this person is a member of this organization. */
-function signInAs(orgId: string, orgName: string) {
-  vi.mocked(auth).mockResolvedValue({ userId: "user_vitest", orgId, has: () => false } as never);
+/** Pretend Clerk says this person is in this organization: a member unless told they are an admin. */
+function signInAs(orgId: string, orgName: string, role: "member" | "admin" = "member") {
+  vi.mocked(auth).mockResolvedValue({
+    userId: "user_vitest",
+    orgId,
+    has: ({ role: wanted }: { role: string }) => role === "admin" && wanted === "org:admin",
+  } as never);
   vi.mocked(auth.protect).mockResolvedValue(undefined as never);
   vi.mocked(clerkClient).mockResolvedValue({
     organizations: {
       getOrganizationMembershipList: async () => ({
-        data: [{ organization: { name: orgName, hasImage: false, imageUrl: "" }, publicMetadata: { kind: "surgeon" }, role: "org:member" }],
+        data: [{ organization: { name: orgName, hasImage: false, imageUrl: "" }, publicMetadata: {}, role: role === "admin" ? "org:admin" : "org:member" }],
       }),
     },
   } as never);
@@ -71,7 +75,9 @@ const createdVideoIds: string[] = [];
 const orgKnee = fakeOrgId();
 const orgHipFinishedOnly = fakeOrgId();
 const orgPending = fakeOrgId();
+const orgHipAll = fakeOrgId();
 let kneeClinic = "";
+let hipAllClinic = "";
 let hipFinishedOnlyClinic = "";
 const hipTitle = `Vitest library hip video ${randomBytes(4).toString("hex")}`;
 const hipSrc = `https://example.com/vitest-${randomBytes(4).toString("hex")}.mp4`;
@@ -81,6 +87,8 @@ beforeAll(async () => {
     { name: "Vitest library clinic (knee)", clerkOrgId: orgKnee, status: "ACTIVE", categories: ["KNEE"], showPlaceholders: true },
     { name: "Vitest library clinic (hip, finished only)", clerkOrgId: orgHipFinishedOnly, status: "ACTIVE", categories: ["HIP"], showPlaceholders: false },
     { name: "Vitest library clinic (pending)", clerkOrgId: orgPending, status: "PENDING", categories: ["KNEE"], showPlaceholders: true },
+    // Hip on the plan and placeholders shown, so the Hip placeholder made below is always there to send.
+    { name: "Vitest library clinic (hip)", clerkOrgId: orgHipAll, status: "ACTIVE", categories: ["HIP"], showPlaceholders: true },
   ] as const;
   const ids: string[] = [];
   for (const data of clinics) {
@@ -88,7 +96,7 @@ beforeAll(async () => {
     createdClinicIds.push(clinic.id);
     ids.push(clinic.id);
   }
-  [kneeClinic, hipFinishedOnlyClinic] = ids;
+  [kneeClinic, hipFinishedOnlyClinic, , hipAllClinic] = ids;
 
   // A published Hip placeholder, so Hip has something in it whatever else the database holds.
   const video = await prisma.video.create({
@@ -144,15 +152,57 @@ describe("the library home", () => {
     expect(html).not.toContain(hipSrc);
   });
 
-  it("shows a clinic that is not open the calm page, not the tiles", async () => {
+  it("shows a clinic that is not open the calm page, not the tiles; a member is told to ask an admin and gets no Billing button", async () => {
     signInAs(orgPending, "Vitest library clinic (pending)");
     const html = renderToStaticMarkup(await LibraryPage());
     expect(html).toContain("Choose a plan to start");
+    expect(html).not.toContain('href="/library/knee"');
+    expect(html).toContain("Ask one of them to open Billing.");
+    expect(html).not.toContain("Go to billing");
+    expect(html).not.toContain('href="/admin/billing"');
+  });
+
+  it("gives an admin of a clinic that is not open (a new clinic's owner, most often) a button to Billing", async () => {
+    signInAs(orgPending, "Vitest library clinic (pending)", "admin");
+    const html = renderToStaticMarkup(await LibraryPage());
+    expect(html).toContain("Choose a plan to start");
+    expect(html).toContain("Go to billing");
+    expect(html).toContain('href="/admin/billing"');
+    expect(html).not.toContain("Ask one of them to open Billing.");
     expect(html).not.toContain('href="/library/knee"');
   });
 });
 
 describe("a category's own page", () => {
+  it("gives the Send button only to someone holding a seat; everyone else can play, and is told why there is no Send", async () => {
+    signInAs(orgHipAll, "Vitest library clinic (hip)");
+    const noSeat = await renderCategory("hip");
+    expect(noSeat).toContain(hipTitle);
+    expect(noSeat).toContain(`Play ${hipTitle}`);
+    expect(noSeat).not.toContain(`Send ${hipTitle} to a patient`);
+    expect(noSeat).toContain("Sending one to a patient needs a surgeon seat");
+
+    await prisma.seatAllocation.create({ data: { clinicId: hipAllClinic, clerkUserId: "user_vitest", syncState: "SYNCED" } });
+    try {
+      signInAs(orgHipAll, "Vitest library clinic (hip)");
+      const seated = await renderCategory("hip");
+      expect(seated).toContain(`Send ${hipTitle} to a patient`);
+      expect(seated).not.toContain("needs a surgeon seat");
+    } finally {
+      await prisma.seatAllocation.deleteMany({ where: { clinicId: hipAllClinic } });
+    }
+  });
+
+  it("does not count a seat at another clinic", async () => {
+    await prisma.seatAllocation.create({ data: { clinicId: kneeClinic, clerkUserId: "user_vitest", syncState: "SYNCED" } });
+    try {
+      signInAs(orgHipAll, "Vitest library clinic (hip)");
+      expect(await renderCategory("hip")).not.toContain(`Send ${hipTitle} to a patient`);
+    } finally {
+      await prisma.seatAllocation.deleteMany({ where: { clinicId: kneeClinic } });
+    }
+  });
+
   it("says a category off the plan is not on the plan, and sends nothing playable, even when the address is typed", async () => {
     signInAs(orgKnee, "Vitest library clinic (knee)");
     const html = await renderCategory("hip");
@@ -203,10 +253,17 @@ describe("a category's own page", () => {
     await expect(renderCategory("elbow")).rejects.toThrow("notFound");
   });
 
-  it("shows a clinic that is not open the calm page", async () => {
+  it("shows a clinic that is not open the calm page, with the Billing button for an admin only", async () => {
     signInAs(orgPending, "Vitest library clinic (pending)");
-    const html = await renderCategory("knee");
-    expect(html).toContain("Choose a plan to start");
-    expect(html).not.toContain("to a patient");
+    const member = await renderCategory("knee");
+    expect(member).toContain("Choose a plan to start");
+    expect(member).not.toContain("to a patient");
+    expect(member).not.toContain('href="/admin/billing"');
+
+    signInAs(orgPending, "Vitest library clinic (pending)", "admin");
+    const admin = await renderCategory("knee");
+    expect(admin).toContain("Choose a plan to start");
+    expect(admin).toContain('href="/admin/billing"');
+    expect(admin).not.toContain("to a patient");
   });
 });

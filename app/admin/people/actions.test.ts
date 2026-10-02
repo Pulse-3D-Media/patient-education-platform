@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
-import { listSeatHolds, listSeatRows, reserveSeat } from "@/lib/db/seats";
+import { listSeatHolds, listSeatNames, listSeatRows, reserveSeat } from "@/lib/db/seats";
 import { fakeClerk } from "@/lib/testing/fake-clerk";
 import {
   giveSeatAction,
@@ -11,6 +11,7 @@ import {
   removePersonAction,
   revokeInvitationAction,
   setAdminAction,
+  setPatientNameAction,
 } from "./actions";
 
 /**
@@ -70,6 +71,7 @@ describe("who may use the People actions", () => {
       expect((await inviteAction("new@example.test", "admin")).error).toBe("Only your clinic's office admins can change this.");
       expect((await removePersonAction(other)).error).toBe("Only your clinic's office admins can change this.");
       expect((await giveSeatAction(other)).error).toBe("Only your clinic's office admins can change this.");
+      expect((await setPatientNameAction(other, "Someone Else, NP")).error).toBe("Only your clinic's office admins can change this.");
     }
     expect(fakeClerk.roleOf(orgId, member)).toBe("org:member");
     expect(fakeClerk.writes).toEqual([]);
@@ -96,6 +98,10 @@ describe("who may use the People actions", () => {
     expect((await removePersonAction(theirMember)).error).toBe("That person is not in your clinic.");
     expect((await giveSeatAction(theirMember)).error).toBe("That person is not in your clinic.");
     expect((await handOffOwnerAction(theirMember)).error).toBe("That person is not in your clinic.");
+    await reserveSeat(theirs.clinicId, theirMember);
+    expect((await setPatientNameAction(theirMember, "Forged Name")).error).toBe("That person is not in your clinic.");
+    expect((await listSeatNames(theirs.clinicId)).map((seat) => seat.displayName)).toEqual([null]);
+    await prisma.seatAllocation.deleteMany({ where: { clinicId: theirs.clinicId } });
     expect(fakeClerk.roleOf(theirs.orgId, theirMember)).toBe("org:member");
     expect(await listSeatRows(theirs.clinicId)).toEqual([]);
     expect(await listSeatRows(mine.clinicId)).toEqual([]);
@@ -135,6 +141,18 @@ describe("what an admin can do", () => {
     expect(await setAdminAction(dr, false)).toEqual({});
     expect(await giveSeatAction(dr)).toEqual({});
     expect((await listSeatRows(clinicId)).map((row) => row.clerkUserId)).toEqual([dr]);
+  });
+
+  it("set the name patients see for someone holding a seat, and keep a refused name out with a plain sentence", async () => {
+    const dr = user();
+    const { clinicId, orgId, owner } = await makeClinic(2, "ACTIVE", [{ userId: dr, firstName: "Jane", lastName: "Smith" }]);
+    await reserveSeat(clinicId, dr);
+    fakeClerk.signIn(owner, orgId);
+
+    expect(await setPatientNameAction(dr, "Jane Smith, PA-C")).toEqual({ message: `Patients will see "Jane Smith, PA-C" on links from Jane Smith from now on.` });
+    expect((await setPatientNameAction(dr, "<script>")).error).toContain("letters");
+    expect((await setPatientNameAction(dr, 42)).error).toBe("Type the name as patients should see it.");
+    expect((await listSeatNames(clinicId)).map((seat) => seat.displayName)).toEqual(["Jane Smith, PA-C"]);
   });
 
   it("the owner cannot be removed or made a plain member, by another admin either", async () => {

@@ -1,5 +1,11 @@
 import type { Prisma } from "@prisma/client";
+import { SETTINGS_DEFAULTS, type Settings } from "../settings-defaults";
 import { prisma } from "./client";
+
+// The shape, the defaults and the help text have no database in them, so they
+// live in lib/settings-defaults.ts, where the settings form in the browser can
+// import them too. Passed along here so server code keeps one import.
+export { SETTINGS_DEFAULTS, SETTINGS_HELP, type Settings } from "../settings-defaults";
 
 /**
  * The platform-wide settings: one row in the AppSettings table, id "default".
@@ -15,40 +21,11 @@ import { prisma } from "./client";
  * save landing at the same moment cannot give it stale numbers (see below).
  */
 
-/** The settings, as the rest of the app reads them. */
-export type Settings = {
-  /** Days a patient link works if nobody ever plays it. */
-  unclaimedDays: number;
-  /** Days a patient link keeps working after the first play. Copied onto each new link when it is made (lib/expiry.ts). */
-  viewDays: number;
-  /** Days a clinic keeps access after a missed payment. */
-  graceDays: number;
-  /** Scans of one QR code in a day that get flagged for a look. */
-  qrDailyFlag: number;
-};
-
 /** The id of the one row. Never any other value. */
 export const SETTINGS_ID = "default";
 
-/** What the app uses until the row exists. Keep in step with the @default values in prisma/schema.prisma. */
-export const SETTINGS_DEFAULTS: Settings = {
-  unclaimedDays: 90,
-  viewDays: 7,
-  graceDays: 14,
-  qrDailyFlag: 200,
-};
-
-/** The one line a staff member reads beside each setting on /pulse/settings. */
-export const SETTINGS_HELP: Record<keyof Settings, string> = {
-  unclaimedDays: "How many days a patient link stays open if nobody ever plays it. After that it stops working. Applies to links made from now on.",
-  viewDays:
-    "Once a patient first plays their video, how many more days the link keeps working. A clinic can be given its own number. Applies to links made from now on; a link already sent keeps the number it was made with.",
-  graceDays: "How many days a clinic keeps using the library after a payment fails, before it is switched off.",
-  qrDailyFlag: "If one QR code is scanned more than this many times in a day, it is flagged on the reports for a look.",
-};
-
-/** The four columns, as every read here asks for them. */
-const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true } as const;
+/** The five columns, as every read here asks for them. */
+const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true, maxRenewals: true } as const;
 
 /**
  * The current settings. Returns the row when it exists, and the defaults
@@ -112,10 +89,10 @@ export async function lockSettings(tx: Prisma.TransactionClient): Promise<Settin
 }
 
 /**
- * Save all four settings at once, creating the row the first time. Returns
+ * Save all five settings at once, creating the row the first time. Returns
  * the settings as they now are. Callers check the values first (whole
- * numbers, at least 1, and the day counts no more than a year, see
- * lib/expiry.ts); this function trusts them.
+ * numbers, at least 1, the day counts no more than a year, and the renewal
+ * count from 0 to 10, see lib/expiry.ts); this function trusts them.
  *
  * The write waits for the exclusive settings lock (see above), so it never
  * lands in the middle of a link being made.

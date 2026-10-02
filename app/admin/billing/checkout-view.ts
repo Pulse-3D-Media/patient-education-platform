@@ -12,8 +12,8 @@ import { checkoutIsOpen } from "@/lib/stripe";
  * What the checkout part of /admin/billing shows for one clinic, worked out
  * on the server. Server only: it reads the database.
  *
- * It decides WHAT to draw (the plan picker, a question, a message, the
- * subscription the clinic already has). It decides nothing about money:
+ * It decides WHAT to draw (the plan picker, a message, the subscription
+ * the clinic already has). It decides nothing about money:
  * when the picker is drawn, the numbers it shows are the active pricing
  * version's, and the Server Action works the price out again from scratch
  * when the button is pressed.
@@ -41,8 +41,6 @@ export type CategoryOption = { value: Category; label: string; availability: Cat
 export type CheckoutOffer =
   /** Pulse manages this clinic's plan. No card payment, no controls. */
   | { kind: "managed" }
-  /** The clinic has not said whether it is a clinic or a hospital. The question comes first. */
-  | { kind: "ask-practice" }
   /** No card payment for this clinic: it talks to Pulse instead. */
   | { kind: "contact"; reason: "hospital" | "closed-by-staff" }
   /** The clinic already has a subscription. Its plan is shown; changing it is a later step. */
@@ -102,7 +100,6 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
   const eligibility = selfServeEligibility(clinic);
   if (!eligibility.eligible) {
     if (eligibility.reason === "managed-by-pulse") return { ...base, offer: { kind: "managed" } };
-    if (eligibility.reason === "practice-type-unknown") return { ...base, offer: { kind: "ask-practice" } };
     return { ...base, offer: { kind: "contact", reason: eligibility.reason } };
   }
   if (live) return { ...base, offer: { kind: "subscribed" } };

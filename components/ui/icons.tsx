@@ -161,3 +161,12 @@ export function PhoneIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** A small arrow pointing right. Beside "More categories" on the library home, turned to point down while it is open. */
+export function ChevronRightIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}

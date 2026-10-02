@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+/*
+ * "computer:" in a class name applies only on a device whose main pointer is a
+ * mouse or trackpad that can hover: a desktop or a laptop. A phone or a tablet
+ * (a finger, no hover) never matches. The patient page uses it to show the
+ * clinic's number as plain text on a computer, where a tap-to-call link does
+ * nothing useful, and as a call button everywhere else. It is a media query,
+ * so the server sends the same page to everyone and the browser decides.
+ */
+@custom-variant computer (@media (hover: hover) and (pointer: fine));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -90,22 +100,23 @@
 }
 
 /*
- * LIGHT MODE. The same family as the patient page (app/watch), so the
- * product feels like one thing: a warm off-white ground, white cards, dark
- * blue-grey ink. Every pair used on the screens is measured in
+ * LIGHT MODE. A pure white page and white cards, with cool, neutral greys
+ * (no warm tint) for the icon rail and the hairlines that tell the surfaces
+ * apart, and the same dark blue-grey ink as the patient page (app/watch).
+ * Van asked for white, not beige, on 2026-09-21. Every pair used on the screens is measured in
  * lib/branding.test.ts against WCAG AA (4.5:1 for text, 3:1 for the edge of
  * a button or a text box). Change a value here and that test tells you if
  * something stopped being readable: the test reads this file.
  */
 [data-theme="light"] {
-  --ui-ground: #fbfaf7;
+  --ui-ground: #ffffff;
   --ui-surface: #ffffff;
-  --ui-sunken: #f4f1ea;
+  --ui-sunken: #f3f5f7;
   --ui-field: #ffffff;
   --ui-overlay: #ffffff;
-  --ui-well: #e9e5dc;
-  --ui-line: #e2ddd2;
-  --ui-line-strong: #7f796c;
+  --ui-well: #e8ecef;
+  --ui-line: #e3e7eb;
+  --ui-line-strong: #737b83;
   --ui-line-hover: #5a6972;
   --ui-ink: #12202a;
   --ui-ink-soft: #3a4c56;
@@ -114,7 +125,7 @@
   --ui-wash: rgba(18, 32, 42, 0.06);
   --ui-wash-strong: rgba(18, 32, 42, 0.1);
   --ui-scrim: rgba(18, 32, 42, 0.55);
-  --ui-veil: #fbfaf7;
+  --ui-veil: #ffffff;
   --ui-warn: #684400;
   --ui-warn-bright: #684400;
   --ui-problem: #9a3d00;

@@ -1,0 +1,52 @@
+# The "production migration" check. Runs on every pull request to main.
+#
+# If the pull request adds, changes or deletes anything under
+# prisma/migrations/, it fails until the pull request has the label
+# "production-migrated". Adding or removing a label runs it again. A pull
+# request with no migration passes straight away. The rule itself, and why it
+# exists, are in .github/scripts/check-migrations.sh.
+#
+# This is a separate workflow from checks.yml on purpose: it has to run again
+# every time a label changes, and the build should not.
+
+name: Production migration
+
+on:
+  pull_request:
+    branches: [main]
+    # The usual three (opened, new commits pushed, reopened), plus labels.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+# Read the code, nothing else. No secrets are used here.
+permissions:
+  contents: read
+
+# When a newer run starts for the same pull request (a label added straight
+# after a push, say), stop the older one: only the newest answer counts.
+concurrency:
+  group: migration-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  migration:
+    # This name is what appears on the pull request, and what is picked when
+    # the check is made required in GitHub's ruleset.
+    name: Production migration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Get the code, with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history, so the branch can be compared with main.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check for a migration and the production-migrated label
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # "true" or "false". Worked out by GitHub from the pull request's
+          # labels at the moment this run started.
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'production-migrated') }}
+        run: bash .github/scripts/check-migrations.sh

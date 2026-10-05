@@ -528,3 +528,101 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
     expect(await renderBilling({ from: "stripe" })).toContain("You are back from Stripe.");
   });
 });
+
+describe("/admin/billing: arriving from the library's \"Add to your plan\" link (?add=<category>)", () => {
+  const paying = (more: ClinicSetup = {}) => makeClinic({ status: "ACTIVE", categories: ["KNEE", "HIP"], surgeonSeats: 3, billing: { status: "ACTIVE", plan: "current" }, ...more });
+  const ticked = (html: string, category: Category) => new RegExp(`<input[^>]*checked=""[^>]*value="${category}"|<input[^>]*value="${category}"[^>]*checked=""`).test(html);
+
+  it("opens the change form with that category ticked beside the plan the clinic has, and shows the new price before anything is charged", async () => {
+    signInAs(await paying(), "admin");
+    const html = await renderBilling({ add: "shoulder" });
+
+    expect(html).toContain('id="change"');
+    expect(html).toContain("Shoulder is ticked below because you chose it in the library. Nothing changes, and nothing is charged, until you review and confirm.");
+    expect(ticked(html, "SHOULDER")).toBe(true);
+    expect(ticked(html, "KNEE")).toBe(true);
+    expect(ticked(html, "HIP")).toBe(true);
+    expect(ticked(html, "SPINE")).toBe(false);
+    // Three categories at $109 a seat, three seats: what the changed plan would come to. The plan in force is still $267.
+    expect(html).toContain("$327.00");
+    expect(html).toContain("$267.00");
+    expect(html).toContain("This only adds to your plan");
+    // Still a review first: nothing on the page confirms or pays by itself.
+    expect(html).toContain("Review change");
+    expect(html).toContain("Nothing changes until you confirm on the next step.");
+  });
+
+  // One paying clinic for the forged addresses below: each is one render of the same page.
+  let forgedOrg = "";
+  beforeAll(async () => {
+    forgedOrg = await paying();
+  });
+
+  // Not a category, the enum's spelling, markup, not for sale, coming soon, already on the plan.
+  it.each(["elbow", "SHOULDER", "<script>", "foot-ankle", "complex-spine", "knee"])("ignores '%s' in the address: nothing extra is ticked", async (add) => {
+    signInAs(forgedOrg, "admin");
+    const html = await renderBilling({ add });
+    expect(html).not.toContain("is ticked below");
+    expect(html).not.toContain("<script>");
+    expect(ticked(html, "KNEE")).toBe(true);
+    expect(ticked(html, "HIP")).toBe(true);
+    for (const other of ["SPINE", "COMPLEX_SPINE", "SHOULDER", "FOOT_ANKLE"] as const) expect(ticked(html, other)).toBe(false);
+    expect(html).toContain("This is the plan you have now.");
+  });
+
+  // A clinic that cannot change its plan by card gets the words Billing already has for its case, and no form.
+  it("a clinic managed by Pulse gets its managed words", async () => {
+    signInAs(await paying({ managedByPulse: true }), "admin");
+    const html = await renderBilling({ add: "shoulder" });
+    expect(html).toContain("Pulse 3D manages this plan");
+    expect(html).not.toContain("is ticked below");
+    expect(html).not.toContain("Review change");
+  });
+
+  it("a hospital is pointed at Pulse 3D", async () => {
+    signInAs(await makeClinic({ practiceType: "HOSPITAL", status: "ACTIVE", staffAccess: "OPEN", categories: ["KNEE"], surgeonSeats: 2 }), "admin");
+    const html = await renderBilling({ add: "shoulder" });
+    expect(html).toContain("Set up by Pulse 3D");
+    expect(html).not.toContain("is ticked below");
+    expect(html).not.toContain("<form");
+  });
+
+  it("a paying clinic on a deployment where card payment is shut is told plan changes are not open", async () => {
+    vi.mocked(checkoutIsOpen).mockReturnValue(false);
+    signInAs(await paying(), "admin");
+    const html = await renderBilling({ add: "shoulder" });
+    expect(html).toContain("Changing a plan here is not open yet.");
+    expect(html).not.toContain("is ticked below");
+    expect(html).not.toContain("Review change");
+  });
+
+  it("a clinic with no subscription, where card payment is shut, is told plans are not open, right where the link lands", async () => {
+    vi.mocked(checkoutIsOpen).mockReturnValue(false);
+    signInAs(await makeClinic({ status: "ACTIVE", staffAccess: "OPEN", categories: ["KNEE"], surgeonSeats: 2 }), "admin");
+    const html = await renderBilling({ add: "shoulder" });
+    expect(html).toContain("not open yet");
+    expect(html).not.toContain("is ticked below");
+    expect(html).not.toContain("<form");
+    expect(html).toContain('id="change"');
+  });
+
+  it("a clinic with no subscription yet, where a first plan can be chosen, gets the picker with the category ticked beside the plan on file", async () => {
+    signInAs(await makeClinic({ status: "ACTIVE", staffAccess: "OPEN", categories: ["KNEE"], surgeonSeats: 2 }), "admin");
+    const html = await renderBilling({ add: "shoulder" });
+    expect(html).toContain("Continue to payment");
+    expect(html).toContain("Shoulder is ticked below because you chose it in the library.");
+    expect(ticked(html, "SHOULDER")).toBe(true);
+    expect(ticked(html, "KNEE")).toBe(true);
+    expect(ticked(html, "HIP")).toBe(false);
+    expect(html).not.toContain("Review change");
+  });
+
+  it("a member who follows the address sees none of it", async () => {
+    signInAs(await paying(), "member");
+    const html = await renderBilling({ add: "shoulder" });
+    expect(html).toContain("handled by its office admins");
+    expect(html).not.toContain("is ticked below");
+    expect(html).not.toContain("Review change");
+    expect(showsAnAmount(html)).toBe(false);
+  });
+});

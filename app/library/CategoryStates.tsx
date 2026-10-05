@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { PRIMARY_BUTTON } from "@/components/ui/styles";
+import { addToPlanHref, type AddToPlanOffer } from "@/lib/add-to-plan";
 
 /**
  * What the library shows for a category a clinic cannot open right now,
@@ -6,7 +8,9 @@ import Link from "next/link";
  *
  *   Locked   something is published in it, but the category is not on
  *            this clinic's plan. The library home lists it by name under
- *            "More categories"; its page says so and points at Billing. Nothing playable is
+ *            "More categories"; its page says so and, for an office admin,
+ *            has "Add to your plan" (Billing, with the category ticked; a
+ *            member is told to ask an office admin). Nothing playable is
  *            sent to the browser for a locked category, whether it was
  *            reached from a tile or by typing the address.
  *
@@ -22,10 +26,19 @@ import Link from "next/link";
  */
 
 /** A category's own page when it is not on the plan, for someone who typed the address or tapped it in the drawer. (On the library home it is one line under "More categories".) */
-export function LockedCategory({ label }: { label: string }) {
+export function LockedCategory({ label, slug, offer }: { label: string; slug: string; offer: AddToPlanOffer }) {
   return (
-    <QuietBlock eyebrow="Not on your plan" heading={`${label} is not on your clinic's plan.`}>
-      Your clinic&rsquo;s admin can see the plan under Billing, and talk to Pulse 3D about adding it.
+    <QuietBlock
+      eyebrow="Not on your plan"
+      heading={`${label} is not on your clinic's plan.`}
+      // An office admin's one step to adding it: Billing, with this category ticked. Nothing is charged by following it.
+      action={offer === "link" ? { href: addToPlanHref(slug), label: "Add to your plan" } : undefined}
+    >
+      {offer === "link"
+        ? "You can add it on Billing. You see what it comes to there before anything changes."
+        : offer === "ask"
+          ? "Ask your office admin to add this."
+          : "Your clinic’s admin can see the plan under Billing, and talk to Pulse 3D about adding it."}
     </QuietBlock>
   );
 }
@@ -73,18 +86,36 @@ function QuietTile({ label, image, badge, sentence }: { label: string; image: st
 }
 
 /** The block a category page shows instead of the video grid, with a way back to the library. */
-function QuietBlock({ eyebrow, heading, children }: { eyebrow: string; heading: string; children: React.ReactNode }) {
+function QuietBlock({
+  eyebrow,
+  heading,
+  action,
+  children,
+}: {
+  eyebrow: string;
+  heading: string;
+  /** One more link beside "Back to the library", for the block that has somewhere useful to send people. */
+  action?: { href: string; label: string };
+  children: React.ReactNode;
+}) {
   return (
     <div className="rounded-2xl border border-dashed border-line-strong px-6 py-14 text-center">
       <p className="text-sm font-medium uppercase tracking-wider text-ink-muted">{eyebrow}</p>
       <p className="mt-2 text-xl font-medium">{heading}</p>
       <p className="mx-auto mt-2 max-w-md text-base text-ink-soft">{children}</p>
-      <Link
-        href="/library"
-        className="mt-6 inline-flex h-11 items-center rounded-lg border border-line-strong px-4 text-sm font-medium text-ink-soft hover:border-brand hover:text-ink"
-      >
-        Back to the library
-      </Link>
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+        {action && (
+          <Link href={action.href} prefetch={false} className={PRIMARY_BUTTON}>
+            {action.label}
+          </Link>
+        )}
+        <Link
+          href="/library"
+          className="inline-flex h-11 items-center rounded-lg border border-line-strong px-4 text-sm font-medium text-ink-soft hover:border-brand hover:text-ink"
+        >
+          Back to the library
+        </Link>
+      </div>
     </div>
   );
 }

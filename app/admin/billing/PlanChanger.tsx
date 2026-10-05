@@ -31,6 +31,9 @@ import { canPick, CategoryChoices, IntervalChoices, SeatsField, TestModeNote } f
  * what is charged is what the server and Stripe work out, never a number
  * this form sent.
  *
+ * The form opens on the plan the clinic has, plus one extra tick when the
+ * admin came from the library's "Add to your plan" link (`suggested`).
+ *
  * The picks are ordinary React state, so a refusal, a lost connection or a
  * changed total leaves everything as it was picked.
  */
@@ -39,12 +42,15 @@ type Changer = Extract<ChangeOffer, { kind: "changer" }>;
 const DATE_WORDS = { dateStyle: "long", timeZone: "America/Denver" } as const;
 const dateWords = (date: Date | null) => (date ? new Date(date).toLocaleDateString("en-US", DATE_WORDS) : "your next renewal");
 
-export function PlanChanger({ offer }: { offer: Changer }) {
+export function PlanChanger({ offer, suggested = null }: { offer: Changer; suggested?: Category | null }) {
   const router = useRouter();
   const form = useRef<HTMLFormElement>(null);
   const { current } = offer;
 
-  const [picked, setPicked] = useState<Category[]>(current.picked);
+  // Opens on the plan the clinic has. Someone who came from the library's "Add to your plan" link also gets that one
+  // category ticked (the page checked it is for sale and not already on the plan). It is a pick like any other:
+  // nothing happens until it is reviewed and confirmed.
+  const [picked, setPicked] = useState<Category[]>(suggested && !current.picked.includes(suggested) ? [...current.picked, suggested] : current.picked);
   const [seatsText, setSeatsText] = useState(String(current.seats));
   const [every, setEvery] = useState<BillingInterval>(current.interval);
   const [useLatest, setUseLatest] = useState(false);

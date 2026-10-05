@@ -193,3 +193,51 @@ body {
   color: var(--foreground);
   font-family: var(--font-inter), Inter, system-ui, sans-serif;
 }
+
+
+/*
+ * THE PICTURE INSIDE A VIDEO'S BOX, for the strip on the video (ClinicMark,
+ * OnPicture). A video is drawn as large as fits and centred, so on a screen
+ * of another shape the picture does not reach the top of its box. These
+ * work out where the picture really is, from the box's size and the video's
+ * shape (--picture-ratio, width over height, 16:9 until the file says):
+ *
+ *   .picture-area        the video's box. "container-type: size" lets the
+ *                        rules below measure it (cqw and cqh are 1% of its
+ *                        width and height). Only on a box whose size comes
+ *                        from outside, never from what is in it.
+ *   .picture-fit         a box over exactly the picture. The strip sits at
+ *                        its top edge.
+ *   .below-picture-top   for something that has to start under the strip
+ *                        (the library player's title row): the top of the
+ *                        picture plus the strip's 32px.
+ *
+ * A browser that cannot measure a box (older than iOS 16) keeps the plain
+ * rules: the picture box is the whole video box, and the title row keeps its
+ * own top-8, so the strip is at the top of the video's box and nothing
+ * collides. These rules are outside Tailwind's layers on purpose, so where
+ * they apply they win over a utility class.
+ */
+.picture-fit {
+  position: absolute;
+  inset: 0;
+}
+
+@supports (width: 1cqw) {
+  .picture-area {
+    container-type: size;
+  }
+
+  .picture-fit {
+    inset: auto;
+    left: 50%;
+    top: 50%;
+    width: min(100cqw, 100cqh * var(--picture-ratio, 1.7778));
+    height: min(100cqh, 100cqw / var(--picture-ratio, 1.7778));
+    translate: -50% -50%;
+  }
+
+  .below-picture-top {
+    top: calc((100cqh - min(100cqh, 100cqw / var(--picture-ratio, 1.7778))) / 2 + 2rem);
+  }
+}

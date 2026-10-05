@@ -27,7 +27,7 @@ import { LinkRows } from "./LinkRows";
  * advance); choosing one makes one new link and opens a small menu for it:
  * Copy link, Download QR code, Print QR code (the pamphlet). Category pills
  * and a search box narrow the rows. The patient page and the pamphlet then
- * say "Sent by Dr. Jane Smith, <clinic>". The server checks the choice again
+ * name the doctor ("Dr. Jane Smith, DO") with the clinic under it. The server checks the choice again
  * when the link is made (rule 8).
  *
  * THERE IS NO LIST OF PAST LINKS, on purpose (Evan's build plan of 2026-09-21, Prompt 4):

@@ -304,7 +304,7 @@ describe("setMyPatientNameAction: a surgeon sets their own name for patients", (
     signInAs(orgKnee);
     try {
       expect(await setMyPatientNameAction({ name: "Jo Seated", credential: "DO" })).toEqual({
-        message: `Saved. Links you send from now on say "Sent by Dr. Jo Seated, DO".`,
+        message: `Saved. Links you send from now on show "Dr. Jo Seated, DO".`,
         name: "Dr. Jo Seated, DO",
       });
       expect(await seatName(kneeClinic, surgeon)).toEqual({ displayName: "Dr. Jo Seated, DO" });

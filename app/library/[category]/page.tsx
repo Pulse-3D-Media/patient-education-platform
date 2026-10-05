@@ -11,6 +11,7 @@ import { getClinicAccess } from "@/lib/db/access";
 import { getCategoryConfigs } from "@/lib/db/category-config";
 import { getSeatFor } from "@/lib/db/seats";
 import { countPublishedVideosByKind, listUsableVideosInCategory } from "@/lib/db/videos";
+import { libraryStripName } from "@/lib/sender-name";
 import { getPlaybackUrl } from "@/lib/video";
 import { EmptyCategory, LockedCategory } from "../CategoryStates";
 import { ComingSoon } from "../ComingSoon";
@@ -97,6 +98,9 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
           categoryLabel={category.label}
           clinicName={clinic.name}
           logoUrl={parseLogoUrl(clinic.logoUrl)}
+          // The strip on the player shows the name patients would see on this person's links: only someone holding a seat
+          // sends links, so only they get a name there (the one chosen for them, else "Dr. First Last" from Clerk).
+          senderName={libraryStripName(seat, clinic.defaultPatientName)}
           // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
           canSend={seat !== null}
         />

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ClinicMark } from "@/components/ui/ClinicMark";
+import { ClinicMark, OnPicture, pictureRatio } from "@/components/ui/ClinicMark";
 import { useModalFocus } from "@/components/ui/useModalFocus";
 import { CloseIcon, FullscreenIcon, PhoneIcon, PlayIcon } from "@/components/ui/icons";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
@@ -46,10 +46,14 @@ import { CallNumber } from "./CallButton";
  * failure is sent anywhere. A video that is only slow gets a quiet "still
  * loading" note over the picture instead, so a tap never looks ignored.
  *
- * THE CLINIC MARK. A small chip with the clinic's logo (or name) rests in
- * a reserved strip above the picture. Anatomy labels and captions can be
- * anywhere in a frame, so no branding is laid over it. It is branding,
- * not protection: see ClinicMark.
+ * THE STRIP ON THE VIDEO. A thin dark band across the top edge of the
+ * picture carries the clinic's logo (or name) and the doctor's name, "Dr.
+ * Jane Smith, DO" (ClinicMark). It is there the whole time: before the first play, while
+ * playing, in the large view (both kinds), and as a row of its own above the
+ * "did not load" panel, where there is no picture to lay it over. It never
+ * takes a tap, and the browser's own controls sit along the BOTTOM of the
+ * picture in Chrome, Edge and Android, so it covers none of them there. It
+ * is branding, not protection: see ClinicMark.
  *
  * MAKING IT BIGGER. After play starts, a "Make the video bigger" button
  * appears under the video. What it does depends on what the browser can do,
@@ -57,7 +61,7 @@ import { CallNumber } from "./CallButton";
  *
  *   - Where the browser can put an element of the page full screen, the
  *     whole player goes full screen (not just the video), so the Close
- *     button and the clinic mark come with it.
+ *     button and the strip come with it.
  *   - Where it cannot (iPhone Safari is the usual case, but the code asks
  *     the browser, it does not look for iPhones), or where the browser says
  *     no, the player expands over the page instead: fixed to the edges of
@@ -78,11 +82,18 @@ import { CallNumber } from "./CallButton";
  * from Close and from the video itself. Keeping the browser's controls is
  * worth that; see the top of this note.
  *
- * The browser's own full-screen button (in its controls) and
- * picture-in-picture still work. They hand the video to the phone's own
- * player, which shows the video alone, without the clinic mark or our Close
- * button. That is the phone's behaviour and is left alone on purpose: those
- * are the most dependable controls a patient has.
+ * THE BROWSER'S OWN FULL-SCREEN BUTTON hands the video to the browser's own
+ * player, which shows the video alone: no strip, no Close. So where it can
+ * be stopped reliably, it is: with `controlsList="nofullscreen"`, Chrome,
+ * Edge and Android Chrome (all Chromium) draw that button greyed out and it
+ * does nothing, and a double-click on the picture no longer goes full screen
+ * either (measured in Edge, October 2026). The "Make the video bigger"
+ * button below, which keeps the strip, is the way to go big there. Whether
+ * turning an Android phone sideways still goes full screen by itself is a
+ * phone check still owed. Nothing can hide that button in Safari (iPhone, iPad, Mac)
+ * or Firefox; there, full screen from the browser's own button still shows
+ * the video without the strip, and that is the browser's to decide.
+ * Picture-in-picture is left as it is (it too shows the video alone).
  */
 export function WatchPlayer({
   src,
@@ -90,14 +101,17 @@ export function WatchPlayer({
   code,
   clinicName,
   logoUrl,
+  senderName,
   call,
 }: {
   src: string;
   title: string;
   code: string;
   clinicName: string;
-  /** The clinic's logo for the mark in the strip above the picture, or null to use its name. */
+  /** The clinic's logo for the strip on the picture, or null to use its name. */
   logoUrl: string | null;
+  /** Who sent the link, as patients see it ("Dr. Jane Smith, DO"), for the strip. Null for a link with no sender recorded. */
+  senderName: string | null;
   /** The clinic's phone as a tap-to-call link, when it has a valid one. Offered only if the video will not load. */
   call: { href: string; label: string } | null;
 }) {
@@ -115,6 +129,8 @@ export function WatchPlayer({
   const [started, setStarted] = useState(false);
   const [failed, setFailed] = useState(false);
   const [slow, setSlow] = useState(false);
+  /** The video's shape, width over height, once the file says; 16:9 until then. Places the strip on the picture's top edge. */
+  const [ratio, setRatio] = useState(() => pictureRatio(undefined, undefined));
   /** "fullscreen": the browser's element full screen. "overlay": our own expanded view, where that is not available. */
   const [big, setBig] = useState<"no" | "fullscreen" | "overlay">("no");
   useModalFocus(frame, big === "overlay");
@@ -197,9 +213,10 @@ export function WatchPlayer({
     slowTimer.current = window.setTimeout(() => setSlow(true), SLOW_AFTER_MS);
   }
 
-  /** After Try again, go back to where the video stopped. */
+  /** The file's size is known: note its shape for the strip. After Try again, go back to where the video stopped. */
   function onLoadedMetadata() {
     const element = video.current;
+    if (element) setRatio(pictureRatio(element.videoWidth, element.videoHeight));
     if (element && resumeAt.current > 0) {
       element.currentTime = Math.min(resumeAt.current, element.duration || resumeAt.current);
       resumeAt.current = 0;
@@ -303,7 +320,7 @@ export function WatchPlayer({
           It is a grid, and never shorter than what it holds (min-h-fit), so that in the one case where the player sits
           inside it rather than over it (the failure panel, below) the box grows to fit instead of squeezing or cutting
           off what is in it. On a wide screen, where the video's box is already taller than the panel, it stays as it is. */}
-      <div className="relative grid min-h-fit w-full" style={failed ? undefined : { paddingTop: "calc(56.25% + 40px)" }}>
+      <div className="relative grid min-h-fit w-full" style={failed ? undefined : { paddingTop: "56.25%" }}>
         <div
           ref={frame}
           tabIndex={-1}
@@ -322,14 +339,14 @@ export function WatchPlayer({
                   // The text under it moves down a little; nothing is playing, so nothing is lost. Nothing is
                   // clipped here either (no overflow-hidden): if a browser ever failed to grow the box, the phone
                   // link would hang below it rather than be cut off.
-                  "relative flex flex-col rounded-[18px] bg-[#12202a] shadow-[0_10px_30px_-14px_rgba(18,32,42,.4)]"
+                  "relative flex min-w-0 flex-col rounded-[18px] bg-[#12202a] shadow-[0_10px_30px_-14px_rgba(18,32,42,.4)]"
                 : // Rounded at every size: a phone is the only screen this page is used on.
                   "absolute inset-0 flex flex-col overflow-hidden rounded-[18px] bg-black shadow-[0_10px_30px_-14px_rgba(18,32,42,.4)]"
           }
         >
-          {/* The bar across the top of the big view. It sits above the picture, not over it, so it covers nothing. */}
+          {/* The bar across the top of the big view, with Close. It sits above the picture, not over it, so the strip on the picture never covers it. */}
           {isBig && (
-            <div className="flex h-16 shrink-0 items-center justify-between gap-3 px-3">
+            <div className="flex h-16 shrink-0 items-center gap-3 px-3">
               <button
                 ref={closeButton}
                 type="button"
@@ -340,15 +357,15 @@ export function WatchPlayer({
                 <CloseIcon className="h-5 w-5" />
                 Close
               </button>
-              <div className="relative h-8 min-w-0 flex-1">
-                <ClinicMark logoUrl={logoUrl} name={clinicName} size="patient" className="right-0 top-0" />
-              </div>
             </div>
           )}
 
-          {!isBig && <div className="relative h-10 shrink-0 bg-[#12202a]">
-            <ClinicMark logoUrl={logoUrl} name={clinicName} size="patient" className="right-3 top-1" />
-          </div>}
+          {/* No picture to lay it over while the video will not load: the strip is a row of its own above the panel (its top corners rounded like the panel's when the player is in the page). */}
+          {failed && (
+            <div className={isBig ? "" : "overflow-hidden rounded-t-[18px]"}>
+              <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} inFlow />
+            </div>
+          )}
 
           <div className={`relative flex flex-1 flex-col ${isBig ? "min-h-32" : "min-h-0"}`}>
             <video
@@ -361,7 +378,8 @@ export function WatchPlayer({
               // would be a second, smaller play button to aim at.
               controls={started && !failed}
               tabIndex={started && !failed ? 0 : -1}
-              controlsList="nodownload"
+              // nofullscreen: Chromium's own full-screen button would show the video without the strip. See the note at the top.
+              controlsList="nodownload nofullscreen"
               onPlay={onPlay}
               onPlaying={onPlaying}
               onWaiting={onWaiting}
@@ -375,19 +393,24 @@ export function WatchPlayer({
               className={`absolute inset-0 h-full w-full object-contain ${failed ? "invisible" : ""}`}
             />
 
-            {/* Branding occupies the strip above, never the clinical picture. */}
-
-            {/* Said only when the wait has gone on a while, so a tap on a weak signal never looks ignored. It is the one thing ever laid over the picture, and only while the picture is stuck, so there is nothing to watch under it. The element is always here so a screen reader hears the words when they arrive. */}
-            <p
-              role="status"
-              className={
-                slow && !failed
-                  ? "absolute left-3 top-3 z-10 max-w-[80%] rounded-xl bg-white/90 px-3 py-1.5 text-[15px] leading-[1.35] font-medium text-[#12333f]"
-                  : "sr-only"
-              }
-            >
-              {slow && !failed ? "Still loading. A slow connection can take a little longer." : ""}
-            </p>
+            {/* What is laid over the picture itself, from before the first play on: the strip on its top edge, and, only while
+                the picture is stuck, a "still loading" note just under the strip. Neither takes a tap. */}
+            {!failed && (
+              <OnPicture ratio={ratio}>
+                <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} />
+                {/* Said only when the wait has gone on a while, so a tap on a weak signal never looks ignored. The element is always here (while there is a picture) so a screen reader hears the words when they arrive; the "did not load" panel announces itself. */}
+                <p
+                  role="status"
+                  className={
+                    slow
+                      ? "absolute left-3 top-11 max-w-[80%] rounded-xl bg-white/90 px-3 py-1.5 text-[15px] leading-[1.35] font-medium text-[#12333f]"
+                      : "sr-only"
+                  }
+                >
+                  {slow ? "Still loading. A slow connection can take a little longer." : ""}
+                </p>
+              </OnPicture>
+            )}
 
             {!started && !failed && (
               // The keyboard focus ring is drawn just inside the edge, because the

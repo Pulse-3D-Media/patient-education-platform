@@ -1,6 +1,6 @@
 /**
- * The name a patient sees on a link: "Sent by Dr. Jane Smith, DO, Summit
- * Orthopedics". Pure: no database, no Clerk, safe for the browser, so the
+ * The name a patient sees on a link: "Dr. Jane Smith, DO", with the
+ * clinic's name on the line under it. Pure: no database, no Clerk, safe for the browser, so the
  * name editor (on People, and in the library's Send panel) and the server
  * that saves it check names the same way.
  *
@@ -190,13 +190,26 @@ export function effectiveSenderName(displayName: string | null | undefined, defa
 }
 
 /**
- * The line near the top of the patient page and on the pamphlet:
- * "Sent by Dr. Jane Smith, DO, Summit Orthopedics", or "From Summit
- * Orthopedics" for a link with no name on it (every link made before
- * surgeons were recorded).
+ * The name on the strip of the LIBRARY's player: the signed-in person's name
+ * as patients see it on the links they send, but only when they hold a seat
+ * (`seat` is their seat, or null). Someone without a seat sends no links, so
+ * the strip shows only the clinic for them.
  */
-export function sentByLine(senderName: string | null | undefined, clinicName: string): string {
-  return senderName ? `Sent by ${senderName}, ${clinicName}` : `From ${clinicName}`;
+export function libraryStripName(seat: { displayName: string | null } | null, defaultName: string | null | undefined): string | null {
+  return seat ? effectiveSenderName(seat.displayName, defaultName) : null;
+}
+
+/**
+ * Who sent the link, as the lines near the top of the patient page and on
+ * the pamphlet show it: the doctor's name, then the clinic's name on a line
+ * of its own (decided by Evan on 2026-10-05: no "Sent by" in front, and two
+ * lines, because "Dr. Jane Smith, DO, Summit Orthopedics" on one line leaves
+ * the reader to guess where the name ends). A link with no name on it
+ * (every link made before surgeons were recorded) keeps its one line, "From
+ * Summit Orthopedics".
+ */
+export function senderLines(senderName: string | null | undefined, clinicName: string): string[] {
+  return senderName ? [senderName, clinicName] : [`From ${clinicName}`];
 }
 
 /** A credential typed under Other: letters and hyphens, starting with a letter. */

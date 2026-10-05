@@ -9,7 +9,7 @@ import {
   effectiveSenderName,
   parseNameChoice,
   readSenderName,
-  sentByLine,
+  senderLines,
   type CredentialPick,
   type NameChoice,
 } from "./sender-name";
@@ -175,18 +175,19 @@ describe("readSenderName: stored words back into the choice that made them", () 
   });
 });
 
-describe("effectiveSenderName and sentByLine", () => {
+describe("effectiveSenderName and senderLines", () => {
   it("prefers the typed name, then the default, then nothing", () => {
     expect(effectiveSenderName("Jane Smith, PA-C", "Dr. Jane Smith")).toBe("Jane Smith, PA-C");
-    expect(sentByLine("Dr. Jane Smith, DO", "Summit Orthopedics")).toBe("Sent by Dr. Jane Smith, DO, Summit Orthopedics");
     expect(effectiveSenderName(null, "Dr. Jane Smith")).toBe("Dr. Jane Smith");
     expect(effectiveSenderName("", "Dr. Jane Smith")).toBe("Dr. Jane Smith");
     expect(effectiveSenderName(null, null)).toBeNull();
   });
 
-  it("says who sent it, or only the clinic for a link with no name", () => {
-    expect(sentByLine("Dr. Jane Smith", "Summit Orthopedics")).toBe("Sent by Dr. Jane Smith, Summit Orthopedics");
-    expect(sentByLine(null, "Summit Orthopedics")).toBe("From Summit Orthopedics");
-    expect(sentByLine("", "Summit Orthopedics")).toBe("From Summit Orthopedics");
+  it("is the doctor's name and then the clinic on its own line, with no \"Sent by\"; a link with no name keeps \"From <clinic>\"", () => {
+    expect(senderLines("Dr. Jane Smith, DO", "Summit Orthopedics")).toEqual(["Dr. Jane Smith, DO", "Summit Orthopedics"]);
+    expect(senderLines("Jane Smith, PA-C", "Summit Orthopedics")).toEqual(["Jane Smith, PA-C", "Summit Orthopedics"]);
+    expect(senderLines(null, "Summit Orthopedics")).toEqual(["From Summit Orthopedics"]);
+    expect(senderLines("", "Summit Orthopedics")).toEqual(["From Summit Orthopedics"]);
+    expect(senderLines(undefined, "Summit Orthopedics")).toEqual(["From Summit Orthopedics"]);
   });
 });

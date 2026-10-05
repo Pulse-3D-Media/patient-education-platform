@@ -580,7 +580,7 @@ describe("who a link is from, on People and on the pamphlet", () => {
     }
   });
 
-  it("the pamphlet says who sent it, carries the placeholder mark, and an older link names only the clinic", async () => {
+  it("the pamphlet names the doctor with the clinic under it (no \"Sent by\"), carries the placeholder mark, and an older link names only the clinic", async () => {
     const hipClinic = createdClinicIds[3];
     const video = createdVideoIds[0];
     const withSender = await createShare(hipClinic, video, { sender: { clerkUserId: HIP_SURGEON.userId, fallbackName: "Dr. Jane Smith" } });
@@ -589,7 +589,8 @@ describe("who a link is from, on People and on the pamphlet", () => {
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
     const html = await render(() => PrintPage({ params: Promise.resolve({ code: withSender.code }) } as never), `/admin/print/${withSender.code}`);
     // Twice: the sheet carries the pamphlet once per half.
-    expect(html.match(/Sent by Jane Smith, PA-C, Vitest pages clinic \(hip\)/g)).toHaveLength(2);
+    expect(html.match(/<span class="block">Jane Smith, PA-C<\/span><span class="block">Vitest pages clinic \(hip\)<\/span>/g)).toHaveLength(2);
+    expect(html).not.toContain("Sent by");
     expect(html.match(/Placeholder: plays a sample animation, not this procedure/g)).toHaveLength(2);
     // The same "for education only" sentence the patient page carries, on each half.
     expect(html.match(/This video is for education only\. It is not medical advice\. Ask your doctor about anything you are unsure of\./g)).toHaveLength(2);

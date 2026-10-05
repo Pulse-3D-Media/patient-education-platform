@@ -31,7 +31,7 @@ import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback
  * THE STRIP ON THE PICTURE. A thin dark band across the top edge of the
  * picture (ClinicMark) carries what has to stay on screen for as long as the
  * picture does: the clinic's logo (or name), the signed-in person's name as
- * patients see it on the links they send ("Sent by Dr. Jane Smith, DO"),
+ * patients see it on the links they send ("Dr. Jane Smith, DO"),
  * when they hold a seat, and the amber "Placeholder animation" chip when the
  * video is a sample standing in for the named procedure. It sits on the
  * picture's own top edge, not the screen's, even where the picture is

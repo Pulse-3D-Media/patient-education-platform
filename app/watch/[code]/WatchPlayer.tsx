@@ -47,8 +47,8 @@ import { CallNumber } from "./CallButton";
  * loading" note over the picture instead, so a tap never looks ignored.
  *
  * THE STRIP ON THE VIDEO. A thin dark band across the top edge of the
- * picture carries the clinic's logo (or name) and "Sent by Dr. Jane Smith,
- * DO" (ClinicMark). It is there the whole time: before the first play, while
+ * picture carries the clinic's logo (or name) and the doctor's name, "Dr.
+ * Jane Smith, DO" (ClinicMark). It is there the whole time: before the first play, while
  * playing, in the large view (both kinds), and as a row of its own above the
  * "did not load" panel, where there is no picture to lay it over. It never
  * takes a tap, and the browser's own controls sit along the BOTTOM of the

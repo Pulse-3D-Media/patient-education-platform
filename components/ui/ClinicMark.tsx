@@ -1,13 +1,12 @@
 import type { CSSProperties, ReactNode } from "react";
 import { VIDEO_STRIP_ALPHA } from "@/lib/branding";
-import { sentByName } from "@/lib/sender-name";
 import { ClinicLogo } from "./ClinicLogo";
 import { PLACEHOLDER_CHIP } from "./styles";
 
 /**
  * The strip on the video, like a TV "lower third" but along the top: one
  * thin band laid across the TOP EDGE OF THE PICTURE, with the clinic's logo
- * and who sent the video ("Sent by Dr. Jane Smith, DO"), in both players
+ * and the name of the doctor who sent it ("Dr. Jane Smith, DO"), in both players
  * (decided by Evan on 2026-10-02, after Van asked for the doctor and the
  * clinic on the video itself on the September 28 call). It replaced a small
  * white chip that sat in a strip of its own ABOVE the picture.
@@ -21,8 +20,10 @@ import { PLACEHOLDER_CHIP } from "./styles";
  *     It keeps its fixed box and loads at low priority (ClinicLogo), so it
  *     never moves anything and never holds up the first frame. No logo, or
  *     one that does not load: the clinic's name in white in its place.
- *   - "Sent by ..." is worded like the line on the patient page
- *     (sentByName() in lib/sender-name.ts). No sender: just the clinic.
+ *   - The doctor's name, exactly as patients see it on their links
+ *     ("Dr. Jane Smith, DO", Share.senderName), with no "Sent by" in front
+ *     (decided by Evan on 2026-10-05: the line above the video already
+ *     says "Sent by"). No sender recorded: just the clinic.
  *   - The amber "Placeholder animation" chip, when the video is a sample,
  *     rides at the right end of the same band, so it stays in view for as
  *     long as the picture does.
@@ -67,7 +68,6 @@ export function ClinicMark({
   /** True where there is no picture to lay it over (the patient player's "did not load" panel): it becomes a row of its own. */
   inFlow?: boolean;
 }) {
-  const sentBy = sentByName(senderName);
   return (
     <div
       data-video-strip=""
@@ -83,10 +83,10 @@ export function ClinicMark({
         ) : (
           <span className={`max-w-[45%] shrink-0 truncate leading-none ${WORDS}`}>{name}</span>
         )}
-        {sentBy && (
+        {senderName && (
           <>
             <span className="h-4 w-px shrink-0 bg-white/50" />
-            <span className={`line-clamp-2 min-w-0 break-words leading-none ${WORDS}`}>{sentBy}</span>
+            <span className={`line-clamp-2 min-w-0 break-words leading-none ${WORDS}`}>{senderName}</span>
           </>
         )}
       </span>
@@ -97,8 +97,8 @@ export function ClinicMark({
 
 /**
  * White, 15px (the smallest text the patient page allows), on the band. The
- * clinic's name stays on one line and is cut short if it must be; "Sent by"
- * and the doctor's name may take two tight lines (two 15px lines are 30px,
+ * clinic's name stays on one line and is cut short if it must be; the
+ * doctor's name may take two tight lines (two 15px lines are 30px,
  * inside the 32px band), so a long name on a phone is still read in full
  * rather than cut off. Most names fit on one.
  */

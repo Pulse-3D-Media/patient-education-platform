@@ -23,20 +23,22 @@ function strip(html: string): string {
 }
 
 describe("what is on the strip", () => {
-  it("a logo and a sender: the logo straight on the band, then 'Sent by' and the name", () => {
+  it("a logo and a sender: the logo straight on the band, then the doctor's name alone", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" senderName="Dr. Jane Smith, DO" />);
 
     expect(html).toContain(`src="${LOGO}"`);
-    expect(html).toContain(">Sent by Dr. Jane Smith, DO<");
+    expect(html).toContain(">Dr. Jane Smith, DO<");
+    // Just the name: the line above the video already says "Sent by".
+    expect(html).not.toContain("Sent by");
     // The logo comes first, then the name.
-    expect(html.indexOf(LOGO)).toBeLessThan(html.indexOf("Sent by"));
+    expect(html.indexOf(LOGO)).toBeLessThan(html.indexOf("Dr. Jane Smith"));
   });
 
-  it("a logo with no sender recorded: the logo only, and no 'Sent by'", () => {
+  it("a logo with no sender recorded: the logo only, and no name", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" senderName={null} />);
 
     expect(html).toContain(`src="${LOGO}"`);
-    expect(html).not.toContain("Sent by");
+    expect(html).not.toContain("bg-white/50");
   });
 
   it("no logo: the clinic's name in white text, then the sender", () => {
@@ -44,14 +46,14 @@ describe("what is on the strip", () => {
 
     expect(html).not.toContain("<img");
     expect(html).toMatch(/<span class="[^"]*text-white[^"]*">Summit Orthopedics<\/span>/);
-    expect(html).toContain(">Sent by Jane Smith, PA-C<");
+    expect(html).toContain(">Jane Smith, PA-C<");
   });
 
   it("no logo and no sender: just the clinic's name", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit Orthopedics" />);
 
     expect(html).toContain(">Summit Orthopedics<");
-    expect(html).not.toContain("Sent by");
+    expect(html).not.toContain("bg-white/50");
     expect(html).not.toContain("Placeholder");
   });
 
@@ -76,7 +78,7 @@ describe("what is on the strip", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name={LONG_NAME} senderName="Dr. Maria de los Angeles Fernandez-Castillo, DPM" />);
 
     expect(html).toMatch(/<span class="max-w-\[45%\] shrink-0 truncate [^"]*">The Intermountain/);
-    expect(html).toMatch(/<span class="line-clamp-2 min-w-0 break-words leading-none [^"]*">Sent by Dr. Maria/);
+    expect(html).toMatch(/<span class="line-clamp-2 min-w-0 break-words leading-none [^"]*">Dr. Maria/);
     // Two lines of 15px with no extra spacing are 30px, inside the 32px band.
     expect(2 * 15).toBeLessThan(32);
     expect(html).toContain("h-8");
@@ -105,7 +107,7 @@ describe("how the strip sits", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit" senderName="Dr. Jane Smith, DO" placeholder />);
     const hidden = html.slice(html.indexOf('aria-hidden="true"'), html.indexOf("Placeholder animation"));
 
-    expect(hidden).toContain("Sent by Dr. Jane Smith, DO");
+    expect(hidden).toContain("Dr. Jane Smith, DO");
     expect(hidden).toContain(LOGO);
   });
 
@@ -114,7 +116,7 @@ describe("how the strip sits", () => {
 
     expect(html).toContain("relative shrink-0");
     expect(html).not.toContain("absolute inset-x-0 top-0");
-    expect(html).toContain("Sent by Dr. Jane Smith, DO");
+    expect(html).toContain("Dr. Jane Smith, DO");
   });
 });
 

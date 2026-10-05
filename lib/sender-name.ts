@@ -206,18 +206,7 @@ export function libraryStripName(seat: { displayName: string | null } | null, de
  * surgeons were recorded).
  */
 export function sentByLine(senderName: string | null | undefined, clinicName: string): string {
-  const sentBy = sentByName(senderName);
-  return sentBy ? `${sentBy}, ${clinicName}` : `From ${clinicName}`;
-}
-
-/**
- * The same words without the clinic, for the strip on the video, where the
- * clinic's logo (or name) sits right beside them: "Sent by Dr. Jane Smith,
- * DO". Null for a link with no name on it; the strip then shows only the
- * clinic.
- */
-export function sentByName(senderName: string | null | undefined): string | null {
-  return senderName ? `Sent by ${senderName}` : null;
+  return senderName ? `Sent by ${senderName}, ${clinicName}` : `From ${clinicName}`;
 }
 
 /** A credential typed under Other: letters and hyphens, starting with a letter. */

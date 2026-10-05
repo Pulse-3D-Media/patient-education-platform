@@ -220,7 +220,7 @@ Before it works: apply the migration to the preview database with `node "Desktop
 
 ## The strip on the video, October 5, 2026 (Prompt 1C, branch name-strip)
 
-This replaces the 40px strip ABOVE the picture described in the passes above (and, after Evan asked for it a little thinner the same day, the band is 32px; the measurements below are the 32px ones): the clinic's logo and "Sent by Dr. Jane Smith, DO" now sit on a dark band laid across the top edge of the picture itself, in both players (see "Clinic branding and dependable playback" in CLAUDE.md). The earlier lines about nothing being drawn over the picture are history.
+This replaces the 40px strip ABOVE the picture described in the passes above (and, after Evan asked for it a little thinner the same day, the band is 32px; the measurements below are the 32px ones): the clinic's logo and the doctor's name ("Dr. Jane Smith, DO", with no "Sent by" in front, Evan's call the same day) now sit on a dark band laid across the top edge of the picture itself, in both players (see "Clinic branding and dependable playback" in CLAUDE.md). The earlier lines about nothing being drawn over the picture are history.
 
 Checked in headless Edge against the Neon testing branch, with Clerk stood in for (made-up clinics and links, removed afterwards):
 
@@ -229,8 +229,8 @@ Checked in headless Edge against the Neon testing branch, with Clerk stood in fo
 - "Did not load": the strip is a row of its own above the panel; the panel stays inside the page's margins.
 - No sender recorded and no logo: the clinic's name in white, and nothing else.
 - `controlsList="nodownload nofullscreen"`: in Edge the browser's own full-screen button is drawn greyed out; pressing it and double-clicking the picture both leave the page out of full screen.
-- Library player, tablet (1024 by 768) and phone (390 by 844): strip on the picture's top edge (96px and 312px down, the picture letterboxed), the title row and Close starting right under it (128px and 344px), no overlap.
-- A 48-character doctor's name at phone width: two tight lines (30px of text in the 32px band, nothing clipped), ending in "..."; the full name is in the line above the video. Someone holding a seat: "Sent by Dr. Ben Carter, DO"; someone without one: the clinic only; a placeholder: the amber chip at the right end of the band. Its own Full screen button took the whole player full screen with the strip.
+- Library player, tablet (1024 by 768) and phone (390 by 844): strip on the picture's top edge (96px and 312px down, the picture letterboxed), the title row and Close starting right under it (128px and 344px), no overlap. Someone holding a seat: "Dr. Ben Carter, DO"; someone without one: the clinic only; a placeholder: the amber chip at the right end of the band. Its own Full screen button took the whole player full screen with the strip.
+- A 48-character doctor's name at phone width ("Dr. Maria de los Angeles Fernandez-Castillo, DPM"): two tight lines, 30px of text in the 32px band, nothing clipped, shown in full.
 - Branding form: the sentence about a white or light logo, and the "On the video" preview over a light and a dark frame.
 - Every published video (13, the same files on production and the testing branch), eight points each, with the band drawn at phone size: the finished Total Knee Replacement puts no words in the band, only the top of the femur and implant, dimmed. Placeholder animations that put words there: ACL Reconstruction (instruction captions), Reverse Total Shoulder Arthroplasty (section titles), Arthroscopic Rotator Cuff Repair ("AlphaVent Knotless"), Hip Arthroscopy (a caption, partly), Lumbar Spinal Fusion and Pedicle Subtraction Osteotomy (feature captions and labels), Adult Scoliosis Correction (instrument labels), Achilles Tendon Repair and Partial Knee Replacement (the vendor's logo). Bunion Correction, Total Hip Replacement and Lumbar Discectomy: nothing that matters.
 

@@ -27,13 +27,13 @@ describe("the strip on the library's player", () => {
 
     expect(html).toContain("data-video-strip");
     expect(html).toContain('src="https://example.com/summit-white.png"');
-    expect(html).toContain(">Sent by Dr. Jane Smith, DO<");
+    expect(html).toContain(">Dr. Jane Smith, DO<");
   });
 
   it("someone holding a seat that nobody named: 'Dr. First Last' from Clerk", () => {
     const html = render({ senderName: libraryStripName({ displayName: null }, "Dr. Jane Smith") });
 
-    expect(html).toContain(">Sent by Dr. Jane Smith<");
+    expect(html).toContain(">Dr. Jane Smith<");
   });
 
   it("someone without a seat: only the clinic, because they send no links", () => {
@@ -42,7 +42,7 @@ describe("the strip on the library's player", () => {
 
     expect(senderName).toBeNull();
     expect(html).toContain(">Summit Orthopedics<");
-    expect(html).not.toContain("Sent by");
+    expect(html).not.toContain("Dr. Jane Smith");
   });
 
   it("a placeholder: the amber chip is on the same strip, on the picture", () => {

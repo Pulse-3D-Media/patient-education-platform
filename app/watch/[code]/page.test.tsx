@@ -290,13 +290,14 @@ describe("the strip on the video", () => {
     return html.slice(start, html.indexOf("</div>", start));
   }
 
-  it("is laid over the picture, from before the first play, with the logo and 'Sent by' the surgeon", async () => {
+  it("is laid over the picture, from before the first play, with the logo and the surgeon's name alone", async () => {
     const clinic = await makeClinic({ name: "Vitest Strip Orthopedics", logoUrl: "https://example.com/strip-white.png" });
     const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO"));
     const strip = stripOf(html);
 
     expect(strip).toContain('src="https://example.com/strip-white.png"');
-    expect(strip).toContain(">Sent by Dr. Jane Smith, DO<");
+    expect(strip).toContain(">Dr. Jane Smith, DO<");
+    expect(strip).not.toContain("Sent by");
     // Inside the box over the picture, not in a row above the video: the player's box is now exactly the video's shape.
     expect(html).toMatch(/class="picture-area pointer-events-none absolute inset-0 z-10" style="--picture-ratio:1.777[^"]*"><div class="picture-fit"><div data-video-strip/);
     expect(html).toContain("padding-top:56.25%");
@@ -311,7 +312,7 @@ describe("the strip on the video", () => {
 
     expect(strip).not.toContain("<img");
     expect(strip).toMatch(/text-white[^"]*">Vitest Nologo Orthopedics</);
-    expect(strip).toContain(">Sent by Jane Smith, NP<");
+    expect(strip).toContain(">Jane Smith, NP<");
   });
 
   it("for a link with no sender recorded, has only the logo or the clinic's name", async () => {
@@ -319,14 +320,14 @@ describe("the strip on the video", () => {
     const strip = stripOf(await render(await shareFrom(clinic.id, null)));
 
     expect(strip).toContain(">Vitest Older Strip Orthopedics<");
-    expect(strip).not.toContain("Sent by");
+    expect(strip).not.toContain("bg-white/50");
   });
 
   it("is on a placeholder link too, under the amber bar that still says so first", async () => {
     const clinic = await makeClinic({ name: "Vitest Sample Orthopedics" });
     const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO", placeholderVideoId));
 
-    expect(stripOf(html)).toContain(">Sent by Dr. Jane Smith, DO<");
+    expect(stripOf(html)).toContain(">Dr. Jane Smith, DO<");
     expect(html.indexOf("Placeholder.")).toBeLessThan(html.indexOf("data-video-strip"));
   });
 });

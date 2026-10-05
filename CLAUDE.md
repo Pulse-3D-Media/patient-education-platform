@@ -675,7 +675,7 @@ model Share {
 
   // Who the link is from: a surgeon, never a patient. Both copied when the link is made; empty on links made before surgeons were recorded.
   senderUserId String?                            // the surgeon's Clerk user id
-  senderName   String?                            // what the patient page and the pamphlet say: "Sent by Dr. Jane Smith". Empty means the older wording, with no name
+  senderName   String?                            // what the patient page, the pamphlet and the strip on the video show: "Dr. Jane Smith, DO" (no "Sent by"). Empty means the older wording, with no name
 
   // Pausing and reactivation (see "How a link expires, pauses, and is turned back on"). Nothing here is about the patient.
   renewalsUsed       Int       @default(0)        // how many times the clinic has turned this link back on

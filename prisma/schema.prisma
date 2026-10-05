@@ -398,7 +398,7 @@ model Share {
   // later name change or the surgeon leaving never changes a link already
   // sent. Empty on every link made before surgeons were recorded.
   senderUserId String? // the surgeon's Clerk user id
-  senderName   String? // what the patient page and the pamphlet say: "Sent by Dr. Jane Smith". Empty means the older wording, with no name
+  senderName   String? // what the patient page, the pamphlet and the strip on the video show: "Dr. Jane Smith, DO" (no "Sent by"). Empty means the older wording, with no name
 
   // Pausing and reactivation (see lib/expiry.ts). A FIRST_PLAY link that has
   // been played PAUSES when its days run out, and the clinic can turn it back

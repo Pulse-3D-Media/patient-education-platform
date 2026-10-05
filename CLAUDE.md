@@ -940,6 +940,7 @@ Match the live Pulse 3D site. Do not invent a new palette.
 - Light band: `#e4ebf3` · Black: `#000000`
 - **Dark staff screens (the default, and all of `/pulse`):** page `#000000` · cards `#0d1113` · rail and text boxes `#07090b` · menus `#0a0d0f` · headings `#ffffff` · body text `#bfbfbf` · muted `#667085` · hairlines white at 10%, button and text-box edges white at 15% · amber `#f3b94d`
 - **Light staff screens (a clinic's choice):** pure white with cool, neutral greys, no warm tint (Van asked for white, not beige, on 2026-09-21) · page, cards, menus and text boxes `#ffffff` · rail `#f3f5f7` · headings `#12202a` · body text `#3a4c56` · muted `#52616a` · hairlines `#e3e7eb`, button and text-box edges `#737b83` · amber text `#684400` · Pulse accent `#1e5668`, which is also the link shade
+- **The patient page (always light, whatever the clinic chose), its calm error and not-found pages, and the Branding form's preview of it:** plain white too (Van, 2026-10-05) · page `#ffffff` · headings `#12202a` · body text `#3a4c56` · small text `#46555e` · hairlines `#e3e7eb` · the soft circle behind an icon `#eef1f4` with the icon `#52616a` · the clinic's colour only as the thin top band and the call button, adjusted against white (`PATIENT_GROUND` in `lib/branding.ts`) · the placeholder bar stays amber
 - In code these are never written as hex: use the token classes (see "Light and dark staff screens"). The values live in `app/globals.css`.
 
 **No monospace fonts anywhere in the interface.**

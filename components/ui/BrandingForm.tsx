@@ -294,7 +294,7 @@ export function BrandingForm({
       <div aria-hidden="true" className="flex flex-col gap-4">
         <p className="text-sm font-medium text-ink-soft">Preview</p>
 
-        <div className={`overflow-hidden rounded-2xl bg-[#fbfaf7] text-[#12202a] ${fontClasses[font]}`} style={themeVars(patient) as CSSProperties}>
+        <div className={`overflow-hidden rounded-2xl bg-white text-[#12202a] ${fontClasses[font]}`} style={themeVars(patient) as CSSProperties}>
           <div className="h-1.5 bg-brand" />
           <div className="px-5 pb-5 pt-4">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#46555e]">What a patient sees</p>

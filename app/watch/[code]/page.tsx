@@ -22,7 +22,7 @@ import { WatchPlayer } from "./WatchPlayer";
  * on cellular data, often anxious. Everything about the look follows from
  * that, and none of it is taste:
  *
- * - Dark text on a warm, light ground. The National Institute on Aging's
+ * - Dark text on a plain white ground. The National Institute on Aging's
  *   guidance for older readers, which is why this page is light when the rest
  *   of the product is near-black.
  * - Body text is 20px with a 1.5 line height. Nothing on the page is under
@@ -146,7 +146,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   const length = describeDuration(share.video.durationSeconds);
 
   return (
-    <main className={`flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a] ${look.fontClass}`} style={look.style}>
+    <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
       <BrandBand />
       {share.video.isPlaceholder && <PlaceholderBar />}
 
@@ -187,7 +187,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
         )}
 
         {/* The second half is for the spouse or adult child who was never in the room. */}
-        <p className="mt-4 border-t border-[#e6e2da] pt-4 text-[19px] leading-[1.52] text-[#3a4c56]">
+        <p className="mt-4 border-t border-[#e3e7eb] pt-4 text-[19px] leading-[1.52] text-[#3a4c56]">
           Watch it as many times as you like, and show it to anyone coming with you.
         </p>
 
@@ -210,7 +210,7 @@ function BrandBand() {
 }
 
 /**
- * The calm page for a link that is expired, taken down or does not exist. Same warm
+ * The calm page for a link that is expired, taken down or does not exist. Same white
  * ground, a soft circular icon, plain words, nothing that reads as an alarm,
  * and nothing to do but ask the practice. Never the words "error" or
  * "invalid", and nothing red.
@@ -238,10 +238,10 @@ function Unavailable({
   children?: ReactNode;
 }) {
   return (
-    <main className={`flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a] ${look.fontClass}`} style={look.style}>
+    <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
       <BrandBand />
       <div className="flex flex-1 flex-col items-center justify-center px-8 pb-10 pt-[46px] text-center">
-        <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#f0ece3] text-[#74664c]">{icon}</div>
+        <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#eef1f4] text-[#52616a]">{icon}</div>
         {children ?? (
           <>
             <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>

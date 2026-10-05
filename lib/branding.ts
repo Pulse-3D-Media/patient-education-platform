@@ -196,8 +196,8 @@ export const STAFF_GROUND = "#0d1113";
  */
 export const STAFF_LIGHT_GROUND = "#f3f5f7";
 
-/** The patient page's warm light ground. */
-export const PATIENT_GROUND = "#fbfaf7";
+/** The patient page's ground: plain white, like the light staff screens (Van, 2026-10-05). */
+export const PATIENT_GROUND = "#ffffff";
 
 /** The colours of the staff screens (/library, /admin): near-black, or light when the clinic chose light. */
 export type StaffTheme = {

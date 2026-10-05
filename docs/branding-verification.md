@@ -149,7 +149,7 @@ Two things found by the comparison and fixed: the dialog backdrop had to be writ
 
 ### Light mode
 
-> **2026-10-02:** the light page is now pure white, with cool greys for the rail (`#f3f5f7`), hairlines (`#e3e7eb`) and button and text-box edges (`#737b83`), replacing the warm values measured below (Van asked for white, not beige). The table below is the September record and still names the old colours. `lib/branding.test.ts` checks the new values against the same floors (4.5:1 for text, 3:1 for edges) on every light surface, plain and under a hover wash, and passes; the browser measurement below was not repeated.
+> **2026-10-02:** the light page is now pure white, with cool greys for the rail (`#f3f5f7`), hairlines (`#e3e7eb`) and button and text-box edges (`#737b83`), replacing the warm values measured below (Van asked for white, not beige). The table below is the September record and still names the old colours. `lib/branding.test.ts` checks the new values against the same floors (4.5:1 for text, 3:1 for edges) on every light surface, plain and under a hover wash, and passes; the browser measurement below was not repeated. **2026-10-05:** the patient page, its calm error pages and the Branding preview of it are now plain white too (`PATIENT_GROUND` `#ffffff`), with the same cool hairline and a cool grey icon circle; the clinic colour on it is checked against white by the same test.
 
 The same nineteen pages at **1280, 820 and 390 wide** for the light clinic, and at 1280 for the pale and navy clinics in both modes. These are browser windows of those sizes, not a tablet and not a phone. No sideways scrolling was seen at any width.
 

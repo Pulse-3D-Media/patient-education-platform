@@ -3,7 +3,7 @@ import { LOGO_URL } from "@/lib/brand";
 import { patientTheme, themeVars } from "@/lib/branding";
 
 /**
- * The calm page frame, in the patient page's family: the warm light ground,
+ * The calm page frame, in the patient page's family: the plain white ground,
  * a thin band of colour across the top, a soft circular icon, one plain
  * heading, one sentence, whatever the page adds under them (a button, or
  * nothing), and the Pulse 3D mark at the bottom. It is the same frame the
@@ -25,10 +25,10 @@ import { patientTheme, themeVars } from "@/lib/branding";
 export function CalmFrame({ icon, heading, body, children }: { icon: ReactNode; heading: string; body: string; children?: ReactNode }) {
   const style = themeVars(patientTheme(null)) as CSSProperties;
   return (
-    <main className="flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a]" style={style}>
+    <main className="flex min-h-screen flex-col bg-white text-[#12202a]" style={style}>
       <div aria-hidden="true" className="h-1.5 shrink-0 bg-brand" />
       <div className="flex flex-1 flex-col items-center justify-center px-8 pb-10 pt-[46px] text-center">
-        <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#f0ece3] text-[#74664c]">{icon}</div>
+        <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#eef1f4] text-[#52616a]">{icon}</div>
         <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
         <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">{body}</p>
         {children}

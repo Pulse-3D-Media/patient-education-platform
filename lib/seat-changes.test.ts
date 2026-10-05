@@ -400,7 +400,7 @@ describe("the name patients see", () => {
 
     expect(await setOwnPatientName({ clinicId, choice: choice("Jane Smith", "other", "LAc"), actor: me })).toEqual({
       ok: true,
-      message: `Saved. Links you send from now on say "Sent by Jane Smith, LAc".`,
+      message: `Saved. Links you send from now on show "Jane Smith, LAc".`,
       name: "Jane Smith, LAc",
     });
     expect((await logOf(clinicId)).at(-1)).toBe(

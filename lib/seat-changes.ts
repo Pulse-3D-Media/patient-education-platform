@@ -385,7 +385,7 @@ export async function setOwnPatientName(args: { clinicId: string; choice: unknow
     choice: args.choice,
     authorName: `${args.actor.name} (surgeon)`,
     noSeat: () => "Only people holding a seat send links, and you do not hold one right now. Ask your clinic's office admin.",
-    saved: (_member, name) => `Saved. Links you send from now on say "Sent by ${name}".`,
+    saved: (_member, name) => `Saved. Links you send from now on show "${name}".`,
   });
 }
 

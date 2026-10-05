@@ -22,8 +22,8 @@ import { PLACEHOLDER_CHIP } from "./styles";
  *     one that does not load: the clinic's name in white in its place.
  *   - The doctor's name, exactly as patients see it on their links
  *     ("Dr. Jane Smith, DO", Share.senderName), with no "Sent by" in front
- *     (decided by Evan on 2026-10-05: the line above the video already
- *     says "Sent by"). No sender recorded: just the clinic.
+ *     (decided by Evan on 2026-10-05). No sender recorded: just the
+ *     clinic.
  *   - The amber "Placeholder animation" chip, when the video is a sample,
  *     rides at the right end of the same band, so it stays in view for as
  *     long as the picture does.

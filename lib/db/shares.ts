@@ -449,7 +449,7 @@ export async function recordSharePlay(code: string, now: Date = new Date()): Pro
 /**
  * One of this clinic's shares, by code, for the admin pages (the QR picture
  * and the pamphlet), with its video's title and placeholder mark and the
- * clinic's name for "Sent by ...". Returns null if the code does not exist
+ * clinic's name for the lines saying who sent it. Returns null if the code does not exist
  * or belongs to another clinic; the admin pages treat both the same way.
  */
 export async function getShareForClinic(clinicId: string, code: string) {

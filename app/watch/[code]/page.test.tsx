@@ -333,7 +333,7 @@ describe("the strip on the video", () => {
 });
 
 describe("who sent the link", () => {
-  it("says 'Sent by' the surgeon and the clinic near the top, for a link that carries a name", async () => {
+  it("names the surgeon near the top, with the clinic on the line under it and no 'Sent by', for a link that carries a name", async () => {
     const clinic = await makeClinic({ name: "Vitest Summit Orthopedics" });
     const share = await prisma.share.create({
       data: {
@@ -347,9 +347,10 @@ describe("who sent the link", () => {
       select: { code: true },
     });
     const html = await render(share.code);
-    expect(html).toContain("Sent by Dr. Jane Smith, Vitest Summit Orthopedics");
+    expect(html).toContain('<span class="block">Dr. Jane Smith</span><span class="block">Vitest Summit Orthopedics</span>');
+    expect(html).not.toContain("Sent by");
     // It comes before the procedure's name, as "who sent me this" always has.
-    expect(html.indexOf("Sent by Dr. Jane Smith")).toBeLessThan(html.indexOf("Vitest Total Knee Replacement"));
+    expect(html.indexOf("Dr. Jane Smith")).toBeLessThan(html.indexOf("Vitest Total Knee Replacement"));
     // The surgeon's account id is never in the page.
     expect(html).not.toContain("user_vitestsender");
   });

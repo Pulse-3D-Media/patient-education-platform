@@ -28,7 +28,7 @@ describe("what is on the strip", () => {
 
     expect(html).toContain(`src="${LOGO}"`);
     expect(html).toContain(">Dr. Jane Smith, DO<");
-    // Just the name: the line above the video already says "Sent by".
+    // Just the name, no "Sent by" (decided by Evan on 2026-10-05).
     expect(html).not.toContain("Sent by");
     // The logo comes first, then the name.
     expect(html.indexOf(LOGO)).toBeLessThan(html.indexOf("Dr. Jane Smith"));

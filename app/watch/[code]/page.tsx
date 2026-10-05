@@ -9,7 +9,7 @@ import { getShareByCode } from "@/lib/db/shares";
 import { canRequestRenewal, isExpired, renewalState } from "@/lib/expiry";
 import { EDUCATION_ONLY } from "@/lib/education-note";
 import { describeDuration } from "@/lib/format";
-import { sentByLine } from "@/lib/sender-name";
+import { senderLines } from "@/lib/sender-name";
 import { getPlaybackUrl } from "@/lib/video";
 import { AskClinic } from "./AskClinic";
 import { CallButton } from "./CallButton";
@@ -31,9 +31,9 @@ import { WatchPlayer } from "./WatchPlayer";
  * - Every tap target is at least 48px. Pinch-to-zoom is left on.
  *
  * Top to bottom it answers the questions an anxious person has, in order: who
- * sent me this ("Sent by Dr. Jane Smith, Summit Orthopedics": the surgeon's
- * name was copied onto the link when it was made; a link made before that
- * says "From Summit Orthopedics"), what is it, why, how long will it take. Under the video, one
+ * sent me this ("Dr. Jane Smith, DO" and "Summit Orthopedics" under it: the
+ * surgeon's name was copied onto the link when it was made; a link made
+ * before that says "From Summit Orthopedics"), what is it, why, how long will it take. Under the video, one
  * quiet sentence says it is for education only, not medical advice (lib/education-note.ts): plain
  * text, never a step before the video. The Pulse 3D logo sits
  * at the very bottom, small, because the practice sent this, not us.
@@ -160,8 +160,14 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
         )}
 
         {/* Who sent it comes first: it is the first thing an anxious person wants to know. Always written out, so it never depends on the logo.
-            "Sent by Dr. Jane Smith, Summit Orthopedics", or "From Summit Orthopedics" for a link made before surgeons were recorded. */}
-        <p className="text-[15px] font-semibold tracking-[.01em] break-words text-[#46555e]">{sentByLine(share.senderName, share.clinic.name)}</p>
+            "Dr. Jane Smith, DO" with "Summit Orthopedics" on the line under it, or "From Summit Orthopedics" for a link made before surgeons were recorded. */}
+        <p className="text-[15px] font-semibold tracking-[.01em] break-words text-[#46555e]">
+          {senderLines(share.senderName, share.clinic.name).map((line, i) => (
+            <span key={i} className="block">
+              {line}
+            </span>
+          ))}
+        </p>
         <h1 className="mt-1.5 text-[29px] leading-[1.15] font-bold tracking-[-.022em]">{share.video.title}</h1>
         <p className="mt-2.5 text-[20px] leading-[1.5] text-[#3a4c56]">
           Your surgeon shared this so you can see what happens during your operation.

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { categoryState } from "@/lib/access";
+import { addToPlanOffer } from "@/lib/add-to-plan";
 import { parseLogoUrl } from "@/lib/branding";
 import { categoryFromSlug } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
@@ -76,8 +77,10 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   }));
 
   // Nothing published here at all: the same "Coming soon" the library home
-  // shows on the tile, with the category's own sentence.
-  const configs = state === "coming-soon" ? await getCategoryConfigs() : null;
+  // shows on the tile, with the category's own sentence. Not on the plan: the
+  // category's row says whether it is for sale, which decides whether there
+  // is anything to add. The other states need no row.
+  const configs = state === "coming-soon" || state === "locked" ? await getCategoryConfigs() : null;
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -104,10 +107,10 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
           // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
           canSend={seat !== null}
         />
-      ) : configs ? (
-        <ComingSoon label={category.label} config={configs[category.value]} />
+      ) : state === "coming-soon" ? (
+        <ComingSoon label={category.label} config={configs?.[category.value]} />
       ) : state === "locked" ? (
-        <LockedCategory label={category.label} />
+        <LockedCategory label={category.label} slug={category.slug} offer={addToPlanOffer(clinic.isAdmin, configs?.[category.value])} />
       ) : (
         <EmptyCategory label={category.label} />
       )}

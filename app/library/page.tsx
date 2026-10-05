@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { ChevronRightIcon, LockIcon } from "@/components/ui/icons";
 import { categoryState, visibleCount, type CategoryState } from "@/lib/access";
+import { addToPlanHref, addToPlanOffer } from "@/lib/add-to-plan";
 import { CATEGORIES, type CategoryConfig } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -25,8 +26,11 @@ import { ComingSoonTile } from "./ComingSoon";
  *
  * Below that, out of the way, a closed "More categories" section lists by
  * name the categories that have something in them but are not on the plan
- * (the "locked" state). None of them is a link, and nothing playable is sent
- * for them. A category that is neither on the plan nor has anything in it
+ * (the "locked" state). None of them opens the category, and nothing playable
+ * is sent for them. An office admin gets one small "Add to your plan" link on
+ * each one that is for sale, to Billing with that category ticked; a member
+ * is told to ask an office admin (lib/add-to-plan.ts). No price is ever shown
+ * here. A category that is neither on the plan nor has anything in it
  * ("coming soon" for a category the clinic has not bought) is not shown on
  * this page at all. Its own page, reached from the menu or by address, still
  * says the same as before: this page only decides where things go.
@@ -57,7 +61,11 @@ export default async function LibraryPage() {
   // The clinic's own categories, in the usual order, and the ones with something in them that it does not have.
   const rows = CATEGORIES.map((category) => ({ category, state: categoryState(access, category.value, counts[category.value]) }));
   const mine = rows.filter((row) => access.categories.includes(row.category.value));
-  const more = rows.filter((row) => row.state === "locked");
+  // Each one with what can be done about it: a link to Billing for an office admin, "ask your admin" for a member, nothing when it is not for sale.
+  const more = rows
+    .filter((row) => row.state === "locked")
+    .map((row) => ({ category: row.category, offer: addToPlanOffer(clinic.isAdmin, configs[row.category.value]) }));
+  const canAdd = more.some((row) => row.offer !== "none");
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -78,7 +86,8 @@ export default async function LibraryPage() {
         </ul>
       )}
 
-      {/* The rest, kept out of the way: closed until tapped (open when the plan has nothing, so the page is not empty). Names, not pictures, and none of them is a link. */}
+      {/* The rest, kept out of the way: closed until tapped (open when the plan has nothing, so the page is not empty). Names, not pictures, and none
+          of them opens the category. An office admin gets one small link on each, to Billing with that category ticked; no price is shown here. */}
       {more.length > 0 && (
         <details open={mine.length === 0} className="group mt-10 border-t border-line pt-3">
           <summary className="flex min-h-12 w-fit cursor-pointer list-none items-center gap-2 rounded-lg pr-3 text-base font-medium text-ink-soft hover:text-ink [&::-webkit-details-marker]:hidden">
@@ -87,14 +96,30 @@ export default async function LibraryPage() {
             <span className="text-sm font-normal text-ink-muted">({more.length} not on your plan)</span>
           </summary>
           <p className="mb-3 max-w-2xl text-sm text-ink-muted">
-            Your clinic&rsquo;s admin can see the plan under Billing, and ask Pulse 3D about adding one of these.
+            {!canAdd
+              ? "Your clinic’s admin can see the plan under Billing, and ask Pulse 3D about adding one of these."
+              : clinic.isAdmin
+                ? "Add one on Billing. You see what it comes to there before anything changes."
+                : "Ask your office admin to add one of these."}
           </p>
           <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {more.map(({ category }) => (
+            {more.map(({ category, offer }) => (
               <li key={category.value} className="flex min-h-12 items-center gap-3 rounded-xl border border-dashed border-line-strong px-4 text-ink-soft">
                 <LockIcon className="h-4 w-4 shrink-0 text-ink-muted" />
                 <span className="font-medium">{category.label}</span>
-                <span className="ml-auto text-sm text-ink-muted">Not on your plan</span>
+                {offer === "link" ? (
+                  // Not prefetched: the library stays light, and Billing is only read when someone asks for it.
+                  <Link
+                    href={addToPlanHref(category.slug)}
+                    prefetch={false}
+                    aria-label={`Add ${category.label} to your plan`}
+                    className="ml-auto inline-flex min-h-12 shrink-0 items-center text-sm font-medium text-brand-bright underline underline-offset-2 hover:text-ink"
+                  >
+                    Add to your plan
+                  </Link>
+                ) : (
+                  <span className="ml-auto text-sm text-ink-muted">Not on your plan</span>
+                )}
               </li>
             ))}
           </ul>

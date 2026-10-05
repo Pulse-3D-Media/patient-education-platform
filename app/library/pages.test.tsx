@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { categoryState, type CategoryState } from "@/lib/access";
 import { CATEGORIES } from "@/lib/categories";
 import { getClinicAccess } from "@/lib/db/access";
+import { getCategoryConfigs } from "@/lib/db/category-config";
 import { prisma } from "@/lib/db/client";
 import { countPublishedVideosByKind } from "@/lib/db/videos";
 import CategoryPage from "./[category]/page";
@@ -48,6 +49,23 @@ vi.mock("next/navigation", () => ({
     throw new Error("notFound");
   },
 }));
+
+// The category rows are real, read from the test database, unless a test hands in its own (hipForSale below):
+// whether Hip is for sale there is not this file's to assume or to change.
+vi.mock("@/lib/db/category-config", async (original) => {
+  const actual = await original<typeof import("@/lib/db/category-config")>();
+  return { ...actual, getCategoryConfigs: vi.fn(actual.getCategoryConfigs) };
+});
+
+/** For the next renders, say whether Hip is for sale, leaving every other category's row as the database has it. */
+async function hipForSale(sellable: boolean) {
+  const actual = await vi.importActual<typeof import("@/lib/db/category-config")>("@/lib/db/category-config");
+  const real = await actual.getCategoryConfigs();
+  vi.mocked(getCategoryConfigs).mockResolvedValue({ ...real, HIP: { sellable, comingSoonText: null } });
+}
+
+/** The address "Add to your plan" goes to for one category. */
+const addLink = (slug: string) => `href="/admin/billing?add=${slug}#change"`;
 
 /** Pretend Clerk says this person is in this organization: a member unless told they are an admin. */
 function signInAs(orgId: string, orgName: string, role: "member" | "admin" = "member") {
@@ -203,6 +221,50 @@ describe("the library home", () => {
     expect(html).not.toContain('href="/library/');
   });
 
+  it("gives an office admin one 'Add to your plan' link on each locked category that is for sale, to Billing with that category suggested, and no price", async () => {
+    await hipForSale(true);
+    signInAs(orgKnee, "Vitest library clinic (knee)", "admin");
+    const html = renderToStaticMarkup(await LibraryPage());
+    const states = await expectedStates(kneeClinic);
+
+    expect(html).toContain(addLink("hip"));
+    expect(html).toContain("Add to your plan");
+    expect(html).toContain('aria-label="Add Hip to your plan"');
+    // A category already on the plan has no such link, and neither does one with nothing in it yet (it is not on the page at all).
+    expect(html).not.toContain(addLink("knee"));
+    for (const category of CATEGORIES) {
+      if (states[category.value] !== "locked") expect(html).not.toContain(addLink(category.slug));
+    }
+    // Still locked: the link adds nothing by itself, and nothing playable is sent.
+    expect(html).not.toContain('href="/library/hip"');
+    expect(html).not.toContain(hipSrc);
+    // No prices in the library.
+    expect(html).not.toMatch(/\$\d/);
+  });
+
+  it("tells a member to ask an office admin, and links nowhere", async () => {
+    await hipForSale(true);
+    signInAs(orgKnee, "Vitest library clinic (knee)");
+    const html = renderToStaticMarkup(await LibraryPage());
+    expect(html).toContain("Ask your office admin to add one of these.");
+    expect(html).not.toContain("Add to your plan");
+    expect(html).not.toContain("/admin/billing");
+  });
+
+  it("offers nothing for a locked category that is not for sale, to an admin or a member", async () => {
+    await hipForSale(false);
+    signInAs(orgKnee, "Vitest library clinic (knee)", "admin");
+    const admin = renderToStaticMarkup(await LibraryPage());
+    expect(admin).toContain(">Hip<");
+    expect(admin).not.toContain(addLink("hip"));
+    expect(admin).not.toContain("Add Hip to your plan");
+
+    signInAs(orgKnee, "Vitest library clinic (knee)");
+    const member = renderToStaticMarkup(await LibraryPage());
+    expect(member).toContain(">Hip<");
+    expect(member).not.toContain("/admin/billing");
+  });
+
   it("shows a clinic that is not open the calm page, not the tiles; a member is told to ask an admin and gets no Billing button", async () => {
     signInAs(orgPending, "Vitest library clinic (pending)");
     const html = renderToStaticMarkup(await LibraryPage());
@@ -262,6 +324,45 @@ describe("a category's own page", () => {
     expect(html).not.toContain(hipTitle);
     expect(html).not.toContain(hipSrc);
     expect(html).not.toContain("to a patient");
+  });
+
+  it("gives an office admin 'Add to your plan' on a locked category's page, and still sends nothing playable", async () => {
+    await hipForSale(true);
+    signInAs(orgKnee, "Vitest library clinic (knee)", "admin");
+    const html = await renderCategory("hip");
+    expect(html).toContain("is not on your clinic");
+    expect(html).toContain(addLink("hip"));
+    expect(html).toContain("Add to your plan");
+    expect(html).toContain('href="/library"');
+    expect(html).not.toContain(hipTitle);
+    expect(html).not.toContain(hipSrc);
+    expect(html).not.toMatch(/\$\d/);
+  });
+
+  it("tells a member on a locked category's page to ask an office admin, with no link to Billing", async () => {
+    await hipForSale(true);
+    signInAs(orgKnee, "Vitest library clinic (knee)");
+    const html = await renderCategory("hip");
+    expect(html).toContain("Ask your office admin to add this.");
+    expect(html).not.toContain("Add to your plan");
+    expect(html).not.toContain("/admin/billing");
+  });
+
+  it("offers nothing on the page of a locked category that is not for sale", async () => {
+    await hipForSale(false);
+    signInAs(orgKnee, "Vitest library clinic (knee)", "admin");
+    const html = await renderCategory("hip");
+    expect(html).toContain("is not on your clinic");
+    expect(html).not.toContain("Add to your plan");
+    expect(html).not.toContain("/admin/billing");
+    expect(html).not.toContain("Ask your office admin");
+  });
+
+  it("has no 'Add to your plan' on the page of a category that is on the plan", async () => {
+    signInAs(orgKnee, "Vitest library clinic (knee)", "admin");
+    const html = await renderCategory("knee");
+    expect(html).not.toContain("Add to your plan");
+    expect(html).not.toContain("/admin/billing?add=");
   });
 
   it("draws a category on the plan in the state the rule gives it", async () => {

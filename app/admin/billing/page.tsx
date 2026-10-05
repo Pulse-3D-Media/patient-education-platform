@@ -1,8 +1,9 @@
-import type { ClinicStatus } from "@prisma/client";
+import type { Category, ClinicStatus } from "@prisma/client";
 import Link from "next/link";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { PRIMARY_BUTTON } from "@/components/ui/styles";
+import { ADD_ANCHOR, ADD_PARAM, readSuggestedCategory } from "@/lib/add-to-plan";
 import { PULSE_CONTACT_URL } from "@/lib/brand";
 import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
@@ -28,6 +29,14 @@ import { PlanPicker } from "./PlanPicker";
  * for changing the plan (a clinic that is paying), or a message about why
  * there is neither; and last, the way to Stripe's own billing page for the
  * card, invoices and cancelling.
+ *
+ * THE LIBRARY'S "ADD TO YOUR PLAN" LINK LANDS HERE, as /admin/billing?add=hip.
+ * The category in the address is only a suggestion for which box starts
+ * ticked (readSuggestedCategory in lib/add-to-plan.ts): an unknown one, one
+ * that cannot be bought, or one the clinic already has is ignored, and so is
+ * any suggestion where there is no form to tick it in (a managed clinic, a
+ * hospital, card payment not open). Ticking a box charges nothing and grants
+ * nothing; the price and the change are worked out by the server as always.
  *
  * ANY OFFICE ADMIN MAY CHANGE BILLING, the account owner included (decided by Evan
  * on 2026-10-05). This is an admin page, so everyone who sees it sees the
@@ -83,6 +92,13 @@ export default async function BillingPage(props: BillingPageProps = {}) {
   const live = checkout?.billingStatus === "ACTIVE" || checkout?.billingStatus === "PAST_DUE";
   // Can a missed payment be settled from this page? Only where Stripe's pages can be opened.
   const canRepair = Boolean(checkout?.portal);
+  // The category the library's "Add to your plan" link asked for, if there is a form here it can be ticked in.
+  const suggested =
+    offer.kind === "picker"
+      ? readSuggestedCategory(params[ADD_PARAM], offer.options, offer.initial.categories)
+      : offer.kind === "subscribed" && !managed && offer.change.kind === "changer"
+        ? readSuggestedCategory(params[ADD_PARAM], offer.change.options, offer.change.current.included)
+        : null;
 
   return (
     <AdminFrame clinic={clinic} title="Billing" intro="Your plan, and what it comes to.">
@@ -213,7 +229,11 @@ export default async function BillingPage(props: BillingPageProps = {}) {
         </section>
       )}
 
-      <OfferSection offer={offer} managed={managed} />
+      {/* Where the library's "Add to your plan" link lands: the picker, the change form, or the words that stand in for them. */}
+      {/* The scroll margin keeps the card's heading clear of the banner across the top (64px tall). */}
+      <div id={ADD_ANCHOR} className="scroll-mt-20">
+        <OfferSection offer={offer} managed={managed} suggested={suggested} />
+      </div>
 
       {checkout?.portal && (
         <section aria-labelledby="stripe-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
@@ -290,7 +310,9 @@ function WaitingChanges({ view }: { view: CheckoutView }) {
 }
 
 /** The last card on the page: the plan picker, the form for changing a plan, or why there is neither. */
-function OfferSection({ offer, managed }: { offer: CheckoutOffer; managed: boolean }) {
+function OfferSection({ offer, managed, suggested }: { offer: CheckoutOffer; managed: boolean; suggested: Category | null }) {
+  // Said once, above the form, so the extra tick is not a surprise.
+  const suggestedLabel = CATEGORIES.find((category) => category.value === suggested)?.label;
   if (offer.kind === "picker") {
     return (
       <section aria-labelledby="choose-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
@@ -298,7 +320,15 @@ function OfferSection({ offer, managed }: { offer: CheckoutOffer; managed: boole
           Choose a plan
         </h2>
         <p className="mt-2 text-ink-soft">Pick what you need, check the total, then pay on Stripe&rsquo;s page. Your clinic opens once Stripe confirms the payment.</p>
-        <PlanPicker versionId={offer.versionId} config={offer.config} options={offer.options} initial={offer.initial} />
+        {suggested && suggestedLabel && (
+          <p className="mt-2 text-ink">{suggestedLabel} is ticked below because you chose it in the library. Nothing is charged until you pay on Stripe&rsquo;s page.</p>
+        )}
+        <PlanPicker
+          versionId={offer.versionId}
+          config={offer.config}
+          options={offer.options}
+          initial={suggested ? { ...offer.initial, categories: [...offer.initial.categories, suggested] } : offer.initial}
+        />
       </section>
     );
   }
@@ -331,7 +361,12 @@ function OfferSection({ offer, managed }: { offer: CheckoutOffer; managed: boole
           Adding seats or categories starts as soon as you confirm and the card on file has been charged for the rest of the current period. Anything else (taking something
           off, swapping, or changing how often you pay) starts at your next renewal. You see exactly what happens, and what it costs, before anything changes.
         </p>
-        <PlanChanger offer={offer.change} />
+        {suggested && suggestedLabel && (
+          <p className="mt-2 text-ink">
+            {suggestedLabel} is ticked below because you chose it in the library. Nothing changes, and nothing is charged, until you review and confirm.
+          </p>
+        )}
+        <PlanChanger offer={offer.change} suggested={suggested} />
       </section>
     );
   }

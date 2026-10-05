@@ -29,7 +29,7 @@ import { PlanPicker } from "./PlanPicker";
  * there is neither; and last, the way to Stripe's own billing page for the
  * card, invoices and cancelling.
  *
- * ANY OFFICE ADMIN MAY CHANGE BILLING, the account owner included (decided
+ * ANY OFFICE ADMIN MAY CHANGE BILLING, the account owner included (decided by Evan
  * on 2026-10-05). This is an admin page, so everyone who sees it sees the
  * buttons, and every action checks the admin role again (getBillingClinicId).
  * Nothing asks what kind of practice the clinic is: only

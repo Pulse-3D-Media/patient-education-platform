@@ -25,7 +25,7 @@ import { pickTrustedOrigin } from "@/lib/trusted-origin";
  * What a clinic can do on its Billing page: choose a plan and pay for it,
  * check on a payment, and, once it is paying, change the plan, cancel a
  * change, and open Stripe's billing page. Any office admin may do all of it,
- * the account owner included (decided on 2026-10-05). All of it works for a clinic that is NOT open,
+ * the account owner included (decided by Evan on 2026-10-05). All of it works for a clinic that is NOT open,
  * because Billing is the page a closed clinic comes to, and all of it finds
  * the clinic from the session, never from the form.
  *

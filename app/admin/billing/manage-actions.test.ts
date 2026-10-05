@@ -22,7 +22,7 @@ import {
  *
  * What these prove:
  *   - billing changes belong to the clinic's OFFICE ADMINS, the account
- *     owner included (decided on 2026-10-05): signed out and a member are
+ *     owner included (decided by Evan on 2026-10-05): signed out and a member are
  *     refused before anything is read or asked of Stripe, and an admin who
  *     is not the owner is let through like the owner;
  *   - the clinic is always the signed-in admin's own. A clinic id, a Stripe

@@ -18,7 +18,14 @@ import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
  *   - a banner across the very top of the screen with the clinic's own logo
  *     at its left, as it is (no chip behind it). The logo's box is wide, so
  *     a wordmark can stretch out sideways instead of being squeezed into a
- *     square. A clinic with no logo gets its name there in words.
+ *     square. A clinic with no logo gets its name there in words. The
+ *     banner is the page's own colour with one hairline under it, and 64px
+ *     tall, the same as the rail is wide, so the corner where they meet is
+ *     square. Nothing is drawn behind the logo: no card, chip, border or
+ *     shadow (Van, 2026-09-21). A logo saved with a background of its own
+ *     still shows that background; on the white light-mode banner a white
+ *     one disappears, on the black dark-mode one it does not, which is why
+ *     the Branding form says a white or pale logo suits Dark.
  *   - an icon rail down the left, under the banner: the books icon that
  *     opens the category menu, the admin icon that opens the admin menu, and
  *     below them Clerk's user button (the signed-in person's avatar; Sign
@@ -88,16 +95,20 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
   return (
     <div data-theme={brand?.theme ?? "dark"} className={`flex min-h-screen flex-col bg-ground text-ink ${brand?.fontClass ?? ""}`} style={brand?.style}>
       {/* Banner, the full width of the screen */}
-      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-line bg-ground px-3 sm:px-4">
+      <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-ground px-3 sm:px-4 md:px-5">
         <LibraryButton open={menu === "library"} onClick={() => toggle("library")} className="md:hidden" />
         {brand ? (
-          <Link href="/library" aria-label={`${brand.clinicName}, library home`} className="flex min-w-0 items-center rounded-lg">
+          <Link
+            href="/library"
+            aria-label={`${brand.clinicName}, library home`}
+            className="flex min-w-0 items-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-bright"
+          >
             {/* The logo as it is, with no chip behind it. The box is a fixed size (wide, so a wordmark has room), which means a slow or broken logo moves nothing. Until the picture loads, and for good if there is none, the clinic's name stands in. */}
             <ClinicLogo
               src={brand.logoUrl}
               name={brand.clinicName}
-              boxClassName="h-10 w-[150px] sm:w-[240px]"
-              nameClassName="text-base font-semibold text-ink"
+              boxClassName="h-11 w-[160px] sm:w-[260px]"
+              nameClassName="text-lg font-semibold tracking-tight text-ink"
             />
           </Link>
         ) : (
@@ -117,7 +128,7 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
         {/* Rail, tablet and up. It stays put under the banner while the page scrolls. */}
         <nav
           aria-label="Application"
-          className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-16 shrink-0 flex-col items-center gap-2 border-r border-line bg-sunken py-3 md:flex"
+          className="sticky top-16 hidden h-[calc(100vh-4rem)] w-16 shrink-0 flex-col items-center gap-2 border-r border-line bg-sunken py-3 md:flex"
         >
           <LibraryButton open={menu === "library"} onClick={() => toggle("library")} />
           {showAdmin && <AdminButton open={menu === "admin"} active={onAdmin} onClick={() => toggle("admin")} />}
@@ -134,7 +145,7 @@ export function AppShell({ children, showAdmin = false, brand }: { children: Rea
               type="button"
               aria-label="Close the menu"
               onClick={close}
-              className="fixed inset-0 z-40 bg-black/60 md:left-16 md:top-14 lg:bg-black/25"
+              className="fixed inset-0 z-40 bg-black/60 md:left-16 md:top-16 lg:bg-black/25"
             />
             {menu === "library" ? (
               <CategoryMenu pathname={pathname} onClose={close} poweredBy={Boolean(brand)} />
@@ -190,7 +201,7 @@ function AdminButton({ open, active, onClick }: { open: boolean; active: boolean
 
 // The look of the pull-out menus, shared by both.
 const MENU_PANEL =
-  "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-line bg-overlay shadow-drawer md:left-16 md:top-14 md:w-64";
+  "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-line bg-overlay shadow-drawer md:left-16 md:top-16 md:w-64";
 const MENU_ITEM = "flex h-12 items-center gap-3 rounded-lg border-l-2 px-3 text-base transition";
 const MENU_ITEM_IDLE = "border-transparent text-ink-soft hover:bg-wash hover:text-ink";
 const MENU_ITEM_ACTIVE = "border-brand-bright bg-brand/15 font-medium text-ink";

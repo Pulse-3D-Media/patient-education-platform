@@ -85,7 +85,7 @@ export function brandFontLabel(key: BrandFontKey): string {
  */
 export const BRAND_THEMES = [
   { key: "dark", label: "Dark", note: "White words on black." },
-  { key: "light", label: "Light", note: "Dark words on warm white." },
+  { key: "light", label: "Light", note: "Dark words on white." },
 ] as const;
 
 export type BrandTheme = (typeof BRAND_THEMES)[number]["key"];
@@ -194,10 +194,10 @@ export const STAFF_GROUND = "#0d1113";
  * this clears them too. lib/branding.test.ts checks it still matches the
  * stylesheet.
  */
-export const STAFF_LIGHT_GROUND = "#f4f1ea";
+export const STAFF_LIGHT_GROUND = "#f3f5f7";
 
-/** The patient page's warm light ground. */
-export const PATIENT_GROUND = "#fbfaf7";
+/** The patient page's ground: plain white, like the light staff screens (Van, 2026-10-05). */
+export const PATIENT_GROUND = "#ffffff";
 
 /** The colours of the staff screens (/library, /admin): near-black, or light when the clinic chose light. */
 export type StaffTheme = {

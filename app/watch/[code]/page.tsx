@@ -7,6 +7,7 @@ import { LOGO_URL } from "@/lib/brand";
 import { getSettings } from "@/lib/db/settings";
 import { getShareByCode } from "@/lib/db/shares";
 import { canRequestRenewal, isExpired, renewalState } from "@/lib/expiry";
+import { EDUCATION_ONLY } from "@/lib/education-note";
 import { describeDuration } from "@/lib/format";
 import { sentByLine } from "@/lib/sender-name";
 import { getPlaybackUrl } from "@/lib/video";
@@ -21,7 +22,7 @@ import { WatchPlayer } from "./WatchPlayer";
  * on cellular data, often anxious. Everything about the look follows from
  * that, and none of it is taste:
  *
- * - Dark text on a warm, light ground. The National Institute on Aging's
+ * - Dark text on a plain white ground. The National Institute on Aging's
  *   guidance for older readers, which is why this page is light when the rest
  *   of the product is near-black.
  * - Body text is 20px with a 1.5 line height. Nothing on the page is under
@@ -32,7 +33,9 @@ import { WatchPlayer } from "./WatchPlayer";
  * Top to bottom it answers the questions an anxious person has, in order: who
  * sent me this ("Sent by Dr. Jane Smith, Summit Orthopedics": the surgeon's
  * name was copied onto the link when it was made; a link made before that
- * says "From Summit Orthopedics"), what is it, why, how long will it take. The Pulse 3D logo sits
+ * says "From Summit Orthopedics"), what is it, why, how long will it take. Under the video, one
+ * quiet sentence says it is for education only, not medical advice (lib/education-note.ts): plain
+ * text, never a step before the video. The Pulse 3D logo sits
  * at the very bottom, small, because the practice sent this, not us.
  *
  * THE CLINIC'S OWN LOOK. The page belongs to the practice that sent it, so
@@ -143,7 +146,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   const length = describeDuration(share.video.durationSeconds);
 
   return (
-    <main className={`flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a] ${look.fontClass}`} style={look.style}>
+    <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
       <BrandBand />
       {share.video.isPlaceholder && <PlaceholderBar />}
 
@@ -184,9 +187,12 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
         )}
 
         {/* The second half is for the spouse or adult child who was never in the room. */}
-        <p className="mt-4 border-t border-[#e6e2da] pt-4 text-[19px] leading-[1.52] text-[#3a4c56]">
+        <p className="mt-4 border-t border-[#e3e7eb] pt-4 text-[19px] leading-[1.52] text-[#3a4c56]">
           Watch it as many times as you like, and show it to anyone coming with you.
         </p>
+
+        {/* Plain words only: never a screen, a popup or a box to tick before the video. The wording is Van's, approved by Evan; ask before changing it. */}
+        <p className="mt-4 text-[16px] leading-[1.5] text-[#46555e]">{EDUCATION_ONLY}</p>
 
         {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
         <div className="mt-auto pt-10">
@@ -204,7 +210,7 @@ function BrandBand() {
 }
 
 /**
- * The calm page for a link that is expired, taken down or does not exist. Same warm
+ * The calm page for a link that is expired, taken down or does not exist. Same white
  * ground, a soft circular icon, plain words, nothing that reads as an alarm,
  * and nothing to do but ask the practice. Never the words "error" or
  * "invalid", and nothing red.
@@ -232,10 +238,10 @@ function Unavailable({
   children?: ReactNode;
 }) {
   return (
-    <main className={`flex min-h-screen flex-col bg-[#fbfaf7] text-[#12202a] ${look.fontClass}`} style={look.style}>
+    <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
       <BrandBand />
       <div className="flex flex-1 flex-col items-center justify-center px-8 pb-10 pt-[46px] text-center">
-        <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#f0ece3] text-[#74664c]">{icon}</div>
+        <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#eef1f4] text-[#52616a]">{icon}</div>
         {children ?? (
           <>
             <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>

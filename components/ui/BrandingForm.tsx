@@ -162,7 +162,7 @@ export function BrandingForm({
                 <span
                   aria-hidden="true"
                   className={`flex h-10 w-14 shrink-0 flex-col justify-center gap-1 rounded-md border px-2 ${
-                    choice.key === "light" ? "border-[#7f796c] bg-[#fbfaf7]" : "border-white/30 bg-black"
+                    choice.key === "light" ? "border-[#737b83] bg-white" : "border-white/30 bg-black"
                   }`}
                 >
                   <span className={`h-1.5 w-8 rounded-full ${choice.key === "light" ? "bg-[#12202a]" : "bg-white"}`} />
@@ -267,7 +267,7 @@ export function BrandingForm({
             className={`${INPUT} max-w-xs`}
           />
           <p id="brand-phone-help" className="mt-1 text-xs text-ink-muted">
-            Patients get a tap-to-call button with this number when their link has expired or the video will not load. Leave it empty
+            Patients get a tap-to-call button with this number (on a computer, the number written out) when their link has expired or the video will not load. Leave it empty
             for no button.
           </p>
           {phoneIsBad && <p className="mt-1 text-sm text-warn">A US number has ten digits. Any format is fine.</p>}
@@ -294,7 +294,7 @@ export function BrandingForm({
       <div aria-hidden="true" className="flex flex-col gap-4">
         <p className="text-sm font-medium text-ink-soft">Preview</p>
 
-        <div className={`overflow-hidden rounded-2xl bg-[#fbfaf7] text-[#12202a] ${fontClasses[font]}`} style={themeVars(patient) as CSSProperties}>
+        <div className={`overflow-hidden rounded-2xl bg-white text-[#12202a] ${fontClasses[font]}`} style={themeVars(patient) as CSSProperties}>
           <div className="h-1.5 bg-brand" />
           <div className="px-5 pb-5 pt-4">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#46555e]">What a patient sees</p>

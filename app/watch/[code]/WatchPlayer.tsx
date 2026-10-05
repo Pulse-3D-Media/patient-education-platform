@@ -6,6 +6,7 @@ import { useModalFocus } from "@/components/ui/useModalFocus";
 import { CloseIcon, FullscreenIcon, PhoneIcon, PlayIcon } from "@/components/ui/icons";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
 import { recordPlay } from "./actions";
+import { CallNumber } from "./CallButton";
 
 /**
  * The patient's player: the video with one big Play button over it.
@@ -421,14 +422,18 @@ export function WatchPlayer({
                 >
                   Try again
                 </button>
+                {/* A tap-to-call link on a phone; on a computer, where it would do nothing useful, the number as plain words (see CallButton). */}
                 {call && (
-                  <a
-                    href={call.href}
-                    className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[16px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white"
-                  >
-                    <PhoneIcon className="h-5 w-5 shrink-0" />
-                    Still stuck? Call {call.label}
-                  </a>
+                  <>
+                    <a
+                      href={call.href}
+                      className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[16px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
+                    >
+                      <PhoneIcon className="h-5 w-5 shrink-0" />
+                      Still stuck? Call {call.label}
+                    </a>
+                    <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[16px] text-white" />
+                  </>
                 )}
               </div>
             )}

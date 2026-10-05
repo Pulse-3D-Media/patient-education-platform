@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getBaseUrl } from "@/lib/base-url";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { getShareForClinic } from "@/lib/db/shares";
+import { EDUCATION_ONLY } from "@/lib/education-note";
 import { qrSvg } from "@/lib/qr";
 import { sentByLine } from "@/lib/sender-name";
 import { isClinicAdmin } from "@/lib/roles";
@@ -20,7 +21,8 @@ import { PrintButton } from "./PrintButton";
  * Each half-page pamphlet has the procedure name, who sent it ("Sent by Dr.
  * Jane Smith, Summit Orthopedics", or "From Summit Orthopedics" for a link
  * made before surgeons were recorded), the QR code, and one line of
- * instructions (plus the typed-out link for anyone who cannot scan). A
+ * instructions (plus the typed-out link for anyone who cannot scan), and the
+ * same "for education only" sentence the patient page carries. A
  * placeholder video carries its mark on the paper too, so a pamphlet for a
  * sample animation can never pass for the real one.
  */
@@ -115,6 +117,8 @@ function Pamphlet({ title, from, placeholder, link, qrImage }: { title: string; 
         <p className="mt-[0.2in] text-[10pt] leading-snug text-[#667085]">
           Or type this address into your phone: <span className="text-black">{link}</span>
         </p>
+        {/* The same sentence as under the video on the patient page. Plain dark text, so it survives any printer. */}
+        <p className="mt-[0.15in] text-[11.5pt] leading-snug text-[#344054]">{EDUCATION_ONLY}</p>
       </div>
       {/* eslint-disable-next-line @next/next/no-img-element -- a drawn QR code, not a photo to resize */}
       <img src={qrImage} alt={`QR code that opens ${link}`} className="h-[2.6in] w-[2.6in] shrink-0" />

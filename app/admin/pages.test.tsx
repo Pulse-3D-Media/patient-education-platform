@@ -591,6 +591,8 @@ describe("who a link is from, on People and on the pamphlet", () => {
     // Twice: the sheet carries the pamphlet once per half.
     expect(html.match(/Sent by Jane Smith, PA-C, Vitest pages clinic \(hip\)/g)).toHaveLength(2);
     expect(html.match(/Placeholder: plays a sample animation, not this procedure/g)).toHaveLength(2);
+    // The same "for education only" sentence the patient page carries, on each half.
+    expect(html.match(/This video is for education only\. It is not medical advice\. Ask your doctor about anything you are unsure of\./g)).toHaveLength(2);
 
     const olderHtml = await render(() => PrintPage({ params: Promise.resolve({ code: older.code }) } as never), `/admin/print/${older.code}`);
     expect(olderHtml).toContain("From Vitest pages clinic (hip)");

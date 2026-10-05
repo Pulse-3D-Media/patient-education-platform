@@ -69,7 +69,7 @@ describe("the strip on the library's player", () => {
   it("starts the title row, with Close, under the strip, so the two never overlap", () => {
     const html = render();
 
-    expect(html).toMatch(/class="below-picture-top absolute inset-x-0 top-10 [^"]*"><div class="min-w-0"><h2[^>]*>Total Knee Replacement</);
+    expect(html).toMatch(/class="below-picture-top absolute inset-x-0 top-8 [^"]*"><div class="min-w-0"><h2[^>]*>Total Knee Replacement</);
     expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Close the video and go back to the library"'));
   });
 });

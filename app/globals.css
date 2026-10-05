@@ -210,11 +210,11 @@ body {
  *                        its top edge.
  *   .below-picture-top   for something that has to start under the strip
  *                        (the library player's title row): the top of the
- *                        picture plus the strip's 40px.
+ *                        picture plus the strip's 32px.
  *
  * A browser that cannot measure a box (older than iOS 16) keeps the plain
  * rules: the picture box is the whole video box, and the title row keeps its
- * own top-10, so the strip is at the top of the video's box and nothing
+ * own top-8, so the strip is at the top of the video's box and nothing
  * collides. These rules are outside Tailwind's layers on purpose, so where
  * they apply they win over a utility class.
  */
@@ -238,6 +238,6 @@ body {
   }
 
   .below-picture-top {
-    top: calc((100cqh - min(100cqh, 100cqw / var(--picture-ratio, 1.7778))) / 2 + 2.5rem);
+    top: calc((100cqh - min(100cqh, 100cqw / var(--picture-ratio, 1.7778))) / 2 + 2rem);
   }
 }

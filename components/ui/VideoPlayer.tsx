@@ -377,9 +377,9 @@ export function VideoPlayer({
           <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} placeholder={placeholder} />
         </div>
 
-        {/* Title band. It starts just under the strip (below-picture-top; top-10 where a browser cannot place it), so Close is never under the band. */}
+        {/* Title band. It starts just under the strip (below-picture-top; top-8 where a browser cannot place it), so Close is never under the band. */}
         <div
-          className={`below-picture-top absolute inset-x-0 top-10 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pb-10 pt-3 transition-opacity duration-300 ${fade}`}
+          className={`below-picture-top absolute inset-x-0 top-8 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pb-10 pt-3 transition-opacity duration-300 ${fade}`}
         >
           <div className="min-w-0">
             <h2 className="truncate text-xl font-semibold text-white sm:text-2xl">{title}</h2>

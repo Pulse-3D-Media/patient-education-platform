@@ -58,7 +58,7 @@ describe("what is on the strip", () => {
   it("a logo that has not loaded (or never will) has the clinic's name standing in, in white, in a box of fixed size", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" />);
 
-    expect(html).toContain("h-7 w-24");
+    expect(html).toContain("h-6 w-24");
     expect(html).toMatch(/<span class="truncate [^"]*text-white[^"]*">Summit Orthopedics<\/span>/);
     expect(html).toMatch(/<img[^>]*opacity-0/);
   });
@@ -72,22 +72,22 @@ describe("what is on the strip", () => {
     expect(html).toMatch(/<\/span><span class="[^"]*bg-\[#f3b94d\][^"]*">Placeholder animation<\/span><\/div>$/);
   });
 
-  it("never grows past its 40px: a very long clinic name is cut short on one line, and a long sender takes at most two lines", () => {
+  it("never grows past its 32px: a very long clinic name is cut short on one line, and a long sender takes at most two lines", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name={LONG_NAME} senderName="Dr. Maria de los Angeles Fernandez-Castillo, DPM" />);
 
     expect(html).toMatch(/<span class="max-w-\[45%\] shrink-0 truncate [^"]*">The Intermountain/);
-    expect(html).toMatch(/<span class="line-clamp-2 min-w-0 break-words leading-\[1.15\] [^"]*">Sent by Dr. Maria/);
-    // Two lines of 15px at 1.15 are 34.5px, inside the 40px band.
-    expect(2 * 15 * 1.15).toBeLessThan(40);
-    expect(html).toContain("h-10");
+    expect(html).toMatch(/<span class="line-clamp-2 min-w-0 break-words leading-none [^"]*">Sent by Dr. Maria/);
+    // Two lines of 15px with no extra spacing are 30px, inside the 32px band.
+    expect(2 * 15).toBeLessThan(32);
+    expect(html).toContain("h-8");
   });
 });
 
 describe("how the strip sits", () => {
-  it("is a 40px band of black at the agreed opacity, laid across the top edge, and never takes a tap", () => {
+  it("is a 32px band of black at the agreed opacity, laid across the top edge, and never takes a tap", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit" />);
 
-    expect(html).toMatch(/^<div data-video-strip="" class="pointer-events-none [^"]*h-10[^"]*absolute inset-x-0 top-0/);
+    expect(html).toMatch(/^<div data-video-strip="" class="pointer-events-none [^"]*h-8[^"]*absolute inset-x-0 top-0/);
     expect(html).toContain(`background-color:rgba(0, 0, 0, ${VIDEO_STRIP_ALPHA})`);
   });
 

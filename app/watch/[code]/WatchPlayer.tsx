@@ -403,7 +403,7 @@ export function WatchPlayer({
                   role="status"
                   className={
                     slow
-                      ? "absolute left-3 top-[52px] max-w-[80%] rounded-xl bg-white/90 px-3 py-1.5 text-[15px] leading-[1.35] font-medium text-[#12333f]"
+                      ? "absolute left-3 top-11 max-w-[80%] rounded-xl bg-white/90 px-3 py-1.5 text-[15px] leading-[1.35] font-medium text-[#12333f]"
                       : "sr-only"
                   }
                 >

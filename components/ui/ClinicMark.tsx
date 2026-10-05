@@ -14,8 +14,9 @@ import { PLACEHOLDER_CHIP } from "./styles";
  *
  *   - The band is black at VIDEO_STRIP_ALPHA (0.6, lib/branding.ts): just
  *     dark enough that the white words read on a white frame (5.7:1), and
- *     see-through enough that the picture still shows under it. 40px tall,
- *     the height the old strip above the picture had.
+ *     see-through enough that the picture still shows under it. 32px tall
+ *     (decided by Evan on 2026-10-05: a little thinner than the 40px strip
+ *     that used to sit above the picture).
  *   - The logo sits straight on the band: no chip, box, border or shadow.
  *     It keeps its fixed box and loads at low priority (ClinicLogo), so it
  *     never moves anything and never holds up the first frame. No logo, or
@@ -31,7 +32,7 @@ import { PLACEHOLDER_CHIP } from "./styles";
  * skip the logo and the name (both are already written on the page); the
  * placeholder chip is read.
  *
- * WHAT IT CAN COVER. It sits over the top 40px of the picture, so an anatomy
+ * WHAT IT CAN COVER. It sits over the top 32px of the picture, so an anatomy
  * label or a caption in that band of a frame is under it, dimmed. That was
  * accepted when it was decided; if a video turns out to put something that
  * matters up there, the strip is not moved without asking Evan.
@@ -70,7 +71,7 @@ export function ClinicMark({
   return (
     <div
       data-video-strip=""
-      className={`pointer-events-none z-10 flex h-10 w-full select-none items-center gap-3 px-3 ${
+      className={`pointer-events-none z-10 flex h-8 w-full select-none items-center gap-3 px-3 ${
         inFlow ? "relative shrink-0" : "absolute inset-x-0 top-0"
       }`}
       style={{ backgroundColor: `rgba(0, 0, 0, ${VIDEO_STRIP_ALPHA})` }}
@@ -78,14 +79,14 @@ export function ClinicMark({
       <span aria-hidden="true" className="flex min-w-0 flex-1 items-center gap-3">
         {logoUrl ? (
           // A fixed box, so the band looks the same before, during and after the logo loads, and if it never does.
-          <ClinicLogo src={logoUrl} name={name} boxClassName="h-7 w-24 shrink-0" nameClassName={`${WORDS} leading-none`} />
+          <ClinicLogo src={logoUrl} name={name} boxClassName="h-6 w-24 shrink-0" nameClassName={`${WORDS} leading-none`} />
         ) : (
           <span className={`max-w-[45%] shrink-0 truncate leading-none ${WORDS}`}>{name}</span>
         )}
         {sentBy && (
           <>
             <span className="h-4 w-px shrink-0 bg-white/50" />
-            <span className={`line-clamp-2 min-w-0 break-words leading-[1.15] ${WORDS}`}>{sentBy}</span>
+            <span className={`line-clamp-2 min-w-0 break-words leading-none ${WORDS}`}>{sentBy}</span>
           </>
         )}
       </span>
@@ -97,8 +98,9 @@ export function ClinicMark({
 /**
  * White, 15px (the smallest text the patient page allows), on the band. The
  * clinic's name stays on one line and is cut short if it must be; "Sent by"
- * and the doctor's name may take two lines (two fit in the 40px band), so a
- * long name on a phone is still read in full rather than cut off.
+ * and the doctor's name may take two tight lines (two 15px lines are 30px,
+ * inside the 32px band), so a long name on a phone is still read in full
+ * rather than cut off. Most names fit on one.
  */
 const WORDS = "text-[15px] font-semibold text-white";
 

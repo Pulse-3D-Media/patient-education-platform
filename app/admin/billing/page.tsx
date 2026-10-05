@@ -29,10 +29,10 @@ import { PlanPicker } from "./PlanPicker";
  * there is neither; and last, the way to Stripe's own billing page for the
  * card, invoices and cancelling.
  *
- * ONCE A CLINIC IS PAYING, CHANGING ITS BILLING BELONGS TO ITS ACCOUNT
- * OWNER. Other office admins see everything here and are told who changes
- * it. The buttons are drawn for the owner only, which is a courtesy: every
- * action checks again (getBillingOwnerClinicId). Nothing asks what kind of practice the clinic is: only
+ * ANY OFFICE ADMIN MAY CHANGE BILLING, the account owner included (decided
+ * on 2026-10-05). This is an admin page, so everyone who sees it sees the
+ * buttons, and every action checks the admin role again (getBillingClinicId).
+ * Nothing asks what kind of practice the clinic is: only
  * Pulse staff mark a clinic a hospital (on /pulse), and a clinic that was
  * never marked is treated as a clinic (see selfServeEligibility).
  *
@@ -80,10 +80,9 @@ export default async function BillingPage(props: BillingPageProps = {}) {
   const managed = view?.plan.managedByPulse ?? false;
   const subscription = checkout?.subscription ?? null;
   const canPayHere = offer.kind === "picker";
-  const isOwner = clinic.isOwner;
   const live = checkout?.billingStatus === "ACTIVE" || checkout?.billingStatus === "PAST_DUE";
-  // Can a missed payment be settled from this page? Only where Stripe's pages can be opened, and only by the owner.
-  const canRepair = Boolean(checkout?.portal) && isOwner;
+  // Can a missed payment be settled from this page? Only where Stripe's pages can be opened.
+  const canRepair = Boolean(checkout?.portal);
 
   return (
     <AdminFrame clinic={clinic} title="Billing" intro="Your plan, and what it comes to.">
@@ -99,7 +98,7 @@ export default async function BillingPage(props: BillingPageProps = {}) {
         </p>
       )}
 
-      <StatusCard clinic={clinic} managed={managed} canPayHere={canPayHere} repair={!checkout?.portal ? "none" : isOwner ? "here" : "owner"} />
+      <StatusCard clinic={clinic} managed={managed} canPayHere={canPayHere} repair={checkout?.portal ? "here" : "none"} />
 
       {checkout?.billingStatus === "PAST_DUE" && canRepair && !managed && (
         <section aria-labelledby="missed-heading" className="mt-6 rounded-2xl border border-warn/40 bg-warn/10 p-5 sm:p-6">
@@ -128,7 +127,7 @@ export default async function BillingPage(props: BillingPageProps = {}) {
 
       {subscription && <SubscriptionCard plan={subscription.plan} status={checkout?.billingStatus ?? "NONE"} renewsAt={subscription.currentPeriodEnd} endsAt={subscription.cancelAt} />}
 
-      {checkout && <WaitingChanges view={checkout} isOwner={isOwner} />}
+      {checkout && <WaitingChanges view={checkout} />}
 
       <section aria-labelledby="plan-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="plan-heading" className="text-lg font-semibold">
@@ -214,7 +213,7 @@ export default async function BillingPage(props: BillingPageProps = {}) {
         </section>
       )}
 
-      <OfferSection offer={offer} managed={managed} isOwner={isOwner} />
+      <OfferSection offer={offer} managed={managed} />
 
       {checkout?.portal && (
         <section aria-labelledby="stripe-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
@@ -230,7 +229,7 @@ export default async function BillingPage(props: BillingPageProps = {}) {
             <p className="mt-2 text-sm text-ink-muted">While a plan change is scheduled, Stripe may not offer cancelling. Cancel the scheduled change above first.</p>
           )}
           <div className="mt-4 flex flex-col gap-3">
-            {isOwner ? <PortalButton /> : <p className="text-[15px] text-ink-soft">{OWNER_ONLY_WORDS}</p>}
+            <PortalButton />
             <CheckWithStripeButton />
           </div>
         </section>
@@ -239,15 +238,12 @@ export default async function BillingPage(props: BillingPageProps = {}) {
   );
 }
 
-/** What an office admin who is not the account owner is told wherever the owner would have a button. */
-const OWNER_ONLY_WORDS = "Changes to billing are made by your clinic's account owner. The People page shows who that is.";
-
 /**
  * A change that is waiting on a live subscription: one scheduled for the
  * next renewal, or an upgrade whose payment has not gone through. Neither
  * is in force, and the words say so.
  */
-function WaitingChanges({ view, isOwner }: { view: CheckoutView; isOwner: boolean }) {
+function WaitingChanges({ view }: { view: CheckoutView }) {
   const { scheduled, unpaidChange } = view;
   if (!scheduled && !unpaidChange) return null;
   const words = (plan: PlanFacts) => {
@@ -268,14 +264,10 @@ function WaitingChanges({ view, isOwner }: { view: CheckoutView; isOwner: boolea
             The payment for this change did not go through, so nothing has changed: your plan is still the one above. Stripe drops the change by itself if it is not paid
             within about a day.
           </p>
-          {isOwner ? (
-            <div className="mt-3 flex flex-col gap-3">
-              <PayInvoiceButton />
-              <CancelChangeButton which="payment" />
-            </div>
-          ) : (
-            <p className="mt-2 text-[15px] text-ink-soft">{OWNER_ONLY_WORDS}</p>
-          )}
+          <div className="mt-3 flex flex-col gap-3">
+            <PayInvoiceButton />
+            <CancelChangeButton which="payment" />
+          </div>
         </div>
       )}
       {scheduled && (
@@ -291,13 +283,9 @@ function WaitingChanges({ view, isOwner }: { view: CheckoutView; isOwner: boolea
             {scheduled.plan.seats < (view.subscription?.plan.seats ?? 0) &&
               ` Because it lowers your seats to ${scheduled.plan.seats}, nobody can be given a seat past that number until then.`}
           </p>
-          {isOwner ? (
-            <div className="mt-3">
-              <CancelChangeButton which="scheduled" />
-            </div>
-          ) : (
-            <p className="mt-2 text-[15px] text-ink-soft">{OWNER_ONLY_WORDS}</p>
-          )}
+          <div className="mt-3">
+            <CancelChangeButton which="scheduled" />
+          </div>
         </div>
       )}
     </section>
@@ -305,7 +293,7 @@ function WaitingChanges({ view, isOwner }: { view: CheckoutView; isOwner: boolea
 }
 
 /** The last card on the page: the plan picker, the form for changing a plan, or why there is neither. */
-function OfferSection({ offer, managed, isOwner }: { offer: CheckoutOffer; managed: boolean; isOwner: boolean }) {
+function OfferSection({ offer, managed }: { offer: CheckoutOffer; managed: boolean }) {
   if (offer.kind === "picker") {
     return (
       <section aria-labelledby="choose-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
@@ -336,7 +324,7 @@ function OfferSection({ offer, managed, isOwner }: { offer: CheckoutOffer; manag
     );
   }
 
-  if (offer.kind === "subscribed" && !managed && isOwner && offer.change.kind === "changer") {
+  if (offer.kind === "subscribed" && !managed && offer.change.kind === "changer") {
     return (
       <section aria-labelledby="change-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="change-heading" className="text-lg font-semibold">
@@ -358,7 +346,7 @@ function OfferSection({ offer, managed, isOwner }: { offer: CheckoutOffer; manag
           body: "Pulse 3D manages this plan, so there is nothing to set up or pay for here. Questions about your invoice go to Pulse 3D.",
         }
       : offer.kind === "subscribed"
-        ? { heading: "Changing your plan", body: !isOwner ? OWNER_ONLY_WORDS : offer.change.kind === "blocked" ? offer.change.message : "" }
+        ? { heading: "Changing your plan", body: offer.change.kind === "blocked" ? offer.change.message : "" }
         : { heading: "Coming here", body: offer.message };
 
   return (
@@ -453,12 +441,11 @@ function StatusCard({ clinic, managed, canPayHere, repair }: { clinic: ClinicOpe
   );
 }
 
-/** How a missed payment can be settled from this page: by this person here, by the account owner, or not here at all. */
-type Repair = "here" | "owner" | "none";
+/** How a missed payment can be settled: on this page, or not here at all (card payment is shut on this deployment). */
+type Repair = "here" | "none";
 
 const REPAIR_WORDS: Record<Repair, string> = {
   here: "Settle it below.",
-  owner: "Your clinic's account owner can settle it on this page.",
   none: "Get in touch with Pulse 3D to settle it.",
 };
 

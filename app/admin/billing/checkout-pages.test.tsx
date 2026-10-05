@@ -279,7 +279,7 @@ describe("/admin/billing: a clinic that already has a subscription", () => {
     expect(html).toContain("Renews on November 1, 2026");
     expect(html).not.toContain("Estimate");
     expect(html).not.toContain("Continue to payment");
-    expect(html).toContain("Changing your plan");
+    expect(html).toContain("Change your plan");
   });
 
   it("past due: the same plan, and that the payment did not go through", async () => {
@@ -353,7 +353,7 @@ describe("/admin/billing/return", () => {
   });
 });
 
-describe("/admin/billing: a clinic that is paying, and who may change its billing", () => {
+describe("/admin/billing: a clinic that is paying, whose billing any office admin may change", () => {
   /** Add a second accepted plan to a paying clinic, as a change scheduled for the renewal or an upgrade waiting for its payment. */
   async function addWaitingPlan(orgId: string, as: "scheduled" | "unpaid", plan: { categories: Category[]; seats: number; perSeatCents: number }) {
     const clinic = await prisma.clinic.findUniqueOrThrow({ where: { clerkOrgId: orgId }, select: { id: true } });
@@ -404,7 +404,7 @@ describe("/admin/billing: a clinic that is paying, and who may change its billin
     expect(html.toLowerCase()).not.toContain("founding");
   });
 
-  it("another office admin sees the plan and is told the account owner changes billing: no form, no Stripe button, no cancel button", async () => {
+  it("an office admin who is NOT the account owner gets exactly the same: the form, the Stripe button and the cancel button", async () => {
     const orgId = await paying();
     await addWaitingPlan(orgId, "scheduled", { categories: ["KNEE"], seats: 3, perSeatCents: 5900 });
     signInAs(orgId, "admin");
@@ -412,14 +412,15 @@ describe("/admin/billing: a clinic that is paying, and who may change its billin
 
     expect(html).toContain("Your subscription");
     expect(html).toContain("$267.00");
-    expect(html).toContain("Changes to billing are made by your clinic’s account owner.".replace("’", "&#x27;"));
-    expect(html).not.toContain("Review change");
-    expect(html).not.toContain("Open Stripe’s billing page");
-    expect(html).not.toContain("Cancel this change");
-    // The scheduled change is still shown, so nobody is surprised at the renewal.
+    expect(html).toContain("Change your plan");
+    expect(html).toContain("Review change");
+    expect(html).toContain("Open Stripe’s billing page");
     expect(html).toContain("A change that is waiting");
-    // Anyone who can see the page may ask Stripe where things stand; that changes nothing by itself.
+    expect(html).toContain("Cancel this change");
     expect(html).toContain("Check with Stripe");
+    // Nothing on the page sends them to the account owner.
+    expect(html).not.toContain("account owner can");
+    expect(html).not.toContain("made by your clinic");
   });
 
   it("a member sees none of it", async () => {
@@ -473,11 +474,12 @@ describe("/admin/billing: a clinic that is paying, and who may change its billin
     expect(html).not.toContain("is coming");
   });
 
-  it("past due, for an admin who is not the owner: told the owner can settle it, with no pay button", async () => {
+  it("past due, for an admin who is not the owner: the same way out, with the pay button", async () => {
     signInAs(await paying({ status: "PAST_DUE", billing: { status: "PAST_DUE", plan: "current" } }), "admin");
     const html = await renderBilling();
-    expect(html).toContain("Your clinic&#x27;s account owner can settle it on this page.");
-    expect(html).not.toContain("Pay the missed payment");
+    expect(html).toContain("Settle it below.");
+    expect(html).toContain("Pay the missed payment");
+    expect(html).toContain("Open Stripe’s billing page");
   });
 
   it("an ended subscription: the owner can still reach Stripe's billing page for invoices, and starts again with the picker", async () => {

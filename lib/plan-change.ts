@@ -78,7 +78,7 @@ export function classifyPlanChange(current: ChangeShape, next: ChangeShape): Cha
   return { timing: "same" };
 }
 
-/** Why a change waits, as a sentence for the account owner. */
+/** Why a change waits, as a sentence for the admin making it. */
 export const RENEWAL_REASON_WORDS: Record<RenewalReason, string> = {
   reduction: "This takes something off your plan, so it starts at your next renewal. Until then you keep everything you have now.",
   mixed: "This adds one thing and takes another away, so the whole change starts together at your next renewal. Until then your plan stays as it is.",
@@ -124,7 +124,7 @@ export function planChangeBlock(facts: ChangeBlockFacts): string | null {
 // What the forms send
 // ---------------------------------------------------------------------------
 
-/** What the change form sends when the owner asks to REVIEW a change: the picks, and nothing about money that is believed. */
+/** What the change form sends when the admin asks to REVIEW a change: the picks, and nothing about money that is believed. */
 export type ChangeRequest = {
   selection: PlanSelection;
   /** Quote from the prices on offer now, not the prices the clinic signed up at. */
@@ -140,7 +140,7 @@ export function readChangeRequest(formData: FormData): ChangeRequestResult {
 }
 
 /**
- * What the owner was shown on the review step, sent back when they press
+ * What the admin was shown on the review step, sent back when they press
  * Confirm. Like every "seen" value, it is only ever COMPARED with what the
  * server works out again; none of it is charged or trusted.
  */
@@ -171,11 +171,11 @@ export function readChangeConfirm(formData: FormData): ChangeConfirmResult {
   return { ok: true, request: read.request, seen: { timing, at: new Date(Number(atText) * 1000), dueNowCents: Number(dueText) } };
 }
 
-/** How long an amount shown on the review step may be confirmed for. After that the owner reviews again, so the amount is fresh. */
+/** How long an amount shown on the review step may be confirmed for. After that the admin reviews again, so the amount is fresh. */
 export const REVIEW_MINUTES = 15;
 
 /**
- * May a change be made for the moment the owner's review was worked out
+ * May a change be made for the moment the admin's review was worked out
  * for? Only a recent moment, never one in the future, and never one before
  * the period being paid for began. The moment decides how much of the
  * period is left to charge for, so it is the server's own clock from the

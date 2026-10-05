@@ -38,7 +38,7 @@ import { STRIPE_INVOICE_PREFIX, STRIPE_PORTAL_PREFIX, type FetchSubscription, ty
  *
  *   THE SERVER PRICES IT. The browser says what was picked. The price comes
  *   from the prices the clinic signed up at (the pricing version on its
- *   current plan), or from the active version when the owner asked to move
+ *   current plan), or from the active version when the admin asked to move
  *   to current prices. An existing customer is never moved to other prices
  *   by loading a page or by a notification: only by asking, seeing the new
  *   amount, and confirming.
@@ -61,8 +61,8 @@ import { STRIPE_INVOICE_PREFIX, STRIPE_PORTAL_PREFIX, type FetchSubscription, ty
  *   the subscription stands. A second request finds what the first one did
  *   and is told so, instead of changing the plan a second time.
  *
- * The clinic id is always the signed-in account owner's own clinic, found
- * on the server (getBillingOwnerClinicId). Nothing here reads one from a form.
+ * The clinic id is always the signed-in office admin's own clinic, found
+ * on the server (getBillingClinicId). Nothing here reads one from a form.
  */
 
 export type PlanChangeDeps = {
@@ -151,7 +151,7 @@ async function prepare(clinicId: string, request: ChangeRequest, deps: PlanChang
   const current = clinic.currentPlan;
   if (!current || !facts.stripeSubscriptionId) return refused("Your clinic has no subscription to change.");
 
-  // The prices: the ones this clinic signed up at, unless the owner asked for the current ones.
+  // The prices: the ones this clinic signed up at, unless the admin asked for the current ones.
   let config: PricingConfig;
   let version: { id: string; version: number };
   if (request.moveToCurrentPricing) {
@@ -187,7 +187,7 @@ async function prepare(clinicId: string, request: ChangeRequest, deps: PlanChang
     return refused(`More than ${config.seats.clinicMax} surgeon seats is set up by Pulse 3D by agreement, so there is no card payment for it here. ${PULSE_CONTACT_WORDS}`);
   }
 
-  // Is that the total the owner was looking at?
+  // Is that the total the admin was looking at?
   if (selection.seenVersionId !== version.id || selection.seenTotalCents !== amounts.totalCents) {
     return {
       ok: false,
@@ -270,7 +270,7 @@ export async function reviewPlanChange(args: { clinicId: string; request: Change
 }
 
 /**
- * Step two: make the change the owner reviewed.
+ * Step two: make the change the admin reviewed.
  *
  *   1. Everything is worked out again, exactly as for the review.
  *   2. For a change that starts now, Stripe is asked again what it would
@@ -304,7 +304,7 @@ export async function confirmPlanChange(args: {
   const { clinic, input, summary, change, basePlanId, subscriptionId } = prepared;
   const customerId = clinic.facts.stripeCustomerId;
 
-  // The owner reviewed one kind of change; if it is now the other kind, they review again.
+  // The admin reviewed one kind of change; if it is now the other kind, they review again.
   if (seen.timing !== change.timing) return { kind: "stale", message: REVIEW_AGAIN };
 
   // Someone else's change may have got there first. If it is this very change (a double click, a second tab), it is done.
@@ -437,7 +437,7 @@ export type LinkResult = { ok: true; url: string } | { ok: false; message: strin
  * A visit to Stripe's billing page for the clinic's own Stripe customer:
  * update the card, see invoices, cancel (or undo a cancellation). The
  * customer id is the one on the clinic's own record, never one from a form,
- * so a visit can only ever be to the signed-in owner's own clinic's account.
+ * so a visit can only ever be to the signed-in admin's own clinic's account.
  *
  * Works for a clinic that is NOT open (past due, ended): it is how such a
  * clinic repairs its billing. Refused for a clinic Pulse manages.

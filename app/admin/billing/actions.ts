@@ -6,7 +6,7 @@ import { headers } from "next/headers";
 import { errorKind } from "@/lib/error-kind";
 import { checkPayment, startCheckout } from "@/lib/checkout";
 import { readPlanSelection } from "@/lib/checkout-rules";
-import { getBillingClinicId, getBillingOwnerClinicId } from "@/lib/clinic";
+import { getBillingClinicId } from "@/lib/clinic";
 import { getSignedInName } from "@/lib/people";
 import { readChangeConfirm, readChangeRequest } from "@/lib/plan-change";
 import {
@@ -23,9 +23,9 @@ import { pickTrustedOrigin } from "@/lib/trusted-origin";
 
 /**
  * What a clinic can do on its Billing page: choose a plan and pay for it,
- * and check on a payment (any office admin); and, once it is paying, change
- * the plan, cancel a change, and open Stripe's billing page (the account
- * owner only, further down). All of it works for a clinic that is NOT open,
+ * check on a payment, and, once it is paying, change the plan, cancel a
+ * change, and open Stripe's billing page. Any office admin may do all of it,
+ * the account owner included (decided on 2026-10-05). All of it works for a clinic that is NOT open,
  * because Billing is the page a closed clinic comes to, and all of it finds
  * the clinic from the session, never from the form.
  *
@@ -121,13 +121,12 @@ export async function checkPaymentAction(): Promise<CheckPaymentState> {
 // ---------------------------------------------------------------------------
 
 /**
- * Everything below belongs to the clinic's ACCOUNT OWNER. Other office
- * admins see the plan on the Billing page and cannot change it, so each
- * action starts with getBillingOwnerClinicId(), which is null for anyone
- * else. The clinic is the owner's own, found from the session; a clinic id,
- * a Stripe customer id, an amount or a price in a form is never read.
+ * Everything below is for the clinic's OFFICE ADMINS (the account owner is
+ * one). Each action starts with getBillingClinicId(), which is null for
+ * anyone else. The clinic is the admin's own, found from the session; a
+ * clinic id, a Stripe customer id, an amount or a price in a form is never read.
  */
-const OWNER_ONLY = "Only your clinic's account owner can change billing.";
+const ADMINS_ONLY = "Only your clinic's office admins can change billing.";
 
 function planDeps(): PlanChangeDeps {
   return { gateway: stripePlanGateway, fetchSubscription: fetchSubscriptionSnapshot, isOpen: checkoutIsOpen() };
@@ -149,8 +148,8 @@ export type ReviewState = { review?: ChangeReview; message?: string; error?: str
  * nothing, in the database or at Stripe.
  */
 export async function reviewPlanChangeAction(formData: FormData): Promise<ReviewState> {
-  const clinicId = await getBillingOwnerClinicId();
-  if (!clinicId) return { error: OWNER_ONLY };
+  const clinicId = await getBillingClinicId();
+  if (!clinicId) return { error: ADMINS_ONLY };
 
   const read = readChangeRequest(formData);
   if (!read.ok) return { error: read.error };
@@ -183,15 +182,15 @@ export type ConfirmState = { done?: string; payUrl?: string | null; unpaid?: str
  * again and compares (confirmPlanChange in lib/plan-changes.ts).
  */
 export async function confirmPlanChangeAction(formData: FormData): Promise<ConfirmState> {
-  const clinicId = await getBillingOwnerClinicId();
-  if (!clinicId) return { error: OWNER_ONLY };
+  const clinicId = await getBillingClinicId();
+  if (!clinicId) return { error: ADMINS_ONLY };
 
   const read = readChangeConfirm(formData);
   if (!read.ok) return { stale: read.error };
 
   try {
     const { userId } = await auth();
-    const name = (await getSignedInName()) ?? "The account owner";
+    const name = (await getSignedInName()) ?? "A clinic admin";
     const result = await confirmPlanChange({ clinicId, request: read.request, seen: read.seen, actor: { id: userId ?? "unknown", name }, deps: planDeps() });
     revalidatePath("/admin/billing");
     if (result.kind === "changed" || result.kind === "scheduled") return { done: result.message };
@@ -210,8 +209,8 @@ export type BillingActionState = { message?: string; error?: string; redirectTo?
 
 /** Cancel the change scheduled for the next renewal, or the upgrade waiting for its payment. The plan in force is not touched. */
 export async function cancelWaitingChangeAction(which: "scheduled" | "payment"): Promise<BillingActionState> {
-  const clinicId = await getBillingOwnerClinicId();
-  if (!clinicId) return { error: OWNER_ONLY };
+  const clinicId = await getBillingClinicId();
+  if (!clinicId) return { error: ADMINS_ONLY };
   if (which !== "scheduled" && which !== "payment") return { error: "That could not be done." };
 
   try {
@@ -245,10 +244,10 @@ export async function checkWithStripeAction(): Promise<BillingActionState> {
   }
 }
 
-/** Open Stripe's own billing page for the owner's clinic: card, invoices, cancelling. Works for a clinic that is not open. */
+/** Open Stripe's own billing page for the admin's clinic: card, invoices, cancelling. Works for a clinic that is not open. */
 export async function openBillingPortalAction(): Promise<BillingActionState> {
-  const clinicId = await getBillingOwnerClinicId();
-  if (!clinicId) return { error: OWNER_ONLY };
+  const clinicId = await getBillingClinicId();
+  if (!clinicId) return { error: ADMINS_ONLY };
 
   try {
     const origin = pickTrustedOrigin((await headers()).get("host"), process.env);
@@ -263,8 +262,8 @@ export async function openBillingPortalAction(): Promise<BillingActionState> {
 
 /** Go to Stripe's page for the clinic's unpaid invoice: a renewal that failed, or an upgrade waiting for its payment. */
 export async function payInvoiceAction(): Promise<BillingActionState> {
-  const clinicId = await getBillingOwnerClinicId();
-  if (!clinicId) return { error: OWNER_ONLY };
+  const clinicId = await getBillingClinicId();
+  if (!clinicId) return { error: ADMINS_ONLY };
 
   try {
     const result = await findInvoiceToPay({ clinicId, deps: planDeps() });

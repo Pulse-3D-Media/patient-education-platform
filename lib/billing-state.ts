@@ -188,7 +188,7 @@ export type SubscriptionSnapshot = {
    *                    date arrives, so this is the proof a change happened.
    *   pendingPlanId    an upgrade Stripe is holding back until its payment
    *                    succeeds (a declined card, or a card whose bank wants
-   *                    the owner to approve the charge).
+   *                    the admin to approve the charge).
    *   scheduledPlanId  the plan Stripe's schedule will move the subscription
    *                    to at the next renewal, and scheduledAt is when.
    */

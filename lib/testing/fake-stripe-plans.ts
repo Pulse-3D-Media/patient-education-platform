@@ -11,7 +11,7 @@ import type { PlanGateway, SubscriptionState } from "../stripe";
  *   - A price is made once per accepted plan and carries that plan's id.
  *   - An upgrade is charged at once. If the card works, the subscription
  *     moves to the new price. If the card is declined, or the bank wants the
- *     owner to approve the charge, the subscription DOES NOT MOVE: Stripe
+ *     admin to approve the charge, the subscription DOES NOT MOVE: Stripe
  *     keeps the change aside ("pending") with an unpaid invoice. Paying that
  *     invoice applies the change; voiding it drops the change.
  *   - Asking for the same upgrade twice (same plan id) gives the first answer.
@@ -262,7 +262,7 @@ export function fakePlanStripe(tag: string) {
       beforeChange = run;
     },
 
-    /** The owner pays the unpaid invoice on Stripe's page (with a card that works, or by approving the charge). */
+    /** The admin pays the unpaid invoice on Stripe's page (with a card that works, or by approving the charge). */
     payOpenInvoice(subscriptionId: string) {
       const s = sub(subscriptionId);
       if (s.latestInvoice.status !== "open") throw new Error("Nothing to pay.");
@@ -300,7 +300,7 @@ export function fakePlanStripe(tag: string) {
       s.status = paid ? "active" : "past_due";
     },
 
-    /** The owner cancels on Stripe's billing page: the subscription ends at the end of the period. Refused while a schedule is attached, as Stripe refuses it. */
+    /** The admin cancels on Stripe's billing page: the subscription ends at the end of the period. Refused while a schedule is attached, as Stripe refuses it. */
     cancelAtPeriodEnd(subscriptionId: string) {
       const s = sub(subscriptionId);
       if (s.schedule) throw new Error("The subscription is managed by a subscription schedule, and updating any cancelation behavior directly is not allowed.");

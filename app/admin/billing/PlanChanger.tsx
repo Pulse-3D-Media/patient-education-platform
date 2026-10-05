@@ -14,9 +14,8 @@ import type { ChangeOffer } from "./checkout-view";
 import { canPick, CategoryChoices, IntervalChoices, SeatsField, TestModeNote } from "./PlanFields";
 
 /**
- * Changing a plan that is being paid for, on /admin/billing. The account
- * owner only (the page does not draw this for anyone else, and the actions
- * refuse anyone else).
+ * Changing a plan that is being paid for, on /admin/billing. For any
+ * office admin (this is an admin page, and the actions refuse anyone else).
  *
  * Two steps, on purpose:
  *
@@ -184,7 +183,7 @@ export function PlanChanger({ offer }: { offer: Changer }) {
         )}
       </section>
 
-      {/* What the owner was looking at. The server compares these with its own numbers and never charges them. */}
+      {/* What the admin was looking at. The server compares these with its own numbers and never charges them. */}
       <input type="hidden" name="interval" value={every} />
       <input type="hidden" name="seenVersionId" value={prices.versionId} />
       <input type="hidden" name="seenTotalCents" value={amounts ? String(amounts.totalCents) : ""} />

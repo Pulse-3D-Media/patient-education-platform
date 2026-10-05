@@ -21,13 +21,14 @@ import {
  * by a recorder so that what each action HANDS it can be read.
  *
  * What these prove:
- *   - billing changes belong to the ACCOUNT OWNER: signed out, a member, and
- *     an office admin who is not the owner are all refused before anything
- *     is read or asked of Stripe;
- *   - the clinic is always the signed-in owner's own. A clinic id, a Stripe
+ *   - billing changes belong to the clinic's OFFICE ADMINS, the account
+ *     owner included (decided on 2026-10-05): signed out and a member are
+ *     refused before anything is read or asked of Stripe, and an admin who
+ *     is not the owner is let through like the owner;
+ *   - the clinic is always the signed-in admin's own. A clinic id, a Stripe
  *     customer id, an amount or a price put into the form never reaches the
- *     flow, so one clinic's owner cannot act on another clinic;
- *   - an owner of a clinic that is NOT open (past due, ended) can still open
+ *     flow, so one clinic's admin cannot act on another clinic;
+ *   - an admin of a clinic that is NOT open (past due, ended) can still open
  *     Stripe's billing page and pay: that is how it recovers;
  *   - Stripe's return address comes from a trusted origin, never a forged
  *     Host header;
@@ -116,15 +117,15 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("billing changes belong to the account owner", () => {
-  it("refuses someone signed out, a member, and an office admin who is not the owner, before anything is asked", async () => {
+describe("billing changes belong to the clinic's office admins", () => {
+  it("refuses someone signed out and a member, before anything is asked", async () => {
     const { orgId } = await makeClinic();
 
-    for (const signIn of [() => signInAs(null, "member"), () => signInAs(orgId, "member"), () => signInAs(orgId, "member", OWNER), () => signInAs(orgId, "admin", OTHER_ADMIN)]) {
+    for (const signIn of [() => signInAs(null, "member"), () => signInAs(orgId, "member", OTHER_ADMIN), () => signInAs(orgId, "member", OWNER)]) {
       signIn();
       for (const run of everyOwnerAction()) {
         const result = await run();
-        expect(result).toMatchObject({ error: expect.stringContaining("account owner") });
+        expect(result).toMatchObject({ error: expect.stringContaining("office admins") });
         expect(result).not.toHaveProperty("redirectTo");
         expect(result).not.toHaveProperty("review");
       }
@@ -132,17 +133,31 @@ describe("billing changes belong to the account owner", () => {
     nothingWasAsked();
   });
 
-  it("a clinic with no account owner has nobody who can change billing here, admin or not", async () => {
-    const { orgId } = await makeClinic("ACTIVE", true);
-    signInAs(orgId, "admin", OWNER);
-    for (const run of everyOwnerAction()) expect(await run()).toMatchObject({ error: expect.stringContaining("account owner") });
-    nothingWasAsked();
+  it("an office admin who is not the account owner can do everything the owner can, for their own clinic", async () => {
+    const { clinicId, orgId } = await makeClinic();
+    signInAs(orgId, "admin", OTHER_ADMIN);
+
+    for (const run of everyOwnerAction()) expect(await run()).not.toHaveProperty("error");
+
+    for (const flow of [reviewPlanChange, confirmPlanChange, cancelWaitingChange, openBillingPortal, findInvoiceToPay]) {
+      expect(flow).toHaveBeenCalled();
+      expect(vi.mocked(flow).mock.calls[0][0]).toMatchObject({ clinicId });
+    }
+    // The log names the admin who confirmed, by their own id.
+    expect(vi.mocked(confirmPlanChange).mock.calls[0][0].actor).toEqual({ id: OTHER_ADMIN, name: "Jane Smith" });
   });
 
-  it("the owner who has had admin switched off in Clerk is refused too: both are needed", async () => {
+  it("a clinic with no account owner can still have its billing changed by an office admin", async () => {
+    const { clinicId, orgId } = await makeClinic("ACTIVE", true);
+    signInAs(orgId, "admin", OTHER_ADMIN);
+    expect(await openBillingPortalAction()).toEqual({ redirectTo: "https://billing.stripe.com/p/session/made_up" });
+    expect(vi.mocked(openBillingPortal).mock.calls[0][0]).toMatchObject({ clinicId });
+  });
+
+  it("the account owner who has had admin switched off in Clerk is refused: the admin role is what counts", async () => {
     const { orgId } = await makeClinic();
     signInAs(orgId, "member", OWNER);
-    expect(await openBillingPortalAction()).toMatchObject({ error: expect.stringContaining("account owner") });
+    expect(await openBillingPortalAction()).toMatchObject({ error: expect.stringContaining("office admins") });
     nothingWasAsked();
   });
 
@@ -159,7 +174,7 @@ describe("billing changes belong to the account owner", () => {
   });
 });
 
-describe("the owner's actions act on the owner's own clinic, with only what the form may say", () => {
+describe("the actions act on the signed-in admin's own clinic, with only what the form may say", () => {
   it("review: the flow gets the picks and nothing else; what comes back is plain values for the browser", async () => {
     const mine = await makeClinic();
     const theirs = await makeClinic();
@@ -176,7 +191,7 @@ describe("the owner's actions act on the owner's own clinic, with only what the 
     expect(state).toEqual({ review: { summary: { ...SUMMARY, included: ["KNEE", "HIP"] }, now: { dueNowCents: 7866, atSeconds: 1_791_720_000, renewsAt: new Date("2026-10-31T12:00:00.000Z") }, renewal: null } });
   });
 
-  it("confirm: the flow gets the owner's clinic, the picks, what was reviewed, and who is confirming", async () => {
+  it("confirm: the flow gets the admin's own clinic, the picks, what was reviewed, and who is confirming", async () => {
     const mine = await makeClinic();
     const theirs = await makeClinic();
     signInAs(mine.orgId, "admin");
@@ -229,7 +244,7 @@ describe("the owner's actions act on the owner's own clinic, with only what the 
 });
 
 describe("Stripe's billing page and paying an invoice", () => {
-  it("the owner of a clinic that is NOT open can still get to both: that is how it recovers", async () => {
+  it("an admin of a clinic that is NOT open can still get to both: that is how it recovers", async () => {
     for (const status of ["PAST_DUE", "CANCELED"] as const) {
       const { clinicId, orgId } = await makeClinic(status);
       signInAs(orgId, "admin");
@@ -241,7 +256,7 @@ describe("Stripe's billing page and paying an invoice", () => {
     }
   });
 
-  it("one clinic's owner can only ever open their own clinic's billing page: there is nothing in the request to point it elsewhere", async () => {
+  it("one clinic's admin can only ever open their own clinic's billing page: there is nothing in the request to point it elsewhere", async () => {
     const mine = await makeClinic();
     await makeClinic();
     signInAs(mine.orgId, "admin");

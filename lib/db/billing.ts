@@ -342,7 +342,7 @@ export async function acceptPlanForCheckout(
 export type ChangeTiming = "now" | "renewal";
 
 /**
- * Write down the plan a clinic's account owner just accepted as a CHANGE to
+ * Write down the plan one of a clinic's office admins just accepted as a CHANGE to
  * the plan it is paying for. Like every accepted plan, the row is written
  * once and never edited.
  *
@@ -395,7 +395,7 @@ export async function acceptPlanForChange(
   }, TX_OPTIONS);
 }
 
-/** What an owner is told when the plan was changed by someone else between drawing the page and pressing the button. */
+/** What an admin is told when the plan was changed by someone else between drawing the page and pressing the button. */
 export const PLAN_MOVED_MESSAGE = "Your plan changed a moment ago. Reload this page and check it before changing anything.";
 
 /** Longer than TX_OPTIONS: a plan change asks Stripe two or three things while the lock is held, each bounded at eight seconds. */

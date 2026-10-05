@@ -12,6 +12,7 @@ import {
   PULSE_STAFF_THEME,
   STAFF_GROUND,
   STAFF_LIGHT_GROUND,
+  VIDEO_STRIP_ALPHA,
   brandFontLabel,
   brandThemeLabel,
   contrastRatio,
@@ -25,6 +26,7 @@ import {
   relativeLuminance,
   staffTheme,
   themeVars,
+  videoStripGround,
 } from "./branding";
 
 /**
@@ -123,6 +125,37 @@ describe("contrast sums", () => {
     expect(contrastRatio("#2a829b", "#2a829b")).toBe(1);
     // Order does not matter.
     expect(contrastRatio("#ffffff", "#1e5668")).toBe(contrastRatio("#1e5668", "#ffffff"));
+  });
+});
+
+describe("the strip on the video", () => {
+  // White words on a black band at VIDEO_STRIP_ALPHA, over whatever the frame is. The two ends of every frame there can be.
+  it("keeps white text at 4.5:1 or better over a white frame, the hardest case", () => {
+    const band = videoStripGround("#ffffff");
+    expect(band).toBe("#666666");
+    expect(contrastRatio("#ffffff", band)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#ffffff", band)).toBeCloseTo(5.74, 1);
+  });
+
+  it("keeps white text at 4.5:1 or better over a black frame (where it is simply black)", () => {
+    expect(videoStripGround("#000000")).toBe("#000000");
+    expect(contrastRatio("#ffffff", videoStripGround("#000000"))).toBeCloseTo(21, 1);
+  });
+
+  it("keeps it over every grey in between, and over the brightest pure colours an animation could hold", () => {
+    for (let level = 0; level <= 255; level += 5) {
+      const grey = `#${level.toString(16).padStart(2, "0").repeat(3)}`;
+      expect(contrastRatio("#ffffff", videoStripGround(grey))).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const frame of ["#ffff00", "#00ffff", "#ff00ff", "#00ff00", "#ffffff"]) {
+      expect(contrastRatio("#ffffff", videoStripGround(frame))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("is as see-through as it can be with room to spare: a little lighter and white on white would be too close to the floor", () => {
+    expect(VIDEO_STRIP_ALPHA).toBe(0.6);
+    // At 0.55 the band over white is #737373, and white on it is about 4.7:1: legal, but no margin for a soft edge or a squint.
+    expect(contrastRatio("#ffffff", "#737373")).toBeLessThan(4.8);
   });
 });
 

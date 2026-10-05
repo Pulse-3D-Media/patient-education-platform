@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ClinicMark } from "./ClinicMark";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { ClinicMark, pictureRatio } from "./ClinicMark";
 import {
   CloseIcon,
   ExitFullscreenIcon,
@@ -12,7 +12,7 @@ import {
   ReplayIcon,
   VolumeIcon,
 } from "./icons";
-import { PLACEHOLDER_CHIP, PRIMARY_BUTTON } from "./styles";
+import { PRIMARY_BUTTON } from "./styles";
 import { formatDuration } from "@/lib/format";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
 
@@ -28,15 +28,28 @@ import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback
  * Playback starts as soon as the element mounts (autoPlay), which is inside
  * the tap that opened the player, so sound is allowed.
  *
- * THE STRIP ABOVE THE PICTURE. Two things have to stay on screen for as long
- * as the picture is: the amber "Placeholder animation" chip (when the video
- * is a sample standing in for the named procedure) and the clinic's mark
- * (its logo, or its name). Neither is laid over the picture, because an
- * anatomy label can be anywhere in a frame. They sit in a slim row of their
- * own above it, and come along when the player goes full screen. The title
- * and the controls do sit over the picture, but only while they are showing;
- * they fade away a moment after the last touch. The mark is branding, not
- * protection: see ClinicMark.
+ * THE STRIP ON THE PICTURE. A thin dark band across the top edge of the
+ * picture (ClinicMark) carries what has to stay on screen for as long as the
+ * picture does: the clinic's logo (or name), the signed-in person's name as
+ * patients see it on the links they send ("Sent by Dr. Jane Smith, DO"),
+ * when they hold a seat, and the amber "Placeholder animation" chip when the
+ * video is a sample standing in for the named procedure. It sits on the
+ * picture's own top edge, not the screen's, even where the picture is
+ * letterboxed (OnPicture's arithmetic, in app/globals.css), and comes along
+ * when the player goes full screen. It never takes a tap.
+ *
+ * The title row (with Close) and the controls sit over the picture only
+ * while they are showing, and fade away a moment after the last touch. The
+ * title row always starts just UNDER the strip (.below-picture-top), so the
+ * two never overlap and Close is never under the band. The strip is
+ * branding, not protection: see ClinicMark.
+ *
+ * FULL SCREEN. The Full screen button puts the whole player full screen,
+ * strip included, wherever the browser can do that for part of a page
+ * (Chrome, Edge, Android, Safari on a Mac and on an iPad). An iPhone cannot:
+ * there the button hands the video to the phone's own player, which shows it
+ * without the strip or these controls. The player already fills the screen
+ * on an iPhone, so that is the one place full screen loses the strip.
  *
  * WHEN THE VIDEO WILL NOT LOAD. A missing file, a blocked one, or a
  * connection that drops part-way: the picture is replaced by a calm panel
@@ -61,6 +74,7 @@ export function VideoPlayer({
   poster,
   clinicName,
   logoUrl = null,
+  senderName = null,
   onClose,
 }: {
   src: string;
@@ -68,12 +82,14 @@ export function VideoPlayer({
   subtitle?: string;
   /** A still to show before the first frame arrives. Empty means the browser shows black. */
   poster?: string;
-  /** True for a sample animation standing in for the named procedure. Keeps a chip above the picture the whole time. */
+  /** True for a sample animation standing in for the named procedure. Keeps a chip on the strip the whole time. */
   placeholder?: boolean;
-  /** The clinic's name, for the mark above the picture. Left out, there is no mark. */
-  clinicName?: string;
-  /** The clinic's checked logo address for that mark, or null to show its name. */
+  /** The clinic's name, for the strip on the picture (in place of the logo when there is none). */
+  clinicName: string;
+  /** The clinic's checked logo address for the strip, or null to show its name. */
   logoUrl?: string | null;
+  /** The signed-in person's name as patients see it ("Dr. Jane Smith, DO") when they hold a seat; null shows only the clinic. */
+  senderName?: string | null;
   onClose: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -93,6 +109,8 @@ export function VideoPlayer({
   const [fullscreen, setFullscreen] = useState(false);
   const [failed, setFailed] = useState(false);
   const [slow, setSlow] = useState(false);
+  /** The video's shape, width over height, once the file says; 16:9 until then. Places the strip on the picture's top edge. */
+  const [ratio, setRatio] = useState(() => pictureRatio(undefined, undefined));
 
   /** Show the controls, then hide them again after a pause if still playing. */
   const reveal = useCallback(() => {
@@ -112,9 +130,16 @@ export function VideoPlayer({
   );
 
   useEffect(() => {
-    const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    const onChange = () => {
+      const doc = document as Document & { webkitFullscreenElement?: Element | null };
+      setFullscreen(Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement));
+    };
     document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
   }, []);
 
   // A file that is missing or blocked can fail before this component is
@@ -126,7 +151,10 @@ export function VideoPlayer({
       const v = vid.current;
       if (!v) return;
       if (v.error) setFailed(true);
-      else if (Number.isFinite(v.duration) && v.duration > 0) setDuration(v.duration);
+      else if (Number.isFinite(v.duration) && v.duration > 0) {
+        setDuration(v.duration);
+        setRatio(pictureRatio(v.videoWidth, v.videoHeight));
+      }
     });
     return () => window.cancelAnimationFrame(frameId);
   }, []);
@@ -212,16 +240,27 @@ export function VideoPlayer({
   };
 
   const toggleFullscreen = () => {
-    const el = box.current;
+    const el = box.current as (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> | void }) | null;
     const v = vid.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    } else if (el?.requestFullscreen) {
-      // The whole player goes, not just the video, so the strip and our controls come with it.
-      // If the browser says no, the player already fills the screen, so nothing is lost.
-      el.requestFullscreen().catch(() => {});
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => void;
+      webkitFullscreenEnabled?: boolean;
+    };
+    const request = el?.requestFullscreen ?? el?.webkitRequestFullscreen;
+    if (doc.fullscreenElement ?? doc.webkitFullscreenElement) {
+      try {
+        Promise.resolve((doc.exitFullscreen ?? doc.webkitExitFullscreen)?.call(doc)).catch(() => {});
+      } catch { /* Escape still leaves full screen. */ }
+    } else if (el && request && (doc.fullscreenEnabled ?? doc.webkitFullscreenEnabled ?? false)) {
+      // The whole player goes, not just the video, so the strip and our controls come with it. (Older Safari on an
+      // iPad and a Mac only knows the "webkit" name.) If the browser says no, the player already fills the screen,
+      // so nothing is lost.
+      try {
+        Promise.resolve(request.call(el)).catch(() => {});
+      } catch { /* As above: the player already fills the screen. */ }
     } else {
-      // iPhone Safari has no element fullscreen, only the video element's own
+      // An iPhone has no full screen for part of a page, only the video element's own
       // (which shows the video alone, without the strip or our controls).
       v?.webkitEnterFullscreen?.();
     }
@@ -261,15 +300,9 @@ export function VideoPlayer({
       onTouchStart={reveal}
       className="flex min-h-0 flex-1 select-none flex-col bg-black outline-none"
     >
-      {/* The strip above the picture: what has to stay on screen the whole time, kept off the picture itself. */}
-      {(placeholder || clinicName) && (
-        <div className="relative flex h-10 shrink-0 items-center px-5">
-          {placeholder && <span className={PLACEHOLDER_CHIP}>Placeholder animation</span>}
-          {clinicName && <ClinicMark logoUrl={logoUrl} name={clinicName} size="patient" className="right-5 top-1" />}
-        </div>
-      )}
-
-      <div className="relative min-h-0 flex-1">
+      {/* The video's box. "picture-area" lets the strip and the title row find the picture's top edge inside it (app/globals.css);
+          its size always comes from the screen, never from what is in it, which that needs. */}
+      <div className="picture-area relative min-h-0 flex-1" style={{ "--picture-ratio": ratio } as CSSProperties}>
         <video
           ref={vid}
           src={src}
@@ -299,6 +332,7 @@ export function VideoPlayer({
           onLoadedMetadata={(e) => {
             const v = e.currentTarget;
             setDuration(v.duration);
+            setRatio(pictureRatio(v.videoWidth, v.videoHeight));
             // After Try again, go back to where the video stopped.
             if (resumeAt.current > 0) {
               v.currentTime = Math.min(resumeAt.current, v.duration || resumeAt.current);
@@ -338,9 +372,14 @@ export function VideoPlayer({
           </div>
         )}
 
-        {/* Title band */}
+        {/* The strip on the picture's top edge: the whole time, failed or not, and never takes a tap. */}
+        <div className="picture-fit pointer-events-none">
+          <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} placeholder={placeholder} />
+        </div>
+
+        {/* Title band. It starts just under the strip (below-picture-top; top-10 where a browser cannot place it), so Close is never under the band. */}
         <div
-          className={`absolute inset-x-0 top-0 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pb-10 pt-4 transition-opacity duration-300 ${fade}`}
+          className={`below-picture-top absolute inset-x-0 top-10 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pb-10 pt-3 transition-opacity duration-300 ${fade}`}
         >
           <div className="min-w-0">
             <h2 className="truncate text-xl font-semibold text-white sm:text-2xl">{title}</h2>

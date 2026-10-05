@@ -174,6 +174,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
             code={share.code}
             clinicName={share.clinic.name}
             logoUrl={look.logoUrl}
+            senderName={share.senderName}
             call={look.call}
           />
         </div>

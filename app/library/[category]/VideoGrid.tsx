@@ -56,13 +56,16 @@ export function VideoGrid({
   categoryLabel,
   clinicName,
   logoUrl,
+  senderName,
   canSend,
 }: {
   videos: Item[];
   categoryLabel: string;
-  /** The clinic's name and checked logo address, for the strip above the picture. */
+  /** The clinic's name and checked logo address, for the strip on the picture. */
   clinicName: string;
   logoUrl: string | null;
+  /** The signed-in person's name as patients see it, for the strip, when they hold a seat; otherwise null and the strip shows only the clinic. */
+  senderName: string | null;
   /** True for someone holding a seat: their cards get the Send button. Everyone else can play but not send. */
   canSend: boolean;
 }) {
@@ -164,6 +167,7 @@ export function VideoGrid({
             poster={playing.posterUrl ?? undefined}
             clinicName={clinicName}
             logoUrl={logoUrl}
+            senderName={senderName}
             onClose={() => setPlaying(null)}
           />
         </div>

@@ -15,6 +15,7 @@ import {
 } from "@/lib/branding";
 import { formatUsPhone, normalizeUsPhone } from "@/lib/phone";
 import { ClinicLogo } from "./ClinicLogo";
+import { ClinicMark } from "./ClinicMark";
 import { PhoneIcon } from "./icons";
 import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
 
@@ -42,7 +43,10 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
  * the mode is chosen, before anything is saved: it carries its own
  * data-theme attribute, so the colour tokens inside it take that mode's
  * values whatever the page around the form looks like (on /pulse the page
- * is always dark). The patient card never changes with the mode.
+ * is always dark). The patient card never changes with the mode. "On the
+ * video" shows the strip both players lay over the picture (ClinicMark),
+ * over a light frame and a dark one, so a clinic can see whether its logo
+ * reads on the dark band.
  * It is a preview only. The server checks every value again when the form
  * is sent, and what the browser thinks is never what gets saved.
  *
@@ -178,7 +182,8 @@ export function BrandingForm({
           <p className="mt-2 text-xs text-ink-muted">
             For your team&rsquo;s screens: the library and this admin area. It is the clinic&rsquo;s setting, the same for everyone who signs
             in. The patient page is always light, and a video always plays on black. Your logo sits straight on the banner with nothing
-            behind it, so a dark logo suits Light and a white or pale logo suits Dark.
+            behind it, so a dark logo suits Light and a white or pale logo suits Dark. On the video, your logo sits on a dark band
+            across the top of the picture, so a white or light version of your logo works best there.
           </p>
         </fieldset>
 
@@ -316,6 +321,20 @@ export function BrandingForm({
               <p className="mt-4 text-sm text-[#46555e]">No phone yet, so no call button.</p>
             )}
           </div>
+        </div>
+
+        {/* The strip on the video, as both players draw it, over a light frame and over a dark one, so the clinic can see how its
+            logo reads on the dark band either way. Fixed colours: a video is the same in every mode. The doctor's name is an example. */}
+        <div className="overflow-hidden rounded-2xl bg-white text-[#12202a]">
+          <p className="px-5 pb-2 pt-4 text-xs font-semibold uppercase tracking-wider text-[#46555e]">On the video</p>
+          {[
+            { key: "light", ground: "#eef1f4" },
+            { key: "dark", ground: "#10181d" },
+          ].map((frame) => (
+            <div key={frame.key} className="relative h-20 w-full" style={{ backgroundColor: frame.ground }}>
+              <ClinicMark key={previewLogo ?? "no-logo"} logoUrl={previewLogo} name={clinicName} senderName="Dr. Jane Smith, DO" />
+            </div>
+          ))}
         </div>
 
         {/* data-theme gives the tokens inside this card the chosen mode's values, whatever the page around the form is. text-ink is set here, not inherited, for the same reason. */}

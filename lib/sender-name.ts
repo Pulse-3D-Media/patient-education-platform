@@ -190,13 +190,34 @@ export function effectiveSenderName(displayName: string | null | undefined, defa
 }
 
 /**
+ * The name on the strip of the LIBRARY's player: the signed-in person's name
+ * as patients see it on the links they send, but only when they hold a seat
+ * (`seat` is their seat, or null). Someone without a seat sends no links, so
+ * the strip shows only the clinic for them.
+ */
+export function libraryStripName(seat: { displayName: string | null } | null, defaultName: string | null | undefined): string | null {
+  return seat ? effectiveSenderName(seat.displayName, defaultName) : null;
+}
+
+/**
  * The line near the top of the patient page and on the pamphlet:
  * "Sent by Dr. Jane Smith, DO, Summit Orthopedics", or "From Summit
  * Orthopedics" for a link with no name on it (every link made before
  * surgeons were recorded).
  */
 export function sentByLine(senderName: string | null | undefined, clinicName: string): string {
-  return senderName ? `Sent by ${senderName}, ${clinicName}` : `From ${clinicName}`;
+  const sentBy = sentByName(senderName);
+  return sentBy ? `${sentBy}, ${clinicName}` : `From ${clinicName}`;
+}
+
+/**
+ * The same words without the clinic, for the strip on the video, where the
+ * clinic's logo (or name) sits right beside them: "Sent by Dr. Jane Smith,
+ * DO". Null for a link with no name on it; the strip then shows only the
+ * clinic.
+ */
+export function sentByName(senderName: string | null | undefined): string | null {
+  return senderName ? `Sent by ${senderName}` : null;
 }
 
 /** A credential typed under Other: letters and hyphens, starting with a letter. */

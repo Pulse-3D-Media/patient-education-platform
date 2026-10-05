@@ -250,18 +250,19 @@ describe("what stays the same", () => {
     expect(html.indexOf("Placeholder.")).toBeLessThan(html.indexOf("summit.png"));
   });
 
-  it("before the first tap there is one thing to press, Play, with the clinic's mark hidden from screen readers", async () => {
+  it("before the first tap there is one thing to press, Play, with the strip's logo and names hidden from screen readers", async () => {
     const clinic = await makeClinic({ logoUrl: "https://example.com/summit.png" });
     const html = await render(await makeShare(clinic.id, videoId));
 
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Play Vitest Total Knee Replacement"');
     expect(html).not.toContain("Make the video bigger");
-    // The video keeps playsinline and the browser's own controls are never stripped beyond "no download".
+    // The video keeps playsinline, and the browser's own controls lose only "download" and, where the browser
+    // understands it (Chromium), its own full-screen button, which would show the video without the strip.
     expect(html).toMatch(/<video[^>]*playsInline/);
-    expect(html).toContain('controlsList="nodownload"');
-    // The mark over the picture is decoration: the name is already on the page as text.
-    expect(html).toMatch(/<div aria-hidden="true" class="pointer-events-none absolute/);
+    expect(html).toContain('controlsList="nodownload nofullscreen"');
+    // The strip is decoration: the clinic and the sender are already on the page as text.
+    expect(html).toMatch(/data-video-strip="" class="pointer-events-none [^"]*"[^>]*><span aria-hidden="true"/);
   });
 
   it("nothing internal about the clinic is in the page", async () => {
@@ -270,6 +271,63 @@ describe("what stays the same", () => {
 
     expect(html).not.toContain("INTERNAL-");
     expect(html).not.toContain(clinic.id);
+  });
+});
+
+describe("the strip on the video", () => {
+  async function shareFrom(clinicId: string, senderName: string | null, video = videoId) {
+    const share = await prisma.share.create({
+      data: { code: code(), clinicId, videoId: video, expiresAt: new Date(Date.now() + 30 * 86_400_000), senderUserId: senderName ? "user_vitestsender" : null, senderName },
+      select: { code: true },
+    });
+    return share.code;
+  }
+
+  /** The strip's part of the page: from its own element to the video. */
+  function stripOf(html: string): string {
+    const start = html.indexOf("data-video-strip");
+    expect(start).toBeGreaterThan(-1);
+    return html.slice(start, html.indexOf("</div>", start));
+  }
+
+  it("is laid over the picture, from before the first play, with the logo and 'Sent by' the surgeon", async () => {
+    const clinic = await makeClinic({ name: "Vitest Strip Orthopedics", logoUrl: "https://example.com/strip-white.png" });
+    const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO"));
+    const strip = stripOf(html);
+
+    expect(strip).toContain('src="https://example.com/strip-white.png"');
+    expect(strip).toContain(">Sent by Dr. Jane Smith, DO<");
+    // Inside the box over the picture, not in a row above the video: the player's box is now exactly the video's shape.
+    expect(html).toMatch(/class="picture-area pointer-events-none absolute inset-0 z-10" style="--picture-ratio:1.777[^"]*"><div class="picture-fit"><div data-video-strip/);
+    expect(html).toContain("padding-top:56.25%");
+    expect(html).not.toContain("56.25% + 40px");
+    // Before Play in the page's order, so it is there before the first tap.
+    expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Play Vitest Total Knee Replacement"'));
+  });
+
+  it("with no logo, has the clinic's name in white in its place", async () => {
+    const clinic = await makeClinic({ name: "Vitest Nologo Orthopedics" });
+    const strip = stripOf(await render(await shareFrom(clinic.id, "Jane Smith, NP")));
+
+    expect(strip).not.toContain("<img");
+    expect(strip).toMatch(/text-white[^"]*">Vitest Nologo Orthopedics</);
+    expect(strip).toContain(">Sent by Jane Smith, NP<");
+  });
+
+  it("for a link with no sender recorded, has only the logo or the clinic's name", async () => {
+    const clinic = await makeClinic({ name: "Vitest Older Strip Orthopedics" });
+    const strip = stripOf(await render(await shareFrom(clinic.id, null)));
+
+    expect(strip).toContain(">Vitest Older Strip Orthopedics<");
+    expect(strip).not.toContain("Sent by");
+  });
+
+  it("is on a placeholder link too, under the amber bar that still says so first", async () => {
+    const clinic = await makeClinic({ name: "Vitest Sample Orthopedics" });
+    const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO", placeholderVideoId));
+
+    expect(stripOf(html)).toContain(">Sent by Dr. Jane Smith, DO<");
+    expect(html.indexOf("Placeholder.")).toBeLessThan(html.indexOf("data-video-strip"));
   });
 });
 

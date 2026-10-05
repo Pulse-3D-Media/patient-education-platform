@@ -1,10 +1,9 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ClinicLogo } from "./ClinicLogo";
-import { ClinicMark } from "./ClinicMark";
 
 /**
- * The logo and the mark over the video, as the server first sends them:
+ * The clinic's logo in its box, as the server first sends it:
  * before the browser knows whether the picture will load. That first state
  * is the one that matters for "a slow or broken logo moves nothing",
  * because it is what is on screen while the picture is slow, and what stays
@@ -62,26 +61,3 @@ describe("ClinicLogo", () => {
   });
 });
 
-describe("ClinicMark", () => {
-  it("never takes a tap and is never wider than half the picture, so nothing under it is blocked", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name={LONG_NAME} size="patient" className="right-3 top-3" />);
-
-    expect(html).toContain("pointer-events-none");
-    expect(html).toContain("max-w-[46%]");
-    expect(html).toContain("truncate");
-    expect(html).toContain("right-3 top-3");
-    expect(html).toMatch(/^<div aria-hidden="true"/);
-  });
-
-  it("keeps the name at 15px on the patient page, the smallest text that page allows", () => {
-    expect(renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit" size="patient" />)).toContain("text-[15px]");
-    expect(renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit" size="staff" />)).toContain("text-[13px]");
-  });
-
-  it("with a logo, is a chip of fixed size, so it is the same before and after the picture loads", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl="https://example.com/logo.png" name="Summit" size="staff" />);
-
-    expect(html).toContain("h-6 w-[104px]");
-    expect(html).toContain('src="https://example.com/logo.png"');
-  });
-});

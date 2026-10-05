@@ -216,3 +216,21 @@ Before it works: apply the migration to the preview database with `node "Desktop
 12. Sign in to a **second clinic**: it is still dark.
 13. As Pulse staff, open `/pulse`, the first clinic, Branding: `/pulse` is dark, the form shows Light, and only the "What your team sees" card is light. Open Notes: "Branding changed: mode changed from Dark to Light." under the admin's name.
 14. Set the first clinic back to Dark if you want it dark.
+
+
+## The strip on the video, October 5, 2026 (Prompt 1C, branch name-strip)
+
+This replaces the 40px strip ABOVE the picture described in the passes above: the clinic's logo and "Sent by Dr. Jane Smith, DO" now sit on a dark band laid across the top edge of the picture itself, in both players (see "Clinic branding and dependable playback" in CLAUDE.md). The earlier lines about nothing being drawn over the picture are history.
+
+Checked in headless Edge against the Neon testing branch, with Clerk stood in for (made-up clinics and links, removed afterwards):
+
+- Patient player, phone (390 by 844, mobile): strip 40px on the picture's top edge (both at 316px), black at 0.6, takes no taps, there before Play. The picture box is now exactly 16:9 (the extra 40px is gone). A light frame (the title card) and a dark one (Lumbar Spinal Fusion) both read.
+- Enlarged with the browser's element full screen, and with full screen switched off to force the overlay: the strip lands on the picture's own top edge, 344px down, not the top of the screen, with Close in its own bar above.
+- "Did not load": the strip is a row of its own above the panel; the panel stays inside the page's margins.
+- No sender recorded and no logo: the clinic's name in white, and nothing else.
+- `controlsList="nodownload nofullscreen"`: in Edge the browser's own full-screen button is drawn greyed out; pressing it and double-clicking the picture both leave the page out of full screen.
+- Library player, tablet (1024 by 768) and phone (390 by 844): strip on the picture's top edge (96px and 312px down, the picture letterboxed), the title row and Close starting right under it (136px and 352px), no overlap. Someone holding a seat: "Sent by Dr. Ben Carter, DO"; someone without one: the clinic only; a placeholder: the amber chip at the right end of the band. Its own Full screen button took the whole player full screen with the strip.
+- Branding form: the sentence about a white or light logo, and the "On the video" preview over a light and a dark frame.
+- Every published video (13, the same files on production and the testing branch), eight points each, with the band drawn at phone size: the finished Total Knee Replacement puts no words in the band, only the top of the femur and implant, dimmed. Placeholder animations that put words there: ACL Reconstruction (instruction captions), Reverse Total Shoulder Arthroplasty (section titles), Arthroscopic Rotator Cuff Repair ("AlphaVent Knotless"), Hip Arthroscopy (a caption, partly), Lumbar Spinal Fusion and Pedicle Subtraction Osteotomy (feature captions and labels), Adult Scoliosis Correction (instrument labels), Achilles Tendon Repair and Partial Knee Replacement (the vendor's logo). Bunion Correction, Total Hip Replacement and Lumbar Discectomy: nothing that matters.
+
+Not checked here, owed on real phones: iPhone Safari and Android Chrome (including whether Safari draws any of its own controls along the top of the picture, and whether turning an Android phone sideways still goes full screen without the strip), Safari on a Mac and an iPad, and Firefox.

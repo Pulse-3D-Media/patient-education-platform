@@ -10,6 +10,7 @@ import {
   parseNameChoice,
   readSenderName,
   sentByLine,
+  sentByName,
   type CredentialPick,
   type NameChoice,
 } from "./sender-name";
@@ -188,5 +189,15 @@ describe("effectiveSenderName and sentByLine", () => {
     expect(sentByLine("Dr. Jane Smith", "Summit Orthopedics")).toBe("Sent by Dr. Jane Smith, Summit Orthopedics");
     expect(sentByLine(null, "Summit Orthopedics")).toBe("From Summit Orthopedics");
     expect(sentByLine("", "Summit Orthopedics")).toBe("From Summit Orthopedics");
+  });
+
+  it("says it the same way on the strip on the video, without the clinic (its logo is right beside it)", () => {
+    expect(sentByName("Dr. Jane Smith, DO")).toBe("Sent by Dr. Jane Smith, DO");
+    expect(sentByName("Jane Smith, PA-C")).toBe("Sent by Jane Smith, PA-C");
+    expect(sentByName(null)).toBeNull();
+    expect(sentByName("")).toBeNull();
+    expect(sentByName(undefined)).toBeNull();
+    // The page's line is the strip's words with the clinic after them.
+    expect(sentByLine("Dr. Jane Smith, DO", "Summit")).toBe(`${sentByName("Dr. Jane Smith, DO")}, Summit`);
   });
 });

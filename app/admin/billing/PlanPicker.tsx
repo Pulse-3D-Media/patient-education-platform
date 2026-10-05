@@ -3,13 +3,13 @@
 import type { BillingInterval, Category } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useMemo, useState } from "react";
-import { INPUT, LABEL, PRIMARY_BUTTON } from "@/components/ui/styles";
+import { PRIMARY_BUTTON } from "@/components/ui/styles";
 import { PULSE_CONTACT_URL } from "@/lib/brand";
-import { availabilityLabel } from "@/lib/categories";
 import { engineInterval } from "@/lib/checkout-rules";
 import { formatCents, quote, type PricingConfig, type Quote } from "@/lib/pricing";
 import { startCheckoutAction } from "./actions";
 import type { CategoryOption } from "./checkout-view";
+import { CategoryChoices, IntervalChoices, SeatsField } from "./PlanFields";
 
 /**
  * The plan picker on /admin/billing: categories, surgeon seats, monthly or
@@ -81,78 +81,16 @@ export function PlanPicker({
         with the card number 4242 4242 4242 4242, any date in the future and any three digits.
       </p>
 
-      <fieldset>
-        <legend className="text-[15px] font-medium text-ink">Categories</legend>
-        <p className="mt-1 text-sm text-ink-muted">
-          The price depends on how many you take, not which.
-          {config.fullLibraryFrom !== null && ` Take ${config.fullLibraryFrom} or more and every category is included.`}
-        </p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          {options.map((option) => {
-            const label = availabilityLabel(option.availability);
-            const canBuy = option.availability === "sellable";
-            return (
-              <label
-                key={option.value}
-                className={`flex min-h-12 items-center gap-3 rounded-lg border px-4 ${
-                  canBuy ? "cursor-pointer border-line-strong has-[:checked]:border-brand has-[:checked]:bg-brand/15" : "border-line opacity-60"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  name="categories"
-                  value={option.value}
-                  checked={picked.includes(option.value)}
-                  disabled={!canBuy}
-                  onChange={() => toggle(option.value)}
-                  className="h-5 w-5 accent-[var(--brand-accent)]"
-                />
-                <span className="text-[15px] font-medium text-ink">{option.label}</span>
-                {label && <span className="ml-auto text-sm text-ink-muted">{label}</span>}
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
+      <CategoryChoices config={config} options={options} picked={picked} onToggle={toggle} />
 
-      <div className="max-w-xs">
-        <label htmlFor="plan-seats" className={LABEL}>
-          Surgeon seats
-        </label>
-        <input
-          id="plan-seats"
-          name="seats"
-          type="number"
-          inputMode="numeric"
-          min={1}
-          step={1}
-          required
-          value={seatsText}
-          onChange={(event) => setSeatsText(event.target.value)}
-          aria-describedby="plan-seats-help"
-          className={INPUT}
-        />
-        <p id="plan-seats-help" className="mt-1 text-sm text-ink-muted">
-          One for each person who will use the library. The account owner does not need one: take one only if you will use the library
-          yourself. At least one.
-        </p>
-      </div>
+      <SeatsField
+        id="plan-seats"
+        value={seatsText}
+        onChange={setSeatsText}
+        help="One for each person who will use the library. The account owner does not need one: take one only if you will use the library yourself. At least one."
+      />
 
-      <fieldset>
-        <legend className="text-[15px] font-medium text-ink">How often you pay</legend>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <IntervalChoice value="MONTH" label="Monthly" chosen={every} onChoose={setEvery} total={monthly?.amounts?.totalCents ?? null} per="month" />
-          <IntervalChoice
-            value="YEAR"
-            label="Yearly"
-            chosen={every}
-            onChoose={setEvery}
-            total={yearly?.amounts?.totalCents ?? null}
-            per="year"
-            note={config.yearlyMonths < 12 ? `A year for the price of ${config.yearlyMonths} months.` : undefined}
-          />
-        </div>
-      </fieldset>
+      <IntervalChoices config={config} chosen={every} onChoose={setEvery} monthlyCents={monthly?.amounts?.totalCents ?? null} yearlyCents={yearly?.amounts?.totalCents ?? null} />
 
       <section aria-live="polite" aria-label="What this plan comes to" className="rounded-xl border border-line bg-sunken p-5">
         {tooManySeats ? (
@@ -210,35 +148,5 @@ export function PlanPicker({
         </span>
       </div>
     </form>
-  );
-}
-
-function IntervalChoice({
-  value,
-  label,
-  chosen,
-  onChoose,
-  total,
-  per,
-  note,
-}: {
-  value: BillingInterval;
-  label: string;
-  chosen: BillingInterval;
-  onChoose: (value: BillingInterval) => void;
-  total: number | null;
-  per: string;
-  note?: string;
-}) {
-  return (
-    <label className="flex min-h-12 cursor-pointer items-start gap-3 rounded-lg border border-line-strong px-4 py-3 has-[:checked]:border-brand has-[:checked]:bg-brand/15">
-      {/* Named only so the two behave as one group for the arrow keys. The server reads the hidden "interval" field, never this one. */}
-      <input type="radio" name="intervalChoice" value={value} checked={chosen === value} onChange={() => onChoose(value)} className="mt-0.5 h-5 w-5 accent-[var(--brand-accent)]" />
-      <span>
-        <span className="block text-[15px] font-medium text-ink">{label}</span>
-        <span className="block text-sm text-ink-soft">{total === null ? "Pick categories and seats to see the price" : `${formatCents(total)} per ${per}`}</span>
-        {note && <span className="block text-sm text-ink-muted">{note}</span>}
-      </span>
-    </label>
   );
 }

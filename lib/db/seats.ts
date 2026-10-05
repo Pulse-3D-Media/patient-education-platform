@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import {
   PENDING_WINDOW_MS,
   hasFreeSeat,
+  scheduledReductionBlocks,
   isClerkUserId,
   isHoldId,
   seatCheckIsEmpty,
@@ -14,7 +15,7 @@ import {
 } from "../seats";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
-import { readSeatsLocked } from "./seat-lock";
+import { readScheduledSeats, readSeatsLocked } from "./seat-lock";
 
 /**
  * Every query on who holds a seat at a clinic: the SeatAllocation table (a
@@ -169,8 +170,8 @@ export async function setSeatDisplayName(
 export type ReserveResult =
   /** The person holds a seat. `fresh` is true when THIS call gave it, false when they already had one (a repeat, a second tab, a retry). */
   | { held: true; fresh: boolean; summary: SeatSummary }
-  /** No seat was free. Nothing was written. */
-  | { held: false; summary: SeatSummary };
+  /** No seat was free. Nothing was written. `scheduledSeats` is set when a seat reduction scheduled for the next renewal is the reason. */
+  | { held: false; summary: SeatSummary; scheduledSeats?: number };
 
 /**
  * Give one person a seat, if the clinic has one free, and write the log
@@ -195,6 +196,7 @@ export async function reserveSeat(clinicId: string, clerkUserId: string, log?: S
     if (existing) return { held: true, fresh: false, summary: before };
 
     if (!hasFreeSeat(before)) return { held: false, summary: before };
+    if (scheduledReductionBlocks(before, clinic.scheduledSeats)) return { held: false, summary: before, scheduledSeats: clinic.scheduledSeats as number };
 
     await tx.seatAllocation.create({ data: { clinicId, clerkUserId, syncState: "SYNCED", reservedAt: now }, select: { id: true } });
     const after = seatSummary(clinic.surgeonSeats, clinic.seated + 1, clinic.invited);
@@ -225,7 +227,7 @@ export async function releaseSeat(clinicId: string, clerkUserId: string, log?: S
 // A seat held by an invitation
 // ---------------------------------------------------------------------------
 
-export type HoldResult = { held: true; holdId: string; summary: SeatSummary } | { held: false; summary: SeatSummary };
+export type HoldResult = { held: true; holdId: string; summary: SeatSummary } | { held: false; summary: SeatSummary; scheduledSeats?: number };
 
 /**
  * Hold a seat for an invitation that is about to be sent, if the clinic has
@@ -244,6 +246,7 @@ export async function holdSeatForInvitation(clinicId: string, now: Date = new Da
     if (!clinic) throw new Error(`No clinic has the id "${clinicId}".`);
     const before = seatSummary(clinic.surgeonSeats, clinic.seated, clinic.invited);
     if (!hasFreeSeat(before)) return { held: false, summary: before };
+    if (scheduledReductionBlocks(before, clinic.scheduledSeats)) return { held: false, summary: before, scheduledSeats: clinic.scheduledSeats as number };
 
     const hold = await tx.seatInvitation.create({ data: { clinicId, reservedAt: now }, select: { id: true } });
     return { held: true, holdId: hold.id, summary: seatSummary(clinic.surgeonSeats, clinic.seated, clinic.invited + 1) };
@@ -386,9 +389,12 @@ export async function applySeatCheck(
           ? (await tx.seatAllocation.findMany({ where: { clinicId, clerkUserId: { in: plan.adopt } }, select: { clerkUserId: true } })).map((row) => row.clerkUserId)
           : [],
       );
+      // A seat reduction scheduled for the next renewal limits these too.
+      const scheduledSeats = plan.adopt.length > 0 ? await readScheduledSeats(tx, clinicId) : null;
       for (const userId of plan.adopt) {
         if (alreadySeated.has(userId) || userId === clinic.ownerClerkUserId) continue;
-        if (!hasFreeSeat(await summaryIn(tx, clinicId, clinic.surgeonSeats))) break;
+        const summary = await summaryIn(tx, clinicId, clinic.surgeonSeats);
+        if (!hasFreeSeat(summary) || scheduledReductionBlocks(summary, scheduledSeats)) break;
         await tx.seatAllocation.create({ data: { clinicId, clerkUserId: userId, syncState: "SYNCED", reservedAt: now }, select: { id: true } });
         adopted += 1;
       }

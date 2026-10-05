@@ -128,7 +128,16 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
             {billing.paymentFailedAt && <Fact label="Payment failure first recorded">{formatDateTime(billing.paymentFailedAt)}</Fact>}
             {billing.graceEndsAt && <Fact label="Grace period ends">{formatDateTime(billing.graceEndsAt)}</Fact>}
             <Fact label="Plan in force">{planWords(billing.currentPlan)}</Fact>
-            {billing.pendingPlan && <Fact label="Plan waiting for a first payment">{planWords(billing.pendingPlan)}</Fact>}
+            {billing.pendingPlan && (
+              <Fact label={billing.status === "ACTIVE" || billing.status === "PAST_DUE" ? "Plan change waiting for its payment" : "Plan waiting for a first payment"}>
+                {planWords(billing.pendingPlan)}
+              </Fact>
+            )}
+            {billing.scheduledPlan && (
+              <Fact label={`Plan change scheduled for ${billing.scheduledChangeAt ? formatDateTime(billing.scheduledChangeAt) : "the next renewal"}`}>
+                {planWords(billing.scheduledPlan)}
+              </Fact>
+            )}
             <Fact label="Last checked against Stripe">{billing.lastReconciledAt ? formatDateTime(billing.lastReconciledAt) : "Never"}</Fact>
           </dl>
         ) : (

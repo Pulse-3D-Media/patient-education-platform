@@ -68,6 +68,8 @@ const FACTS_SELECT = {
   cancelAt: true,
   paymentFailedAt: true,
   graceEndsAt: true,
+  scheduledPlanId: true,
+  scheduledChangeAt: true,
 } as const;
 
 /** One clinic's financial record, as the rules read it. A clinic with no row has NO_BILLING. */
@@ -97,9 +99,9 @@ export async function getClinicBilling(clinicId: string) {
     select: {
       ...FACTS_SELECT,
       lastReconciledAt: true,
-      scheduledChangeAt: true,
       currentPlan: { select: PLAN_SELECT },
       pendingPlan: { select: PLAN_SELECT },
+      scheduledPlan: { select: PLAN_SELECT },
     },
   });
 }
@@ -175,8 +177,8 @@ function checkPlan(input: AcceptedPlanInput) {
  * lib/seats.ts; the count is read under the clinic's lock, which the caller
  * holds. The message tells the admin what to do about it.
  *
- * When changing a paid plan is built, a seat reduction must call this when it
- * is scheduled, and the place that applies it must check again (see
+ * A change to a paid plan calls this too, when the change is accepted
+ * (acceptPlanForChange), and the place that applies it checks again (see
  * reconcileSubscription below for how "when it takes effect" is handled).
  */
 async function refuseFewerSeatsThanInUse(tx: Prisma.TransactionClient, clinicId: string, surgeonSeats: number) {
@@ -204,7 +206,7 @@ export async function recordAcceptedPlan(clinicId: string, input: AcceptedPlanIn
     if (!clinic) throw new BillingRefusedError("That clinic no longer exists.");
     const facts = await readBillingFacts(tx, clinicId);
     if (facts.status === "ACTIVE" || facts.status === "PAST_DUE") {
-      throw new BillingRefusedError("This clinic already has a subscription. Changing a plan that is being paid for is not built yet.");
+      throw new BillingRefusedError("This clinic already has a subscription. A plan that is being paid for is changed on the Billing page, not replaced.");
     }
     await refuseFewerSeatsThanInUse(tx, clinicId, input.surgeonSeats);
     const plan = await tx.billingPlan.create({ data: { clinicId, ...input }, select: { id: true } });
@@ -231,7 +233,7 @@ export async function getCheckoutFacts(clinicId: string) {
       practiceType: true,
       managedByPulse: true,
       staffAccess: true,
-      billing: { select: { ...FACTS_SELECT, currentPlan: { select: PLAN_SELECT }, pendingPlan: { select: PLAN_SELECT } } },
+      billing: { select: { ...FACTS_SELECT, currentPlan: { select: PLAN_SELECT }, pendingPlan: { select: PLAN_SELECT }, scheduledPlan: { select: PLAN_SELECT } } },
     },
   });
   if (!clinic) return null;
@@ -249,10 +251,13 @@ export async function getCheckoutFacts(clinicId: string) {
           cancelAt: billing.cancelAt,
           paymentFailedAt: billing.paymentFailedAt,
           graceEndsAt: billing.graceEndsAt,
+          scheduledPlanId: billing.scheduledPlanId,
+          scheduledChangeAt: billing.scheduledChangeAt,
         }
       : NO_BILLING,
     currentPlan: billing?.currentPlan ?? null,
     pendingPlan: billing?.pendingPlan ?? null,
+    scheduledPlan: billing?.scheduledPlan ?? null,
   };
 }
 
@@ -327,6 +332,102 @@ export async function acceptPlanForCheckout(
     await tx.clinicBilling.update({ where: { clinicId }, data: { pendingPlanId: plan.id }, select: { clinicId: true } });
     return { planId: plan.id, createdAt: plan.createdAt, reused: false };
   }, TX_OPTIONS);
+}
+
+// ---------------------------------------------------------------------------
+// Changing a plan that is being paid for
+// ---------------------------------------------------------------------------
+
+/** When a change takes effect: now (an upgrade, once its payment succeeds) or at the next renewal (everything else). */
+export type ChangeTiming = "now" | "renewal";
+
+/**
+ * Write down the plan one of a clinic's office admins just accepted as a CHANGE to
+ * the plan it is paying for. Like every accepted plan, the row is written
+ * once and never edited.
+ *
+ * Nothing here changes what the clinic has or pays. The row is only what
+ * the Stripe price for the change is marked with; the change becomes real
+ * when Stripe says the subscription is on that price (an upgrade whose
+ * payment succeeded, or a scheduled change whose date came), and
+ * reconcileSubscription applies it then. A row whose change never happens
+ * (a declined card, a change cancelled before renewal) stays as history.
+ *
+ * Everything that could have changed since the page was drawn is checked
+ * again here, under the clinic's row lock:
+ *
+ *   - who may pay by card (a clinic marked managed, a hospital, or paused by
+ *     hand a second ago is refused);
+ *   - that the subscription is paid up and not set to end;
+ *   - that the plan being changed FROM is still the plan in force
+ *     (`basePlanId`), so two tabs cannot both change "the plan I was looking at";
+ *   - that no other change is in the way;
+ *   - the seat floor: never fewer seats than are taken right now, by people
+ *     and open invitations together. This is the "when it is scheduled" half
+ *     of the rule in lib/seats.ts.
+ */
+export async function acceptPlanForChange(
+  clinicId: string,
+  input: AcceptedPlanInput,
+  options: { basePlanId: string; timing: ChangeTiming },
+): Promise<{ planId: string }> {
+  checkPlan(input);
+  return prisma.$transaction(async (tx) => {
+    const clinic = await readClinicLocked(tx, clinicId, { id: true, practiceType: true, managedByPulse: true, staffAccess: true });
+    if (!clinic) throw new BillingRefusedError("That clinic no longer exists.");
+
+    const eligibility = selfServeEligibility(clinic);
+    if (!eligibility.eligible) throw new BillingRefusedError(SELF_SERVE_REFUSALS[eligibility.reason]);
+
+    const facts = await readBillingFacts(tx, clinicId);
+    if (facts.status === "PAST_DUE") throw new BillingRefusedError("Your last payment did not go through. Settle that first, then change your plan.");
+    if (facts.status !== "ACTIVE" || !facts.currentPlanId) throw new BillingRefusedError("Your clinic has no subscription to change.");
+    if (facts.cancelAt) throw new BillingRefusedError("Your subscription is set to end. Keep it going first, then change your plan.");
+    if (facts.currentPlanId !== options.basePlanId) throw new BillingRefusedError(PLAN_MOVED_MESSAGE);
+    if (facts.pendingPlanId) throw new BillingRefusedError("A plan change is waiting for its payment. Pay for it or cancel it first.");
+    if (options.timing === "now" && facts.scheduledPlanId) {
+      throw new BillingRefusedError("A change is already scheduled for your next renewal. Cancel that one first, then make this one.");
+    }
+    await refuseFewerSeatsThanInUse(tx, clinicId, input.surgeonSeats);
+
+    const plan = await tx.billingPlan.create({ data: { clinicId, ...input }, select: { id: true } });
+    return { planId: plan.id };
+  }, TX_OPTIONS);
+}
+
+/** What an admin is told when the plan was changed by someone else between drawing the page and pressing the button. */
+export const PLAN_MOVED_MESSAGE = "Your plan changed a moment ago. Reload this page and check it before changing anything.";
+
+/** Longer than TX_OPTIONS: a plan change asks Stripe two or three things while the lock is held, each bounded at eight seconds. */
+const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+
+/**
+ * Run one clinic's plan change while holding the clinic's row lock, so two
+ * plan changes for one clinic (two tabs, a double click, two admins) happen
+ * one after the other, never at once. The second one starts by asking Stripe
+ * where the subscription stands, and sees what the first one did.
+ *
+ * `work` talks to Stripe and writes NOTHING to the database: if this
+ * transaction fails after Stripe has made the change, nothing here is lost,
+ * because the change is applied from what Stripe says (reconcileSubscription),
+ * by the caller straight afterwards and by Stripe's own notification.
+ */
+export async function withPlanChangeLock<T>(clinicId: string, work: () => Promise<T>): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    const clinic = await readClinicLocked(tx, clinicId, { id: true });
+    if (!clinic) throw new BillingRefusedError("That clinic no longer exists.");
+    return work();
+  }, CHANGE_TX_OPTIONS);
+}
+
+/** One accepted plan of one clinic, in the shape two plans are compared by, or null when it is not this clinic's. */
+export async function getPlanShape(clinicId: string, planId: string) {
+  const plan = await prisma.billingPlan.findUnique({
+    where: { id: planId },
+    select: { clinicId: true, pricingVersionId: true, categories: true, entitledCategories: true, surgeonSeats: true, interval: true, perSeatCents: true, totalCents: true },
+  });
+  if (!plan || plan.clinicId !== clinicId) return null;
+  return plan;
 }
 
 // ---------------------------------------------------------------------------
@@ -543,8 +644,26 @@ export async function reconcileSubscription(args: {
       return { kind: "ignored", outcome, logged: 0 };
     }
 
+    // The plans Stripe names for a plan change (the one the subscription is
+    // on, one waiting for its payment, one scheduled) are ids this server
+    // wrote on its own Stripe prices. Any that is not one of THIS clinic's
+    // accepted plans is not acted on: it can only come from a price changed
+    // by hand in Stripe, and a person is asked to look.
+    const named = [snap.itemPlanId, snap.pendingPlanId, snap.scheduledPlanId].filter((id): id is string => typeof id === "string" && id.length > 0);
+    const known = new Set(
+      named.length > 0 ? (await tx.billingPlan.findMany({ where: { id: { in: named }, clinicId }, select: { id: true } })).map((plan) => plan.id) : [],
+    );
+    const ours = (id: string | null | undefined) => (id && known.has(id) ? id : null);
+    const strangePlan = named.some((id) => !known.has(id));
+    const checked: SubscriptionSnapshot = {
+      ...snap,
+      itemPlanId: ours(snap.itemPlanId),
+      pendingPlanId: ours(snap.pendingPlanId),
+      scheduledPlanId: ours(snap.scheduledPlanId),
+    };
+
     const settings = await readSettingsIn(tx);
-    const decision = decideBilling(current, snap, now, settings.graceDays);
+    const decision = decideBilling(current, checked, now, settings.graceDays);
 
     if (decision.kind === "ignored") {
       const outcome = (decision.needsLook ? NEEDS_LOOK : "") + decision.reason;
@@ -569,13 +688,16 @@ export async function reconcileSubscription(args: {
         cancelAt: next.cancelAt,
         paymentFailedAt: next.paymentFailedAt,
         graceEndsAt: next.graceEndsAt,
+        scheduledPlanId: next.scheduledPlanId,
+        scheduledChangeAt: next.scheduledChangeAt,
         lastReconciledAt: now,
       },
       select: { clinicId: true },
     });
 
-    // 2. The plan, when a first payment was just confirmed. A managed
-    //    clinic keeps the plan and the access Pulse staff gave it.
+    // 2. The plan, when a first payment was just confirmed, or when a plan
+    //    change has taken effect in Stripe. A managed clinic keeps the plan
+    //    and the access Pulse staff gave it.
     const clinicData: Prisma.ClinicUncheckedUpdateInput = {};
     let staffAccess = clinic.staffAccess;
     if (activatePlanId) {
@@ -591,7 +713,7 @@ export async function reconcileSubscription(args: {
         clinicData.surgeonSeats = plan.surgeonSeats;
         clinicData.pricingVersionId = plan.pricingVersionId;
         entries.push(
-          `Plan started: ${plan.entitledCategories.length} ${plan.entitledCategories.length === 1 ? "category" : "categories"}, ${plan.surgeonSeats} ${plan.surgeonSeats === 1 ? "seat" : "seats"}.`,
+          `${decision.planChanged ? "The plan is now" : "Plan started:"} ${plan.entitledCategories.length} ${plan.entitledCategories.length === 1 ? "category" : "categories"}, ${plan.surgeonSeats} ${plan.surgeonSeats === 1 ? "seat" : "seats"}.`,
         );
         // The "when it takes effect" half of the seat rule. The plan was
         // checked against the seats in use when it was accepted, but people
@@ -602,9 +724,9 @@ export async function reconcileSubscription(args: {
         // nobody new can be given a seat until that is settled.
         const over = overAllocatedWords(seatSummary(plan.surgeonSeats, await countSeatsInUseIn(tx, clinicId)));
         if (over) entries.push(over);
-        if (staffAccess === "OPEN") {
+        if (staffAccess === "OPEN" && !decision.planChanged) {
           // The one hand setting billing ever clears, and only this one, only
-          // here (see the top of lib/billing-state.ts).
+          // here, at a FIRST payment (see the top of lib/billing-state.ts).
           staffAccess = null;
           clinicData.staffAccess = null;
           entries.push("The clinic had been opened by hand; it now pays by card, so its access follows its payments from here on.");
@@ -644,7 +766,10 @@ export async function reconcileSubscription(args: {
       });
     }
 
-    const outcome = entries.length > 0 ? entries.join(" ") : recordChanged ? "Dates updated from Stripe." : "Checked against Stripe. Nothing had changed.";
+    const words = entries.length > 0 ? entries.join(" ") : recordChanged ? "Dates updated from Stripe." : "Checked against Stripe. Nothing had changed.";
+    const outcome = strangePlan
+      ? `${NEEDS_LOOK}The subscription in Stripe names a plan this app did not make for this clinic, so that part was not acted on. Check its price and schedule in Stripe. ${words}`
+      : words;
     await finish("PROCESSED", outcome);
     return { kind: "processed", outcome, logged: entries.length > 0 ? 1 : 0 };
   }, TX_OPTIONS);

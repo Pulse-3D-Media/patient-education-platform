@@ -9,6 +9,7 @@ import {
   isHandledEventType,
   isTestSecretKey,
   snapshotFromSubscription,
+  stateFromSubscription,
   verifyWebhook,
 } from "./stripe";
 
@@ -113,6 +114,25 @@ describe("eventRefs: the only two facts taken from a notification", () => {
     expect(eventRefs({ type: "invoice.paid", data: { object: { customer: 42, subscription: {} } } })).toEqual({ customerId: null, subscriptionId: null });
   });
 
+  it("finds the subscription a schedule notification is about, including one the schedule has let go of", () => {
+    expect(eventRefs({ type: "subscription_schedule.updated", data: { object: { id: "sub_sched_1", customer: "cus_1", subscription: "sub_1" } } })).toEqual({ customerId: "cus_1", subscriptionId: "sub_1" });
+    expect(
+      eventRefs({ type: "subscription_schedule.released", data: { object: { id: "sub_sched_1", customer: "cus_1", subscription: null, released_subscription: "sub_1" } } }),
+    ).toEqual({ customerId: "cus_1", subscriptionId: "sub_1" });
+  });
+
+  it("uses the notifications a plan change sends", () => {
+    for (const type of [
+      "customer.subscription.pending_update_applied",
+      "customer.subscription.pending_update_expired",
+      "invoice.voided",
+      "subscription_schedule.updated",
+      "subscription_schedule.released",
+    ]) {
+      expect(isHandledEventType(type)).toBe(true);
+    }
+  });
+
   it("knows which kinds of notification the app uses", () => {
     expect(isHandledEventType("invoice.paid")).toBe(true);
     expect(isHandledEventType("customer.subscription.deleted")).toBe(true);
@@ -145,7 +165,53 @@ describe("snapshotFromSubscription", () => {
       currentPeriodEnd: new Date(1_793_491_200 * 1000),
       cancelAt: null,
       planId: "plan_1",
+      // A subscription that has never had a plan change names no other plan.
+      itemPlanId: null,
+      pendingPlanId: null,
+      scheduledPlanId: null,
+      scheduledAt: null,
     });
+  });
+
+  it("reads a plan change off the subscription: the plan its price was made for, one waiting for payment, one scheduled", () => {
+    const price = (plan: string) => ({ id: `price_${plan}`, metadata: { billingPlanId: plan } });
+    const renewal = 1_793_491_200;
+    const changed = snapshotFromSubscription(
+      subscription({
+        items: { data: [{ id: "si_1", current_period_end: renewal, price: price("plan_2") }] },
+        pending_update: { subscription_items: [{ id: "si_1", price: price("plan_3") }] },
+        schedule: {
+          id: "sub_sched_1",
+          status: "active",
+          current_phase: { start_date: renewal - 2_592_000, end_date: renewal },
+          phases: [
+            { start_date: renewal - 2_592_000, end_date: renewal, metadata: {}, items: [] },
+            { start_date: renewal, end_date: renewal + 2_592_000, metadata: { billingPlanId: "plan_4" }, items: [] },
+          ],
+        },
+      }),
+    );
+    expect(changed).toMatchObject({ planId: "plan_1", itemPlanId: "plan_2", pendingPlanId: "plan_3", scheduledPlanId: "plan_4", scheduledAt: new Date(renewal * 1000) });
+  });
+
+  it("a schedule with nothing left to change, one that is over, or one that was not expanded schedules nothing", () => {
+    const renewal = 1_793_491_200;
+    const spent = {
+      id: "sub_sched_1",
+      status: "active",
+      current_phase: { start_date: renewal - 2_592_000, end_date: renewal },
+      // The only phases are a finished one and the one running now.
+      phases: [
+        { start_date: renewal - 5_184_000, end_date: renewal - 2_592_000, metadata: {}, items: [] },
+        { start_date: renewal - 2_592_000, end_date: renewal, metadata: { billingPlanId: "plan_2" }, items: [] },
+      ],
+    };
+    for (const schedule of [spent, { ...spent, status: "released" }, { ...spent, status: "canceled" }, "sub_sched_not_expanded", null]) {
+      expect(snapshotFromSubscription(subscription({ schedule }))).toMatchObject({ scheduledPlanId: null, scheduledAt: null });
+    }
+    // A next phase this server did not mark with a plan is not a scheduled plan (and carries no date).
+    const unmarked = { ...spent, phases: [spent.phases[1], { start_date: renewal, end_date: renewal + 2_592_000, metadata: {}, items: [] }] };
+    expect(snapshotFromSubscription(subscription({ schedule: unmarked }))).toMatchObject({ scheduledPlanId: null, scheduledAt: null });
   });
 
   it("an invoice that is open, written off, void, missing or not expanded is not 'paid'", () => {
@@ -237,5 +303,84 @@ describe("checkoutSessionParams: exactly what Stripe is asked to charge", () => 
     expect(params.success_url).toBe("https://app.example.com/admin/billing/return");
     expect(params.cancel_url).toBe("https://app.example.com/admin/billing?checkout=cancelled");
     expect(params.expires_at).toBe(Date.parse("2026-09-19T13:00:00.000Z") / 1000);
+  });
+});
+
+describe("stateFromSubscription: what a plan change reads", () => {
+  const renewal = 1_793_491_200;
+  function subscription(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "sub_1",
+      customer: "cus_1",
+      status: "active",
+      cancel_at: null,
+      cancel_at_period_end: false,
+      latest_invoice: { id: "in_1", status: "paid", amount_due: 5900, hosted_invoice_url: "https://invoice.stripe.com/i/made_up" },
+      items: { data: [{ id: "si_1", quantity: 3, current_period_start: renewal - 2_592_000, current_period_end: renewal, price: { id: "price_1", metadata: {} } }] },
+      metadata: { billingPlanId: "plan_1" },
+      pending_update: null,
+      schedule: null,
+      ...overrides,
+    } as unknown as Stripe.Subscription;
+  }
+
+  it("a subscription that was never changed is on the plan checkout wrote on it", () => {
+    expect(stateFromSubscription(subscription())).toEqual({
+      subscriptionId: "sub_1",
+      customerId: "cus_1",
+      status: "active",
+      itemId: "si_1",
+      quantity: 3,
+      planId: "plan_1",
+      periodStart: new Date((renewal - 2_592_000) * 1000),
+      periodEnd: new Date(renewal * 1000),
+      cancelAt: null,
+      pending: null,
+      schedule: null,
+      openInvoice: null,
+    });
+  });
+
+  it("the plan a price was made for wins over the older mark on the subscription", () => {
+    const changed = subscription({ items: { data: [{ id: "si_2", quantity: 4, current_period_start: 1, current_period_end: renewal, price: { id: "price_2", metadata: { billingPlanId: "plan_2" } } }] } });
+    expect(stateFromSubscription(changed)).toMatchObject({ planId: "plan_2", itemId: "si_2", quantity: 4 });
+  });
+
+  it("an unpaid latest invoice is the one to pay, but only with an address that is really Stripe's invoice page", () => {
+    const open = (url: string | null) => subscription({ latest_invoice: { id: "in_2", status: "open", amount_due: 7866, hosted_invoice_url: url } });
+    expect(stateFromSubscription(open("https://invoice.stripe.com/i/made_up"))?.openInvoice).toEqual({ id: "in_2", payUrl: "https://invoice.stripe.com/i/made_up", dueCents: 7866 });
+    expect(stateFromSubscription(open("https://invoice.stripe.com.evil.example/i/x"))?.openInvoice).toEqual({ id: "in_2", payUrl: null, dueCents: 7866 });
+    expect(stateFromSubscription(open(null))?.openInvoice?.payUrl).toBeNull();
+    // Paid, void or not expanded: nothing to pay.
+    for (const latest_invoice of [{ id: "in_3", status: "paid" }, { id: "in_3", status: "void" }, "in_not_expanded", null]) {
+      expect(stateFromSubscription(subscription({ latest_invoice }))?.openInvoice).toBeNull();
+    }
+  });
+
+  it("reads an upgrade waiting for payment, a scheduled change, a spent schedule, and a cancellation", () => {
+    const waiting = subscription({ pending_update: { subscription_items: [{ id: "si_1", price: { id: "price_2", metadata: { billingPlanId: "plan_2" } } }] } });
+    expect(stateFromSubscription(waiting)?.pending).toEqual({ planId: "plan_2" });
+
+    const schedule = {
+      id: "sub_sched_1",
+      status: "active",
+      current_phase: { start_date: renewal - 2_592_000, end_date: renewal },
+      phases: [
+        { start_date: renewal - 2_592_000, end_date: renewal, metadata: {}, items: [] },
+        { start_date: renewal, end_date: renewal + 2_592_000, metadata: { billingPlanId: "plan_3" }, items: [] },
+      ],
+    };
+    expect(stateFromSubscription(subscription({ schedule }))?.schedule).toEqual({ id: "sub_sched_1", next: { planId: "plan_3", at: new Date(renewal * 1000) } });
+    // Spent: still attached (so it still blocks a cancellation at Stripe), with nothing next.
+    expect(stateFromSubscription(subscription({ schedule: { ...schedule, phases: [schedule.phases[0]] } }))?.schedule).toEqual({ id: "sub_sched_1", next: null });
+    // Not expanded: we know one is attached, and no more.
+    expect(stateFromSubscription(subscription({ schedule: "sub_sched_9" }))?.schedule).toEqual({ id: "sub_sched_9", next: null });
+
+    expect(stateFromSubscription(subscription({ cancel_at_period_end: true }))?.cancelAt).toEqual(new Date(renewal * 1000));
+  });
+
+  it("gives null, never a guess, for a subscription with no customer or no line", () => {
+    expect(stateFromSubscription(subscription({ customer: null }))).toBeNull();
+    expect(stateFromSubscription(subscription({ items: { data: [] } }))).toBeNull();
   });
 });

@@ -134,6 +134,13 @@ export type BillingFacts = {
   cancelAt: Date | null;
   paymentFailedAt: Date | null;
   graceEndsAt: Date | null;
+  /**
+   * A plan change set to take over at the next renewal, and when. A copy of
+   * what Stripe's schedule on the subscription says, written only from a
+   * look at Stripe, so it cannot disagree with what Stripe will do.
+   */
+  scheduledPlanId: string | null;
+  scheduledChangeAt: Date | null;
 };
 
 /** A clinic that has never had anything to do with Stripe. */
@@ -147,6 +154,8 @@ export const NO_BILLING: BillingFacts = {
   cancelAt: null,
   paymentFailedAt: null,
   graceEndsAt: null,
+  scheduledPlanId: null,
+  scheduledChangeAt: null,
 };
 
 /**
@@ -167,6 +176,26 @@ export type SubscriptionSnapshot = {
   cancelAt: Date | null;
   /** metadata.billingPlanId, which checkout puts on the subscription itself. */
   planId: string | null;
+  /**
+   * The three facts a PLAN CHANGE is read from. Each is the id of an accepted
+   * plan, which this server wrote on the Stripe price the change is charged
+   * at (a price is made for one plan and never reused). Left out, they mean
+   * "none", which is every subscription that has never had a plan change.
+   *
+   *   itemPlanId       the plan the subscription is ON right now. Stripe only
+   *                    moves a subscription to a new price once an upgrade's
+   *                    payment has succeeded, or when a scheduled change's
+   *                    date arrives, so this is the proof a change happened.
+   *   pendingPlanId    an upgrade Stripe is holding back until its payment
+   *                    succeeds (a declined card, or a card whose bank wants
+   *                    the owner to approve the charge).
+   *   scheduledPlanId  the plan Stripe's schedule will move the subscription
+   *                    to at the next renewal, and scheduledAt is when.
+   */
+  itemPlanId?: string | null;
+  pendingPlanId?: string | null;
+  scheduledPlanId?: string | null;
+  scheduledAt?: Date | null;
 };
 
 export type BillingDecision =
@@ -177,9 +206,10 @@ export type BillingDecision =
    * log sentences, one per real transition; empty when nothing a person
    * would care about changed (a renewal moving the period end, say).
    * `activatePlanId` is set when the first payment was just confirmed and
-   * the accepted plan should take effect.
+   * the accepted plan should take effect, and when a plan CHANGE has taken
+   * effect in Stripe (`planChanged` says which of the two it is).
    */
-  | { kind: "apply"; next: BillingFacts; entries: string[]; activatePlanId: string | null };
+  | { kind: "apply"; next: BillingFacts; entries: string[]; activatePlanId: string | null; planChanged: boolean };
 
 /** Statuses of ours in which the expected subscription is over or never started, so a new one may take its place. */
 const REPLACEABLE: BillingStatus[] = ["NONE", "INCOMPLETE", "CANCELED"];
@@ -243,7 +273,17 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
       };
     }
     // Take it on. Everything that belonged to the old subscription is dropped.
-    base = { ...current, status: "NONE", stripeSubscriptionId: snap.subscriptionId, currentPeriodEnd: null, cancelAt: null, paymentFailedAt: null, graceEndsAt: null };
+    base = {
+      ...current,
+      status: "NONE",
+      stripeSubscriptionId: snap.subscriptionId,
+      currentPeriodEnd: null,
+      cancelAt: null,
+      paymentFailedAt: null,
+      graceEndsAt: null,
+      scheduledPlanId: null,
+      scheduledChangeAt: null,
+    };
   }
 
   const next: BillingFacts = { ...base };
@@ -358,7 +398,56 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
     }
   }
 
-  return { kind: "apply", next, entries, activatePlanId };
+  // Plan changes, for a subscription that was already live before this look
+  // (a first payment is handled above, and has no plan change to read).
+  let planChanged = false;
+  if (wasLive) {
+    const stillLive = next.status === "ACTIVE" || next.status === "PAST_DUE";
+    const carried = stillLive ? (snap.itemPlanId ?? null) : null;
+    const pending = stillLive ? (snap.pendingPlanId ?? null) : null;
+    const scheduled = stillLive ? (snap.scheduledPlanId ?? null) : null;
+    const scheduledAt = scheduled ? (snap.scheduledAt ?? null) : null;
+
+    // 1. The plan the subscription is on. Stripe moved it to another plan's
+    //    price, which it only does once an upgrade is paid for or a scheduled
+    //    change's date has come, so that plan is now the one in force.
+    if (carried && carried !== base.currentPlanId) {
+      activatePlanId = carried;
+      planChanged = true;
+      next.currentPlanId = carried;
+      entries.push(
+        carried === base.scheduledPlanId
+          ? "The scheduled plan change took effect."
+          : carried === base.pendingPlanId
+            ? "The payment for the plan change was confirmed, so the change took effect."
+            : "The plan change took effect.",
+      );
+    }
+
+    // 2. An upgrade waiting for its payment. Nothing is granted for it.
+    if (pending !== base.pendingPlanId) {
+      next.pendingPlanId = pending;
+      if (pending) {
+        entries.push("A plan change is waiting for its payment. Nothing has changed, and nothing will until Stripe confirms the payment.");
+      } else if (base.pendingPlanId !== carried) {
+        entries.push("The plan change that was waiting for its payment was not paid, so the plan stays as it was.");
+      }
+    }
+
+    // 3. A change scheduled for the next renewal.
+    const sameDate = (base.scheduledChangeAt?.getTime() ?? null) === (scheduledAt?.getTime() ?? null);
+    if (scheduled !== base.scheduledPlanId || !sameDate) {
+      next.scheduledPlanId = scheduled;
+      next.scheduledChangeAt = scheduledAt;
+      if (scheduled) {
+        entries.push(scheduledAt ? `A plan change is scheduled for ${day(scheduledAt)}. Until then the plan stays as it is.` : "A plan change is scheduled for the next renewal.");
+      } else if (base.scheduledPlanId !== carried) {
+        entries.push(stillLive ? "The scheduled plan change was cancelled." : "The plan change that was scheduled will not happen.");
+      }
+    }
+  }
+
+  return { kind: "apply", next, entries, activatePlanId, planChanged };
 }
 
 /**
@@ -397,7 +486,9 @@ export function sameBillingFacts(a: BillingFacts, b: BillingFacts): boolean {
     time(a.currentPeriodEnd) === time(b.currentPeriodEnd) &&
     time(a.cancelAt) === time(b.cancelAt) &&
     time(a.paymentFailedAt) === time(b.paymentFailedAt) &&
-    time(a.graceEndsAt) === time(b.graceEndsAt)
+    time(a.graceEndsAt) === time(b.graceEndsAt) &&
+    a.scheduledPlanId === b.scheduledPlanId &&
+    time(a.scheduledChangeAt) === time(b.scheduledChangeAt)
   );
 }
 

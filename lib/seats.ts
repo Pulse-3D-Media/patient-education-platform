@@ -136,6 +136,29 @@ export function seatsFullMessage(summary: SeatSummary): string {
 // Lowering the seats on a plan
 // ---------------------------------------------------------------------------
 
+/**
+ * Does a seat reduction that is SCHEDULED for the next renewal stop one more
+ * seat being taken now?
+ *
+ * A reduction is checked against the seats taken when it is scheduled
+ * (checkSeatReduction below). For it still to fit when it takes effect,
+ * weeks later, nobody may be seated past the lower number in between. So
+ * from the moment a plan with fewer seats is scheduled, that lower number is
+ * the limit for new seats and invitations, even though the higher number is
+ * still being paid for. Cancelling the scheduled change on the Billing page
+ * lifts it. `scheduledSeats` is null when nothing is scheduled.
+ *
+ * True only when this rule is the reason: the plan itself still has a seat free.
+ */
+export function scheduledReductionBlocks(summary: SeatSummary, scheduledSeats: number | null): boolean {
+  return scheduledSeats !== null && hasFreeSeat(summary) && summary.inUse >= scheduledSeats;
+}
+
+/** What an admin is told when a scheduled seat reduction is why nobody else can be seated. */
+export function scheduledSeatsMessage(scheduledSeats: number): string {
+  return `Your plan is set to go down to ${plural(scheduledSeats, "seat", "seats")} at its next renewal, and that many are taken already. Cancel that change on the Billing page first, or remove someone.`;
+}
+
 export type SeatReductionCheck = { ok: true } | { ok: false; short: number; message: string };
 
 /**

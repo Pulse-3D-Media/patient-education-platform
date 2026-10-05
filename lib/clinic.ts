@@ -195,6 +195,31 @@ export async function getBillingClinicId(): Promise<string | null> {
 }
 
 /**
+ * The id of the current clinic for an action that CHANGES billing once the
+ * clinic is paying: changing the plan, cancelling a change, opening Stripe's
+ * billing page (card, invoices, cancelling), paying a missed invoice. Those
+ * belong to the clinic's ACCOUNT OWNER, the one person who runs the account
+ * (see "Roles" in CLAUDE.md); other office admins see the plan and cannot
+ * change it. So this checks that the person is an office admin AND is the
+ * account owner recorded on the clinic's own row. Like getBillingClinicId()
+ * it does not check clinicIsOpen(): a clinic that is past due or ended has
+ * to be able to repair its billing.
+ *
+ * Null means: signed out, no active organization, not an admin, or not the
+ * account owner (which includes a clinic that has no account owner at all,
+ * until Pulse staff set one).
+ */
+export async function getBillingOwnerClinicId(): Promise<string | null> {
+  const { orgId, userId } = await auth();
+  if (!orgId || !userId) return null;
+  if (!(await isClinicAdmin())) return null;
+
+  const clinic = await getClinicByClerkOrgId(orgId);
+  if (!clinic || clinic.ownerClerkUserId !== userId) return null;
+  return clinic.id;
+}
+
+/**
  * What every staff page calls first. Makes sure someone is signed in and has
  * a clinic, sending them to the right step if not:
  *

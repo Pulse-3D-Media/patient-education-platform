@@ -82,7 +82,7 @@ const readSeatsWithoutLock: Read = async (tx: Prisma.TransactionClient, clinicId
   if (!clinic) return null;
   const seated = await tx.seatAllocation.count({ where: { clinicId } });
   const invited = await tx.seatInvitation.count({ where: { clinicId } });
-  return { surgeonSeats: clinic.surgeonSeats, seated, invited, ownerClerkUserId: clinic.ownerClerkUserId };
+  return { surgeonSeats: clinic.surgeonSeats, seated, invited, ownerClerkUserId: clinic.ownerClerkUserId, scheduledSeats: null };
 };
 
 /**

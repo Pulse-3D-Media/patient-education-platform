@@ -3,6 +3,8 @@ import {
   PENDING_WINDOW_MS,
   checkSeatReduction,
   hasFreeSeat,
+  scheduledReductionBlocks,
+  scheduledSeatsMessage,
   holdIdFromMetadata,
   isClerkUserId,
   overAllocatedWords,
@@ -124,6 +126,26 @@ describe("lowering the seats on a plan", () => {
     expect(overAllocatedWords(seatSummary(3, 3))).toBeNull();
     expect(overAllocatedWords(seatSummary(3, 5))).toContain("5 seats are taken, 2 more than the 3 the plan now pays for");
     expect(overAllocatedWords(seatSummary(3, 5))).toContain("Nobody was removed and no charge was changed");
+  });
+
+  it("a reduction scheduled for the renewal limits new seats to the lower number from the moment it is scheduled", () => {
+    // Five seats paid for, a drop to three scheduled.
+    expect(scheduledReductionBlocks(seatSummary(5, 2), 3)).toBe(false); // the third seat still fits
+    expect(scheduledReductionBlocks(seatSummary(5, 3), 3)).toBe(true); // a fourth would not fit after the renewal
+    expect(scheduledReductionBlocks(seatSummary(5, 2, 1), 3)).toBe(true); // an open invitation counts
+    expect(scheduledReductionBlocks(seatSummary(5, 4), 3)).toBe(true);
+    // Nothing scheduled, or a scheduled plan with the same or more seats: no extra limit.
+    expect(scheduledReductionBlocks(seatSummary(5, 4), null)).toBe(false);
+    expect(scheduledReductionBlocks(seatSummary(5, 4), 5)).toBe(false);
+    expect(scheduledReductionBlocks(seatSummary(5, 4), 8)).toBe(false);
+    // A plan that is simply full is not blocked BY THE SCHEDULE: the ordinary "all seats are taken" answer applies.
+    expect(scheduledReductionBlocks(seatSummary(5, 5), 3)).toBe(false);
+  });
+
+  it("says why, and what to do, when the scheduled reduction is the reason", () => {
+    expect(scheduledSeatsMessage(3)).toContain("go down to 3 seats at its next renewal");
+    expect(scheduledSeatsMessage(1)).toContain("go down to 1 seat at its next renewal");
+    expect(scheduledSeatsMessage(3)).toContain("Cancel that change on the Billing page first");
   });
 });
 

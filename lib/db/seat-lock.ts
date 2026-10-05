@@ -16,19 +16,30 @@ import { readClinicLocked } from "./clinic-lock";
  * Seats held by people (SeatAllocation) and by open invitations
  * (SeatInvitation) are counted together: both use up the plan.
  *
+ * `scheduledSeats` is the seat count of a plan change scheduled for the
+ * next renewal, or null when none is. A scheduled reduction already limits
+ * new seats (scheduledReductionBlocks in lib/seats.ts).
+ *
  * In a file of its own so the overlap test can wrap it and hold a request
  * still in exactly that gap, after the count and before the write
  * (seats.race.test.ts).
  *
  * Returns null when no clinic has that id.
  */
+/** The seat count of the plan scheduled for this clinic's next renewal, or null. For a caller that already holds the clinic's lock. */
+export async function readScheduledSeats(tx: Prisma.TransactionClient, clinicId: string): Promise<number | null> {
+  const billing = await tx.clinicBilling.findUnique({ where: { clinicId }, select: { scheduledPlan: { select: { surgeonSeats: true } } } });
+  return billing?.scheduledPlan?.surgeonSeats ?? null;
+}
+
 export async function readSeatsLocked(
   tx: Prisma.TransactionClient,
   clinicId: string,
-): Promise<{ surgeonSeats: number; seated: number; invited: number; ownerClerkUserId: string | null } | null> {
+): Promise<{ surgeonSeats: number; seated: number; invited: number; ownerClerkUserId: string | null; scheduledSeats: number | null } | null> {
   const clinic = await readClinicLocked(tx, clinicId, { id: true, surgeonSeats: true, ownerClerkUserId: true });
   if (!clinic) return null;
   const seated = await tx.seatAllocation.count({ where: { clinicId } });
   const invited = await tx.seatInvitation.count({ where: { clinicId } });
-  return { surgeonSeats: clinic.surgeonSeats, seated, invited, ownerClerkUserId: clinic.ownerClerkUserId };
+  const scheduledSeats = await readScheduledSeats(tx, clinicId);
+  return { surgeonSeats: clinic.surgeonSeats, seated, invited, ownerClerkUserId: clinic.ownerClerkUserId, scheduledSeats };
 }

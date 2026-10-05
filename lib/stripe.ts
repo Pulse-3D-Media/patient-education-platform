@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import type { SubscriptionSnapshot } from "./billing-state";
+import { STRIPE_INVOICE_PREFIX, STRIPE_PORTAL_PREFIX } from "./stripe-pages";
 
 /**
  * The only file that talks to Stripe. SERVER ONLY: it reads the secret key,
@@ -12,10 +13,11 @@ import type { SubscriptionSnapshot } from "./billing-state";
  *     worked out over the exact bytes Stripe sent);
  *   - asking Stripe where one subscription stands right now;
  *   - checkout: making the clinic's one Stripe customer, and making, finding
- *     and closing the Stripe-hosted payment pages (the bottom of this file).
- *
- * Plan changes, the customer portal and the rest come in later steps and go
- * in here too.
+ *     and closing the Stripe-hosted payment pages;
+ *   - plan changes: previewing and making an upgrade, scheduling a change
+ *     for the next renewal, cancelling either, and opening Stripe's own
+ *     billing page for cards, invoices and cancelling (the bottom of this
+ *     file).
  *
  * TEST MODE ONLY. Until launch the app refuses a live key outright: a key
  * that does not start with "sk_test_" (or "rk_test_", a restricted test key)
@@ -98,9 +100,19 @@ export const HANDLED_EVENT_TYPES = [
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
+  // An upgrade that was waiting for its payment: paid, or given up on.
+  "customer.subscription.pending_update_applied",
+  "customer.subscription.pending_update_expired",
   "invoice.paid",
   "invoice.payment_failed",
   "invoice.payment_action_required",
+  "invoice.voided",
+  // A change scheduled for the next renewal: made, replaced, cancelled, or finished.
+  "subscription_schedule.created",
+  "subscription_schedule.updated",
+  "subscription_schedule.released",
+  "subscription_schedule.canceled",
+  "subscription_schedule.completed",
 ] as const;
 
 export function isHandledEventType(type: string): boolean {
@@ -139,6 +151,10 @@ export function eventRefs(event: { type: string; data: { object: unknown } }): E
   if (event.type.startsWith("checkout.session.")) {
     return { customerId, subscriptionId: idOf(object.subscription) };
   }
+  if (event.type.startsWith("subscription_schedule.")) {
+    // A schedule that has let go of its subscription names it under released_subscription.
+    return { customerId, subscriptionId: idOf(object.subscription) ?? idOf(object.released_subscription) };
+  }
   return { customerId, subscriptionId: null };
 }
 
@@ -147,6 +163,29 @@ export const PLAN_METADATA_KEY = "billingPlanId";
 
 function fromUnix(seconds: number | null | undefined): Date | null {
   return typeof seconds === "number" && Number.isFinite(seconds) ? new Date(seconds * 1000) : null;
+}
+
+/** The accepted plan's id from a piece of metadata this server wrote, or null. */
+function planIdIn(metadata: Record<string, string> | null | undefined): string | null {
+  const planId = metadata?.[PLAN_METADATA_KEY];
+  return typeof planId === "string" && planId ? planId : null;
+}
+
+/**
+ * The change a subscription's schedule will make at the next renewal: the
+ * first phase that starts when the current one ends. Null when there is no
+ * schedule, or the schedule has nothing left to change (its last phase is
+ * the one running now).
+ */
+function nextPhaseOf(schedule: Stripe.SubscriptionSchedule | string | null | undefined): { planId: string | null; at: Date } | null {
+  if (!schedule || typeof schedule === "string") return null;
+  if (schedule.status !== "active" && schedule.status !== "not_started") return null;
+  const currentEnd = schedule.current_phase?.end_date;
+  if (typeof currentEnd !== "number") return null;
+  const next = schedule.phases.find((phase) => phase.start_date >= currentEnd);
+  const at = fromUnix(next?.start_date);
+  if (!next || !at) return null;
+  return { planId: planIdIn(next.metadata), at };
 }
 
 /**
@@ -168,7 +207,12 @@ export function snapshotFromSubscription(subscription: Stripe.Subscription): Sub
 
   const cancelAt = fromUnix(subscription.cancel_at) ?? (subscription.cancel_at_period_end ? currentPeriodEnd : null);
 
-  const planId = subscription.metadata?.[PLAN_METADATA_KEY];
+  // Plan changes. A price made for a plan change carries that plan's id; the
+  // price a first checkout made carries none, so itemPlanId is null until a
+  // subscription has been through a change.
+  const item = subscription.items?.data?.[0];
+  const pendingItem = subscription.pending_update?.subscription_items?.[0];
+  const nextPhase = nextPhaseOf(subscription.schedule);
 
   return {
     subscriptionId: subscription.id,
@@ -177,7 +221,11 @@ export function snapshotFromSubscription(subscription: Stripe.Subscription): Sub
     latestInvoicePaid,
     currentPeriodEnd,
     cancelAt,
-    planId: typeof planId === "string" && planId ? planId : null,
+    planId: planIdIn(subscription.metadata),
+    itemPlanId: planIdIn(item?.price?.metadata),
+    pendingPlanId: planIdIn(pendingItem?.price?.metadata),
+    scheduledPlanId: nextPhase?.planId ?? null,
+    scheduledAt: nextPhase?.planId ? nextPhase.at : null,
   };
 }
 
@@ -191,7 +239,7 @@ export type FetchSubscription = (subscriptionId: string) => Promise<Subscription
  */
 export const fetchSubscriptionSnapshot: FetchSubscription = async (subscriptionId) => {
   try {
-    const subscription = await getStripe().subscriptions.retrieve(subscriptionId, { expand: ["latest_invoice"] });
+    const subscription = await getStripe().subscriptions.retrieve(subscriptionId, { expand: ["latest_invoice", "schedule"] });
     if (subscription.livemode) return null;
     return snapshotFromSubscription(subscription);
   } catch (error) {
@@ -416,5 +464,303 @@ export const stripeGateway: CheckoutGateway = {
         const planId = subscription.metadata?.[PLAN_METADATA_KEY];
         return { id: subscription.id, planId: typeof planId === "string" && planId ? planId : null, status: subscription.status };
       });
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Plan changes, and Stripe's own billing page
+// ---------------------------------------------------------------------------
+
+export { STRIPE_INVOICE_PREFIX, STRIPE_PORTAL_PREFIX };
+
+/** An invoice Stripe is still waiting to be paid for. */
+export type OpenInvoice = {
+  id: string;
+  /** Stripe's own page for paying it, or null when Stripe gave none. */
+  payUrl: string | null;
+  dueCents: number;
+};
+
+/**
+ * One subscription as a plan change needs to see it, read from Stripe at
+ * the moment of asking. Never stored: the next request asks again.
+ */
+export type SubscriptionState = {
+  subscriptionId: string;
+  customerId: string;
+  /** Stripe's own word: active, past_due, canceled and so on. */
+  status: string;
+  /** The one line on the subscription. Its id CHANGES when a scheduled change takes effect, so it is never kept. */
+  itemId: string;
+  quantity: number;
+  /**
+   * The accepted plan the subscription is on: the plan its price was made
+   * for, or, for a subscription that has never been changed, the plan
+   * checkout wrote on the subscription itself.
+   */
+  planId: string | null;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  cancelAt: Date | null;
+  /** An upgrade Stripe is holding back until its invoice is paid. */
+  pending: { planId: string | null } | null;
+  /** The schedule attached to the subscription, when there is one. `next` is the change it will make at the next renewal, if any. */
+  schedule: { id: string; next: { planId: string | null; at: Date } | null } | null;
+  /** The latest invoice, when it is still unpaid: a failed renewal, or an upgrade waiting for its payment. */
+  openInvoice: OpenInvoice | null;
+};
+
+/** Everything a plan change asks of Stripe. A plain object of functions, so the flow (lib/plan-changes.ts) takes it as a parameter and the tests hand in a stand-in. */
+export type PlanGateway = {
+  /** The subscription as it stands now, or null when Stripe has none by that id. */
+  getState(subscriptionId: string): Promise<SubscriptionState | null>;
+  /** The Stripe price for one accepted plan, made once: asking twice for the same plan gives the same price. */
+  ensurePrice(args: { planId: string; perSeatCents: number; interval: "MONTH" | "YEAR" }): Promise<string>;
+  /** What Stripe would charge today for moving to this price and these seats at this exact moment. Changes nothing. */
+  previewUpgrade(args: { state: SubscriptionState; perSeatCents: number; interval: "MONTH" | "YEAR"; seats: number; at: Date }): Promise<{ dueNowCents: number }>;
+  /**
+   * Move the subscription to this plan's price and seats now, charging the
+   * difference for the rest of the period. `applied` is false when the
+   * payment did not go through: Stripe then holds the change back, the
+   * subscription stays exactly as it was, and the unpaid invoice can be paid
+   * on Stripe's page (or voided, which drops the change).
+   */
+  applyUpgrade(args: { state: SubscriptionState; planId: string; priceId: string; seats: number; at: Date }): Promise<{ applied: boolean }>;
+  /** Set (or replace) the change made at the next renewal. Nothing is charged and nothing changes until then. Returns that date. */
+  scheduleChange(args: { state: SubscriptionState; planId: string; priceId: string; seats: number; interval: "MONTH" | "YEAR" }): Promise<{ at: Date }>;
+  /** Let a schedule go. The subscription carries on exactly as it is now, with no change waiting. */
+  releaseSchedule(scheduleId: string): Promise<void>;
+  /** Void an unpaid invoice. For an upgrade waiting on its payment, this is what drops the upgrade. */
+  voidInvoice(invoiceId: string): Promise<void>;
+  /** A visit to Stripe's own billing page for this customer: card, invoices, cancelling. Returns its address. */
+  createPortalSession(args: { customerId: string; returnUrl: string }): Promise<string>;
+};
+
+const unix = (date: Date) => Math.floor(date.getTime() / 1000);
+const stripeInterval = (interval: "MONTH" | "YEAR") => (interval === "YEAR" ? "year" : "month");
+
+/** Reduce a subscription (with its latest invoice and its schedule expanded) to what a plan change reads. Pure. */
+export function stateFromSubscription(subscription: Stripe.Subscription): SubscriptionState | null {
+  const customerId = idOf(subscription.customer);
+  const item = subscription.items?.data?.[0];
+  if (!customerId || !item) return null;
+
+  const invoice = typeof subscription.latest_invoice === "object" ? subscription.latest_invoice : null;
+  const openInvoice: OpenInvoice | null =
+    invoice && invoice.status === "open" && invoice.id
+      ? {
+          id: invoice.id,
+          payUrl: invoice.hosted_invoice_url && invoice.hosted_invoice_url.startsWith(STRIPE_INVOICE_PREFIX) ? invoice.hosted_invoice_url : null,
+          dueCents: invoice.amount_due,
+        }
+      : null;
+
+  const pendingItem = subscription.pending_update?.subscription_items?.[0];
+  const schedule = typeof subscription.schedule === "object" && subscription.schedule !== null ? subscription.schedule : null;
+  const scheduleId = idOf(subscription.schedule);
+
+  return {
+    subscriptionId: subscription.id,
+    customerId,
+    status: subscription.status,
+    itemId: item.id,
+    quantity: item.quantity ?? 1,
+    planId: planIdIn(item.price?.metadata) ?? planIdIn(subscription.metadata),
+    periodStart: fromUnix(item.current_period_start),
+    periodEnd: fromUnix(item.current_period_end),
+    cancelAt: fromUnix(subscription.cancel_at) ?? (subscription.cancel_at_period_end ? fromUnix(item.current_period_end) : null),
+    pending: subscription.pending_update ? { planId: planIdIn(pendingItem?.price?.metadata) } : null,
+    schedule: scheduleId ? { id: scheduleId, next: nextPhaseOf(schedule) } : null,
+    openInvoice,
+  };
+}
+
+/** What Stripe's billing page may do. Changing the plan there is switched OFF: it would skip this app's seat and category rules. */
+const PORTAL_KEY = "p3d";
+const PORTAL_VERSION = "portal-v1";
+let portalConfigurationId: string | null = null;
+
+/**
+ * The settings Stripe's billing page runs with for this app, found by the
+ * mark this server puts on them, or made the first time they are needed.
+ * Every visit names these settings, so it never depends on whatever is saved
+ * as the default in the Stripe dashboard. (On a Stripe account that has no
+ * billing-page settings at all, Stripe makes the first ones its default.)
+ *
+ *   - Updating the card: on.   Past invoices: on.
+ *   - Cancelling: on, at the END of the period that has been paid for, with
+ *     no refund worked out. Undoing a cancellation before then: Stripe's
+ *     page offers it. (The cancellation terms are not approved yet; this is
+ *     the test-mode placeholder.)
+ *   - Changing the plan, the seats or the price there: OFF. Plan changes go
+ *     through this app, which checks seats, categories and prices.
+ */
+async function ensurePortalConfiguration(): Promise<string> {
+  if (portalConfigurationId) return portalConfigurationId;
+  const stripe = getStripe();
+  const existing = await stripe.billingPortal.configurations.list({ active: true, limit: 100 });
+  const found = existing.data.find((configuration) => !configuration.livemode && configuration.metadata?.[PORTAL_KEY] === PORTAL_VERSION);
+  if (found) {
+    portalConfigurationId = found.id;
+    return found.id;
+  }
+  const made = await stripe.billingPortal.configurations.create(
+    {
+      business_profile: { headline: PRODUCT_NAME },
+      features: {
+        payment_method_update: { enabled: true },
+        invoice_history: { enabled: true },
+        subscription_cancel: { enabled: true, mode: "at_period_end" },
+        subscription_update: { enabled: false },
+        customer_update: { enabled: true, allowed_updates: ["email", "address"] },
+      },
+      metadata: { [PORTAL_KEY]: PORTAL_VERSION },
+    },
+    { idempotencyKey: `p3d:${PORTAL_VERSION}` },
+  );
+  portalConfigurationId = made.id;
+  return made.id;
+}
+
+/**
+ * The real gateway. The calls that make something carry an idempotency key
+ * built from the accepted plan's id, so a double click, a retry and a second
+ * tab asking for the same change get the first one's answer, not a second
+ * price or a second charge.
+ */
+export const stripePlanGateway: PlanGateway = {
+  async getState(subscriptionId) {
+    try {
+      const subscription = await getStripe().subscriptions.retrieve(subscriptionId, { expand: ["latest_invoice", "schedule"] });
+      if (subscription.livemode) return null;
+      return stateFromSubscription(subscription);
+    } catch (error) {
+      if (isStripeRequestError(error, "resource_missing")) return null;
+      throw error;
+    }
+  },
+
+  async ensurePrice({ planId, perSeatCents, interval }) {
+    await ensureProduct();
+    const price = await getStripe().prices.create(
+      {
+        currency: "usd",
+        product: PRODUCT_ID,
+        unit_amount: perSeatCents,
+        recurring: { interval: stripeInterval(interval), interval_count: 1 },
+        // The mark the billing rules read (lib/billing-state.ts): a subscription on this price is on this plan.
+        metadata: { [PLAN_METADATA_KEY]: planId },
+      },
+      { idempotencyKey: `p3d:price:${planId}` },
+    );
+    if (price.livemode) throw new StripeConfigError("Stripe made a live-mode price. This app only runs Stripe in test mode.");
+    return price.id;
+  },
+
+  async previewUpgrade({ state, perSeatCents, interval, seats, at }) {
+    const preview = await getStripe().invoices.createPreview({
+      customer: state.customerId,
+      subscription: state.subscriptionId,
+      subscription_details: {
+        items: [
+          {
+            id: state.itemId,
+            quantity: seats,
+            price_data: { currency: "usd", product: PRODUCT_ID, unit_amount: perSeatCents, recurring: { interval: stripeInterval(interval), interval_count: 1 } },
+          },
+        ],
+        // The same two settings applyUpgrade uses, with the same moment, so the preview is the invoice.
+        proration_behavior: "always_invoice",
+        proration_date: unix(at),
+      },
+    });
+    return { dueNowCents: preview.amount_due };
+  },
+
+  async applyUpgrade({ state, planId, priceId, seats, at }) {
+    const subscription = await getStripe().subscriptions.update(
+      state.subscriptionId,
+      {
+        items: [{ id: state.itemId, price: priceId, quantity: seats }],
+        // Invoice the difference now, not at the next renewal.
+        proration_behavior: "always_invoice",
+        proration_date: unix(at),
+        // Only change the subscription if that invoice is PAID. Otherwise
+        // Stripe keeps the change aside (a "pending update") and the
+        // subscription stays exactly as it was.
+        payment_behavior: "pending_if_incomplete",
+      },
+      { idempotencyKey: `p3d:upgrade:${planId}` },
+    );
+    const item = subscription.items?.data?.[0];
+    return { applied: !subscription.pending_update && item?.price?.id === priceId };
+  },
+
+  async scheduleChange({ state, planId, priceId, seats, interval }) {
+    const stripe = getStripe();
+    // A subscription can have one schedule. If it has one, its waiting change is replaced in place.
+    const scheduleId = state.schedule?.id ?? (await stripe.subscriptionSchedules.create({ from_subscription: state.subscriptionId })).id;
+    const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+    const currentStart = schedule.current_phase?.start_date;
+    const current = schedule.phases.find((phase) => phase.start_date === currentStart) ?? schedule.phases[0];
+    const at = fromUnix(current?.end_date);
+    if (!current || !at) throw new Error("Stripe returned a schedule with no current period.");
+
+    await stripe.subscriptionSchedules.update(scheduleId, {
+      // After the change has run for one period the schedule lets go, and the subscription simply carries on.
+      end_behavior: "release",
+      // Writing the schedule must not itself put anything on an invoice.
+      // Without this, Stripe added two stray "unused time / remaining time"
+      // lines to the NEXT invoice just for restating the current period
+      // (seen in test mode, October 2026: they came to one cent).
+      proration_behavior: "none",
+      phases: [
+        // The period being paid for now, exactly as it is.
+        {
+          start_date: current.start_date,
+          end_date: current.end_date,
+          proration_behavior: "none",
+          items: current.items.map((phaseItem) => ({ price: idOf(phaseItem.price) as string, quantity: phaseItem.quantity ?? 1 })),
+        },
+        // From the renewal on: the new plan. Nothing is credited or charged
+        // for the change itself ("none"); the new period starts on the
+        // renewal date and is invoiced in full ("phase_start"). Without that
+        // second setting, a move from monthly to yearly made NO invoice for
+        // the first year (seen in Stripe test mode, October 2026).
+        {
+          items: [{ price: priceId, quantity: seats }],
+          duration: { interval: stripeInterval(interval), interval_count: 1 },
+          proration_behavior: "none",
+          billing_cycle_anchor: "phase_start",
+          metadata: { [PLAN_METADATA_KEY]: planId },
+        },
+      ],
+    });
+    return { at };
+  },
+
+  async releaseSchedule(scheduleId) {
+    try {
+      await getStripe().subscriptionSchedules.release(scheduleId);
+    } catch (error) {
+      // Already released, finished or gone: either way nothing is scheduled, which is all that was wanted.
+      if (!isStripeRequestError(error)) throw error;
+    }
+  },
+
+  async voidInvoice(invoiceId) {
+    try {
+      await getStripe().invoices.voidInvoice(invoiceId);
+    } catch (error) {
+      // Already paid, already void, or gone. The caller looks at the subscription again to see which.
+      if (!isStripeRequestError(error)) throw error;
+    }
+  },
+
+  async createPortalSession({ customerId, returnUrl }) {
+    const configuration = await ensurePortalConfiguration();
+    const session = await getStripe().billingPortal.sessions.create({ customer: customerId, configuration, return_url: returnUrl });
+    if (session.livemode) throw new StripeConfigError("Stripe made a live-mode billing page. This app only runs Stripe in test mode.");
+    return session.url;
   },
 };

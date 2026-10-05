@@ -334,6 +334,112 @@ describe("decideBilling: whose subscription is it", () => {
   });
 });
 
+describe("decideBilling: plan changes on a subscription that is already live", () => {
+  const P1 = PLAN;
+  const P2 = "plan_madeup_2";
+  const P3 = "plan_madeup_3";
+  const live = (overrides: Partial<BillingFacts> = {}) => facts({ status: "ACTIVE", stripeSubscriptionId: SUB, currentPlanId: P1, currentPeriodEnd: new Date("2026-11-01T00:00:00.000Z"), ...overrides });
+  const RENEWAL = new Date("2026-11-01T00:00:00.000Z");
+
+  it("a subscription that has never been changed reads as no change: nothing moves, nothing is logged", () => {
+    const decision = apply(live(), snap());
+    expect(decision).toMatchObject({ activatePlanId: null, planChanged: false, entries: [] });
+    expect(sameBillingFacts(decision.next, live())).toBe(true);
+    // The snapshot fields being present and empty is the same as their being left out.
+    const explicit = apply(live(), snap({ itemPlanId: null, pendingPlanId: null, scheduledPlanId: null, scheduledAt: null }));
+    expect(explicit).toMatchObject({ activatePlanId: null, planChanged: false, entries: [] });
+  });
+
+  it("an upgrade Stripe has moved the subscription to becomes the plan in force", () => {
+    const decision = apply(live(), snap({ itemPlanId: P2 }));
+    expect(decision).toMatchObject({ activatePlanId: P2, planChanged: true });
+    expect(decision.next).toMatchObject({ currentPlanId: P2, pendingPlanId: null, status: "ACTIVE" });
+    expect(decision.entries).toEqual(["The plan change took effect."]);
+    // Seeing the same thing again changes nothing and logs nothing.
+    const again = apply(decision.next, snap({ itemPlanId: P2 }));
+    expect(again).toMatchObject({ activatePlanId: null, planChanged: false, entries: [] });
+  });
+
+  it("an upgrade waiting for its payment grants nothing; paid, it takes effect; unpaid, it is dropped", () => {
+    const waiting = apply(live(), snap({ pendingPlanId: P2, latestInvoicePaid: false }));
+    expect(waiting).toMatchObject({ activatePlanId: null, planChanged: false });
+    expect(waiting.next).toMatchObject({ currentPlanId: P1, pendingPlanId: P2, status: "ACTIVE" });
+    expect(waiting.entries.join(" ")).toContain("waiting for its payment");
+    // Told again while it still waits: nothing new.
+    expect(apply(waiting.next, snap({ pendingPlanId: P2, latestInvoicePaid: false })).entries).toEqual([]);
+
+    const paid = apply(waiting.next, snap({ itemPlanId: P2 }));
+    expect(paid).toMatchObject({ activatePlanId: P2, planChanged: true });
+    expect(paid.next).toMatchObject({ currentPlanId: P2, pendingPlanId: null });
+    expect(paid.entries).toEqual(["The payment for the plan change was confirmed, so the change took effect."]);
+
+    const dropped = apply(waiting.next, snap());
+    expect(dropped).toMatchObject({ activatePlanId: null, planChanged: false });
+    expect(dropped.next).toMatchObject({ currentPlanId: P1, pendingPlanId: null });
+    expect(dropped.entries.join(" ")).toContain("was not paid, so the plan stays as it was");
+  });
+
+  it("a scheduled change is recorded with its date and grants nothing until Stripe makes it", () => {
+    const scheduled = apply(live(), snap({ scheduledPlanId: P3, scheduledAt: RENEWAL }));
+    expect(scheduled).toMatchObject({ activatePlanId: null, planChanged: false });
+    expect(scheduled.next).toMatchObject({ currentPlanId: P1, scheduledPlanId: P3, scheduledChangeAt: RENEWAL });
+    expect(scheduled.entries).toEqual(["A plan change is scheduled for 2026-11-01 00:00 UTC. Until then the plan stays as it is."]);
+    // Any number of looks before the date: nothing.
+    expect(apply(scheduled.next, snap({ scheduledPlanId: P3, scheduledAt: RENEWAL }))).toMatchObject({ activatePlanId: null, entries: [] });
+
+    // The renewal: the subscription is on the new plan, and the schedule has nothing left.
+    const done = apply(scheduled.next, snap({ itemPlanId: P3, currentPeriodEnd: new Date("2026-12-01T00:00:00.000Z") }));
+    expect(done).toMatchObject({ activatePlanId: P3, planChanged: true });
+    expect(done.next).toMatchObject({ currentPlanId: P3, scheduledPlanId: null, scheduledChangeAt: null });
+    expect(done.entries).toEqual(["The scheduled plan change took effect."]);
+  });
+
+  it("a scheduled change that is replaced or cancelled is recorded as that", () => {
+    const scheduled = live({ scheduledPlanId: P3, scheduledChangeAt: RENEWAL });
+    const replaced = apply(scheduled, snap({ scheduledPlanId: P2, scheduledAt: RENEWAL }));
+    expect(replaced.next).toMatchObject({ scheduledPlanId: P2, currentPlanId: P1 });
+    expect(replaced.entries.join(" ")).toContain("A plan change is scheduled for");
+
+    const cancelled = apply(scheduled, snap());
+    expect(cancelled.next).toMatchObject({ scheduledPlanId: null, scheduledChangeAt: null, currentPlanId: P1 });
+    expect(cancelled.entries).toEqual(["The scheduled plan change was cancelled."]);
+  });
+
+  it("a scheduled change still takes effect when the renewal's payment fails: the clinic is on the new plan, in grace", () => {
+    const scheduled = live({ scheduledPlanId: P3, scheduledChangeAt: RENEWAL });
+    const decision = apply(scheduled, snap({ status: "past_due", latestInvoicePaid: false, itemPlanId: P3 }));
+    expect(decision).toMatchObject({ activatePlanId: P3, planChanged: true });
+    expect(decision.next).toMatchObject({ status: "PAST_DUE", currentPlanId: P3, scheduledPlanId: null });
+    expect(decision.next.graceEndsAt).not.toBeNull();
+  });
+
+  it("the subscription ending drops whatever was waiting", () => {
+    const busy = live({ scheduledPlanId: P3, scheduledChangeAt: RENEWAL });
+    const ended = apply(busy, snap({ status: "canceled", scheduledPlanId: P3, scheduledAt: RENEWAL }));
+    expect(ended.next).toMatchObject({ status: "CANCELED", scheduledPlanId: null, scheduledChangeAt: null, currentPlanId: P1 });
+    expect(ended).toMatchObject({ activatePlanId: null, planChanged: false });
+    expect(ended.entries.join(" ")).toContain("The plan change that was scheduled will not happen.");
+  });
+
+  it("a FIRST payment is never read as a plan change, and a waiting first checkout is not disturbed by these rules", () => {
+    const waitingFirst = facts({ status: "INCOMPLETE", stripeSubscriptionId: SUB, pendingPlanId: P1 });
+    const first = apply(waitingFirst, snap());
+    expect(first).toMatchObject({ activatePlanId: P1, planChanged: false });
+    expect(first.next).toMatchObject({ currentPlanId: P1, pendingPlanId: null, scheduledPlanId: null });
+
+    // A clinic whose subscription ended has started a new checkout: old news about the dead one leaves that attempt alone.
+    const startedAgain = facts({ status: "CANCELED", stripeSubscriptionId: SUB, currentPlanId: P1, pendingPlanId: P2 });
+    const late = apply(startedAgain, snap({ status: "canceled" }));
+    expect(late.next.pendingPlanId).toBe(P2);
+  });
+
+  it("taking over a new subscription forgets a change scheduled on the old one", () => {
+    const old = facts({ status: "CANCELED", stripeSubscriptionId: "sub_old", currentPlanId: P1, pendingPlanId: P2, scheduledPlanId: P3, scheduledChangeAt: RENEWAL });
+    const decision = apply(old, snap({ subscriptionId: "sub_new", planId: P2 }));
+    expect(decision.next).toMatchObject({ stripeSubscriptionId: "sub_new", currentPlanId: P2, scheduledPlanId: null, scheduledChangeAt: null });
+  });
+});
+
 describe("who may pay by card", () => {
   it("a clinic, or one Pulse staff never marked (UNKNOWN counts as a clinic, decided 2026-09-25); never a hospital, never one managed by Pulse", () => {
     expect(selfServeEligibility({ practiceType: "CLINIC", managedByPulse: false })).toEqual({ eligible: true });

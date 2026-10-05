@@ -37,6 +37,7 @@ import {
   seatCountWords,
   seatStateOf,
   seatSummary,
+  scheduledSeatsMessage,
   seatsFullMessage,
   type InvitationFacts,
   type SeatState,
@@ -161,7 +162,7 @@ export async function inviteSomeone(args: { clinicId: string; email: unknown; ro
     });
     if (board && board.released > 0) hold = await holdSeatForInvitation(args.clinicId);
   }
-  if (!hold.held) return { ok: false, message: seatsFullMessage(hold.summary) };
+  if (!hold.held) return { ok: false, message: hold.scheduledSeats !== undefined ? scheduledSeatsMessage(hold.scheduledSeats) : seatsFullMessage(hold.summary) };
 
   let invitationId: string;
   try {
@@ -327,7 +328,7 @@ export async function giveSeat(args: { clinicId: string; targetUserId: unknown; 
     });
     if (board && board.released > 0) result = await reserveSeat(args.clinicId, member.userId, log);
   }
-  if (!result.held) return { ok: false, message: seatsFullMessage(result.summary) };
+  if (!result.held) return { ok: false, message: result.scheduledSeats !== undefined ? scheduledSeatsMessage(result.scheduledSeats) : seatsFullMessage(result.summary) };
   return { ok: true };
 }
 

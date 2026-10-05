@@ -86,7 +86,7 @@ export default async function ReactivatePage({ params }: PageProps<"/admin/react
           {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
         </h2>
         <dl className="mt-4 grid gap-x-6 gap-y-2 text-[15px] sm:grid-cols-[max-content_1fr]">
-          <dt className="text-ink-muted">Link from</dt>
+          <dt className="text-ink-muted">Surgeon</dt>
           <dd className="text-ink">{share.senderName ?? "Not recorded on this link"}</dd>
           <dt className="text-ink-muted">Made</dt>
           <dd className="text-ink">{formatDate(share.createdAt)}</dd>

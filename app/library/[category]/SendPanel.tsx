@@ -1,10 +1,12 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useModalFocus } from "@/components/ui/useModalFocus";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CloseIcon } from "@/components/ui/icons";
-import type { SendResult } from "./actions";
+import { SenderNameForm } from "@/components/ui/SenderNameForm";
+import { SECONDARY_BUTTON } from "@/components/ui/styles";
+import { setMyPatientNameAction, type SendResult } from "./actions";
 
 /**
  * The panel that opens when a surgeon taps Send on a procedure card.
@@ -79,6 +81,7 @@ export function SendPanel({
             unclaimedUntil={result.unclaimedUntil}
             daysAfterFirstPlay={result.daysAfterFirstPlay}
             senderName={result.senderName}
+            onRemake={onRetry}
           />
         ) : (
           <Failed error={result.error} onRetry={onRetry} />
@@ -118,12 +121,15 @@ function Ready({
   unclaimedUntil,
   daysAfterFirstPlay,
   senderName,
+  onRemake,
 }: {
   link: string;
   qrImage: string;
   unclaimedUntil: string;
   daysAfterFirstPlay: number;
   senderName: string | null;
+  /** Make the link again, after the surgeon has changed their name. */
+  onRemake: () => void;
 }) {
   // With the year, because a link made in the autumn runs into the next one.
   const until = new Date(unclaimedUntil).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -155,10 +161,78 @@ function Ready({
 
         {/* The same numbers createShare copied onto this link, so this says what the link will actually do. */}
         <p className="mt-5 text-sm text-ink-muted">
-          {senderName ? <>The patient will see it is from {senderName}. </> : null}Once the patient plays it, it works for {daysAfterFirstPlay}{" "}
-          {daysAfterFirstPlay === 1 ? "day" : "days"}. If nobody plays it, it stops on {until}.
+          Once the patient plays it, it works for {daysAfterFirstPlay} {daysAfterFirstPlay === 1 ? "day" : "days"}. If nobody plays it, it stops on {until}.
         </p>
+
+        <SentAs senderName={senderName} onRemake={onRemake} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * "Sent as Dr. Jane Smith, DO · Change": the name on this link, and the
+ * surgeon's own way to change it for the links they send. Change opens the
+ * same name and credential editor an office admin has on People. The server
+ * changes only the signed-in person's own name (setMyPatientNameAction).
+ *
+ * This link was already made, with the name it shows, and keeps it. After a
+ * change the panel says so and offers to make the link again with the new
+ * name. The first link is left as it is: nothing on the clinic side cancels
+ * a link, and an unsent link reaches nobody.
+ */
+function SentAs({ senderName, onRemake }: { senderName: string | null; onRemake: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  if (editing) {
+    return (
+      <div className="mt-4 rounded-xl border border-line bg-sunken px-4 py-3">
+        <SenderNameForm
+          idPrefix="my-name"
+          current={senderName}
+          heading="Your name as patients see it on the links you send"
+          onSave={(choice) => setMyPatientNameAction(choice)}
+          onSaved={(message) => {
+            setSaved(message ?? "Saved.");
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 text-sm">
+      <p className="text-ink-soft">
+        {senderName ? (
+          <>
+            Sent as <span className="font-medium text-ink">{senderName}</span>
+          </>
+        ) : (
+          <>This link names only your clinic, because you have no name for patients yet.</>
+        )}{" "}
+        <button
+          type="button"
+          onClick={() => {
+            setSaved(null);
+            setEditing(true);
+          }}
+          aria-label="Change the name patients see on links you send"
+          className="ml-1 inline-flex min-h-11 items-center font-medium text-brand-bright underline underline-offset-2 hover:text-ink"
+        >
+          Change
+        </button>
+      </p>
+      {saved && (
+        <div role="status" className="mt-2">
+          <p className="text-ink-soft">{saved} This link was made before the change and keeps the old name.</p>
+          <button type="button" onClick={onRemake} className={`${SECONDARY_BUTTON} mt-2`}>
+            Make this link again with the new name
+          </button>
+        </div>
+      )}
     </div>
   );
 }

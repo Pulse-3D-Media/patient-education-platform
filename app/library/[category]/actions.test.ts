@@ -5,7 +5,7 @@ import { createShare } from "@/lib/db/shares";
 import { ShareTermsError } from "@/lib/expiry";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { fakeClerk } from "@/lib/testing/fake-clerk";
-import { sendShareAction } from "./actions";
+import { sendShareAction, setMyPatientNameAction } from "./actions";
 
 /**
  * The Server Action behind the library's Send button, with Clerk replaced
@@ -287,6 +287,89 @@ describe("when making the link fails for a reason the person can do nothing abou
       signInAs(orgKnee);
       const again = await sendShareAction(placeholderId);
       expect(again).toMatchObject({ ok: true, link: expect.stringContaining("/watch/") });
+    } finally {
+      log.mockRestore();
+    }
+  });
+});
+
+describe("setMyPatientNameAction: a surgeon sets their own name for patients", () => {
+  const seatName = (clinicId: string, clerkUserId: string) =>
+    prisma.seatAllocation.findUnique({ where: { clinicId_clerkUserId: { clinicId, clerkUserId } }, select: { displayName: true } });
+  const putBack = (clinicId: string, clerkUserId: string) =>
+    prisma.seatAllocation.update({ where: { clinicId_clerkUserId: { clinicId, clerkUserId } }, data: { displayName: null } });
+
+  it("saves the signed-in surgeon's own name and credential, logs it as theirs, and the next link carries it", async () => {
+    const surgeon = surgeonOf.get(orgKnee)!;
+    signInAs(orgKnee);
+    try {
+      expect(await setMyPatientNameAction({ name: "Jo Seated", credential: "DO" })).toEqual({
+        message: `Saved. Links you send from now on say "Sent by Dr. Jo Seated, DO".`,
+        name: "Dr. Jo Seated, DO",
+      });
+      expect(await seatName(kneeClinic, surgeon)).toEqual({ displayName: "Dr. Jo Seated, DO" });
+      const note = await prisma.clinicNote.findFirst({ where: { clinicId: kneeClinic }, orderBy: { createdAt: "desc" }, select: { authorName: true, body: true } });
+      expect(note).toEqual({
+        authorName: "Jo Seated (surgeon)",
+        body: `Name patients see for Jo Seated changed from the default, "Dr. Jo Seated" to "Dr. Jo Seated, DO". Links already sent keep the old name.`,
+      });
+
+      const sent = await sendShareAction(placeholderId);
+      expect(sent).toMatchObject({ ok: true, senderName: "Dr. Jo Seated, DO" });
+    } finally {
+      await putBack(kneeClinic, surgeon);
+    }
+  });
+
+  it("changes only their own name, even with someone else's id slipped into what was sent", async () => {
+    const surgeon = surgeonOf.get(orgKnee)!;
+    const colleague = `user_colleague${randomBytes(6).toString("hex")}`;
+    fakeClerk.addMember(orgKnee, { userId: colleague, firstName: "Cole", lastName: "League", role: "org:member" });
+    await prisma.seatAllocation.create({ data: { clinicId: kneeClinic, clerkUserId: colleague, syncState: "SYNCED" } });
+    signInAs(orgKnee);
+    try {
+      const forged = { name: "Not Me", credential: "NP", userId: colleague, targetUserId: colleague, clinicId: hipClinic };
+      expect(await setMyPatientNameAction(forged)).toMatchObject({ name: "Not Me, NP" });
+      expect(await seatName(kneeClinic, surgeon)).toEqual({ displayName: "Not Me, NP" });
+      expect(await seatName(kneeClinic, colleague)).toEqual({ displayName: null });
+    } finally {
+      await putBack(kneeClinic, surgeon);
+      await prisma.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId: kneeClinic, clerkUserId: colleague } } });
+    }
+  });
+
+  it("refuses someone with no seat, a signed-out visitor and a clinic that is not open, and a bad name, writing nothing", async () => {
+    const notesBefore = await prisma.clinicNote.count({ where: { clinicId: kneeClinic } });
+
+    signInAs(orgKnee, noSeat);
+    expect(await setMyPatientNameAction({ name: "No Seat", credential: "MD" })).toEqual({
+      error: "Only people holding a seat send links, and you do not hold one right now. Ask your clinic's office admin.",
+    });
+
+    signInAs(null);
+    expect(await setMyPatientNameAction({ name: "Jo Seated", credential: "MD" })).toEqual({
+      error: "Your name can't be changed right now. Sign in again, or ask your clinic's office admin.",
+    });
+    signInAs(orgPending);
+    expect(await setMyPatientNameAction({ name: "Jo Seated", credential: "MD" })).toMatchObject({ error: expect.stringContaining("can't be changed") });
+
+    signInAs(orgKnee);
+    expect(await setMyPatientNameAction({ name: "Dr. Jo Seated", credential: "MD" })).toMatchObject({ error: expect.stringContaining('Leave "Dr." out') });
+    expect(await setMyPatientNameAction("Dr. Jo Seated, MD")).toEqual({ error: "Type the name and choose a credential." });
+
+    expect(await seatName(kneeClinic, surgeonOf.get(orgKnee)!)).toEqual({ displayName: null });
+    expect(await prisma.clinicNote.count({ where: { clinicId: kneeClinic } })).toBe(notesBefore);
+  });
+
+  it("answers a failure with a plain sentence, and logs only the kind", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      signInAs(orgKnee);
+      vi.mocked(getCurrentClinicId).mockRejectedValueOnce(new Error(`postgres://user:secret@host/db`));
+      expect(await setMyPatientNameAction({ name: "Jo Seated", credential: "MD" })).toEqual({
+        error: "That could not be saved just now. Nothing was changed. Try again in a moment.",
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain("secret");
     } finally {
       log.mockRestore();
     }

@@ -133,7 +133,7 @@ export default async function AdminOverviewPage() {
                     {request.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
                   </p>
                   <p className="mt-1 text-sm text-ink-muted">
-                    {request.senderName ? `From ${request.senderName}` : "No surgeon recorded"} &middot; made {formatDate(request.createdAt)} &middot; asked{" "}
+                    {request.senderName ? `Surgeon: ${request.senderName}` : "No surgeon recorded"} &middot; made {formatDate(request.createdAt)} &middot; asked{" "}
                     {formatDate(request.requestedAt)} &middot; {request.renewalsLeft} {request.renewalsLeft === 1 ? "renewal" : "renewals"} left
                   </p>
                 </div>

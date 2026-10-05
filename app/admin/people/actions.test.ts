@@ -71,7 +71,7 @@ describe("who may use the People actions", () => {
       expect((await inviteAction("new@example.test", "admin")).error).toBe("Only your clinic's office admins can change this.");
       expect((await removePersonAction(other)).error).toBe("Only your clinic's office admins can change this.");
       expect((await giveSeatAction(other)).error).toBe("Only your clinic's office admins can change this.");
-      expect((await setPatientNameAction(other, "Someone Else, NP")).error).toBe("Only your clinic's office admins can change this.");
+      expect((await setPatientNameAction(other, { name: "Someone Else", credential: "NP" })).error).toBe("Only your clinic's office admins can change this.");
     }
     expect(fakeClerk.roleOf(orgId, member)).toBe("org:member");
     expect(fakeClerk.writes).toEqual([]);
@@ -99,7 +99,7 @@ describe("who may use the People actions", () => {
     expect((await giveSeatAction(theirMember)).error).toBe("That person is not in your clinic.");
     expect((await handOffOwnerAction(theirMember)).error).toBe("That person is not in your clinic.");
     await reserveSeat(theirs.clinicId, theirMember);
-    expect((await setPatientNameAction(theirMember, "Forged Name")).error).toBe("That person is not in your clinic.");
+    expect((await setPatientNameAction(theirMember, { name: "Forged Name", credential: "MD" })).error).toBe("That person is not in your clinic.");
     expect((await listSeatNames(theirs.clinicId)).map((seat) => seat.displayName)).toEqual([null]);
     await prisma.seatAllocation.deleteMany({ where: { clinicId: theirs.clinicId } });
     expect(fakeClerk.roleOf(theirs.orgId, theirMember)).toBe("org:member");
@@ -149,9 +149,11 @@ describe("what an admin can do", () => {
     await reserveSeat(clinicId, dr);
     fakeClerk.signIn(owner, orgId);
 
-    expect(await setPatientNameAction(dr, "Jane Smith, PA-C")).toEqual({ message: `Patients will see "Jane Smith, PA-C" on links from Jane Smith from now on.` });
-    expect((await setPatientNameAction(dr, "<script>")).error).toContain("letters");
-    expect((await setPatientNameAction(dr, 42)).error).toBe("Type the name as patients should see it.");
+    expect(await setPatientNameAction(dr, { name: "Jane Smith", credential: "PA-C" })).toEqual({ message: `Patients will see "Jane Smith, PA-C" on links from Jane Smith from now on.` });
+    expect((await setPatientNameAction(dr, { name: "<script>", credential: "MD" })).error).toContain("letters");
+    // The finished words are never taken from the browser: a string is not a name and a credential.
+    expect((await setPatientNameAction(dr, "Dr. Jane Smith, MD")).error).toBe("Type the name and choose a credential.");
+    expect((await setPatientNameAction(dr, 42)).error).toBe("Type the name and choose a credential.");
     expect((await listSeatNames(clinicId)).map((seat) => seat.displayName)).toEqual(["Jane Smith, PA-C"]);
   });
 

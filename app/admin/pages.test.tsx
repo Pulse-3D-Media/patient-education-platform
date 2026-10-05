@@ -640,7 +640,7 @@ describe("a paused link a patient has asked about", () => {
 
     expect(html).toContain("Links waiting to be reactivated");
     expect(html).toContain(hipVideoTitle);
-    expect(html).toContain("From Dr. Jane Smith");
+    expect(html).toContain("Surgeon: Dr. Jane Smith");
     expect(html).toContain(`href="/admin/reactivate/${code}"`);
     expect(html).toContain("Turn it back on");
     // Another clinic sees none of it.
@@ -659,7 +659,9 @@ describe("a paused link a patient has asked about", () => {
     expect(html).toContain("Turn a link back on");
     expect(html).toContain("Nothing changes until you press Confirm.");
     expect(html).toContain(hipVideoTitle);
-    expect(html).toContain("Dr. Jane Smith");
+    // Labelled as the surgeon, so the name is never read as a patient's.
+    expect(html).toMatch(/>Surgeon<\/dt><dd[^>]*>Dr\. Jane Smith</);
+    expect(html).not.toContain("Link from");
     expect(html).toContain("Paused since");
     expect(html).toContain("Confirm: turn this link back on");
     expect(html).toMatch(/<form[^>]*>[\s\S]*name="code"[^>]*value="/);

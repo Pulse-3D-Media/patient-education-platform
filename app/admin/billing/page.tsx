@@ -225,9 +225,6 @@ export default async function BillingPage(props: BillingPageProps = {}) {
             {live && " If you cancel there, your plan stays on until the end of the period you have already paid for, and you can undo it there before then."}{" "}
             Seats and categories are changed on this page, not there.
           </p>
-          {live && checkout.scheduled && (
-            <p className="mt-2 text-sm text-ink-muted">While a plan change is scheduled, Stripe may not offer cancelling. Cancel the scheduled change above first.</p>
-          )}
           <div className="mt-4 flex flex-col gap-3">
             <PortalButton />
             <CheckWithStripeButton />

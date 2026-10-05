@@ -182,8 +182,6 @@ export default async function PeoplePage() {
                         userId={person.userId}
                         personName={person.name}
                         patientName={person.patientName}
-                        typedName={person.typedPatientName}
-                        defaultName={person.defaultPatientName ?? null}
                       />
                     )}
                   </div>

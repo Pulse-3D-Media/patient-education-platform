@@ -407,7 +407,7 @@ function LinkMenu({ title, link, baseUrl, onClose }: { title: string; link: Made
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink" role="status">
-            New link made{link.senderName ? `, from ${link.senderName}` : ""}
+            New link made{link.senderName ? `. Surgeon: ${link.senderName}` : ""}
           </p>
           <p className="mt-1 truncate text-sm text-ink-soft" title={address}>
             {address}

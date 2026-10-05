@@ -6,7 +6,9 @@ import { getCurrentClinicId } from "@/lib/clinic";
 import { createShare, SenderRefusedError, ShareRefusedError } from "@/lib/db/shares";
 import { errorKind } from "@/lib/error-kind";
 import { ShareTermsError } from "@/lib/expiry";
+import { getSignedInName } from "@/lib/people";
 import { qrSvg } from "@/lib/qr";
+import { setOwnPatientName } from "@/lib/seat-changes";
 import { resolveSender } from "@/lib/senders";
 import { watchLink } from "@/lib/share-link";
 
@@ -119,5 +121,35 @@ export async function sendShareAction(videoId: string): Promise<SendResult> {
     // server log (it holds no patient information and no link), never to the screen.
     console.error("Making a share link from the library failed", errorKind(error));
     return { ok: false, error: COULD_NOT_MAKE_LINK };
+  }
+}
+
+/** What the name editor in the Send panel gets back: the sentence and the new name, or a plain refusal. */
+export type MyNameResult = { message: string; name: string; error?: undefined } | { error: string };
+
+/**
+ * The Server Action behind "Sent as Dr. Jane Smith, DO · Change" in the Send
+ * panel: a surgeon sets the name patients see on the links THEY send.
+ *
+ * Whose name changes is never in what the browser sends. The only argument is
+ * the name and credential; the person is the signed-in user, from the
+ * session, and the clinic is theirs, found on the server. So a surgeon can
+ * only ever change their own name, and lib/seat-changes.ts refuses someone
+ * who holds no seat. The change and its line in the clinic log ("<name>
+ * (surgeon)") are written together. Links already made keep the name they
+ * were made with.
+ */
+export async function setMyPatientNameAction(choice: unknown): Promise<MyNameResult> {
+  try {
+    const clinicId = await getCurrentClinicId();
+    const { userId } = await auth();
+    if (!clinicId || !userId) return { error: "Your name can't be changed right now. Sign in again, or ask your clinic's office admin." };
+    const name = (await getSignedInName()) ?? "A surgeon";
+    const outcome = await setOwnPatientName({ clinicId, choice, actor: { userId, name } });
+    if (!outcome.ok) return { error: outcome.message };
+    return { message: outcome.message, name: outcome.name };
+  } catch (error) {
+    console.error("Saving a surgeon's own name from the library failed", errorKind(error));
+    return { error: "That could not be saved just now. Nothing was changed. Try again in a moment." };
   }
 }

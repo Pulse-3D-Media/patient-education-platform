@@ -103,8 +103,9 @@ export async function releaseMySeatAction(): Promise<ActionResult> {
   return run(({ clinicId, actor }) => releaseOwnSeat({ clinicId, actor }));
 }
 
-export async function setPatientNameAction(userId: unknown, name: unknown): Promise<ActionResult> {
-  return run(({ clinicId, actor }) => setPatientName({ clinicId, targetUserId: userId, name, actor }));
+/** `choice` is the editor's name, credential and typed credential. The server checks it and builds the words (lib/sender-name.ts). */
+export async function setPatientNameAction(userId: unknown, choice: unknown): Promise<ActionResult> {
+  return run(({ clinicId, actor }) => setPatientName({ clinicId, targetUserId: userId, choice, actor }));
 }
 
 export async function handOffOwnerAction(userId: unknown): Promise<ActionResult> {

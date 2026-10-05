@@ -42,7 +42,7 @@ import {
   type SeatState,
   type SeatSummary,
 } from "./seats";
-import { effectiveSenderName, parseDisplayName } from "./sender-name";
+import { effectiveSenderName, parseNameChoice } from "./sender-name";
 
 /**
  * THE ONLY WAY ANYONE'S SEAT, ROLE, INVITATION OR OWNERSHIP IS CHANGED.
@@ -75,7 +75,8 @@ import { effectiveSenderName, parseDisplayName } from "./sender-name";
  *   Admin on/off    one write to Clerk. Seats are not touched.
  *   Giving a seat   one write here, under the lock. Clerk is not touched.
  *   Name patients   one write here (on the seat), under the lock, after Clerk
- *   see             has confirmed the person is in the clinic.
+ *   see             has confirmed the person is in the clinic. An admin sets
+ *                   anyone's; a surgeon sets only their own.
  *   Handing over    one write here (the owner), under the lock, after Clerk
  *   the owner       has confirmed the new owner is an admin of the clinic.
  *
@@ -89,7 +90,7 @@ import { effectiveSenderName, parseDisplayName } from "./sender-name";
  * checked to be a member of THAT organization before anything is written.
  */
 
-/** Who is asking: a clinic admin, already checked on the server by the action. */
+/** Who is asking: a clinic admin (or, for setOwnPatientName, the signed-in surgeon), already checked on the server by the action. */
 export type Actor = { userId: string; name: string };
 
 export type Outcome = { ok: true; message?: string } | { ok: false; message: string };
@@ -347,35 +348,73 @@ export async function releaseOwnSeat(args: { clinicId: string; actor: Actor }): 
   return { ok: true };
 }
 
+/** What a name change answers: on success, the sentence to show and the finished name patients will now see. */
+export type NameOutcome = { ok: true; message: string; name: string } | { ok: false; message: string };
+
 /**
- * Set how a seated person's name appears to patients on the links they send
- * ("Jane Smith, PA-C"), or clear it (an empty box) to go back to "Dr. First
- * Last" from Clerk. Only for someone holding a seat, since only they send
- * links. Links already sent keep the name they were made with. Clerk is only
- * read (is this person in the clinic?), never written.
+ * An office admin sets how a seated person's name appears to patients on the
+ * links they send: a name and a credential from the list ("Dr. Jane Smith,
+ * DO", "Jane Smith, PA-C"; the rule is lib/sender-name.ts). Only for someone
+ * holding a seat, since only they send links. Links already sent keep the
+ * name they were made with. Clerk is only read (is this person in the
+ * clinic?), never written.
  */
-export async function setPatientName(args: { clinicId: string; targetUserId: unknown; name: unknown; actor: Actor }): Promise<Outcome> {
-  const parsed = parseDisplayName(args.name);
+export async function setPatientName(args: { clinicId: string; targetUserId: unknown; choice: unknown; actor: Actor }): Promise<NameOutcome> {
+  return saveName({
+    clinicId: args.clinicId,
+    targetUserId: typeof args.targetUserId === "string" ? args.targetUserId : "",
+    choice: args.choice,
+    authorName: byAdmin(args.actor),
+    noSeat: (member) => `${member.name} does not hold a seat, and only people with a seat send links. Give them a seat first.`,
+    saved: (member, name) => `Patients will see "${name}" on links from ${member.name} from now on.`,
+  });
+}
+
+/**
+ * A person holding a seat sets their OWN name for patients, from the
+ * library's Send panel. There is no "whose name" in what the browser sends:
+ * it is always the signed-in person (`actor`, from the session), so a
+ * surgeon can never change anyone else's. Someone without a seat has nothing
+ * to change and is refused. Logged under "<name> (surgeon)", in the same
+ * transaction as the change, like an admin's.
+ */
+export async function setOwnPatientName(args: { clinicId: string; choice: unknown; actor: Actor }): Promise<NameOutcome> {
+  return saveName({
+    clinicId: args.clinicId,
+    targetUserId: args.actor.userId,
+    choice: args.choice,
+    authorName: `${args.actor.name} (surgeon)`,
+    noSeat: () => "Only people holding a seat send links, and you do not hold one right now. Ask your clinic's office admin.",
+    saved: (_member, name) => `Saved. Links you send from now on say "Sent by ${name}".`,
+  });
+}
+
+/** The one way a name for patients is saved: checked, the person checked with Clerk, then written and logged under the clinic's lock. */
+async function saveName(args: {
+  clinicId: string;
+  targetUserId: string;
+  choice: unknown;
+  authorName: string;
+  noSeat: (member: Person) => string;
+  saved: (member: Person, name: string) => string;
+}): Promise<NameOutcome> {
+  const parsed = parseNameChoice(args.choice);
   if (!parsed.ok) return { ok: false, message: parsed.message };
 
   const clinic = await clinicFor(args.clinicId);
   if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
-  const member = await memberOf(clinic.orgId, typeof args.targetUserId === "string" ? args.targetUserId : "");
+  const member = await memberOf(clinic.orgId, args.targetUserId);
   if (member === null) return { ok: false, message: NOT_SAVED };
   if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
 
   const fallback = member.defaultPatientName ?? null;
   const shown = (name: string | null) => (name ? `"${name}"` : fallback ? `the default, "${fallback}"` : "no name");
-  const result = await setSeatDisplayName(args.clinicId, member.userId, parsed.name, {
-    authorName: byAdmin(args.actor),
+  const result = await setSeatDisplayName(args.clinicId, member.userId, parsed.words, {
+    authorName: args.authorName,
     describe: (before, after) => `Name patients see for ${member.name} changed from ${shown(before)} to ${shown(after)}. Links already sent keep the old name.`,
   });
-  if (!result.found) return { ok: false, message: `${member.name} does not hold a seat, and only people with a seat send links. Give them a seat first.` };
-  const now = effectiveSenderName(parsed.name, fallback);
-  return {
-    ok: true,
-    message: now ? `Patients will see "${now}" on links from ${member.name} from now on.` : `Links from ${member.name} will name only your clinic until a name is set.`,
-  };
+  if (!result.found) return { ok: false, message: args.noSeat(member) };
+  return { ok: true, message: args.saved(member, parsed.words), name: parsed.words };
 }
 
 // ---------------------------------------------------------------------------

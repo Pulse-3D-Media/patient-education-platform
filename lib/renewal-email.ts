@@ -45,7 +45,7 @@ function escapeHtml(text: string): string {
 
 /** The subject, the plain-text body and the HTML body, from the facts and the page's address. */
 export function renewalRequestEmail(facts: RenewalRequestFacts, reactivateUrl: string): { subject: string; text: string; html: string } {
-  const from = facts.senderName ?? "not recorded on this link";
+  const surgeon = facts.senderName ?? "not recorded on this link";
   const times = `${facts.renewalsLeft} more ${facts.renewalsLeft === 1 ? "time" : "times"}`;
   const days = `${facts.daysPerRenewal} ${facts.daysPerRenewal === 1 ? "day" : "days"} each`;
 
@@ -55,7 +55,7 @@ export function renewalRequestEmail(facts: RenewalRequestFacts, reactivateUrl: s
     `A patient has asked ${facts.clinic.name} to turn a paused video link back on.`,
     "",
     `Procedure: ${facts.videoTitle}`,
-    `Link from: ${from}`,
+    `Surgeon: ${surgeon}`,
     `Link made: ${dayWords(facts.createdAt)}`,
     `Can be turned back on: ${times}, ${days}`,
     "",
@@ -73,7 +73,7 @@ export function renewalRequestEmail(facts: RenewalRequestFacts, reactivateUrl: s
     `<p>A patient has asked <strong>${escapeHtml(facts.clinic.name)}</strong> to turn a paused video link back on.</p>`,
     "<table cellpadding=\"0\" cellspacing=\"0\" style=\"font-size:16px;line-height:1.5\">",
     `<tr><td style="padding-right:12px;color:#52616a">Procedure</td><td><strong>${escapeHtml(facts.videoTitle)}</strong></td></tr>`,
-    `<tr><td style="padding-right:12px;color:#52616a">Link from</td><td>${escapeHtml(from)}</td></tr>`,
+    `<tr><td style="padding-right:12px;color:#52616a">Surgeon</td><td>${escapeHtml(surgeon)}</td></tr>`,
     `<tr><td style="padding-right:12px;color:#52616a">Link made</td><td>${escapeHtml(dayWords(facts.createdAt))}</td></tr>`,
     `<tr><td style="padding-right:12px;color:#52616a">Can be turned back on</td><td>${escapeHtml(times)}, ${escapeHtml(days)}</td></tr>`,
     "</table>",

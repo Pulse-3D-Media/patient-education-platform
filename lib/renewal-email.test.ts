@@ -64,6 +64,12 @@ describe("renewalRequestEmail", () => {
     expect(email.text).toContain("Procedure: Total Knee <Replacement>");
   });
 
+  it("labels the name as the surgeon's, so nobody reads it as the patient's", () => {
+    expect(email.text).toContain("Surgeon: Dr. Jane Smith");
+    expect(email.html).toMatch(/>Surgeon<\/td><td>Dr\. Jane Smith</);
+    for (const body of [email.text, email.html]) expect(body).not.toContain("Link from");
+  });
+
   it("says nothing about the patient exists, because nothing does", () => {
     expect(email.text).toContain("Nothing about the patient is stored or sent");
     expect(email.html).toContain("Nothing about the patient is stored or sent");
@@ -87,7 +93,7 @@ describe("renewalRequestEmail", () => {
 
   it("says the surgeon is not recorded on a link made before surgeons were", () => {
     const older = renewalRequestEmail({ ...facts, senderName: null, renewalsLeft: 1, daysPerRenewal: 1 }, url);
-    expect(older.text).toContain("Link from: not recorded on this link");
+    expect(older.text).toContain("Surgeon: not recorded on this link");
     expect(older.text).toContain("1 more time, 1 day each");
   });
 });

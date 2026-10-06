@@ -7,6 +7,7 @@ import { saveSettings } from "@/lib/db/settings";
 import { MAX_GRACE_DAYS } from "@/lib/billing-state";
 import { recordAcceptedPlan, setStripeCustomer } from "@/lib/db/billing";
 import { MAX_LINK_DAYS } from "@/lib/expiry";
+import { checkPlaybackId } from "@/lib/mux";
 import { NOTE_MAX_LENGTH } from "@/lib/note-form";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
@@ -48,6 +49,12 @@ vi.mock("next/cache", () => ({
 vi.mock("@/lib/db/settings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/settings")>();
   return { ...actual, saveSettings: vi.fn() };
+});
+
+// Asking Mux about a playback id is a stand-in: each test says what Mux would answer (lib/mux.test.ts covers the real check's reading of Mux's answers).
+vi.mock("@/lib/mux", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mux")>();
+  return { ...actual, checkPlaybackId: vi.fn() };
 });
 
 function signInAs(userId: string, publicMetadata: Record<string, unknown>) {
@@ -575,6 +582,83 @@ describe("saveVideoAction", () => {
     expect(await saveVideoAction(null, form({ ...fields, durationSeconds: "4:70" }))).toMatchObject({ error: expect.any(String) });
     expect(await saveVideoAction(null, form({ ...fields, category: "ELBOW" }))).toMatchObject({ error: expect.any(String) });
     expect(await saveVideoAction(null, form({ ...fields, id: "no-such-video" }))).toEqual({ error: "That video no longer exists." });
+  });
+
+  describe("moving a video to Mux", () => {
+    const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
+    const asked = () => vi.mocked(checkPlaybackId);
+
+    /** A video of this test's own, on the CDN, to move. */
+    async function cdnVideo() {
+      const video = await prisma.video.create({
+        data: { title: `Vitest Mux move ${randomBytes(3).toString("hex")}`, category: "FOOT_ANKLE", videoUrl: fields.videoUrl, isPublished: true },
+        select: { id: true },
+      });
+      createdVideoIds.push(video.id);
+      return video.id;
+    }
+
+    it("saves a playback id Mux confirms is signed, and keeps the CDN address as the record of the file", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      asked().mockResolvedValueOnce({ ok: true });
+      const id = await cdnVideo();
+
+      expect(await saveVideoAction(null, form({ ...fields, id, muxPlaybackId: playbackId, muxAssetId: "AssetId00AbCdEf" }))).toMatchObject({ ok: expect.any(String) });
+      expect(asked()).toHaveBeenCalledWith(playbackId);
+      expect(await prisma.video.findUnique({ where: { id }, select: { muxPlaybackId: true, muxAssetId: true, videoUrl: true } })).toEqual({
+        muxPlaybackId: playbackId,
+        muxAssetId: "AssetId00AbCdEf",
+        videoUrl: fields.videoUrl,
+      });
+
+      // A save that leaves the id as it was does not ask Mux again, so a slow Mux never stops a title from being corrected.
+      asked().mockClear();
+      expect(await saveVideoAction(null, form({ ...fields, id, title: "Vitest Total Ankle Replacement (edited)", muxPlaybackId: playbackId }))).toMatchObject({ ok: expect.any(String) });
+      expect(asked()).not.toHaveBeenCalled();
+
+      // Clearing the box goes back to the CDN file, with nothing to ask.
+      expect(await saveVideoAction(null, form({ ...fields, id, muxPlaybackId: "", muxAssetId: "" }))).toMatchObject({ ok: expect.any(String) });
+      expect(await prisma.video.findUnique({ where: { id }, select: { muxPlaybackId: true, muxAssetId: true } })).toEqual({ muxPlaybackId: null, muxAssetId: null });
+      expect(asked()).not.toHaveBeenCalled();
+    });
+
+    it("refuses what Mux refuses (public, unknown, not configured, unreachable), in Mux's own words, and writes nothing", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const id = await cdnVideo();
+      for (const reason of ["public", "refused", "not-configured", "unreachable"] as const) {
+        asked().mockResolvedValueOnce({ ok: false, reason, message: `Refused because ${reason}.` });
+        expect(await saveVideoAction(null, form({ ...fields, id, muxPlaybackId: playbackId }))).toEqual({ error: `Refused because ${reason}.` });
+      }
+      expect(await prisma.video.findUnique({ where: { id }, select: { muxPlaybackId: true } })).toEqual({ muxPlaybackId: null });
+    });
+
+    it("refuses a malformed id, and an asset id on its own, before asking Mux", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const id = await cdnVideo();
+      expect(await saveVideoAction(null, form({ ...fields, id, muxPlaybackId: "has/slash00" }))).toMatchObject({ error: expect.stringContaining("playback id") });
+      expect(await saveVideoAction(null, form({ ...fields, id, muxPlaybackId: "", muxAssetId: "AssetId00AbCdEf" }))).toMatchObject({ error: expect.stringContaining("asset id") });
+      expect(asked()).not.toHaveBeenCalled();
+    });
+
+    it("refuses a playback id that is already on another video, in plain words", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      asked().mockResolvedValue({ ok: true });
+      const first = await cdnVideo();
+      const second = await cdnVideo();
+      const shared = `Vitest${randomBytes(6).toString("hex")}`;
+      expect(await saveVideoAction(null, form({ ...fields, id: first, muxPlaybackId: shared }))).toMatchObject({ ok: expect.any(String) });
+      expect(await saveVideoAction(null, form({ ...fields, id: second, muxPlaybackId: shared }))).toEqual({
+        error: "That playback id is already on another video. Each Mux playback id belongs to one video.",
+      });
+      expect(await prisma.video.findUnique({ where: { id: second }, select: { muxPlaybackId: true } })).toEqual({ muxPlaybackId: null });
+    });
+
+    it("never lets a non-staff user near it, however good the id", async () => {
+      signInAs("user_clinic_admin", { kind: "staff" });
+      asked().mockResolvedValue({ ok: true });
+      await expect(saveVideoAction(null, form({ ...fields, muxPlaybackId: playbackId }))).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+      expect(asked()).not.toHaveBeenCalled();
+    });
   });
 });
 

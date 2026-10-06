@@ -16,7 +16,7 @@ import { VideoPlayer } from "./VideoPlayer";
 
 function render(props: Partial<Parameters<typeof VideoPlayer>[0]> = {}): string {
   return renderToStaticMarkup(
-    <VideoPlayer src="https://example.com/knee.mp4" title="Total Knee Replacement" subtitle="Knee" clinicName="Summit Orthopedics" onClose={() => {}} {...props} />,
+    <VideoPlayer source={{ kind: "file", src: "https://example.com/knee.mp4" }} title="Total Knee Replacement" subtitle="Knee" clinicName="Summit Orthopedics" onClose={() => {}} {...props} />,
   );
 }
 
@@ -71,6 +71,37 @@ describe("the strip on the library's player", () => {
 
     expect(html).toMatch(/class="below-picture-top absolute inset-x-0 top-8 [^"]*"><div class="min-w-0"><h2[^>]*>Total Knee Replacement</);
     expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Close the video and go back to the library"'));
+  });
+});
+
+describe("what the player is handed", () => {
+  it("writes a plain file on the element in the page's own HTML, so the browser starts fetching at once", () => {
+    const html = render();
+    expect(html).toMatch(/<video[^>]*\ssrc="https:\/\/example\.com\/knee\.mp4"/);
+  });
+
+  it("writes no address for a stream (the hook puts it on once awake) and never the CDN file; the strip, the title row and the controls are all still there", () => {
+    const html = render({
+      source: { kind: "stream", src: "https://stream.mux.com/abc.m3u8?token=t", poster: "https://image.mux.com/abc/thumbnail.jpg?token=p", expiresAt: Date.now() + 3_600_000 },
+      poster: "https://image.mux.com/abc/thumbnail.jpg?token=p",
+      senderName: "Dr. Jane Smith, DO",
+      placeholder: true,
+    });
+    expect(html).not.toMatch(/<video[^>]*\ssrc=/);
+    expect(html).not.toContain("stream.mux.com");
+    expect(html).toContain('poster="https://image.mux.com/abc/thumbnail.jpg?token=p"');
+    expect(html).toContain("data-video-strip");
+    expect(html).toContain(">Dr. Jane Smith, DO<");
+    expect(html).toContain("Placeholder animation");
+    expect(html).toContain('aria-label="Close the video and go back to the library"');
+    expect(html).toContain('aria-label="Seek"');
+    expect(html).toContain('aria-label="Full screen"');
+  });
+
+  it("draws the picture, not a panel, for an unavailable source: the hook shows the panel once the player is awake", () => {
+    const html = render({ source: { kind: "unavailable" } });
+    expect(html).not.toMatch(/<video[^>]*\ssrc=/);
+    expect(html).not.toContain("did not load");
   });
 });
 

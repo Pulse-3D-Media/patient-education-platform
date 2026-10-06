@@ -71,6 +71,8 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
               isPlaceholder: video.isPlaceholder,
               isPublished: video.isPublished,
               notes: video.notes,
+              muxPlaybackId: video.muxPlaybackId,
+              muxAssetId: video.muxAssetId,
               shareCount: video._count.shares,
             }}
           />

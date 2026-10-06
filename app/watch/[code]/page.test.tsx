@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { getSettings } from "@/lib/db/settings";
 import WatchPage from "./page";
@@ -459,5 +459,91 @@ describe("a link that has paused", () => {
     expect(html).toContain("--brand-accent:#7a1f2b");
     expect(html).not.toContain("INTERNAL-");
     expect(html).not.toContain(clinic.id);
+  });
+});
+
+describe("a video that has moved to Mux", () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const MUX_ENV = { MUX_SIGNING_KEY_ID: "testkey0001", MUX_SIGNING_PRIVATE_KEY: Buffer.from(privateKey.export({ type: "pkcs8", format: "pem" }).toString()).toString("base64") };
+  const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
+  let muxVideoId = "";
+
+  beforeAll(async () => {
+    const video = await prisma.video.create({
+      data: { title: "Vitest Mux Knee Replacement", category: "KNEE", videoUrl: "https://example.com/vitest-cdn-copy.mp4", durationSeconds: 110, isPublished: true, muxPlaybackId: playbackId },
+      select: { id: true },
+    });
+    muxVideoId = video.id;
+    createdVideoIds.push(video.id);
+  });
+
+  afterEach(() => {
+    delete process.env.MUX_SIGNING_KEY_ID;
+    delete process.env.MUX_SIGNING_PRIVATE_KEY;
+    vi.restoreAllMocks();
+  });
+
+  it("plays through a signed Mux address, never the CDN file, with the signed still before the first play", async () => {
+    Object.assign(process.env, MUX_ENV);
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, muxVideoId));
+
+    // The stream is put on by the player once the page is awake, so the <video> carries no src; the signed still stands in.
+    expect(html).toMatch(/<video[^>]*poster="https:\/\/image\.mux\.com\/[^"]*thumbnail\.jpg\?token=[^"]+"/);
+    expect(html).not.toMatch(/<video[^>]*\ssrc=/);
+    expect(html).not.toContain("example.com/vitest-cdn-copy.mp4");
+    // The strip, the sender lines, the controls setting and the education note survive the player change.
+    expect(html).toContain("data-video-strip");
+    expect(html).toContain('controlsList="nodownload nofullscreen"');
+    expect(html).toContain("This video is for education only.");
+    expect(html).not.toMatch(/stops working in a few minutes/);
+  });
+
+  it("shows the calm did-not-load panel, and never the CDN file, when Mux is not configured on this deployment", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, muxVideoId));
+
+    expect(html).not.toContain("example.com/vitest-cdn-copy.mp4");
+    expect(html).not.toContain("stream.mux.com");
+    expect(html).not.toMatch(/\berror\b|invalid|\b403\b/i);
+    // The page itself still stands: the title, the sender, the note.
+    expect(html).toContain("Vitest Mux Knee Replacement");
+    expect(html).toContain(`From ${clinic.name}`);
+  });
+
+  it("says, honestly, when a played link has less time left than the video needs", async () => {
+    Object.assign(process.env, MUX_ENV);
+    const clinic = await makeClinic({});
+    const played = await prisma.share.create({
+      data: {
+        code: code(),
+        clinicId: clinic.id,
+        videoId: muxVideoId,
+        expiryPolicy: "FIRST_PLAY",
+        daysAfterFirstPlay: 7,
+        firstPlayedAt: new Date(Date.now() - 6 * 86_400_000),
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+      select: { code: true },
+    });
+    const html = await render(played.code);
+    expect(html).toContain("stops working in a few minutes");
+    expect(html).toContain(`${clinic.name} can send you a fresh link.`);
+    // And the token runs out with the link, not an hour later.
+    const token = /poster="https:\/\/image\.mux\.com\/[^"]*thumbnail\.jpg\?token=([^"]+)"/.exec(html)![1];
+    const exp = (JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")) as { exp: number }).exp * 1000;
+    expect(exp).toBeLessThanOrEqual(Date.now() + 60_000);
+    expect(exp).toBeGreaterThan(Date.now());
+  });
+
+  it("does not say so for an unplayed first-play link, whose first play adds its days", async () => {
+    Object.assign(process.env, MUX_ENV);
+    const clinic = await makeClinic({});
+    const unplayed = await prisma.share.create({
+      data: { code: code(), clinicId: clinic.id, videoId: muxVideoId, expiryPolicy: "FIRST_PLAY", daysAfterFirstPlay: 7, expiresAt: new Date(Date.now() + 60_000) },
+      select: { code: true },
+    });
+    expect(await render(unplayed.code)).not.toContain("stops working in a few minutes");
   });
 });

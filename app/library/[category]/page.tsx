@@ -12,8 +12,8 @@ import { getClinicAccess } from "@/lib/db/access";
 import { getCategoryConfigs } from "@/lib/db/category-config";
 import { getSeatFor } from "@/lib/db/seats";
 import { countPublishedVideosByKind, listUsableVideosInCategory } from "@/lib/db/videos";
+import { playbackForVideo } from "@/lib/playback-auth";
 import { libraryStripName } from "@/lib/sender-name";
-import { getPlaybackUrl } from "@/lib/video";
 import { EmptyCategory, LockedCategory } from "../CategoryStates";
 import { ComingSoon } from "../ComingSoon";
 import { VideoGrid } from "./VideoGrid";
@@ -65,12 +65,16 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   const state = categoryState(access, category.value, counts[category.value]);
 
   // Only plain data crosses into the browser: id, title, duration, whether it
-  // is a placeholder, and the playback address (built here on the server,
-  // through the video boundary).
+  // is a placeholder, and what to play (built here on the server, through
+  // lib/playback-auth.ts: the plain file, or a signed Mux address for this
+  // clinic, which the list above has just shown may use the video). The
+  // player asks the server for a fresh address before a signed one runs out
+  // (refreshPlaybackAction), and the plan is checked again then.
+  const now = new Date();
   const items = videos.map((video) => ({
     id: video.id,
     title: video.title,
-    src: getPlaybackUrl(video),
+    source: playbackForVideo(video, now, null),
     posterUrl: video.posterUrl,
     durationSeconds: video.durationSeconds,
     isPlaceholder: video.isPlaceholder,

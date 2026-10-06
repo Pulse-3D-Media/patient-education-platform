@@ -124,6 +124,20 @@ export async function listUsableVideos(access: ClinicAccess) {
 }
 
 /**
+ * What a player needs to know about one video to be handed a source
+ * (lib/playback-auth.ts): where its file lives, how long it runs, and
+ * whether it is published. No clinic here: whether a clinic may play it is
+ * decided first, with canUseVideo(), and nothing is read for a video it
+ * may not. Null for an unknown id.
+ */
+export async function getVideoForPlayback(videoId: string) {
+  return prisma.video.findUnique({
+    where: { id: videoId },
+    select: { id: true, videoUrl: true, muxPlaybackId: true, durationSeconds: true, isPublished: true },
+  });
+}
+
+/**
  * Every published video across all categories, whichever clinic is asking.
  * Sorted by category in the order lib/categories lists them (the same order
  * as the library tiles and the drawer), then by title. The clinic-side
@@ -212,6 +226,10 @@ export type VideoInput = {
   isPlaceholder: boolean;
   isPublished: boolean;
   notes: string | null;
+  /** The signed Mux playback id once the video has moved to Mux, checked with Mux before it gets here (see saveVideoAction). Null plays the file at videoUrl. */
+  muxPlaybackId: string | null;
+  /** The Mux asset the id belongs to, as a note for staff. */
+  muxAssetId: string | null;
 };
 
 /** Add a video to the catalogue. Returns the new row. */

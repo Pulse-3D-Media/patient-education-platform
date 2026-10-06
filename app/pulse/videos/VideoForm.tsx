@@ -19,6 +19,9 @@ export type VideoValues = {
   isPlaceholder: boolean;
   isPublished: boolean;
   notes: string | null;
+  /** The signed Mux playback id once the video has moved to Mux, and the asset it belongs to. Null while it plays from the CDN. */
+  muxPlaybackId: string | null;
+  muxAssetId: string | null;
   /** Share links already pointing at this video. */
   shareCount: number;
 };
@@ -98,7 +101,30 @@ export function VideoForm({ video }: { video?: VideoValues }) {
             Video address
           </label>
           <input id="videoUrl" name="videoUrl" type="url" required defaultValue={video?.videoUrl ?? ""} placeholder="https://" className={INPUT} />
-          <p className="mt-1 text-xs text-[#667085]">The MP4 on the CDN. Must start with https://. Paste a new address here to swap the file behind this video.</p>
+          <p className="mt-1 text-xs text-[#667085]">
+            The MP4 on the CDN. Must start with https://. Paste a new address here to swap the file behind this video. Once a Mux playback id is
+            filled in below, this address is kept only as the record of where the file came from: nothing plays from it.
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="muxPlaybackId" className={LABEL}>
+            Mux playback id (signed)
+          </label>
+          <input id="muxPlaybackId" name="muxPlaybackId" defaultValue={video?.muxPlaybackId ?? ""} placeholder="Leave empty to keep playing the CDN file" className={INPUT} />
+          <p className="mt-1 text-xs text-[#667085]">
+            From the asset&apos;s page in Mux, and it must be a <strong className="font-medium text-[#bfbfbf]">signed</strong> playback id. Saving asks Mux: a public id, an
+            unknown id, or a key that does not match is refused. With an id here the video plays only through a signed address that expires;
+            clearing the box goes back to the CDN file.
+          </p>
+        </div>
+
+        <div>
+          <label htmlFor="muxAssetId" className={LABEL}>
+            Mux asset id (optional)
+          </label>
+          <input id="muxAssetId" name="muxAssetId" defaultValue={video?.muxAssetId ?? ""} placeholder="For finding it in Mux" className={INPUT} />
+          <p className="mt-1 text-xs text-[#667085]">A note for staff: which asset the playback id belongs to. Nothing plays from it.</p>
         </div>
 
         <div className="md:col-span-2">

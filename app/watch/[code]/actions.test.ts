@@ -1,10 +1,10 @@
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import * as shares from "@/lib/db/shares";
 import { addDays } from "@/lib/expiry";
 import * as renewalEmail from "@/lib/renewal-email";
-import { recordPlay, requestReactivation } from "./actions";
+import { recordPlay, refreshPlayback, requestReactivation } from "./actions";
 
 /**
  * The Server Actions behind the patient page, against the real test
@@ -110,6 +110,91 @@ describe("recordPlay", () => {
     // the error object, whose message and stack would print the code.
     expect(log).toHaveBeenCalledWith("Could not record a play start on a share link.", "Error");
     expect(log.mock.calls[0].every((part) => typeof part === "string" && !part.includes(code))).toBe(true);
+  });
+});
+
+describe("a link whose video streams from Mux", () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const MUX_ENV = { MUX_SIGNING_KEY_ID: "testkey0001", MUX_SIGNING_PRIVATE_KEY: Buffer.from(privateKey.export({ type: "pkcs8", format: "pem" }).toString()).toString("base64") };
+  let muxVideoId = "";
+
+  /** The expiry a token carries, read back from the address. */
+  const expiryOf = (url: string) => (JSON.parse(Buffer.from(new URL(url).searchParams.get("token")!.split(".")[1], "base64url").toString("utf8")) as { exp: number }).exp * 1000;
+
+  beforeAll(async () => {
+    const video = await prisma.video.create({
+      data: { title: "Vitest Mux video", category: "KNEE", videoUrl: "https://example.com/vitest-cdn-copy.mp4", durationSeconds: 110, isPublished: true, muxPlaybackId: `Vitest${randomBytes(6).toString("hex")}` },
+      select: { id: true },
+    });
+    muxVideoId = video.id;
+    createdVideoIds.push(video.id);
+    Object.assign(process.env, MUX_ENV);
+  });
+
+  afterAll(() => {
+    delete process.env.MUX_SIGNING_KEY_ID;
+    delete process.env.MUX_SIGNING_PRIVATE_KEY;
+  });
+
+  it("the first play hands back a grant for the link's new deadline; later plays and CDN videos hand back none", async () => {
+    const share = await shares.createShare(clinicId, muxVideoId);
+    const first = await recordPlay(share.code);
+    expect(first.recorded).toBe(true);
+    expect(first.playback?.kind).toBe("stream");
+    if (first.playback?.kind !== "stream") return;
+    const row = await prisma.share.findUniqueOrThrow({ where: { code: share.code }, select: { expiresAt: true } });
+    // Bounded by the usual lifetime now (the new deadline is ten days off), and never past the link.
+    expect(first.playback.expiresAt).toBeLessThanOrEqual(row.expiresAt.getTime());
+    // A token's expiry is whole seconds.
+    expect(expiryOf(first.playback.src)).toBe(Math.floor(first.playback.expiresAt / 1000) * 1000);
+    expect(JSON.stringify(first.playback)).not.toContain("example.com");
+
+    expect(await recordPlay(share.code)).toEqual({ recorded: true });
+    // The CDN video from the top of this file: counted, nothing handed back.
+    const cdn = await shares.createShare(clinicId, videoId);
+    expect(await recordPlay(cdn.code)).toEqual({ recorded: true });
+  });
+
+  it("refreshPlayback hands a working link a fresh address bounded by its deadline, and nothing to a link that is over, taken down, unknown or made up", async () => {
+    const share = await shares.createShare(clinicId, muxVideoId);
+    const answer = await refreshPlayback(share.code);
+    expect(answer.ok).toBe(true);
+    if (!answer.ok || answer.source.kind !== "stream") return;
+    const row = await prisma.share.findUniqueOrThrow({ where: { code: share.code }, select: { expiresAt: true } });
+    expect(answer.source.expiresAt).toBeLessThanOrEqual(row.expiresAt.getTime());
+
+    // A link that ran out: no address, however it is asked.
+    await prisma.share.update({ where: { code: share.code }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    expect(await refreshPlayback(share.code)).toEqual({ ok: false, reason: "ended" });
+
+    // A working link whose video was taken down.
+    const other = await shares.createShare(clinicId, muxVideoId);
+    await prisma.video.update({ where: { id: muxVideoId }, data: { isPublished: false } });
+    try {
+      expect(await refreshPlayback(other.code)).toEqual({ ok: false, reason: "ended" });
+    } finally {
+      await prisma.video.update({ where: { id: muxVideoId }, data: { isPublished: true } });
+    }
+
+    expect(await refreshPlayback("nope00")).toEqual({ ok: false, reason: "ended" });
+    expect(await refreshPlayback("")).toEqual({ ok: false, reason: "ended" });
+    expect(await refreshPlayback("x".repeat(21))).toEqual({ ok: false, reason: "ended" });
+  });
+
+  it("refreshPlayback answers unavailable, not the CDN file and not an exception, when Mux is not configured or the server fails", async () => {
+    const share = await shares.createShare(clinicId, muxVideoId);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    delete process.env.MUX_SIGNING_KEY_ID;
+    try {
+      expect(await refreshPlayback(share.code)).toEqual({ ok: false, reason: "unavailable" });
+    } finally {
+      Object.assign(process.env, MUX_ENV);
+    }
+
+    vi.spyOn(shares, "getShareByCode").mockRejectedValueOnce(new Error(`the database went away looking up ${share.code}`));
+    expect(await refreshPlayback(share.code)).toEqual({ ok: false, reason: "unavailable" });
+    expect(log.mock.calls.flat().every((part) => typeof part === "string" && !part.includes(share.code))).toBe(true);
   });
 });
 

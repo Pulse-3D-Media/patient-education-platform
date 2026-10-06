@@ -1,11 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { createShare } from "@/lib/db/shares";
 import { ShareTermsError } from "@/lib/expiry";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { fakeClerk } from "@/lib/testing/fake-clerk";
-import { sendShareAction, setMyPatientNameAction } from "./actions";
+import { refreshPlaybackAction, sendShareAction, setMyPatientNameAction } from "./actions";
 
 /**
  * The Server Action behind the library's Send button, with Clerk replaced
@@ -373,5 +373,76 @@ describe("setMyPatientNameAction: a surgeon sets their own name for patients", (
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+describe("refreshPlaybackAction", () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const MUX_ENV = { MUX_SIGNING_KEY_ID: "testkey0001", MUX_SIGNING_PRIVATE_KEY: Buffer.from(privateKey.export({ type: "pkcs8", format: "pem" }).toString()).toString("base64") };
+  let muxKneeId = "";
+
+  beforeAll(async () => {
+    const video = await prisma.video.create({
+      data: { title: "Vitest send video (Mux)", category: "KNEE", videoUrl: "https://example.com/vitest-cdn-copy.mp4", isPublished: true, muxPlaybackId: `Vitest${randomBytes(6).toString("hex")}` },
+      select: { id: true },
+    });
+    createdVideoIds.push(video.id);
+    muxKneeId = video.id;
+    Object.assign(process.env, MUX_ENV);
+  });
+
+  afterAll(() => {
+    delete process.env.MUX_SIGNING_KEY_ID;
+    delete process.env.MUX_SIGNING_PRIVATE_KEY;
+  });
+
+  it("hands anyone in an open clinic whose plan has the category a fresh signed address, seat or no seat, and the plain file for a CDN video", async () => {
+    signInAs(orgKnee, noSeat);
+    const answer = await refreshPlaybackAction(muxKneeId);
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    expect(answer.source.kind).toBe("stream");
+    expect(JSON.stringify(answer.source)).not.toContain("example.com");
+
+    signInAs(orgKnee);
+    expect(await refreshPlaybackAction(placeholderId)).toEqual({ ok: true, source: { kind: "file", src: "https://example.com/vitest.mp4" } });
+  });
+
+  it("hands nothing to a clinic whose plan lacks the category, a clinic that has not paid, someone signed out, or for an unpublished or made-up video", async () => {
+    signInAs(orgHip);
+    expect(await refreshPlaybackAction(muxKneeId)).toEqual({ ok: false, reason: "ended" });
+    signInAs(orgPending);
+    expect(await refreshPlaybackAction(muxKneeId)).toEqual({ ok: false, reason: "ended" });
+    signInAs(null);
+    expect(await refreshPlaybackAction(muxKneeId)).toEqual({ ok: false, reason: "ended" });
+    signInAs(orgKnee);
+    expect(await refreshPlaybackAction(unpublishedId)).toEqual({ ok: false, reason: "ended" });
+    expect(await refreshPlaybackAction("no-such-video")).toEqual({ ok: false, reason: "ended" });
+    expect(await refreshPlaybackAction("")).toEqual({ ok: false, reason: "ended" });
+  });
+
+  it("stops renewing the moment the category leaves the plan", async () => {
+    signInAs(orgKnee);
+    expect((await refreshPlaybackAction(muxKneeId)).ok).toBe(true);
+    await prisma.clinic.update({ where: { id: kneeClinic }, data: { categories: [] } });
+    try {
+      expect(await refreshPlaybackAction(muxKneeId)).toEqual({ ok: false, reason: "ended" });
+    } finally {
+      await prisma.clinic.update({ where: { id: kneeClinic }, data: { categories: ["KNEE"] } });
+    }
+  });
+
+  it("answers unavailable, not an exception and never the CDN file, when Mux is not configured or the server fails", async () => {
+    signInAs(orgKnee);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    delete process.env.MUX_SIGNING_KEY_ID;
+    try {
+      expect(await refreshPlaybackAction(muxKneeId)).toEqual({ ok: false, reason: "unavailable" });
+    } finally {
+      Object.assign(process.env, MUX_ENV);
+    }
+    vi.mocked(getCurrentClinicId).mockRejectedValueOnce(new Error("the database went away"));
+    expect(await refreshPlaybackAction(muxKneeId)).toEqual({ ok: false, reason: "unavailable" });
+    expect(log.mock.calls.flat().every((part) => typeof part === "string")).toBe(true);
   });
 });

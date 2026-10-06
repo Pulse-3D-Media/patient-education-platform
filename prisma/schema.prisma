@@ -28,6 +28,8 @@ model Video {
   isPlaceholder   Boolean  @default(false) // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
   posterUrl       String? // a still shown on the library card instead of the video's own first frame; empty means the branded fallback
   notes           String? // internal, for Pulse staff on /pulse/videos: what the file is, what is still to do. Never shown to a clinic
+  muxPlaybackId   String?  @unique // the SIGNED Mux playback id, once the video has moved to protected playback. Set, the video plays only through a signed Mux address (lib/playback-auth.ts) and videoUrl is kept as the record of where the file came from, never as a fallback. Empty means the file at videoUrl plays as before
+  muxAssetId      String? // the Mux asset the playback id belongs to, so staff can find it in the Mux dashboard. A note for staff; nothing plays from it
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shares          Share[]

@@ -159,7 +159,10 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
                     <td className="px-4 py-3 text-right text-[#bfbfbf]">
                       {video.durationSeconds == null ? "–" : formatDuration(video.durationSeconds)}
                     </td>
-                    <td className="px-4 py-3 text-[#bfbfbf]">{describeVideoSource(video)}</td>
+                    <td className="px-4 py-3 text-[#bfbfbf]">
+                      {describeVideoSource(video)}
+                      {video.muxUploadId !== null && <span className="block text-xs text-[#667085]">Upload in flight</span>}
+                    </td>
                     <td className="px-4 py-3 text-right text-[#bfbfbf]">{video._count.shares}</td>
                     <td className="px-4 py-3 text-[#bfbfbf]">{formatDate(video.createdAt)}</td>
                   </tr>

@@ -29,11 +29,12 @@ export const SAVE_NOT_CONFIRMED = "We could not confirm the save. Your entries a
  * after adding a video, a not-found) still do their job and only real
  * failures are turned into the sentence.
  */
-export async function safeSave(save: () => Promise<SaveOutcome>, passOn: (error: unknown) => void = () => {}): Promise<SaveOutcome> {
+export async function safeSave<Outcome extends SaveOutcome>(save: () => Promise<Outcome>, passOn: (error: unknown) => void = () => {}): Promise<Outcome> {
   try {
     return await save();
   } catch (error) {
     passOn(error);
-    return { error: SAVE_NOT_CONFIRMED };
+    // A plain refusal is one of the shapes every form's outcome allows, so it is handed back as the form's own kind.
+    return { error: SAVE_NOT_CONFIRMED } as Outcome;
   }
 }

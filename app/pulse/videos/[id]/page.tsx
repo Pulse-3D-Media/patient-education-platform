@@ -3,9 +3,12 @@ import { notFound } from "next/navigation";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
 import { getVideoForPulse } from "@/lib/db/videos";
+import { muxUploadsAreConfigured } from "@/lib/mux";
+import { parseUploadState } from "@/lib/mux-upload";
 import { requirePulseStaff } from "@/lib/pulse";
 import { describeVideoSource } from "@/lib/video";
 import { formatDate } from "../../ui";
+import { MuxUploader } from "../MuxUploader";
 import { VideoForm } from "../VideoForm";
 
 /**
@@ -58,6 +61,17 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
             Added. {video.isPublished ? "It is in the library now." : "It stays out of the library until it is published."}
           </p>
         )}
+
+        {/* Uploading a new file to Mux: where the file lives, an upload in flight, and the control. The form below is untouched by an upload until Mux says the asset is ready. */}
+        <div className="mb-5">
+          <MuxUploader
+            videoId={video.id}
+            configured={muxUploadsAreConfigured()}
+            uploadState={parseUploadState(video.muxUploadState)}
+            inFlight={video.muxUploadId !== null}
+            source={describeVideoSource(video)}
+          />
+        </div>
 
         <div className="rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
           <VideoForm

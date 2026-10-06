@@ -96,6 +96,13 @@ describe("playbackForVideo", () => {
     expect(playbackForVideo(cdn, NOW, new Date(NOW.getTime() + 60_000))).toEqual({ kind: "file", src: "https://example.com/a.mp4" });
   });
 
+  it("a video with neither a Mux id nor an address (its upload has not finished) is unavailable; a Mux-only video streams like any other", () => {
+    configureMux(true);
+    expect(playbackForVideo({ videoUrl: null, muxPlaybackId: null, durationSeconds: 110 }, NOW, null)).toEqual({ kind: "unavailable" });
+    expect(playbackForVideo({ videoUrl: "", muxPlaybackId: null, durationSeconds: null }, NOW, null)).toEqual({ kind: "unavailable" });
+    expect(playbackForVideo({ videoUrl: null, muxPlaybackId: playbackId, durationSeconds: 110 }, NOW, null)).toMatchObject({ kind: "stream" });
+  });
+
   it("hands out a Mux video as a signed stream and still, with the usual lifetime when nothing shorter applies", () => {
     configureMux(true);
     const source = playbackForVideo(mux, NOW, null);

@@ -7,6 +7,8 @@ import { createShare, SenderRefusedError, ShareRefusedError } from "@/lib/db/sha
 import { errorKind } from "@/lib/error-kind";
 import { ShareTermsError } from "@/lib/expiry";
 import { getSignedInName } from "@/lib/people";
+import { playbackForLibraryVideo } from "@/lib/playback-auth";
+import type { PlaybackSource } from "@/lib/playback-source";
 import { qrSvg } from "@/lib/qr";
 import { setOwnPatientName } from "@/lib/seat-changes";
 import { resolveSender } from "@/lib/senders";
@@ -151,5 +153,36 @@ export async function setMyPatientNameAction(choice: unknown): Promise<MyNameRes
   } catch (error) {
     console.error("Saving a surgeon's own name from the library failed", errorKind(error));
     return { error: "That could not be saved just now. Nothing was changed. Try again in a moment." };
+  }
+}
+
+/** What the player gets back when it asks for a fresh address: one, or why not. */
+export type PlaybackRefresh = { ok: true; source: PlaybackSource } | { ok: false; reason: "ended" | "unavailable" };
+
+/**
+ * The Server Action behind the library player's refresh: a little before a
+ * signed Mux address runs out, the player asks for a fresh one.
+ *
+ * The browser sends only a video id. The clinic is the signed-in person's,
+ * from the server's own lookup (getCurrentClinicId, null for anyone signed
+ * out or at a clinic that is not open), and the clinic's plan is asked about
+ * the video again with the same rule that lets a link be made
+ * (playbackForLibraryVideo). So a video id on its own obtains nothing, and a
+ * category taken off the plan while the player was open is not renewed:
+ * the answer is "ended", the player says so, and the token already out
+ * simply runs down. A failure on the server is "unavailable", logged by
+ * its kind, and the player tries again shortly.
+ */
+export async function refreshPlaybackAction(videoId: string): Promise<PlaybackRefresh> {
+  try {
+    const clinicId = await getCurrentClinicId();
+    if (!clinicId || typeof videoId !== "string" || !videoId.trim()) return { ok: false, reason: "ended" };
+    const source = await playbackForLibraryVideo(clinicId, videoId.trim());
+    if (source === null) return { ok: false, reason: "ended" };
+    if (source.kind === "unavailable") return { ok: false, reason: "unavailable" };
+    return { ok: true, source };
+  } catch (error) {
+    console.error("Refreshing a library video's playback failed", errorKind(error));
+    return { ok: false, reason: "unavailable" };
   }
 }

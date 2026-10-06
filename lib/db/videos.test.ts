@@ -7,6 +7,7 @@ import {
   countPublishedVideosByCategory,
   countPublishedVideosByKind,
   createVideo,
+  getVideoForPlayback,
   getVideoForPulse,
   listPublishedVideos,
   listPublishedVideosByCategory,
@@ -42,6 +43,8 @@ function input(overrides: Partial<VideoInput> = {}): VideoInput {
     isPlaceholder: true,
     isPublished: true,
     notes: null,
+    muxPlaybackId: null,
+    muxAssetId: null,
     ...overrides,
   };
 }
@@ -251,5 +254,29 @@ describe("countPublishedVideosByKind", () => {
       expect(counts.placeholder).toBe(await prisma.video.count({ where: { category: category as never, isPublished: true, isPlaceholder: true } }));
     }
     expect([finished.id, placeholder.id]).toHaveLength(2);
+  });
+});
+
+describe("the Mux fields and getVideoForPlayback", () => {
+  it("stores a signed playback id and asset id, keeps the CDN address beside them, and hands a player only what it needs", async () => {
+    const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
+    const video = await makeVideo({ muxPlaybackId: playbackId, muxAssetId: "AssetId00AbCdEf", isPublished: false });
+
+    const facts = await getVideoForPlayback(video.id);
+    expect(facts).toEqual({ id: video.id, videoUrl: "https://cdn.prod.website-files.com/test/vitest.mp4", muxPlaybackId: playbackId, durationSeconds: 110, isPublished: false });
+    // Nothing a player has no business with: no notes, no asset id, no title.
+    expect(facts).not.toHaveProperty("notes");
+    expect(facts).not.toHaveProperty("muxAssetId");
+
+    // Clearing the id goes back to the file, in place: same row, same id.
+    await updateVideo(video.id, input({ title: video.title, muxPlaybackId: null, muxAssetId: null }));
+    expect(await getVideoForPlayback(video.id)).toMatchObject({ id: video.id, muxPlaybackId: null });
+    expect(await getVideoForPlayback("no-such-video")).toBeNull();
+  });
+
+  it("refuses a second video with the same playback id (the unique column), so one id is one video", async () => {
+    const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
+    await makeVideo({ muxPlaybackId: playbackId });
+    await expect(createVideo(input({ muxPlaybackId: playbackId }))).rejects.toMatchObject({ code: "P2002" });
   });
 });

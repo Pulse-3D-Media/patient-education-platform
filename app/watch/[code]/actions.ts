@@ -1,10 +1,19 @@
 "use server";
 
 import { headers } from "next/headers";
-import { recordSharePlay, requestShareRenewal } from "@/lib/db/shares";
+import { getShareByCode, recordSharePlay, requestShareRenewal } from "@/lib/db/shares";
 import { errorKind } from "@/lib/error-kind";
+import { isExpired } from "@/lib/expiry";
+import { playbackForShare } from "@/lib/playback-auth";
+import type { PlaybackSource } from "@/lib/playback-source";
 import { notifyClinicOfRenewalRequest } from "@/lib/renewal-email";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
+import { usesProtectedPlayback } from "@/lib/video";
+
+/** A code as the player sends it, or nothing: anything odd is ignored without a database call. */
+function cleanCode(code: unknown): string | null {
+  return typeof code === "string" && code.length > 0 && code.length <= 20 ? code : null;
+}
 
 /**
  * Called from the player the first time the video actually starts playing
@@ -19,17 +28,57 @@ import { pickTrustedOrigin } from "@/lib/trusted-origin";
  * an exception, and the video keeps playing. A play that could not be
  * recorded is simply not counted, and a first-play link keeps its longer,
  * unclaimed deadline, so the patient is never worse off for it.
+ *
+ * When the first play moves the deadline of a link whose video streams from
+ * Mux, the answer also carries `playback`: a fresh grant made for the new
+ * deadline (lib/playback-auth.ts), because the one the page loaded with was
+ * bounded by the old one and may be shorter than the time the link now has.
+ * The player swaps to it at its next refresh. A video still on the CDN needs
+ * none, and nothing is handed out for a play that was not recorded.
  */
-export async function recordPlay(code: string): Promise<{ recorded: boolean }> {
-  if (typeof code !== "string" || code.length === 0 || code.length > 20) return { recorded: false };
+export async function recordPlay(code: string): Promise<{ recorded: boolean; playback?: PlaybackSource }> {
+  const clean = cleanCode(code);
+  if (!clean) return { recorded: false };
   try {
-    const result = await recordSharePlay(code);
-    return { recorded: result.recorded };
+    const result = await recordSharePlay(clean);
+    if (!result.recorded || !result.firstPlay) return { recorded: result.recorded };
+    const share = await getShareByCode(clean);
+    if (!share || !usesProtectedPlayback(share.video)) return { recorded: true };
+    return { recorded: true, playback: playbackForShare(share, new Date()) };
   } catch (error) {
     // The kind of failure goes to the server log, never to the patient's
     // screen, and never the error itself: its message could hold the code.
     console.error("Could not record a play start on a share link.", errorKind(error));
     return { recorded: false };
+  }
+}
+
+/** What the player gets back when it asks for a fresh address: one, or why not. */
+export type PlaybackRefresh = { ok: true; source: PlaybackSource } | { ok: false; reason: "ended" | "unavailable" };
+
+/**
+ * Called by the player a little before a signed address runs out, while the
+ * patient still has the page open. The link is looked up and judged again,
+ * exactly as the page judges it: working and its video published gets a
+ * fresh grant bounded by the link's deadline; a link that has run out,
+ * paused, been taken down or never existed gets "ended", and the player
+ * says so calmly and renews nothing. A link the browser invents gets
+ * nothing. A failure on the server is "unavailable": logged there by its
+ * kind, and the player simply tries again shortly.
+ */
+export async function refreshPlayback(code: string): Promise<PlaybackRefresh> {
+  const clean = cleanCode(code);
+  if (!clean) return { ok: false, reason: "ended" };
+  try {
+    const now = new Date();
+    const share = await getShareByCode(clean);
+    if (!share || isExpired(share, now) || !share.video.isPublished) return { ok: false, reason: "ended" };
+    const source = playbackForShare(share, now);
+    if (source.kind === "unavailable") return { ok: false, reason: "unavailable" };
+    return { ok: true, source };
+  } catch (error) {
+    console.error("Could not refresh a share link's playback.", errorKind(error));
+    return { ok: false, reason: "unavailable" };
   }
 }
 

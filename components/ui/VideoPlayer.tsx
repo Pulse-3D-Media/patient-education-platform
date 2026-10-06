@@ -15,6 +15,8 @@ import {
 import { PRIMARY_BUTTON } from "./styles";
 import { formatDuration } from "@/lib/format";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
+import type { PlaybackSource } from "@/lib/playback-source";
+import { useVideoSource } from "./useVideoSource";
 
 /**
  * The full-screen procedure player, with our own controls instead of the
@@ -65,9 +67,19 @@ import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback
  * Because the controls are ordinary buttons, the keyboard works everywhere
  * in the player: space or K plays and pauses, the arrows move ten seconds,
  * M mutes, F is full screen, and Escape (handled by the library page) closes.
+ *
+ * WHAT IT PLAYS is a PlaybackSource the category page made on the server
+ * (lib/playback-auth.ts): a plain file, or a signed, expiring Mux stream.
+ * useVideoSource puts it on the element (the browser's own HLS where it has
+ * it, hls.js loaded on demand elsewhere) and, a little before a signed
+ * address runs out, asks the server for a fresh one through `refresh`,
+ * which checks the clinic's plan again. When the answer is that access has
+ * ended (the category came off the plan while the player was open) the
+ * player says so calmly and renews nothing.
  */
 export function VideoPlayer({
-  src,
+  source,
+  refresh,
   title,
   subtitle,
   placeholder = false,
@@ -77,7 +89,10 @@ export function VideoPlayer({
   senderName = null,
   onClose,
 }: {
-  src: string;
+  /** What to play, made on the server for this clinic. */
+  source: PlaybackSource;
+  /** Ask the server for a fresh address for the same video: the new source, or null when access has ended. */
+  refresh?: () => Promise<PlaybackSource | null>;
   title: string;
   subtitle?: string;
   /** A still to show before the first frame arrives. Empty means the browser shows black. */
@@ -108,9 +123,21 @@ export function VideoPlayer({
   const [visible, setVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** Access ended while the player was open (the server would not renew the stream). Said calmly, with no Try again. */
+  const [ended, setEnded] = useState(false);
   const [slow, setSlow] = useState(false);
   /** The video's shape, width over height, once the file says; 16:9 until then. Places the strip on the picture's top edge. */
   const [ratio, setRatio] = useState(() => pictureRatio(undefined, undefined));
+  const { reload } = useVideoSource(vid, source, {
+    onFailure: () => fail(),
+    refresh,
+    onEnded: () => {
+      clearSlow();
+      window.clearTimeout(hideTimer.current);
+      setVisible(true);
+      setEnded(true);
+    },
+  });
 
   /** Show the controls, then hide them again after a pause if still playing. */
   const reveal = useCallback(() => {
@@ -193,15 +220,18 @@ export function VideoPlayer({
     const v = vid.current;
     if (!v) return;
     setFailed(false);
-    v.load();
-    start(v);
+    // The hook fetches the file afresh, or a fresh signed address when the old one has run out, and starts the video.
+    void reload(resumeAt.current);
     // Try again is about to disappear; hand the keyboard back to the player so the shortcuts keep working.
     window.requestAnimationFrame(() => box.current?.focus({ preventScroll: true }));
   };
 
+  /** Nothing is playing and nothing can be: the failure panel, or access ended. The layout treats both alike. */
+  const stopped = failed || ended;
+
   const togglePlay = () => {
     const v = vid.current;
-    if (!v || failed) return;
+    if (!v || stopped) return;
     if (v.paused) start(v);
     else v.pause();
     reveal();
@@ -209,7 +239,7 @@ export function VideoPlayer({
 
   const restart = () => {
     const v = vid.current;
-    if (!v || failed) return;
+    if (!v || stopped) return;
     v.currentTime = 0;
     start(v);
     reveal();
@@ -217,7 +247,7 @@ export function VideoPlayer({
 
   const seekBy = (seconds: number) => {
     const v = vid.current;
-    if (!v || failed) return;
+    if (!v || stopped) return;
     v.currentTime = Math.min(Math.max(0, v.currentTime + seconds), v.duration || 0);
     reveal();
   };
@@ -286,7 +316,7 @@ export function VideoPlayer({
   };
 
   const pct = duration ? (time / duration) * 100 : 0;
-  const fade = visible || failed ? "opacity-100" : "pointer-events-none opacity-0";
+  const fade = visible || stopped ? "opacity-100" : "pointer-events-none opacity-0";
 
   return (
     <div
@@ -305,7 +335,8 @@ export function VideoPlayer({
       <div className="picture-area relative min-h-0 flex-1" style={{ "--picture-ratio": ratio } as CSSProperties}>
         <video
           ref={vid}
-          src={src}
+          // A plain file goes on the element here; a stream is put on by useVideoSource once the player is awake.
+          src={source.kind === "file" ? source.src : undefined}
           poster={poster}
           autoPlay
           playsInline
@@ -345,30 +376,33 @@ export function VideoPlayer({
           }}
           aria-label={title}
           // When it has failed, the panel below says so in our words; the hidden video should not say it again.
-          aria-hidden={failed || undefined}
-          className={`absolute inset-0 h-full w-full object-contain ${failed ? "invisible" : ""}`}
+          aria-hidden={stopped || undefined}
+          className={`absolute inset-0 h-full w-full object-contain ${stopped ? "invisible" : ""}`}
         />
 
         {/* Said only when the wait has gone on a while. It sits over the picture, but only while the picture is stuck. The element is always here so a screen reader hears the words when they arrive. */}
         <p
           role="status"
           className={
-            slow && !failed
+            slow && !stopped
               ? "pointer-events-none absolute left-1/2 top-1/2 z-10 w-max max-w-[86%] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-black/70 px-4 py-2 text-center text-base text-white"
               : "sr-only"
           }
         >
-          {slow && !failed ? "Still loading. A slow connection can take a little longer." : ""}
+          {slow && !stopped ? "Still loading. A slow connection can take a little longer." : ""}
         </p>
 
-        {failed && (
-          // Calm, and never the word "error". Announced to a screen reader when it appears.
+        {stopped && (
+          // Calm, and never the word "error". Announced to a screen reader when it appears. The same panel says, with
+          // no Try again, that the video is no longer on the clinic's plan when the server would not renew the stream.
           <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
-            <p className="text-xl font-semibold text-white">This video did not load.</p>
-            <p className="text-base text-[#bfbfbf]">Check your connection, then try again.</p>
-            <button ref={retryButton} type="button" onClick={retry} className={`${PRIMARY_BUTTON} min-h-12`}>
-              Try again
-            </button>
+            <p className="text-xl font-semibold text-white">{ended ? "This video is no longer available to your clinic." : "This video did not load."}</p>
+            <p className="text-base text-[#bfbfbf]">{ended ? "It has come off your clinic's plan. Your office admin can add it back on Billing." : "Check your connection, then try again."}</p>
+            {!ended && (
+              <button ref={retryButton} type="button" onClick={retry} className={`${PRIMARY_BUTTON} min-h-12`}>
+                Try again
+              </button>
+            )}
           </div>
         )}
 
@@ -396,8 +430,8 @@ export function VideoPlayer({
           </button>
         </div>
 
-        {/* Controls band. Not there at all while the video has failed: there is nothing to control. */}
-        {!failed && (
+        {/* Controls band. Not there at all while the video has failed or access ended: there is nothing to control. */}
+        {!stopped && (
           <div
             className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-5 pb-3 pt-12 transition-opacity duration-300 ${fade}`}
           >

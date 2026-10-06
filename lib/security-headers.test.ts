@@ -74,6 +74,13 @@ describe("contentSecurityPolicy", () => {
     expect(directive(production, "font-src")).toEqual(["'self'", "data:"]);
   });
 
+  it("allows Mux streams, both as media and as the connections hls.js makes for them; stills ride on the https picture rule", () => {
+    expect(directive(production, "media-src")).toContain("https://stream.mux.com");
+    expect(directive(production, "connect-src")).toContain("https://stream.mux.com");
+    // Nothing of Mux's runs as script here: hls.js is served from our own address.
+    expect(directive(production, "script-src")).not.toContain("https://stream.mux.com");
+  });
+
   it("keeps forms on our own address and refuses framing, plug-ins and <base>", () => {
     expect(directive(production, "form-action")).toEqual(["'self'"]);
     expect(directive(production, "frame-ancestors")).toEqual(["'none'"]);

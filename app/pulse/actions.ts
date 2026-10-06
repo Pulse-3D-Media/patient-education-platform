@@ -21,10 +21,13 @@ import { addClinicNote } from "@/lib/db/notes";
 import { PricingError, activatePricingVersion, createPricingVersion } from "@/lib/db/pricing";
 import { saveSettings, type Settings } from "@/lib/db/settings";
 import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/lib/db/videos";
+import { errorKind } from "@/lib/error-kind";
 import { isValidRenewalCount, MAX_LINK_DAYS, MAX_RENEWALS, MIN_LINK_DAYS, MIN_RENEWALS } from "@/lib/expiry";
 import { parseDuration } from "@/lib/format";
+import { checkPlaybackId } from "@/lib/mux";
 import { NOTE_MAX_LENGTH, cleanNote } from "@/lib/note-form";
 import { renameClerkOrganization } from "@/lib/organization";
+import { isPlaybackIdShape } from "@/lib/playback-source";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 import { setOwnerByStaff } from "@/lib/seat-changes";
@@ -412,6 +415,16 @@ function videoFromForm(formData: FormData): { input: VideoInput } | { error: str
   const notes = String(formData.get("notes") ?? "").trim();
   if (notes.length > VIDEO_NOTES_LIMIT) return { error: `Keep the notes under ${VIDEO_NOTES_LIMIT} characters.` };
 
+  // The Mux fields. The id's shape is checked here; whether Mux knows it, and
+  // whether its policy is signed, is checked against Mux in saveVideoAction.
+  const muxPlaybackId = String(formData.get("muxPlaybackId") ?? "").trim();
+  if (muxPlaybackId && !isPlaybackIdShape(muxPlaybackId)) {
+    return { error: "That does not look like a Mux playback id. Copy it from the asset's page in the Mux dashboard, or leave the box empty." };
+  }
+  const muxAssetId = String(formData.get("muxAssetId") ?? "").trim();
+  if (muxAssetId && !isPlaybackIdShape(muxAssetId)) return { error: "That does not look like a Mux asset id. Copy it from the Mux dashboard, or leave the box empty." };
+  if (muxAssetId && !muxPlaybackId) return { error: "An asset id on its own plays nothing. Add the signed playback id too, or leave both empty." };
+
   return {
     input: {
       title,
@@ -423,8 +436,24 @@ function videoFromForm(formData: FormData): { input: VideoInput } | { error: str
       isPlaceholder: formData.get("isPlaceholder") === "on",
       isPublished: formData.get("isPublished") === "on",
       notes: notes || null,
+      muxPlaybackId: muxPlaybackId || null,
+      muxAssetId: muxAssetId || null,
     },
   };
+}
+
+/**
+ * A playback id is saved only once Mux has been asked about it (lib/mux.ts):
+ * it must have the signed policy, and the key on this deployment must open
+ * it. Asked when an id is first put on a video or changed; a save that
+ * leaves the id as it was does not ask again, so a slow Mux never stops a
+ * title from being corrected. Without Mux configured here the id is refused:
+ * a video marked as moved would then play for nobody.
+ */
+async function checkMuxBeforeSave(input: VideoInput, existing: { muxPlaybackId: string | null } | null): Promise<string | null> {
+  if (!input.muxPlaybackId || input.muxPlaybackId === existing?.muxPlaybackId) return null;
+  const check = await checkPlaybackId(input.muxPlaybackId);
+  return check.ok ? null : check.message;
 }
 
 /** Tell Next.js the catalogue changed, wherever it is shown. */
@@ -448,17 +477,27 @@ export async function saveVideoAction(_previous: FormState, formData: FormData):
   if ("error" in checked) return checked;
 
   const id = String(formData.get("id") ?? "").trim();
-  if (id) {
-    const existing = await getVideoForPulse(id);
-    if (!existing) return { error: "That video no longer exists." };
-    await updateVideo(id, checked.input);
-    refreshCatalogue(id);
-    return { ok: "Saved. Every link that points at this video plays the new version." };
-  }
+  try {
+    if (id) {
+      const existing = await getVideoForPulse(id);
+      if (!existing) return { error: "That video no longer exists." };
+      const refused = await checkMuxBeforeSave(checked.input, existing);
+      if (refused) return { error: refused };
+      await updateVideo(id, checked.input);
+      refreshCatalogue(id);
+      return { ok: "Saved. Every link that points at this video plays the new version." };
+    }
 
-  const video = await createVideo(checked.input);
-  refreshCatalogue(video.id);
-  redirect(`/pulse/videos/${video.id}?added=1`);
+    const refused = await checkMuxBeforeSave(checked.input, null);
+    if (refused) return { error: refused };
+    const video = await createVideo(checked.input);
+    refreshCatalogue(video.id);
+    redirect(`/pulse/videos/${video.id}?added=1`);
+  } catch (error) {
+    // One playback id belongs to one video: the unique column refuses a second row with it (Prisma P2002).
+    if (errorKind(error) === "Prisma P2002") return { error: "That playback id is already on another video. Each Mux playback id belongs to one video." };
+    throw error;
+  }
 }
 
 /** Save one category's "for sale" switch and its coming-soon sentence. */

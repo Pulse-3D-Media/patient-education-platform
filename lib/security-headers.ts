@@ -65,6 +65,15 @@ export const CSP_ENFORCED = false;
 /** Where the finished animations, posters and the Pulse logo are served from today. */
 const WEBFLOW_CDN = ["https://cdn.prod.website-files.com", "https://*.website-files.com", "https://uploads-ssl.webflow.com"];
 
+/**
+ * Where a video that has moved to Mux streams from (lib/mux.ts). The
+ * playlist and its pieces come from stream.mux.com; on browsers without
+ * HLS of their own they are fetched by script (hls.js), which is a
+ * connection, not a media load, so the address is in both lists. Stills
+ * come from image.mux.com, which the picture rule (any https) already lets in.
+ */
+const MUX_STREAM = ["https://stream.mux.com"];
+
 /** Clerk's bot check (Cloudflare Turnstile) and its newer protection service, both shown on sign-up. */
 const CLERK_CHALLENGES = ["https://challenges.cloudflare.com", "https://*.protect.clerk.com"];
 
@@ -106,7 +115,7 @@ export function contentSecurityPolicy(settings: SecurityHeaderSettings): string 
     // Pictures may come from any https address: a clinic's logo is an
     // address Pulse staff approve, on whatever site the clinic keeps it.
     "img-src": ["'self'", "data:", "blob:", "https:"],
-    "media-src": ["'self'", "blob:", ...WEBFLOW_CDN],
+    "media-src": ["'self'", "blob:", ...WEBFLOW_CDN, ...MUX_STREAM],
     // Our fonts are served from our own address (app/brand-fonts.ts).
     "font-src": ["'self'", "data:", ...(preview ? ["https://vercel.live", "https://assets.vercel.com"] : [])],
     "connect-src": [
@@ -115,6 +124,7 @@ export function contentSecurityPolicy(settings: SecurityHeaderSettings): string 
       "https://clerk-telemetry.com",
       "https://*.clerk-telemetry.com",
       "https://img.clerk.com",
+      ...MUX_STREAM,
       ...CLERK_CHALLENGES,
       ...(preview ? ["https://vercel.live", "wss://ws-us3.pusher.com"] : []),
     ],

@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ClinicMark, OnPicture, pictureRatio } from "@/components/ui/ClinicMark";
 import { useModalFocus } from "@/components/ui/useModalFocus";
+import { useVideoSource } from "@/components/ui/useVideoSource";
 import { CloseIcon, FullscreenIcon, PhoneIcon, PlayIcon } from "@/components/ui/icons";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
-import { recordPlay } from "./actions";
+import type { PlaybackSource } from "@/lib/playback-source";
+import { recordPlay, refreshPlayback } from "./actions";
 import { CallNumber } from "./CallButton";
 
 /**
@@ -94,9 +96,21 @@ import { CallNumber } from "./CallButton";
  * or Firefox; there, full screen from the browser's own button still shows
  * the video without the strip, and that is the browser's to decide.
  * Picture-in-picture is left as it is (it too shows the video alone).
+ *
+ * WHAT IT PLAYS is a PlaybackSource the page made on the server
+ * (lib/playback-auth.ts): a plain file for a video still on the CDN, or a
+ * signed, expiring Mux stream for one that has moved. useVideoSource puts it
+ * on the element, and, for a stream, asks the server for a fresh address a
+ * little before the token runs out (refreshPlayback, which checks the link
+ * again). The first real play may move the link's deadline (recordPlay); the
+ * answer then carries a grant for the new deadline, which replaces the one
+ * the page loaded with, so the stream never stops short of the time the link
+ * now has. When the link's time runs out while the page is open the player
+ * says so in the same calm words as the expired page, with the clinic's
+ * number, and renews nothing.
  */
 export function WatchPlayer({
-  src,
+  source,
   title,
   code,
   clinicName,
@@ -104,7 +118,8 @@ export function WatchPlayer({
   senderName,
   call,
 }: {
-  src: string;
+  /** What to play, made on the server for this link. */
+  source: PlaybackSource;
   title: string;
   code: string;
   clinicName: string;
@@ -128,7 +143,25 @@ export function WatchPlayer({
 
   const [started, setStarted] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** The link's time ran out while the page was open (a stream's token was not renewed). Said calmly, with no Try again. */
+  const [ended, setEnded] = useState(false);
   const [slow, setSlow] = useState(false);
+  /** A grant for the link's new deadline, handed back when the first play moved it; used in place of asking the server at the next refresh. */
+  const pendingGrant = useRef<PlaybackSource | null>(null);
+  const { reload } = useVideoSource(video, source, {
+    onFailure: () => fail(),
+    refresh: async () => {
+      const ready = pendingGrant.current;
+      pendingGrant.current = null;
+      if (ready) return ready;
+      const answer = await refreshPlayback(code);
+      return answer.ok ? answer.source : answer.reason === "ended" ? null : { kind: "unavailable" };
+    },
+    onEnded: () => {
+      clearSlow();
+      setEnded(true);
+    },
+  });
   /** The video's shape, width over height, once the file says; 16:9 until then. Places the strip on the picture's top edge. */
   const [ratio, setRatio] = useState(() => pictureRatio(undefined, undefined));
   /** "fullscreen": the browser's element full screen. "overlay": our own expanded view, where that is not available. */
@@ -181,8 +214,8 @@ export function WatchPlayer({
     const element = video.current;
     if (!element) return;
     setFailed(false);
-    element.load();
-    play();
+    // The hook fetches the file afresh, or a fresh signed address when the old one has run out; it starts the video too.
+    void reload(resumeAt.current);
     window.requestAnimationFrame(() => element.focus({ preventScroll: true }));
   }
 
@@ -204,7 +237,12 @@ export function WatchPlayer({
     counted.current = true;
     // Recorded in the background, one attempt. If it does not get through,
     // the video still plays; the play is just not counted (see actions.ts).
-    recordPlay(code).catch(() => {});
+    recordPlay(code)
+      .then((answer) => {
+        // The first play moved the deadline: the stream's next refresh uses this grant, for the link's new window.
+        if (answer.playback) pendingGrant.current = answer.playback;
+      })
+      .catch(() => {});
   }
 
   /** The video has run out of data and is waiting for more. Say so only if it goes on for a while. */
@@ -313,6 +351,8 @@ export function WatchPlayer({
   }
 
   const isBig = big !== "no";
+  /** Nothing is playing and nothing can be: the failure panel, or the link's time ran out. The layout treats both alike. */
+  const stopped = failed || ended;
 
   return (
     <div>
@@ -320,7 +360,7 @@ export function WatchPlayer({
           It is a grid, and never shorter than what it holds (min-h-fit), so that in the one case where the player sits
           inside it rather than over it (the failure panel, below) the box grows to fit instead of squeezing or cutting
           off what is in it. On a wide screen, where the video's box is already taller than the panel, it stays as it is. */}
-      <div className="relative grid min-h-fit w-full" style={failed ? undefined : { paddingTop: "56.25%" }}>
+      <div className="relative grid min-h-fit w-full" style={stopped ? undefined : { paddingTop: "56.25%" }}>
         <div
           ref={frame}
           tabIndex={-1}
@@ -332,7 +372,7 @@ export function WatchPlayer({
             isBig
               ? // Fixed to the edges of the screen (no viewport units, so the browser's bars sliding in and out just re-fit it), inside the phone's safe areas.
                 "fixed inset-0 z-50 flex flex-col overflow-y-auto bg-black pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]"
-              : failed
+              : stopped
                 ? // The failure panel holds a sentence, a button and a phone link. On a phone the video's box is only
                   // about 190px tall, too short for all of that at full size, and squeezing it shrank "Try again" to
                   // 26px (measured). So here the player takes its place IN the page and is as tall as it needs to be.
@@ -361,7 +401,7 @@ export function WatchPlayer({
           )}
 
           {/* No picture to lay it over while the video will not load: the strip is a row of its own above the panel (its top corners rounded like the panel's when the player is in the page). */}
-          {failed && (
+          {stopped && (
             <div className={isBig ? "" : "overflow-hidden rounded-t-[18px]"}>
               <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} inFlow />
             </div>
@@ -370,14 +410,17 @@ export function WatchPlayer({
           <div className={`relative flex flex-1 flex-col ${isBig ? "min-h-32" : "min-h-0"}`}>
             <video
               ref={video}
-              src={src}
+              // A plain file goes in the page's HTML so the browser starts fetching at once (useVideoSource leaves it be).
+              // A stream is put on by the hook once the page is awake; until then its signed still stands in.
+              src={source.kind === "file" ? source.src : undefined}
+              poster={source.kind === "stream" ? source.poster : undefined}
               preload="auto"
               playsInline
               // The browser's controls arrive with the first play, as they always have here: before it, the big
               // Play button is the only thing on the picture, and a control bar showing through under "Tap to play"
               // would be a second, smaller play button to aim at.
-              controls={started && !failed}
-              tabIndex={started && !failed ? 0 : -1}
+              controls={started && !stopped}
+              tabIndex={started && !stopped ? 0 : -1}
               // nofullscreen: Chromium's own full-screen button would show the video without the strip. See the note at the top.
               controlsList="nodownload nofullscreen"
               onPlay={onPlay}
@@ -389,13 +432,13 @@ export function WatchPlayer({
               aria-label={title}
               // When it has failed, the panel below says so in our words. Without this a screen reader also reads
               // the browser's own "Unable to play media" from the video underneath, the same news twice.
-              aria-hidden={failed || undefined}
-              className={`absolute inset-0 h-full w-full object-contain ${failed ? "invisible" : ""}`}
+              aria-hidden={stopped || undefined}
+              className={`absolute inset-0 h-full w-full object-contain ${stopped ? "invisible" : ""}`}
             />
 
             {/* What is laid over the picture itself, from before the first play on: the strip on its top edge, and, only while
                 the picture is stuck, a "still loading" note just under the strip. Neither takes a tap. */}
-            {!failed && (
+            {!stopped && (
               <OnPicture ratio={ratio}>
                 <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} />
                 {/* Said only when the wait has gone on a while, so a tap on a weak signal never looks ignored. The element is always here (while there is a picture) so a screen reader hears the words when they arrive; the "did not load" panel announces itself. */}
@@ -412,7 +455,7 @@ export function WatchPlayer({
               </OnPicture>
             )}
 
-            {!started && !failed && (
+            {!started && !stopped && (
               // The keyboard focus ring is drawn just inside the edge, because the
               // rounded box clips anything drawn outside it.
               <button
@@ -430,21 +473,27 @@ export function WatchPlayer({
               </button>
             )}
 
-            {failed && (
+            {stopped && (
               // Calm, like the expired page: no red, and never the word "error". Announced to a screen reader when it appears.
               // It is part of the page's flow (not laid over the video's box), so it is as tall as its words and buttons
               // need, and "shrink-0" on the two controls means they keep their full 48px whatever else happens.
+              // The same panel says, in the expired page's words, that the link's time ran out while the page was open;
+              // there is no Try again then, because nothing is renewed once access has ended.
               <div role="alert" className="relative flex flex-1 flex-col items-center justify-center gap-3 rounded-[18px] bg-[#12202a] px-5 py-6 text-center">
-                <p className="text-[20px] leading-[1.35] font-semibold text-white">The video did not load.</p>
-                <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">Check your connection, then try again.</p>
-                <button
-                  ref={retryButton}
-                  type="button"
-                  onClick={retry}
-                  className="mt-1 flex h-12 shrink-0 items-center rounded-full bg-white px-7 text-[17px] font-semibold text-[#12333f] transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
-                >
-                  Try again
-                </button>
+                <p className="text-[20px] leading-[1.35] font-semibold text-white">{ended ? "This link has expired." : "The video did not load."}</p>
+                <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">
+                  {ended ? `Links stay open for a set time. ${clinicName} can send you a fresh one whenever you need it.` : "Check your connection, then try again."}
+                </p>
+                {!ended && (
+                  <button
+                    ref={retryButton}
+                    type="button"
+                    onClick={retry}
+                    className="mt-1 flex h-12 shrink-0 items-center rounded-full bg-white px-7 text-[17px] font-semibold text-[#12333f] transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
+                  >
+                    Try again
+                  </button>
+                )}
                 {/* A tap-to-call link on a phone; on a computer, where it would do nothing useful, the number as plain words (see CallButton). */}
                 {call && (
                   <>
@@ -453,7 +502,7 @@ export function WatchPlayer({
                       className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[16px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
                     >
                       <PhoneIcon className="h-5 w-5 shrink-0" />
-                      Still stuck? Call {call.label}
+                      {ended ? "Call" : "Still stuck? Call"} {call.label}
                     </a>
                     <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[16px] text-white" />
                   </>
@@ -466,7 +515,7 @@ export function WatchPlayer({
 
       {/* Offered once the video is playing, so that before the first tap there is still nothing to press but Play. Its space is kept from the start, so nothing under the video moves when it appears. */}
       <div className="mt-3 min-h-12">
-        {started && !failed && (
+        {started && !stopped && (
           <button
             ref={biggerButton}
             type="button"

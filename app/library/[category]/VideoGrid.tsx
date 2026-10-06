@@ -6,13 +6,15 @@ import { useModalFocus } from "@/components/ui/useModalFocus";
 import { PlayIcon, ShareIcon } from "@/components/ui/icons";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { formatDuration } from "@/lib/format";
-import { sendShareAction, type SendResult } from "./actions";
+import type { PlaybackSource } from "@/lib/playback-source";
+import { refreshPlaybackAction, sendShareAction, type SendResult } from "./actions";
 import { SendPanel } from "./SendPanel";
 
 type Item = {
   id: string;
   title: string;
-  src: string;
+  /** What to play, made on the server for this clinic (lib/playback-auth.ts): a plain file, or a signed Mux stream. */
+  source: PlaybackSource;
   /** A still for the card, chosen on /pulse. Null means the video's own first frame, or the branded fallback. */
   posterUrl: string | null;
   durationSeconds: number | null;
@@ -160,11 +162,17 @@ export function VideoGrid({
         <div ref={playerDialog} tabIndex={-1} data-theme="dark" className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-black text-ink pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]" role="dialog" aria-modal="true" aria-label={`${playing.title}, from ${clinicName}`}>
           <VideoPlayer
             key={playing.id}
-            src={playing.src}
+            source={playing.source}
+            // Before a signed address runs out, the player asks the server for a fresh one; the clinic's plan is checked again then.
+            refresh={async () => {
+              const answer = await refreshPlaybackAction(playing.id);
+              return answer.ok ? answer.source : answer.reason === "ended" ? null : { kind: "unavailable" };
+            }}
             title={playing.title}
             subtitle={categoryLabel}
             placeholder={playing.isPlaceholder}
-            poster={playing.posterUrl ?? undefined}
+            // The still chosen on /pulse; for a stream, the signed still from the video itself.
+            poster={playing.posterUrl ?? (playing.source.kind === "stream" ? playing.source.poster : undefined)}
             clinicName={clinicName}
             logoUrl={logoUrl}
             senderName={senderName}
@@ -202,17 +210,22 @@ function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => v
       >
         {thumbFailed ? (
           <BrandedFallback />
-        ) : video.posterUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- a CDN still, no resizing needed
+        ) : video.posterUrl || video.source.kind === "stream" ? (
+          // The still chosen on /pulse, or, for a video that streams from Mux, the signed still Mux makes from the video itself.
+          // A picture, never a stream: a grid of cards must not load a streaming library or a playlist per card.
+          // eslint-disable-next-line @next/next/no-img-element -- a CDN or Mux still, no resizing needed
           <img
-            src={video.posterUrl}
+            src={video.posterUrl ?? (video.source.kind === "stream" ? video.source.poster : "")}
             alt=""
+            referrerPolicy="no-referrer"
             onError={() => setThumbFailed(true)}
             className="h-full w-full object-cover transition group-hover:scale-[1.03]"
           />
+        ) : video.source.kind === "unavailable" ? (
+          <BrandedFallback />
         ) : (
           <video
-            src={`${video.src}#t=1`}
+            src={`${video.source.src}#t=1`}
             preload="metadata"
             muted
             playsInline

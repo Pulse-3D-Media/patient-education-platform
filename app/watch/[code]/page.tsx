@@ -9,8 +9,9 @@ import { getShareByCode } from "@/lib/db/shares";
 import { canRequestRenewal, isExpired, renewalState } from "@/lib/expiry";
 import { EDUCATION_ONLY } from "@/lib/education-note";
 import { describeDuration } from "@/lib/format";
+import { playbackForShare } from "@/lib/playback-auth";
+import { windowCoversVideo } from "@/lib/playback-source";
 import { senderLines } from "@/lib/sender-name";
-import { getPlaybackUrl } from "@/lib/video";
 import { AskClinic } from "./AskClinic";
 import { CallButton } from "./CallButton";
 import { WatchPlayer } from "./WatchPlayer";
@@ -145,6 +146,16 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
 
   const length = describeDuration(share.video.durationSeconds);
 
+  // What the player loads, made here on the server for this link
+  // (lib/playback-auth.ts): the plain file for a video still on the CDN, or
+  // a signed Mux address that lives no longer than the link does. A link
+  // that has only minutes left, which the first play will not extend (it
+  // was played already, or is a legacy link), is told so in plain words
+  // rather than letting the video stop part-way with no explanation.
+  const source = playbackForShare(share, now);
+  const willNotExtend = share.expiryPolicy !== "FIRST_PLAY" || share.firstPlayedAt !== null;
+  const endsSoon = willNotExtend && !windowCoversVideo(now, share.expiresAt, share.video.durationSeconds);
+
   return (
     <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
       <BrandBand />
@@ -173,9 +184,16 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
           Your surgeon shared this so you can see what happens during your operation.
         </p>
 
+        {/* Said only when the time left cannot hold one whole viewing and the first play will not add any: honest, calm, and the number to call. */}
+        {endsSoon && (
+          <p role="note" className="mt-5 rounded-xl bg-[#eef1f4] px-4 py-3 text-[16px] leading-[1.5] text-[#3a4c56]">
+            This link stops working in a few minutes, so the video may stop before the end. {share.clinic.name} can send you a fresh link.
+          </p>
+        )}
+
         <div className="mt-6">
           <WatchPlayer
-            src={getPlaybackUrl(share.video)}
+            source={source}
             title={share.video.title}
             code={share.code}
             clinicName={share.clinic.name}

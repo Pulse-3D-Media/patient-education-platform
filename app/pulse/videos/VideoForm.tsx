@@ -155,6 +155,11 @@ export function VideoForm({ video, uploadsConfigured = false }: { video?: VideoV
       <form {...form} onSubmit={confirmBeforeSend} className="flex flex-col gap-4">
         {video && <input type="hidden" name="id" value={video.id} />}
         {addingWithFile && <input type="hidden" name="uploadPending" value="1" />}
+        {/* What the form was SHOWING for the three boxes an upload fills in. The server keeps the row's value for any of
+            them the staff member did not change, so a form drawn before an upload finished cannot wipe what the upload wrote. */}
+        {video && <input type="hidden" name="shownMuxPlaybackId" value={video.muxPlaybackId ?? ""} />}
+        {video && <input type="hidden" name="shownMuxAssetId" value={video.muxAssetId ?? ""} />}
+        {video && <input type="hidden" name="shownDurationSeconds" value={video.durationSeconds == null ? "" : formatDuration(video.durationSeconds)} />}
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="md:col-span-2">

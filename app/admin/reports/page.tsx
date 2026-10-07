@@ -4,9 +4,12 @@ import { requireClinicPage } from "@/lib/clinic";
 import { AdminFrame } from "../AdminFrame";
 
 /**
- * Reports, at /admin/reports: a placeholder until clinic reporting is
- * built, so the section link in the navigation never leads nowhere.
- * Admins only, like every admin page. Shows nothing about the clinic.
+ * Reports, at /admin/reports: a placeholder, so the section link in the
+ * navigation never leads nowhere. Admins only, like every admin page. Shows
+ * nothing about the clinic. Reports exist for Pulse staff (/pulse/reports);
+ * clinics do not see them yet (decided by Evan on 2026-10-07, while it is
+ * still being tested whether clinics want them), so this page promises no
+ * particular number.
  */
 export const dynamic = "force-dynamic";
 
@@ -24,8 +27,7 @@ export default async function ReportsPage() {
   return (
     <AdminFrame clinic={clinic} title="Reports" intro="Coming later.">
       <p className="mt-6 max-w-xl text-ink-soft">
-        How your links get used: links made and play starts per procedure, and which categories see the most use. Totals
-        only, never anything about a patient. Until then, each link&rsquo;s play starts are on the Shared links page.
+        Reports on how your clinic uses its links are coming later. They will show totals only, never anything about a patient.
       </p>
     </AdminFrame>
   );

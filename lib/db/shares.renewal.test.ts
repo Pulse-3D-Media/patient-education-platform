@@ -138,6 +138,8 @@ describe("the patient's request", () => {
     const nextDay = new Date(paused.getTime() + DAY_MS);
     expect((await requestShareRenewal(code, nextDay)).kind).toBe("requested");
     expect((await read(code)).renewalRequestedAt?.getTime()).toBe(nextDay.getTime());
+    // The tally for the Pulse reports counts the two recorded requests, not the tap that was "already asked".
+    expect((await read(code)).renewalRequests).toBe(2);
     // One tick short of a day is still inside it.
     const justBefore = new Date(nextDay.getTime() + DAY_MS - 1);
     expect(await requestShareRenewal(code, justBefore)).toEqual({ kind: "already-asked" });
@@ -149,9 +151,10 @@ describe("the patient's request", () => {
     const outcomes = await Promise.all(Array.from({ length: 5 }, () => requestShareRenewal(code, paused)));
     expect(outcomes.filter((one) => one.kind === "requested")).toHaveLength(1);
     expect(outcomes.filter((one) => one.kind === "already-asked")).toHaveLength(4);
+    expect((await read(code)).renewalRequests).toBe(1);
   });
 
-  it("writes one timestamp and nothing else: no other column of the link changes, and no other table gains a row", async () => {
+  it("writes one timestamp and one more on the tally, and nothing else: no other column of the link changes, and no other table gains a row", async () => {
     const code = await makePlayed(clinic, video);
     const before = await read(code);
     const notesBefore = await prisma.clinicNote.count({ where: { clinicId: clinic } });
@@ -159,10 +162,11 @@ describe("the patient's request", () => {
     expect((await requestShareRenewal(code, addDays(T, 11))).kind).toBe("requested");
 
     const after = await read(code);
-    const { renewalRequestedAt: wasNull, ...restBefore } = before;
-    const { renewalRequestedAt: nowSet, ...restAfter } = after;
+    const { renewalRequestedAt: wasNull, renewalRequests: tallyBefore, ...restBefore } = before;
+    const { renewalRequestedAt: nowSet, renewalRequests: tallyAfter, ...restAfter } = after;
     expect(wasNull).toBeNull();
     expect(nowSet).toEqual(addDays(T, 11));
+    expect([tallyBefore, tallyAfter]).toEqual([0, 1]);
     expect(restAfter).toEqual(restBefore);
     expect(await prisma.clinicNote.count({ where: { clinicId: clinic } })).toBe(notesBefore);
   });
@@ -181,7 +185,10 @@ describe("the patient's request", () => {
 
     expect(await requestShareRenewal("nosuch", T)).toEqual({ kind: "refused", reason: "no-such-link" });
 
-    for (const code of [working, legacy, toHidden]) expect((await read(code)).renewalRequestedAt).toBeNull();
+    for (const code of [working, legacy, toHidden]) {
+      expect((await read(code)).renewalRequestedAt).toBeNull();
+      expect((await read(code)).renewalRequests).toBe(0);
+    }
   });
 });
 
@@ -201,6 +208,8 @@ describe("the clinic turning a link back on", () => {
     expect(row.renewalsUsed).toBe(1);
     expect(row.lastRenewedAt).toEqual(addDays(T, 12));
     expect(row.renewalRequestedAt).toBeNull();
+    // Turning it back on clears the request but never the tally: the request still happened.
+    expect(row.renewalRequests).toBe(1);
     // The first play is history; it is not moved or repeated.
     expect(row.firstPlayedAt).toEqual(T);
 

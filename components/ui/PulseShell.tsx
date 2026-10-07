@@ -26,7 +26,7 @@ const SECTIONS: { href: string; label: string; coming?: boolean; matches: (path:
   { href: "/pulse/pricing", label: "Pricing", matches: (p) => p.startsWith("/pulse/pricing") },
   { href: "/pulse/billing", label: "Billing", matches: (p) => p.startsWith("/pulse/billing") },
   { href: "/pulse/settings", label: "Settings", matches: (p) => p.startsWith("/pulse/settings") },
-  { href: "/pulse/reports", label: "Reports", coming: true, matches: (p) => p.startsWith("/pulse/reports") },
+  { href: "/pulse/reports", label: "Reports", matches: (p) => p.startsWith("/pulse/reports") },
 ];
 
 export function PulseShell({ children }: { children: ReactNode }) {

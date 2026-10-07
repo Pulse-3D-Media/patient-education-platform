@@ -262,7 +262,7 @@ export async function updateVideo(id: string, input: VideoInput) {
 export async function getVideoUpload(videoId: string) {
   return prisma.video.findUnique({
     where: { id: videoId },
-    select: { id: true, muxUploadId: true, muxUploadState: true, muxPlaybackId: true, videoUrl: true },
+    select: { id: true, title: true, muxUploadId: true, muxUploadState: true, muxPlaybackId: true, videoUrl: true },
   });
 }
 

@@ -255,8 +255,13 @@ export type AssetFacts = {
  * an id Mux does not know (a 404), so the flow can tell "gone" from "down".
  */
 export type MuxUploadGateway = {
-  /** Ask Mux for a one-time upload address. The asset it will make gets the SIGNED policy and UPLOAD_VIDEO_QUALITY, nothing else. */
-  createUpload(input: { corsOrigin: string }): Promise<{ id: string; url: string }>;
+  /**
+   * Ask Mux for a one-time upload address. The asset it will make gets the
+   * SIGNED policy, UPLOAD_VIDEO_QUALITY, and a name: the video's title and
+   * its id, so the asset reads as the video in the Mux dashboard and can be
+   * matched to its row. Nothing else.
+   */
+  createUpload(input: { corsOrigin: string; title: string; externalId: string }): Promise<{ id: string; url: string }>;
   getUpload(uploadId: string): Promise<UploadFacts | null>;
   getAsset(assetId: string): Promise<AssetFacts | null>;
   /** Cancel an upload whose file has not arrived. Mux refuses once an asset exists; the caller then looks at the upload instead. */
@@ -342,16 +347,22 @@ export function makeMuxUploadGateway(options: { env?: MuxEnv; fetch?: typeof fet
   const env = options.env ?? process.env;
   const ask = options.fetch ?? fetch;
   return {
-    async createUpload({ corsOrigin }) {
+    async createUpload({ corsOrigin, title, externalId }) {
       const data = await muxApi(
         "POST",
         "/video/v1/uploads",
         {
           cors_origin: corsOrigin,
           timeout: UPLOAD_TIMEOUT_SECONDS,
-          // The SIGNED policy and the chosen quality, and nothing else: no
-          // MP4 downloads (static renditions), no Mux Data, no captions.
-          new_asset_settings: { playback_policies: ["signed"], video_quality: UPLOAD_VIDEO_QUALITY },
+          // The SIGNED policy, the chosen quality and the video's name (Mux
+          // allows 512 characters for the title and 128 for the reference),
+          // and nothing else: no MP4 downloads (static renditions), no Mux
+          // Data, no captions.
+          new_asset_settings: {
+            playback_policies: ["signed"],
+            video_quality: UPLOAD_VIDEO_QUALITY,
+            meta: { title: title.slice(0, 512), external_id: externalId.slice(0, 128) },
+          },
         },
         env,
         ask,

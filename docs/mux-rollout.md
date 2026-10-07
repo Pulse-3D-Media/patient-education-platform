@@ -68,6 +68,8 @@ file, assume the website uses it.
 2. The card then says **Mux is preparing it**. Usually a minute or two. The
    video keeps playing whatever it had (the CDN file, or its old Mux asset)
    the whole time; nothing changes for the library or for patients yet.
+   In the Mux dashboard the new asset carries the video's title, and the
+   video's row id as its external reference.
 3. When Mux says the asset is ready, the new playback id and asset id are
    written onto the same video row (by the webhook, or by **Check with Mux**
    if you are on a preview or do not want to wait), and from then on the

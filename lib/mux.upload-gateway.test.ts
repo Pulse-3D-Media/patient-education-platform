@@ -53,7 +53,10 @@ describe("the upload gateway", () => {
     const { ask, calls } = fakeFetch([{ status: 201, body: { data: { id: "UploadAbc12345", url: "https://storage.googleapis.com/bucket/one-time", status: "waiting" } } }]);
     const gateway = makeMuxUploadGateway({ env: ENV, fetch: ask });
 
-    expect(await gateway.createUpload({ corsOrigin: "https://learn.example.test" })).toEqual({ id: "UploadAbc12345", url: "https://storage.googleapis.com/bucket/one-time" });
+    expect(await gateway.createUpload({ corsOrigin: "https://learn.example.test", title: "Total Knee Replacement", externalId: "clz0000000000000000000000" })).toEqual({
+      id: "UploadAbc12345",
+      url: "https://storage.googleapis.com/bucket/one-time",
+    });
 
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("https://api.mux.com/video/v1/uploads");
@@ -64,7 +67,12 @@ describe("the upload gateway", () => {
     expect(body).toEqual({
       cors_origin: "https://learn.example.test",
       timeout: UPLOAD_TIMEOUT_SECONDS,
-      new_asset_settings: { playback_policies: ["signed"], video_quality: UPLOAD_VIDEO_QUALITY },
+      new_asset_settings: {
+        playback_policies: ["signed"],
+        video_quality: UPLOAD_VIDEO_QUALITY,
+        // The video's title and id, so the asset reads as the video in the Mux dashboard.
+        meta: { title: "Total Knee Replacement", external_id: "clz0000000000000000000000" },
+      },
     });
     expect(UPLOAD_VIDEO_QUALITY).toBe("basic");
     // No MP4 downloads, no captions, no public policy, however the settings are spelt.
@@ -128,7 +136,7 @@ describe("the upload gateway", () => {
   it("refuses to call Mux at all without the token", async () => {
     const { ask, calls } = fakeFetch([]);
     const gateway = makeMuxUploadGateway({ env: SIGNING, fetch: ask });
-    await expect(gateway.createUpload({ corsOrigin: "https://learn.example.test" })).rejects.toMatchObject({ name: "MuxConfigError" });
+    await expect(gateway.createUpload({ corsOrigin: "https://learn.example.test", title: "Any", externalId: "any" })).rejects.toMatchObject({ name: "MuxConfigError" });
     expect(calls).toHaveLength(0);
   });
 });

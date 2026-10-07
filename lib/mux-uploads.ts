@@ -61,7 +61,8 @@ export async function startUpload(videoId: string, corsOrigin: string, deps: Upl
   const video = await getVideoUpload(videoId);
   if (!video) return { ok: false, error: "That video no longer exists." };
 
-  const upload = await deps.gateway.createUpload({ corsOrigin });
+  // The asset is named after the video (title and id), so it reads as the video in the Mux dashboard.
+  const upload = await deps.gateway.createUpload({ corsOrigin, title: video.title, externalId: video.id });
   const previous = await markUploadStarted(videoId, upload.id);
   if (previous.muxUploadId && previous.muxUploadId !== upload.id) {
     try {

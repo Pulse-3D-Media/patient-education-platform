@@ -21,7 +21,7 @@ import type { AssetFacts, MuxUploadGateway, UploadFacts } from "../mux";
  * call fail, for "Mux is down".
  */
 
-type FakeUpload = { id: string; url: string; status: UploadFacts["status"]; assetId: string | null; corsOrigin: string };
+type FakeUpload = { id: string; url: string; status: UploadFacts["status"]; assetId: string | null; corsOrigin: string; title: string; externalId: string };
 type FakeAsset = AssetFacts;
 
 let serial = 0;
@@ -41,10 +41,10 @@ export function fakeMux(tag: string) {
   }
 
   const gateway: MuxUploadGateway = {
-    async createUpload({ corsOrigin }) {
+    async createUpload({ corsOrigin, title, externalId }) {
       maybeFail();
       const id = next("Upload");
-      const upload: FakeUpload = { id, url: `https://uploads.fake-mux.test/${id}`, status: "waiting", assetId: null, corsOrigin };
+      const upload: FakeUpload = { id, url: `https://uploads.fake-mux.test/${id}`, status: "waiting", assetId: null, corsOrigin, title, externalId };
       uploads.set(id, upload);
       return { id, url: upload.url };
     },

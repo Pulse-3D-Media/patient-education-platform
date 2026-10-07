@@ -81,6 +81,9 @@ describe("startUpload", () => {
 
     const [upload] = mux.uploads();
     expect(upload.corsOrigin).toBe(ORIGIN);
+    // The asset is named after the video, so it reads as the video in the Mux dashboard.
+    expect(upload.title).toBe(video.title);
+    expect(upload.externalId).toBe(video.id);
     expect(await row(video.id)).toEqual({
       videoUrl: video.videoUrl,
       muxPlaybackId: null,

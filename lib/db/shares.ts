@@ -523,8 +523,9 @@ export type RenewalRequestOutcome =
  * Public on purpose: the patient is not signed in and belongs to no clinic,
  * so this is the third function here that takes no clinicId (with
  * getShareByCode and recordSharePlay). It writes one timestamp on the link
- * and nothing else: no name, no address, nothing typed, because there is
- * nothing to type (rule 2).
+ * and adds one to the link's request tally (Share.renewalRequests, for the
+ * Pulse reports), and nothing else: no name, no address, nothing typed,
+ * because there is nothing to type (rule 2).
  *
  * One request per link per day (RENEWAL_REQUEST_GAP_MS). The write is a
  * single UPDATE whose WHERE says "still paused, and not asked about within
@@ -562,7 +563,9 @@ export async function requestShareRenewal(code: string, now: Date = new Date()):
       video: { isPublished: true },
       OR: [{ renewalRequestedAt: null }, { renewalRequestedAt: { lte: new Date(now.getTime() - RENEWAL_REQUEST_GAP_MS) } }],
     },
-    data: { renewalRequestedAt: now },
+    // The tally for the Pulse reports goes up in the same write, so it counts
+    // exactly the requests that were recorded: once per link per day at most.
+    data: { renewalRequestedAt: now, renewalRequests: { increment: 1 } },
   });
   // Nothing written means another tap got there first, or the clinic turned
   // the link back on in between. Either way the calm confirmation is right.

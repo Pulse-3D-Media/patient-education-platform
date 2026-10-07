@@ -81,6 +81,12 @@ describe("contentSecurityPolicy", () => {
     expect(directive(production, "script-src")).not.toContain("https://stream.mux.com");
   });
 
+  it("lets a staff member's browser send an upload to Mux's one-time addresses (a connection), and plays nothing from there", () => {
+    expect(directive(production, "connect-src")).toContain("https://storage.googleapis.com");
+    expect(directive(production, "media-src")).not.toContain("https://storage.googleapis.com");
+    expect(directive(production, "script-src")).not.toContain("https://storage.googleapis.com");
+  });
+
   it("keeps forms on our own address and refuses framing, plug-ins and <base>", () => {
     expect(directive(production, "form-action")).toEqual(["'self'"]);
     expect(directive(production, "frame-ancestors")).toEqual(["'none'"]);

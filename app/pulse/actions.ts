@@ -2,6 +2,7 @@
 
 import { Category, PracticeType, type StaffAccess } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { retryBillingEvent } from "@/lib/billing-events";
 import { MAX_GRACE_DAYS, MIN_GRACE_DAYS } from "@/lib/billing-state";
@@ -24,13 +25,16 @@ import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/l
 import { errorKind } from "@/lib/error-kind";
 import { isValidRenewalCount, MAX_LINK_DAYS, MAX_RENEWALS, MIN_LINK_DAYS, MIN_RENEWALS } from "@/lib/expiry";
 import { parseDuration } from "@/lib/format";
-import { checkPlaybackId } from "@/lib/mux";
+import { MuxApiError, checkPlaybackId } from "@/lib/mux";
+import { cancelUpload, checkUpload, dismissFailure, startUpload, type ReconcileOutcome, type StartUploadResult } from "@/lib/mux-uploads";
 import { NOTE_MAX_LENGTH, cleanNote } from "@/lib/note-form";
 import { renameClerkOrganization } from "@/lib/organization";
 import { isPlaybackIdShape } from "@/lib/playback-source";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 import { setOwnerByStaff } from "@/lib/seat-changes";
+import { pickTrustedOrigin } from "@/lib/trusted-origin";
+import { hasPlayableSource } from "@/lib/video";
 
 /**
  * Server Actions for the Pulse 3D master dashboard.
@@ -45,8 +49,8 @@ import { setOwnerByStaff } from "@/lib/seat-changes";
  * button.
  */
 
-/** What a form gets back after it is submitted. */
-export type FormState = { ok?: string; error?: string } | null;
+/** What a form gets back after it is submitted. `videoId` comes back only from the add-video form when a file is waiting to be uploaded (see saveVideoAction). */
+export type FormState = { ok?: string; error?: string; videoId?: string } | null;
 
 /**
  * What staff may set by hand, as the Status form sends it. OPEN, PAUSED and
@@ -403,8 +407,9 @@ function videoFromForm(formData: FormData): { input: VideoInput } | { error: str
   const category = String(formData.get("category") ?? "") as Category;
   if (!ALL_CATEGORIES.includes(category)) return { error: "Choose one of our categories." };
 
+  // The CDN address is optional since October 2026: a video uploaded to Mux from the app has none.
   const videoUrl = String(formData.get("videoUrl") ?? "").trim();
-  if (!isHttpsUrl(videoUrl)) return { error: "The video address must be a full https:// address." };
+  if (videoUrl && !isHttpsUrl(videoUrl)) return { error: "The video address must be a full https:// address, or empty for a video that lives in Mux." };
 
   const durationSeconds = parseDuration(String(formData.get("durationSeconds") ?? ""));
   if (durationSeconds === undefined) return { error: "Type the length as minutes and seconds, like 4:12, or leave it empty." };
@@ -425,21 +430,27 @@ function videoFromForm(formData: FormData): { input: VideoInput } | { error: str
   if (muxAssetId && !isPlaybackIdShape(muxAssetId)) return { error: "That does not look like a Mux asset id. Copy it from the Mux dashboard, or leave the box empty." };
   if (muxAssetId && !muxPlaybackId) return { error: "An asset id on its own plays nothing. Add the signed playback id too, or leave both empty." };
 
-  return {
-    input: {
-      title,
-      category,
-      videoUrl,
-      durationSeconds,
-      posterUrl: posterText || null,
-      // An unticked checkbox sends nothing; a ticked one sends "on".
-      isPlaceholder: formData.get("isPlaceholder") === "on",
-      isPublished: formData.get("isPublished") === "on",
-      notes: notes || null,
-      muxPlaybackId: muxPlaybackId || null,
-      muxAssetId: muxAssetId || null,
-    },
+  const input: VideoInput = {
+    title,
+    category,
+    videoUrl: videoUrl || null,
+    durationSeconds,
+    posterUrl: posterText || null,
+    // An unticked checkbox sends nothing; a ticked one sends "on".
+    isPlaceholder: formData.get("isPlaceholder") === "on",
+    isPublished: formData.get("isPublished") === "on",
+    notes: notes || null,
+    muxPlaybackId: muxPlaybackId || null,
+    muxAssetId: muxAssetId || null,
   };
+
+  // A video must have something to play before it is published: a CDN
+  // address or a Mux playback id. One with neither may be saved (its file is
+  // on its way to Mux, or its id was just cleared) but stays unpublished.
+  if (input.isPublished && !hasPlayableSource(input)) {
+    return { error: "A video with no file cannot be published. Give it a CDN address or upload a file to Mux first, or untick Published." };
+  }
+  return { input };
 }
 
 /**
@@ -469,6 +480,13 @@ function refreshCatalogue(videoId?: string) {
  * hidden field when it is editing; an empty id means "add". Editing keeps
  * the same row, so every share link and QR code already pointing at it
  * keeps working. A new video is sent on to its own page once saved.
+ *
+ * The one exception to that redirect: the add form with a file chosen for
+ * upload sends `uploadPending`, and gets the new row's id back instead, so
+ * the browser can start the upload for that row (the file never passes
+ * through the server) and then go to the video's page itself. A video added
+ * with no address, no playback id and no file to upload is refused: there
+ * would be nothing to ever play.
  */
 export async function saveVideoAction(_previous: FormState, formData: FormData): Promise<FormState> {
   await requirePulseStaff();
@@ -477,6 +495,7 @@ export async function saveVideoAction(_previous: FormState, formData: FormData):
   if ("error" in checked) return checked;
 
   const id = String(formData.get("id") ?? "").trim();
+  const uploadPending = formData.get("uploadPending") === "1";
   try {
     if (id) {
       const existing = await getVideoForPulse(id);
@@ -488,16 +507,103 @@ export async function saveVideoAction(_previous: FormState, formData: FormData):
       return { ok: "Saved. Every link that points at this video plays the new version." };
     }
 
+    if (!hasPlayableSource(checked.input) && !uploadPending) {
+      return { error: "Give the video a CDN address, a Mux playback id, or a file to upload. With none of the three there would be nothing to play." };
+    }
     const refused = await checkMuxBeforeSave(checked.input, null);
     if (refused) return { error: refused };
     const video = await createVideo(checked.input);
     refreshCatalogue(video.id);
+    if (uploadPending) return { ok: "Added. Sending the file to Mux...", videoId: video.id };
     redirect(`/pulse/videos/${video.id}?added=1`);
   } catch (error) {
     // One playback id belongs to one video: the unique column refuses a second row with it (Prisma P2002).
     if (errorKind(error) === "Prisma P2002") return { error: "That playback id is already on another video. Each Mux playback id belongs to one video." };
     throw error;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Uploading a video to Mux from a video's page (lib/mux-uploads.ts). Not
+// form actions: the upload control calls them directly. Each one checks for
+// Pulse staff first, reads nothing from the browser but a video id (looked
+// up before it is used), and answers in plain words. The file itself never
+// comes here: the browser sends it straight to the one-time address Mux
+// gives, which the server hands out once and never logs.
+// ---------------------------------------------------------------------------
+
+/** A video id as the browser sends it, or null for anything that is not one. */
+function readVideoId(value: unknown): string | null {
+  return typeof value === "string" && /^[a-z0-9]{10,40}$/i.test(value) ? value : null;
+}
+
+/** Turn what the flow said into the line the page shows. A failure is logged by kind and answered in words. */
+function uploadOutcome(work: () => Promise<ReconcileOutcome>): Promise<FormState> {
+  return work()
+    .then((outcome) => (outcome.kind === "failed" || outcome.kind === "unknown" || outcome.kind === "not-confirmed" ? { error: outcome.message } : { ok: outcome.message }))
+    .catch((error: unknown) => {
+      console.error(`Mux upload: ${errorKind(error)}`);
+      return { error: muxFailureWords(error) };
+    });
+}
+
+/** What to say when a call to Mux failed: a refused token is a settings problem, anything else is "try again". The status only, never a body. */
+function muxFailureWords(error: unknown): string {
+  if (error instanceof MuxApiError && (error.status === 401 || error.status === 403)) {
+    return `Mux refused this deployment's access token (status ${error.status}). Nothing was changed. Check MUX_TOKEN_ID and MUX_TOKEN_SECRET in the settings.`;
+  }
+  return "Mux could not be reached just now. Nothing was changed. Try again in a moment.";
+}
+
+/**
+ * Begin an upload: ask Mux for a one-time address for this video's new file
+ * and hand it to the browser. The address Mux lets the file come from is
+ * this deployment's own (pickTrustedOrigin), never the Host header as sent.
+ */
+export async function startMuxUploadAction(videoId: unknown): Promise<StartUploadResult> {
+  await requirePulseStaff();
+  const id = readVideoId(videoId);
+  if (!id) return { ok: false, error: "That video no longer exists." };
+  try {
+    const origin = pickTrustedOrigin((await headers()).get("host"), process.env);
+    if (!origin) return { ok: false, error: "Uploads cannot be started from this address." };
+    const result = await startUpload(id, origin);
+    if (result.ok) refreshCatalogue(id);
+    return result;
+  } catch (error) {
+    console.error(`Mux upload: could not start: ${errorKind(error)}`);
+    return { ok: false, error: muxFailureWords(error) };
+  }
+}
+
+/** "Check with Mux", and what the browser calls once it has sent the file: ask Mux where the upload stands and apply it. */
+export async function checkMuxUploadAction(videoId: unknown): Promise<FormState> {
+  await requirePulseStaff();
+  const id = readVideoId(videoId);
+  if (!id) return { error: "That video no longer exists." };
+  const outcome = await uploadOutcome(() => checkUpload(id));
+  refreshCatalogue(id);
+  return outcome;
+}
+
+/** "Cancel upload": an upload whose file has not arrived is cancelled at Mux and forgotten; the video is as it was. */
+export async function cancelMuxUploadAction(videoId: unknown): Promise<FormState> {
+  await requirePulseStaff();
+  const id = readVideoId(videoId);
+  if (!id) return { error: "That video no longer exists." };
+  const outcome = await uploadOutcome(() => cancelUpload(id));
+  refreshCatalogue(id);
+  return outcome;
+}
+
+/** "Dismiss" on the line about a failed upload. */
+export async function dismissUploadFailureAction(videoId: unknown): Promise<FormState> {
+  await requirePulseStaff();
+  const id = readVideoId(videoId);
+  if (!id) return { error: "That video no longer exists." };
+  await dismissFailure(id);
+  refreshCatalogue(id);
+  return { ok: "Dismissed." };
 }
 
 /** Save one category's "for sale" switch and its coming-soon sentence. */

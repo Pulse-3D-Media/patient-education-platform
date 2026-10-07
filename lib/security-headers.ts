@@ -74,6 +74,14 @@ const WEBFLOW_CDN = ["https://cdn.prod.website-files.com", "https://*.website-fi
  */
 const MUX_STREAM = ["https://stream.mux.com"];
 
+/**
+ * Where a staff member's browser sends a video file when uploading to Mux
+ * from /pulse/videos (lib/mux-upload.ts). Mux's one-time upload addresses
+ * are on Google Cloud Storage; the file goes there straight from the
+ * browser, never through our server. A connection, not a media load.
+ */
+const MUX_UPLOADS = ["https://storage.googleapis.com"];
+
 /** Clerk's bot check (Cloudflare Turnstile) and its newer protection service, both shown on sign-up. */
 const CLERK_CHALLENGES = ["https://challenges.cloudflare.com", "https://*.protect.clerk.com"];
 
@@ -125,6 +133,7 @@ export function contentSecurityPolicy(settings: SecurityHeaderSettings): string 
       "https://*.clerk-telemetry.com",
       "https://img.clerk.com",
       ...MUX_STREAM,
+      ...MUX_UPLOADS,
       ...CLERK_CHALLENGES,
       ...(preview ? ["https://vercel.live", "wss://ws-us3.pusher.com"] : []),
     ],

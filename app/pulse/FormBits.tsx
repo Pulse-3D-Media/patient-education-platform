@@ -38,7 +38,7 @@ import type { FormState } from "./actions";
  * that should be emptied then (the reason typed for a status change).
  */
 export function useKeptForm(serverAction: (previous: FormState, formData: FormData) => Promise<FormState>, onSaved?: () => void) {
-  const [state, action, pending] = useActionState(async (previous: FormState, formData: FormData) => {
+  const [state, action, pending] = useActionState<FormState, FormData>(async (previous, formData) => {
     // unstable_rethrow hands Next.js's own signals (a redirect, a not-found) back to Next.js; only real failures become the sentence.
     const outcome = await safeSave(() => serverAction(previous, formData), unstable_rethrow);
     if (outcome?.ok) onSaved?.();

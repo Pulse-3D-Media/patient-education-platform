@@ -22,7 +22,7 @@ model Video {
   id              String   @id @default(cuid())
   title           String // "Total Knee Replacement"
   category        Category
-  videoUrl        String // read via getPlaybackUrl(), never directly
+  videoUrl        String? // the MP4 on the Webflow CDN, read only through lib/playback-auth.ts, never directly. Optional since October 2026: a video uploaded from the app lives in Mux only and has none. A video needs this or muxPlaybackId before it can be published
   durationSeconds Int?
   isPublished     Boolean  @default(false) // staging: Van finishes animations before they go live
   isPlaceholder   Boolean  @default(false) // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
@@ -30,6 +30,8 @@ model Video {
   notes           String? // internal, for Pulse staff on /pulse/videos: what the file is, what is still to do. Never shown to a clinic
   muxPlaybackId   String?  @unique // the SIGNED Mux playback id, once the video has moved to protected playback. Set, the video plays only through a signed Mux address (lib/playback-auth.ts) and videoUrl is kept as the record of where the file came from, never as a fallback. Empty means the file at videoUrl plays as before
   muxAssetId      String? // the Mux asset the playback id belongs to, so staff can find it in the Mux dashboard. A note for staff; nothing plays from it
+  muxUploadId     String?  @unique // an upload to Mux that is in flight for this video (Mux's direct upload id), so the webhook and "Check with Mux" can find the row. Cleared when the asset is ready, cancelled or failed. The video keeps playing what it had the whole time
+  muxUploadState  String? // where that upload stands, in a word checked by parseUploadState() in lib/mux-upload.ts: "waiting" (address handed out, file not yet at Mux), "preparing" (Mux has the file), "failed" (the last upload did not finish; the row was left as it was). Empty means no upload in flight and nothing to report
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shares          Share[]

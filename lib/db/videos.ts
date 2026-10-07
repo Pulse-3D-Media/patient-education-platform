@@ -220,7 +220,8 @@ export async function getVideoForPulse(id: string) {
 export type VideoInput = {
   title: string;
   category: Category;
-  videoUrl: string;
+  /** The MP4 on the CDN, or null for a video that lives in Mux only (uploaded from the app, or about to be). */
+  videoUrl: string | null;
   durationSeconds: number | null;
   posterUrl: string | null;
   isPlaceholder: boolean;
@@ -246,4 +247,88 @@ export async function createVideo(input: VideoInput) {
  */
 export async function updateVideo(id: string, input: VideoInput) {
   return prisma.video.update({ where: { id }, data: input });
+}
+
+// ---------------------------------------------------------------------------
+// An upload to Mux in flight for a video (lib/mux-uploads.ts is the flow;
+// lib/mux-upload.ts explains the two columns). The one rule of every write
+// below: it names the upload it is about, so a write for an upload the row
+// has since stopped waiting for changes nothing. `updateMany` with the
+// upload id in its WHERE is how that is said; it answers how many rows it
+// changed, which is one or none. Staff only, through the flow.
+// ---------------------------------------------------------------------------
+
+/** What the flow needs to know about a video's upload, or null for an unknown id. */
+export async function getVideoUpload(videoId: string) {
+  return prisma.video.findUnique({
+    where: { id: videoId },
+    select: { id: true, title: true, muxUploadId: true, muxUploadState: true, muxPlaybackId: true, videoUrl: true },
+  });
+}
+
+/** The video waiting for this upload, or null when no row is (the upload was replaced, or was never this app's). */
+export async function findVideoIdByUploadId(uploadId: string): Promise<string | null> {
+  const row = await prisma.video.findUnique({ where: { muxUploadId: uploadId }, select: { id: true } });
+  return row?.id ?? null;
+}
+
+/**
+ * The row now waits for this upload, at "waiting". Answers what it was
+ * waiting for before, so the flow can cancel a replaced upload at Mux. One
+ * transaction, so two staff members starting an upload at once each learn
+ * the other's id and the row ends waiting for exactly one.
+ */
+export async function markUploadStarted(videoId: string, uploadId: string): Promise<{ muxUploadId: string | null }> {
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.video.findUniqueOrThrow({ where: { id: videoId }, select: { muxUploadId: true } });
+    await tx.video.update({ where: { id: videoId }, data: { muxUploadId: uploadId, muxUploadState: "waiting" } });
+    return before;
+  });
+}
+
+/** Record where the upload stands, if the row still waits for it. */
+export async function setUploadState(videoId: string, uploadId: string, state: "waiting" | "preparing"): Promise<boolean> {
+  const result = await prisma.video.updateMany({ where: { id: videoId, muxUploadId: uploadId }, data: { muxUploadState: state } });
+  return result.count === 1;
+}
+
+/**
+ * The upload is over without a new file: cancelled (nothing to report) or
+ * failed (the word stays on the row until it is dismissed). The playback
+ * columns are not touched: the video is exactly as it was.
+ */
+export async function clearUpload(videoId: string, uploadId: string, state: "failed" | null): Promise<boolean> {
+  const result = await prisma.video.updateMany({ where: { id: videoId, muxUploadId: uploadId }, data: { muxUploadId: null, muxUploadState: state } });
+  return result.count === 1;
+}
+
+/**
+ * The new file is ready: put its signed playback id and asset id on the
+ * row, and the upload is over. The one write that changes what plays, and
+ * only if the row still waits for this upload. The video's length is filled
+ * in from the asset when the row has none; a length a staff member typed is
+ * kept. Answers false when nothing was written (a newer upload replaced
+ * this one).
+ */
+export async function applyReadyUpload(videoId: string, uploadId: string, asset: { playbackId: string; assetId: string; durationSeconds: number | null }): Promise<boolean> {
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.video.findUnique({ where: { id: videoId, muxUploadId: uploadId }, select: { durationSeconds: true } });
+    if (!row) return false;
+    const result = await tx.video.updateMany({
+      where: { id: videoId, muxUploadId: uploadId },
+      data: {
+        muxPlaybackId: asset.playbackId,
+        muxAssetId: asset.assetId,
+        muxUploadId: null,
+        muxUploadState: null,
+        ...(row.durationSeconds === null && asset.durationSeconds !== null ? { durationSeconds: asset.durationSeconds } : {}),
+      },
+    });
+    return result.count === 1;
+  });
+}
+
+/** Take the "failed" word off a row. Nothing else is touched, and a row waiting for an upload is left alone. */
+export async function dismissUploadFailure(videoId: string): Promise<void> {
+  await prisma.video.updateMany({ where: { id: videoId, muxUploadState: "failed", muxUploadId: null }, data: { muxUploadState: null } });
 }

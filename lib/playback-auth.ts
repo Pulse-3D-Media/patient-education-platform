@@ -38,16 +38,20 @@ import { usesProtectedPlayback } from "./video";
  * phone has already loaded. A copied address works until its token expires.
  */
 
-/** What a source is built from: where the file lives and, for the token's length, how long the video runs. */
-export type PlayableVideo = { videoUrl: string; muxPlaybackId: string | null; durationSeconds: number | null };
+/** What a source is built from: where the file lives (either may be empty) and, for the token's length, how long the video runs. */
+export type PlayableVideo = { videoUrl: string | null; muxPlaybackId: string | null; durationSeconds: number | null };
 
 /**
  * A source for one video, for a viewer whose permission ends at `windowEnd`
  * (null when only the plan governs, as in the library). The one function
- * that turns a row into something a player can load.
+ * that turns a row into something a player can load. A Mux id wins; with no
+ * Mux id the CDN file plays; a video with neither (its upload has not
+ * finished, and nothing lets it be published in that state) is unavailable.
  */
 export function playbackForVideo(video: PlayableVideo, now: Date, windowEnd: Date | null): PlaybackSource {
-  if (!usesProtectedPlayback(video) || !video.muxPlaybackId) return { kind: "file", src: video.videoUrl };
+  if (!usesProtectedPlayback(video) || !video.muxPlaybackId) {
+    return video.videoUrl ? { kind: "file", src: video.videoUrl } : { kind: "unavailable" };
+  }
   if (!muxIsConfigured()) {
     // Logged once per request, never with an address: the staff fix is a setting in Vercel, not anything on the page.
     console.error("Playback: a video has moved to Mux but Mux signing is not configured on this deployment.");

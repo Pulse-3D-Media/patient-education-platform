@@ -7,13 +7,18 @@ import { saveSettings } from "@/lib/db/settings";
 import { MAX_GRACE_DAYS } from "@/lib/billing-state";
 import { recordAcceptedPlan, setStripeCustomer } from "@/lib/db/billing";
 import { MAX_LINK_DAYS } from "@/lib/expiry";
-import { checkPlaybackId } from "@/lib/mux";
+import { MuxApiError, checkPlaybackId } from "@/lib/mux";
+import { cancelUpload, checkUpload, dismissFailure, startUpload } from "@/lib/mux-uploads";
 import { NOTE_MAX_LENGTH } from "@/lib/note-form";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
   activatePricingVersionAction,
   addNoteAction,
+  cancelMuxUploadAction,
+  checkMuxUploadAction,
+  dismissUploadFailureAction,
   retryBillingEventAction,
+  startMuxUploadAction,
   saveBrandingAction,
   saveCategoryConfigAction,
   saveDetailsAction,
@@ -56,6 +61,20 @@ vi.mock("@/lib/mux", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/mux")>();
   return { ...actual, checkPlaybackId: vi.fn() };
 });
+
+// The upload flow is a stand-in too (lib/mux-uploads.test.ts runs the real one against the database): these tests are about who may call it and with what.
+vi.mock("@/lib/mux-uploads", () => ({
+  startUpload: vi.fn(),
+  checkUpload: vi.fn(),
+  cancelUpload: vi.fn(),
+  dismissFailure: vi.fn(),
+  UPLOADS_NOT_CONFIGURED: "not configured",
+}));
+
+// The upload action reads the request's Host header to pick a trusted origin; here the request is this deployment's own.
+vi.mock("next/headers", () => ({
+  headers: vi.fn(async () => new Headers({ host: "localhost:3000" })),
+}));
 
 function signInAs(userId: string, publicMetadata: Record<string, unknown>) {
   vi.mocked(auth).mockResolvedValue({ userId } as never);
@@ -659,6 +678,130 @@ describe("saveVideoAction", () => {
       await expect(saveVideoAction(null, form({ ...fields, muxPlaybackId: playbackId }))).rejects.toMatchObject({ digest: expect.stringContaining("404") });
       expect(asked()).not.toHaveBeenCalled();
     });
+  });
+
+  describe("the CDN address is optional: a video needs an address OR a Mux id, and one with neither cannot be published", () => {
+    const asked = () => vi.mocked(checkPlaybackId);
+    const newest = () => prisma.video.findFirst({ where: { title: fields.title }, orderBy: { createdAt: "desc" } });
+
+    it("adds a video with a Mux id and no address, which lives in Mux only", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      asked().mockResolvedValueOnce({ ok: true });
+      const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
+      await expect(saveVideoAction(null, form({ ...fields, videoUrl: "", muxPlaybackId: playbackId }))).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
+      const video = await newest();
+      createdVideoIds.push(video!.id);
+      expect(video).toMatchObject({ videoUrl: null, muxPlaybackId: playbackId, isPublished: true });
+    });
+
+    it("adds a video with an address and no id, as before", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      await expect(saveVideoAction(null, form({ ...fields, muxPlaybackId: "" }))).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
+      const video = await newest();
+      createdVideoIds.push(video!.id);
+      expect(video).toMatchObject({ videoUrl: fields.videoUrl, muxPlaybackId: null });
+    });
+
+    it("refuses a video with neither when it is published, and when it is added with no file to upload either, writing nothing", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const before = await prisma.video.count();
+      expect(await saveVideoAction(null, form({ ...fields, videoUrl: "", muxPlaybackId: "" }))).toEqual({
+        error: "A video with no file cannot be published. Give it a CDN address or upload a file to Mux first, or untick Published.",
+      });
+      expect(await saveVideoAction(null, form({ ...fields, videoUrl: "", muxPlaybackId: "", isPublished: "" }))).toEqual({
+        error: "Give the video a CDN address, a Mux playback id, or a file to upload. With none of the three there would be nothing to play.",
+      });
+      expect(await prisma.video.count()).toBe(before);
+      expect(asked()).not.toHaveBeenCalled();
+    });
+
+    it("adds an unpublished video with neither when a file is about to be uploaded, and answers with the new row's id instead of a redirect", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const result = await saveVideoAction(null, form({ ...fields, videoUrl: "", muxPlaybackId: "", isPublished: "", uploadPending: "1" }));
+      expect(result).toMatchObject({ ok: expect.stringContaining("Added"), videoId: expect.any(String) });
+      createdVideoIds.push(result!.videoId!);
+      expect(await prisma.video.findUnique({ where: { id: result!.videoId! } })).toMatchObject({ videoUrl: null, muxPlaybackId: null, isPublished: false, muxUploadId: null });
+
+      // The file flag does not let a video with neither be published, and does not stand in for a source once the upload is over.
+      expect(await saveVideoAction(null, form({ ...fields, videoUrl: "", muxPlaybackId: "", uploadPending: "1" }))).toMatchObject({ error: expect.stringContaining("cannot be published") });
+    });
+
+    it("lets an edit clear a Mux-only video's id (leaving nothing to play) only while it stays unpublished, and never touches an upload in flight", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
+      const video = await prisma.video.create({
+        data: { title: `Vitest Mux-only ${randomBytes(3).toString("hex")}`, category: "FOOT_ANKLE", videoUrl: null, muxPlaybackId: playbackId, isPublished: true, muxUploadId: `Upload${randomBytes(6).toString("hex")}`, muxUploadState: "preparing" },
+      });
+      createdVideoIds.push(video.id);
+
+      expect(await saveVideoAction(null, form({ ...fields, id: video.id, videoUrl: "", muxPlaybackId: "" }))).toMatchObject({ error: expect.stringContaining("cannot be published") });
+      expect(await saveVideoAction(null, form({ ...fields, id: video.id, videoUrl: "", muxPlaybackId: "", isPublished: "" }))).toMatchObject({ ok: expect.any(String) });
+      expect(await prisma.video.findUnique({ where: { id: video.id } })).toMatchObject({
+        videoUrl: null,
+        muxPlaybackId: null,
+        isPublished: false,
+        muxUploadId: video.muxUploadId,
+        muxUploadState: "preparing",
+      });
+    });
+  });
+});
+
+describe("the upload actions", () => {
+  const flow = { start: vi.mocked(startUpload), check: vi.mocked(checkUpload), cancel: vi.mocked(cancelUpload), dismiss: vi.mocked(dismissFailure) };
+
+  beforeEach(() => {
+    for (const fn of Object.values(flow)) fn.mockReset();
+  });
+
+  it("hands an upload address only to Pulse staff: anyone else gets not-found before Mux is asked", async () => {
+    signInAs("user_clinic_admin", { kind: "staff" });
+    await expect(startMuxUploadAction("clz0000000000000000000000")).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    await expect(checkMuxUploadAction("clz0000000000000000000000")).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    await expect(cancelMuxUploadAction("clz0000000000000000000000")).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    await expect(dismissUploadFailureAction("clz0000000000000000000000")).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    for (const fn of Object.values(flow)) expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("starts an upload for staff with this deployment's own origin, never the browser's word, and passes Mux's address straight back", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    flow.start.mockResolvedValue({ ok: true, uploadId: "UploadAbc12345", url: "https://storage.googleapis.com/bucket/one-time" });
+    expect(await startMuxUploadAction("clz0000000000000000000000")).toEqual({ ok: true, uploadId: "UploadAbc12345", url: "https://storage.googleapis.com/bucket/one-time" });
+    expect(flow.start).toHaveBeenCalledWith("clz0000000000000000000000", "http://localhost:3000");
+  });
+
+  it("refuses a video id that is not one, before anything is asked, and answers a failure in plain words", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await startMuxUploadAction("../../etc")).toEqual({ ok: false, error: "That video no longer exists." });
+    expect(await startMuxUploadAction({ id: "x" })).toEqual({ ok: false, error: "That video no longer exists." });
+    expect(await checkMuxUploadAction("")).toEqual({ error: "That video no longer exists." });
+    expect(flow.start).not.toHaveBeenCalled();
+    expect(flow.check).not.toHaveBeenCalled();
+
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    flow.start.mockRejectedValue(new Error("fetch failed https://api.mux.com"));
+    expect(await startMuxUploadAction("clz0000000000000000000000")).toEqual({ ok: false, error: expect.stringMatching(/^Mux could not be reached/) });
+    flow.check.mockRejectedValue(new Error("fetch failed https://api.mux.com"));
+    expect(await checkMuxUploadAction("clz0000000000000000000000")).toEqual({ error: expect.stringMatching(/^Mux could not be reached/) });
+
+    // A refused token is a settings problem and is said as one, with the status and never a body.
+    flow.start.mockRejectedValue(new MuxApiError(401));
+    expect(await startMuxUploadAction("clz0000000000000000000000")).toEqual({ ok: false, error: expect.stringMatching(/refused this deployment's access token \(status 401\)/) });
+    flow.check.mockRejectedValue(new MuxApiError(403));
+    expect(await checkMuxUploadAction("clz0000000000000000000000")).toEqual({ error: expect.stringMatching(/status 403/) });
+  });
+
+  it("turns what the flow said into the line under the button: a failure as an error, the rest as a plain line", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    flow.check.mockResolvedValue({ kind: "preparing", message: "Mux is preparing it." });
+    expect(await checkMuxUploadAction("clz0000000000000000000000")).toEqual({ ok: "Mux is preparing it." });
+    flow.check.mockResolvedValue({ kind: "failed", message: "It failed." });
+    expect(await checkMuxUploadAction("clz0000000000000000000000")).toEqual({ error: "It failed." });
+    flow.cancel.mockResolvedValue({ kind: "cancelled", message: "Cancelled." });
+    expect(await cancelMuxUploadAction("clz0000000000000000000000")).toEqual({ ok: "Cancelled." });
+    flow.dismiss.mockResolvedValue(undefined);
+    expect(await dismissUploadFailureAction("clz0000000000000000000000")).toEqual({ ok: "Dismissed." });
+    expect(flow.dismiss).toHaveBeenCalledWith("clz0000000000000000000000");
   });
 });
 

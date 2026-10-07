@@ -1,13 +1,26 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
+import { INPUT, PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
 import type { ProcedureReportRow } from "@/lib/db/reports";
-import { playedRate, REPORT_DEFINITIONS, REPORT_PERIODS, type LinkCounts, type ReportDays } from "@/lib/reports";
+import {
+  EARLIEST_REPORT_DATE,
+  playedRate,
+  presetRange,
+  rangeSentence,
+  REPORT_DEFINITIONS,
+  REPORT_PERIODS,
+  reportHref,
+  utahDateOf,
+  type LinkCounts,
+  type ReportRange,
+} from "@/lib/reports";
+import { formatDateTime } from "../ui";
 
 /**
- * The pieces both report pages share: the period switch, the row of totals,
- * a table of counts, the procedure table and the definitions. Server-safe
+ * The pieces both report pages share: the range controls, the Download CSV
+ * button, the row of totals, a table of counts, the procedure table and the
+ * definitions. Server-safe
  * (no state). What each number means is at the top of lib/reports.ts.
  */
 
@@ -16,26 +29,97 @@ export function count(value: number) {
   return value.toLocaleString("en-US");
 }
 
-/** The two links that switch the period, 30 or 90 days. `hrefFor` builds the address of the same page for a period. */
-export function PeriodSwitch({ days, hrefFor }: { days: ReportDays; hrefFor: (days: ReportDays) => string }) {
+/**
+ * Which links the page covers: two links for the last 30 or 90 days, and a
+ * plain GET form for two dates (so the address carries the range and a
+ * reload keeps it), then the sentence saying exactly what the numbers cover,
+ * and, when the dates asked for could not be used, why (lib/reports.ts
+ * decides). `path` is the page's own address.
+ */
+export function RangeControls({ path, range, problem, now }: { path: string; range: ReportRange; problem: string | null; now: Date }) {
+  const today = utahDateOf(now);
+  const custom = range.kind === "custom";
   return (
-    <nav aria-label="Period" className="flex flex-wrap gap-2">
-      {REPORT_PERIODS.map((option) => {
-        const current = option === days;
-        return (
-          <Link
-            key={option}
-            href={hrefFor(option)}
-            aria-current={current ? "page" : undefined}
-            className={`inline-flex min-h-11 items-center rounded-full border px-4 text-[15px] font-medium ${
-              current ? "border-[#2a829b] bg-[#2a829b]/20 text-white" : "border-white/15 text-[#bfbfbf] hover:bg-white/[.06]"
-            }`}
-          >
-            Last {option} days
-          </Link>
-        );
-      })}
-    </nav>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+        <nav aria-label="Period" className="flex flex-wrap gap-2">
+          {REPORT_PERIODS.map((option) => {
+            const current = range.kind === "preset" && range.days === option;
+            return (
+              <Link
+                key={option}
+                href={reportHref(path, presetRange(option, now))}
+                aria-current={current ? "page" : undefined}
+                className={`inline-flex min-h-11 items-center rounded-full border px-4 text-[15px] font-medium ${
+                  current ? "border-[#2a829b] bg-[#2a829b]/20 text-white" : "border-white/15 text-[#bfbfbf] hover:bg-white/[.06]"
+                }`}
+              >
+                Last {option} days
+              </Link>
+            );
+          })}
+        </nav>
+        <form
+          method="get"
+          action={path}
+          aria-label="Choose dates"
+          className={`flex flex-wrap items-end gap-2 rounded-2xl border p-2 ${custom ? "border-[#2a829b] bg-[#2a829b]/10" : "border-transparent"}`}
+        >
+          <div>
+            <label htmlFor="report-from" className="mb-1 block text-sm text-[#bfbfbf]">
+              From
+            </label>
+            <input
+              id="report-from"
+              name="from"
+              type="date"
+              required
+              min={EARLIEST_REPORT_DATE}
+              max={today}
+              defaultValue={custom ? range.from : utahDateOf(range.since)}
+              className={`${INPUT} w-44 [color-scheme:dark]`}
+            />
+          </div>
+          <div>
+            <label htmlFor="report-to" className="mb-1 block text-sm text-[#bfbfbf]">
+              To
+            </label>
+            <input
+              id="report-to"
+              name="to"
+              type="date"
+              required
+              min={EARLIEST_REPORT_DATE}
+              defaultValue={custom ? range.to : today}
+              className={`${INPUT} w-44 [color-scheme:dark]`}
+            />
+          </div>
+          <button type="submit" className={`${SECONDARY_BUTTON} h-11`}>
+            Show these dates
+          </button>
+        </form>
+      </div>
+      {problem && (
+        <p role="status" className="text-[15px] text-[#f3b94d]">
+          {problem}
+        </p>
+      )}
+      <p className="text-sm text-[#bfbfbf]">
+        {rangeSentence(range)}
+        {range.kind === "preset" && ` Since ${formatDateTime(range.since)}, Utah time.`}
+      </p>
+    </div>
+  );
+}
+
+/** The Download CSV button above a table: a plain link to the file, for the same range as the page. */
+export function CsvLink({ href }: { href: string }) {
+  return (
+    <div className="mb-3 flex justify-end">
+      <a href={href} download className={`${SECONDARY_BUTTON} h-10`}>
+        Download CSV
+      </a>
+    </div>
   );
 }
 

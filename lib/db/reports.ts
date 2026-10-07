@@ -63,6 +63,8 @@ export const REPORT_PROCEDURE_LIMIT = 100;
 export const REPORT_SURGEON_LIMIT = 100;
 /** Clinics on one page of the report's clinic table. */
 export const REPORT_CLINICS_PAGE_SIZE = 50;
+/** The most rows one Download CSV file holds. Far more clinics, procedures or surgeons than exist; it only keeps a file bounded (rule 8). */
+export const REPORT_EXPORT_LIMIT = 5000;
 
 export type CategoryReportRow = LinkCounts & { category: Category };
 export type ProcedureReportRow = LinkCounts & { videoId: string; title: string; category: Category; isPlaceholder: boolean };
@@ -120,12 +122,8 @@ export async function getPlatformReport(window: ReportWindow, now: Date = new Da
       LEFT JOIN (SELECT "clinicId", COUNT(*)::int AS "n" FROM "SeatInvitation" GROUP BY "clinicId") i ON i."clinicId" = c."id"
       WHERE c."status"::text = 'ACTIVE' OR (c."status"::text = 'PAST_DUE' AND c."graceEndsAt" > ${now})
       GROUP BY 1`,
-    prisma.$queryRaw<(LinkCounts & { category: string })[]>`
-      SELECT v."category"::text AS "category", ${COUNTS}
-      FROM "Share" s JOIN "Video" v ON v."id" = s."videoId"
-      WHERE ${madeIn(window)}
-      GROUP BY v."category"`,
-    listProcedures(null, window),
+    listCategoryReportRows(window),
+    listProcedureReportRows(null, window),
   ]);
 
   const clinicsByStatus = Object.fromEntries(Object.values(ClinicStatuses).map((status) => [status, 0])) as Record<ClinicStatus, number>;
@@ -136,18 +134,26 @@ export async function getPlatformReport(window: ReportWindow, now: Date = new Da
     openSeats[row.source] = { clinics: Number(row.clinics), seatsOnPlans: Number(row.seatsOnPlans), seatsInUse: Number(row.seatsInUse) };
   }
 
-  const byCategory = new Map(categoryRows.map((row) => [row.category, countsOf(row)]));
-  const categories = CATEGORIES.map(({ value }) => ({ category: value, ...(byCategory.get(value) ?? NO_LINKS) }));
-
   return {
     links: linkRows[0] ? countsOf(linkRows[0]) : NO_LINKS,
     waitingNow,
     clinicsByStatus,
     openSeats,
-    categories,
+    categories: categoryRows,
     procedures: procedures.rows,
     proceduresCapped: procedures.capped,
   };
+}
+
+/** Every category, in screen order, with the links made in the window (zeros where none were). Six rows, counted in the database. */
+export async function listCategoryReportRows(window: ReportWindow): Promise<CategoryReportRow[]> {
+  const rows = await prisma.$queryRaw<(LinkCounts & { category: string })[]>`
+    SELECT v."category"::text AS "category", ${COUNTS}
+    FROM "Share" s JOIN "Video" v ON v."id" = s."videoId"
+    WHERE ${madeIn(window)}
+    GROUP BY v."category"`;
+  const byCategory = new Map(rows.map((row) => [row.category, countsOf(row)]));
+  return CATEGORIES.map(({ value }) => ({ category: value, ...(byCategory.get(value) ?? NO_LINKS) }));
 }
 
 /** One clinic in the report's clinic table. */
@@ -253,24 +259,11 @@ export async function getClinicReport(clinicId: string, window: ReportWindow, no
   });
   if (!clinic) return null;
 
-  const [linkRows, waitingNow, surgeonRows, procedures] = await Promise.all([
+  const [linkRows, waitingNow, surgeons, procedures] = await Promise.all([
     prisma.$queryRaw<LinkCounts[]>`SELECT ${COUNTS} FROM "Share" s WHERE s."clinicId" = ${clinicId} AND ${madeIn(window)}`,
     countWaitingNow(clinicId, now),
-    // One row per surgeon. The name is the one on their newest link in the
-    // window that has a name (it was copied onto each link when it was made,
-    // so it can differ between links after a change); a link with no
-    // surgeon recorded is grouped under null.
-    prisma.$queryRaw<(LinkCounts & { userId: string | null; name: string | null })[]>`
-      SELECT
-        s."senderUserId" AS "userId",
-        (array_agg(s."senderName" ORDER BY s."createdAt" DESC) FILTER (WHERE s."senderName" IS NOT NULL))[1] AS "name",
-        ${COUNTS}
-      FROM "Share" s
-      WHERE s."clinicId" = ${clinicId} AND ${madeIn(window)}
-      GROUP BY s."senderUserId"
-      ORDER BY "made" DESC, "name" ASC NULLS LAST
-      LIMIT ${REPORT_SURGEON_LIMIT + 1}`,
-    listProcedures(clinicId, window),
+    listSurgeonReportRows(clinicId, window),
+    listProcedureReportRows(clinicId, window),
   ]);
 
   return {
@@ -287,15 +280,47 @@ export async function getClinicReport(clinicId: string, window: ReportWindow, no
     },
     links: linkRows[0] ? countsOf(linkRows[0]) : NO_LINKS,
     waitingNow,
-    surgeons: surgeonRows.slice(0, REPORT_SURGEON_LIMIT).map((row) => ({ userId: row.userId, name: row.name, ...countsOf(row) })),
-    surgeonsCapped: surgeonRows.length > REPORT_SURGEON_LIMIT,
+    surgeons: surgeons.rows,
+    surgeonsCapped: surgeons.capped,
     procedures: procedures.rows,
     proceduresCapped: procedures.capped,
   };
 }
 
-/** The procedures with links made in the window, most links first, for the whole platform (clinicId null) or one clinic. Capped at REPORT_PROCEDURE_LIMIT. */
-async function listProcedures(clinicId: string | null, window: ReportWindow): Promise<{ rows: ProcedureReportRow[]; capped: boolean }> {
+/**
+ * One clinic's surgeons with links made in the window, most links first.
+ * The name is the one on their newest link in the window that has a name
+ * (it was copied onto each link when it was made, so it can differ between
+ * links after a change); links with no surgeon recorded are one row, under
+ * null. Takes the clinic id first (rule 1). At most `limit` rows.
+ */
+export async function listSurgeonReportRows(
+  clinicId: string,
+  window: ReportWindow,
+  limit: number = REPORT_SURGEON_LIMIT,
+): Promise<{ rows: SurgeonReportRow[]; capped: boolean }> {
+  const rows = await prisma.$queryRaw<(LinkCounts & { userId: string | null; name: string | null })[]>`
+    SELECT
+      s."senderUserId" AS "userId",
+      (array_agg(s."senderName" ORDER BY s."createdAt" DESC) FILTER (WHERE s."senderName" IS NOT NULL))[1] AS "name",
+      ${COUNTS}
+    FROM "Share" s
+    WHERE s."clinicId" = ${clinicId} AND ${madeIn(window)}
+    GROUP BY s."senderUserId"
+    ORDER BY "made" DESC, "name" ASC NULLS LAST
+    LIMIT ${limit + 1}`;
+  return {
+    rows: rows.slice(0, limit).map((row) => ({ userId: row.userId, name: row.name, ...countsOf(row) })),
+    capped: rows.length > limit,
+  };
+}
+
+/** The procedures with links made in the window, most links first, for the whole platform (clinicId null) or one clinic. At most `limit` rows. */
+export async function listProcedureReportRows(
+  clinicId: string | null,
+  window: ReportWindow,
+  limit: number = REPORT_PROCEDURE_LIMIT,
+): Promise<{ rows: ProcedureReportRow[]; capped: boolean }> {
   const onlyClinic = clinicId === null ? Prisma.empty : Prisma.sql`AND s."clinicId" = ${clinicId}`;
   const rows = await prisma.$queryRaw<(LinkCounts & { videoId: string; title: string; category: Category; isPlaceholder: boolean })[]>`
     SELECT v."id" AS "videoId", v."title", v."category"::text AS "category", v."isPlaceholder", ${COUNTS}
@@ -303,12 +328,12 @@ async function listProcedures(clinicId: string | null, window: ReportWindow): Pr
     WHERE ${madeIn(window)} ${onlyClinic}
     GROUP BY v."id"
     ORDER BY "made" DESC, v."title" ASC, v."id" ASC
-    LIMIT ${REPORT_PROCEDURE_LIMIT + 1}`;
+    LIMIT ${limit + 1}`;
   return {
     rows: rows
-      .slice(0, REPORT_PROCEDURE_LIMIT)
+      .slice(0, limit)
       .map((row) => ({ videoId: row.videoId, title: row.title, category: row.category, isPlaceholder: row.isPlaceholder, ...countsOf(row) })),
-    capped: rows.length > REPORT_PROCEDURE_LIMIT,
+    capped: rows.length > limit,
   };
 }
 
@@ -335,4 +360,10 @@ async function countWaitingNow(clinicId: string | null, now: Date): Promise<numb
       video: { isPublished: true },
     },
   });
+}
+
+/** A clinic's name, for a downloaded file's name; null for an unknown id. Takes the clinic id first (rule 1). */
+export async function getClinicNameForReport(clinicId: string): Promise<string | null> {
+  const clinic = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { name: true } });
+  return clinic?.name ?? null;
 }

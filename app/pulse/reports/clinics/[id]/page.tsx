@@ -2,16 +2,18 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getClinicReport, REPORT_PROCEDURE_LIMIT, REPORT_SURGEON_LIMIT } from "@/lib/db/reports";
 import { requirePulseStaff } from "@/lib/pulse";
-import { periodSentence, periodStart, readReportDays, seatSourceOf, SEAT_SOURCE_WORDS, type ReportDays } from "@/lib/reports";
-import { Section, StatusBadge, formatDateTime } from "../../../ui";
-import { categoryLabel, count, CountsTable, CountTiles, Definitions, Empty, PeriodSwitch, ProcedureTable } from "../../ReportBits";
+import { readReportRange, reportHref, seatSourceOf, SEAT_SOURCE_WORDS } from "@/lib/reports";
+import { Section, StatusBadge } from "../../../ui";
+import { categoryLabel, count, CountsTable, CountTiles, CsvLink, Definitions, Empty, ProcedureTable, RangeControls } from "../../ReportBits";
 
 /**
  * One clinic's report, at /pulse/reports/clinics/<id>: what it has right
  * now (its plan's categories and its seats) and the links it made in the
  * period, in total, by surgeon and by procedure. Pulse staff only, like
- * every page under /pulse; an unknown clinic id is not-found. The numbers
- * mean what lib/reports.ts says they mean.
+ * every page under /pulse; an unknown clinic id is not-found. The range
+ * (30 or 90 days, or two dates) is the same as on /pulse/reports, the
+ * surgeon and procedure tables each have a Download CSV button, and the
+ * numbers mean what lib/reports.ts says they mean.
  */
 export const dynamic = "force-dynamic";
 
@@ -19,21 +21,23 @@ export default async function PulseClinicReportPage({ params, searchParams }: Pa
   await requirePulseStaff();
 
   const { id } = await params;
-  const days = readReportDays((await searchParams).days);
   const now = new Date();
-  const window = { since: periodStart(now, days), until: now };
+  const { range, problem } = readReportRange(await searchParams, now);
+  const window = { since: range.since, until: range.until };
 
   const report = await getClinicReport(id, window, now);
   if (!report) notFound();
   const { clinic } = report;
 
-  const hrefFor = (target: ReportDays) => `/pulse/reports/clinics/${clinic.id}${target === 30 ? "" : `?days=${target}`}`;
+  const path = `/pulse/reports/clinics/${clinic.id}`;
+  /** The Download CSV address of one of this clinic's tables, for the range on screen. */
+  const csvHref = (table: string) => reportHref("/pulse/reports/export", range, { table, clinic: clinic.id });
 
   return (
     <main className="px-5 py-6 sm:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <header>
-          <Link href={days === 30 ? "/pulse/reports" : `/pulse/reports?days=${days}`} className="text-sm text-[#5fb8d4] hover:underline">
+          <Link href={reportHref("/pulse/reports", range)} className="text-sm text-[#5fb8d4] hover:underline">
             All reports
           </Link>
           <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -71,18 +75,14 @@ export default async function PulseClinicReportPage({ params, searchParams }: Pa
           </dl>
         </Section>
 
-        <div className="space-y-2">
-          <PeriodSwitch days={days} hrefFor={hrefFor} />
-          <p className="text-sm text-[#bfbfbf]">
-            {periodSentence(days)} Since {formatDateTime(window.since)}, Utah time.
-          </p>
-        </div>
+        <RangeControls path={path} range={range} problem={problem} now={now} />
 
         <Section title="Links made in this period">
           <CountTiles counts={report.links} />
         </Section>
 
         <Section title="By surgeon" blurb="Who the links are from. The name is the one patients saw on the surgeon's newest link in this period.">
+          <CsvLink href={csvHref("surgeons")} />
           {report.surgeons.length === 0 ? (
             <Empty>No links were made in this period.</Empty>
           ) : (
@@ -103,6 +103,7 @@ export default async function PulseClinicReportPage({ params, searchParams }: Pa
         </Section>
 
         <Section title="By procedure">
+          <CsvLink href={csvHref("procedures")} />
           <ProcedureTable rows={report.procedures} capped={report.proceduresCapped} limit={REPORT_PROCEDURE_LIMIT} />
         </Section>
 

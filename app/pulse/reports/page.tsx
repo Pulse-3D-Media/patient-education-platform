@@ -3,9 +3,9 @@ import Link from "next/link";
 import { getPlatformReport, listClinicReportRows, REPORT_CLINICS_PAGE_SIZE, REPORT_PROCEDURE_LIMIT } from "@/lib/db/reports";
 import { pageInfo, readPage } from "@/lib/paging";
 import { requirePulseStaff } from "@/lib/pulse";
-import { periodSentence, periodStart, readReportDays, SEAT_SOURCE_WORDS, type ReportDays } from "@/lib/reports";
-import { Pager, Section, StatusBadge, formatDateTime, statusLabel } from "../ui";
-import { categoryLabel, count, CountCells, CountHeadings, CountsTable, CountTiles, Definitions, Empty, PeriodSwitch, ProcedureTable, ReportTable } from "./ReportBits";
+import { readReportRange, reportHref, SEAT_SOURCE_WORDS } from "@/lib/reports";
+import { Pager, Section, StatusBadge, statusLabel } from "../ui";
+import { categoryLabel, count, CountCells, CountHeadings, CountsTable, CountTiles, CsvLink, Definitions, Empty, ProcedureTable, RangeControls, ReportTable } from "./ReportBits";
 
 /**
  * Reports, at /pulse/reports: how the platform's links are used, in totals.
@@ -13,15 +13,17 @@ import { categoryLabel, count, CountCells, CountHeadings, CountsTable, CountTile
  * here is shown to a clinic: clinics do not get reports yet (decided by Evan
  * on 2026-10-07, while it is still being tested whether people want them).
  *
- * The numbers cover the links MADE in the period, 30 days by default or 90
- * (?days=90), with what has been recorded on them so far; what each number
+ * The numbers cover the links MADE in the period, 30 days by default, 90
+ * (?days=90), or two dates (?from=2026-09-01&to=2026-09-30, whole days in
+ * Utah time), with what has been recorded on them so far; what each number
  * means, and why it is not "activity in the period", is at the top of
  * lib/reports.ts and in the box at the bottom of the page. "Right now"
  * numbers (clinics, seats, links waiting) say so.
  *
  * Every number is counted in the database (lib/db/reports.ts), the clinic
  * table is read a page at a time (?page=2), and the procedure list is
- * capped. Rendered fresh on every request.
+ * capped. Each table has a Download CSV button (export/route.ts) for the
+ * same range. Rendered fresh on every request.
  */
 export const dynamic = "force-dynamic";
 
@@ -31,22 +33,15 @@ export default async function PulseReportsPage({ searchParams }: PageProps<"/pul
   await requirePulseStaff();
 
   const params = await searchParams;
-  const days = readReportDays(params.days);
   const now = new Date();
-  const window = { since: periodStart(now, days), until: now };
+  const { range, problem } = readReportRange(params, now);
+  const window = { since: range.since, until: range.until };
 
   const [report, clinics] = await Promise.all([getPlatformReport(window, now), listClinicReportRows(window, readPage(params.page))]);
   const info = pageInfo(clinics.page, clinics.total, REPORT_CLINICS_PAGE_SIZE);
 
-  /** This page's address for a period and a page of the clinic table. */
-  function hrefFor(target: { days?: ReportDays; page?: number }) {
-    const search = new URLSearchParams();
-    const targetDays = target.days ?? days;
-    if (targetDays !== 30) search.set("days", String(targetDays));
-    if (target.page && target.page > 1) search.set("page", String(target.page));
-    const text = search.toString();
-    return text ? `/pulse/reports?${text}` : "/pulse/reports";
-  }
+  /** The Download CSV address of one table, for the range on screen. */
+  const csvHref = (table: string) => reportHref("/pulse/reports/export", range, { table });
 
   const seatRows = (["card", "pulse"] as const).map((source) => ({ source, ...report.openSeats[source] }));
   const seatTotal = seatRows.reduce(
@@ -64,12 +59,7 @@ export default async function PulseReportsPage({ searchParams }: PageProps<"/pul
           </p>
         </header>
 
-        <div className="space-y-2">
-          <PeriodSwitch days={days} hrefFor={(target) => hrefFor({ days: target })} />
-          <p className="text-sm text-[#bfbfbf]">
-            {periodSentence(days)} Since {formatDateTime(window.since)}, Utah time.
-          </p>
-        </div>
+        <RangeControls path="/pulse/reports" range={range} problem={problem} now={now} />
 
         <Section title="Links made in this period">
           <CountTiles counts={report.links} />
@@ -121,14 +111,17 @@ export default async function PulseReportsPage({ searchParams }: PageProps<"/pul
         </Section>
 
         <Section title="By category">
+          <CsvLink href={csvHref("categories")} />
           <CountsTable firstHeading="Category" rows={report.categories.map((row) => ({ key: row.category, label: categoryLabel(row.category), counts: row }))} />
         </Section>
 
         <Section title="By procedure">
+          <CsvLink href={csvHref("procedures")} />
           <ProcedureTable rows={report.procedures} capped={report.proceduresCapped} limit={REPORT_PROCEDURE_LIMIT} />
         </Section>
 
         <Section title="By clinic" blurb="Every clinic, the ones that made the most links in this period first. Open one for its surgeons and procedures.">
+          <CsvLink href={csvHref("clinics")} />
           {clinics.rows.length === 0 ? (
             <Empty>No clinics yet. The first one appears when someone signs up.</Empty>
           ) : (
@@ -146,7 +139,7 @@ export default async function PulseReportsPage({ searchParams }: PageProps<"/pul
                 {clinics.rows.map((clinic) => (
                   <tr key={clinic.id} className="border-b border-white/5 last:border-b-0 hover:bg-white/[.03]">
                     <td className="px-4 py-3">
-                      <Link href={`/pulse/reports/clinics/${clinic.id}${days === 30 ? "" : `?days=${days}`}`} className="font-medium text-white hover:text-[#5fb8d4]">
+                      <Link href={reportHref(`/pulse/reports/clinics/${clinic.id}`, range)} className="font-medium text-white hover:text-[#5fb8d4]">
                         {clinic.name}
                       </Link>
                       {clinic.managedByPulse && <span className="ml-2 whitespace-nowrap text-xs text-[#667085]">Managed by Pulse</span>}
@@ -164,7 +157,7 @@ export default async function PulseReportsPage({ searchParams }: PageProps<"/pul
               </tbody>
             </ReportTable>
           )}
-          <Pager info={info} hrefFor={(target) => hrefFor({ page: target })} />
+          <Pager info={info} hrefFor={(target) => reportHref("/pulse/reports", range, target > 1 ? { page: String(target) } : {})} />
         </Section>
 
         <Section title="What the numbers mean">

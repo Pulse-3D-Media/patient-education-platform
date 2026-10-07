@@ -99,6 +99,28 @@ describe("the platform page", () => {
     expect(renderToStaticMarkup(await reportsPage({ days: "90" }))).toContain("Links made in the last 90 days");
     expect(renderToStaticMarkup(await reportsPage({ days: "9999" }))).toContain("Links made in the last 30 days");
   });
+
+  it("covers two dates when chosen, keeps them in the form, the next page and every download, and offers a Download CSV for each table", async () => {
+    fakeClerk.signIn(STAFF, null);
+    const html = renderToStaticMarkup(await reportsPage({ from: "2026-09-01", to: "2026-09-30" }));
+    expect(html).toContain("Links made from Sep 1, 2026 to Sep 30, 2026, Utah time");
+    expect(html).toContain('name="from"');
+    expect(html).toContain('value="2026-09-01"');
+    expect(html).toContain('value="2026-09-30"');
+    for (const table of ["categories", "procedures", "clinics"]) {
+      expect(html).toContain(`href="/pulse/reports/export?from=2026-09-01&amp;to=2026-09-30&amp;table=${table}"`);
+    }
+    expect(html.match(/Download CSV/g)).toHaveLength(3);
+    // Neither preset is marked as the one showing.
+    expect(html).not.toContain('aria-current="page"');
+  });
+
+  it("says why, and shows the last 30 days, when the dates cannot be used", async () => {
+    fakeClerk.signIn(STAFF, null);
+    const html = renderToStaticMarkup(await reportsPage({ from: "2026-09-30", to: "2026-09-01" }));
+    expect(html).toContain("The start date is after the end date. Showing the last 30 days instead.");
+    expect(html).toContain("Links made in the last 30 days");
+  });
 });
 
 describe("one clinic's page", () => {
@@ -114,6 +136,12 @@ describe("one clinic's page", () => {
     expect(html).toContain("Placeholder");
     // Three links made, one played: 33%.
     expect(html).toContain("33% of links made");
+    // Downloads of this clinic's two tables, for the same range.
+    expect(html).toContain(`href="/pulse/reports/export?table=surgeons&amp;clinic=${clinicId}"`);
+    expect(html).toContain(`href="/pulse/reports/export?table=procedures&amp;clinic=${clinicId}"`);
+    const custom = renderToStaticMarkup(await clinicPage(clinicId, { from: "2026-09-01", to: "2026-09-30" }));
+    expect(custom).toContain(`href="/pulse/reports/export?from=2026-09-01&amp;to=2026-09-30&amp;table=surgeons&amp;clinic=${clinicId}"`);
+    expect(custom).toContain('href="/pulse/reports?from=2026-09-01&amp;to=2026-09-30"');
     for (const code of codes) expect(html).not.toContain(code);
   });
 });

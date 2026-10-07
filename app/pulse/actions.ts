@@ -395,11 +395,23 @@ function isHttpsUrl(text: string) {
   }
 }
 
+/** The three boxes an upload fills in on its own, as the row has them now. Handed to videoFromForm when editing. */
+type UploadWrittenFields = Pick<VideoInput, "muxPlaybackId" | "muxAssetId" | "durationSeconds">;
+
 /**
  * Read a video's fields out of the form and check them. Returns the values
  * to save, or the sentence to show the staff member.
+ *
+ * When editing, `existing` is the row as it is now. Three boxes (the Mux
+ * playback id, the asset id and the length) are also written by an upload
+ * finishing in the background, so a form drawn before that moment shows
+ * them empty. For each of those, if the staff member did not change the
+ * box (what was sent equals what the form was showing, in the hidden
+ * `shown...` fields), the row's current value is kept; a value the staff
+ * member typed or cleared on purpose still wins. Without this a stale form
+ * would wipe what the upload wrote.
  */
-function videoFromForm(formData: FormData): { input: VideoInput } | { error: string } {
+function videoFromForm(formData: FormData, existing: UploadWrittenFields | null = null): { input: VideoInput } | { error: string } {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { error: "The video needs a title: the procedure name a surgeon would look for." };
   if (title.length > TITLE_LIMIT) return { error: `Keep the title under ${TITLE_LIMIT} characters.` };
@@ -443,6 +455,19 @@ function videoFromForm(formData: FormData): { input: VideoInput } | { error: str
     muxPlaybackId: muxPlaybackId || null,
     muxAssetId: muxAssetId || null,
   };
+
+  // Keep what an upload wrote where the staff member left the box as the form showed it.
+  if (existing) {
+    const unchanged = (name: string, sent: string) => String(formData.get(name) ?? "").trim() === sent;
+    if (unchanged("shownMuxPlaybackId", muxPlaybackId)) {
+      input.muxPlaybackId = existing.muxPlaybackId;
+      // The asset id belongs with the playback id: keep both together unless the asset box itself was changed.
+      if (unchanged("shownMuxAssetId", muxAssetId)) input.muxAssetId = existing.muxAssetId;
+    }
+    if (unchanged("shownDurationSeconds", String(formData.get("durationSeconds") ?? "").trim()) && existing.durationSeconds !== null) {
+      input.durationSeconds = existing.durationSeconds;
+    }
+  }
 
   // A video must have something to play before it is published: a CDN
   // address or a Mux playback id. One with neither may be saved (its file is
@@ -491,15 +516,15 @@ function refreshCatalogue(videoId?: string) {
 export async function saveVideoAction(_previous: FormState, formData: FormData): Promise<FormState> {
   await requirePulseStaff();
 
-  const checked = videoFromForm(formData);
-  if ("error" in checked) return checked;
-
   const id = String(formData.get("id") ?? "").trim();
   const uploadPending = formData.get("uploadPending") === "1";
   try {
     if (id) {
+      // The row as it is now is read first, so the form's boxes can be compared with what an upload may have written since the page was drawn.
       const existing = await getVideoForPulse(id);
       if (!existing) return { error: "That video no longer exists." };
+      const checked = videoFromForm(formData, existing);
+      if ("error" in checked) return checked;
       const refused = await checkMuxBeforeSave(checked.input, existing);
       if (refused) return { error: refused };
       await updateVideo(id, checked.input);
@@ -507,6 +532,8 @@ export async function saveVideoAction(_previous: FormState, formData: FormData):
       return { ok: "Saved. Every link that points at this video plays the new version." };
     }
 
+    const checked = videoFromForm(formData);
+    if ("error" in checked) return checked;
     if (!hasPlayableSource(checked.input) && !uploadPending) {
       return { error: "Give the video a CDN address, a Mux playback id, or a file to upload. With none of the three there would be nothing to play." };
     }

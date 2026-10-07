@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { ACCEPTED_UPLOAD_TYPES, UPLOAD_STATE_WORDS, type UploadState } from "@/lib/mux-upload";
 import { cancelMuxUploadAction, checkMuxUploadAction, dismissUploadFailureAction, type FormState } from "../actions";
@@ -20,6 +20,9 @@ export type MuxUploaderProps = {
   /** The Videos table's word for where the file lives today. */
   source: "Mux" | "CDN" | "Other" | "No file";
 };
+
+/** How often the page re-reads the row while an upload is in flight. */
+const REFRESH_EVERY_MS = 8_000;
 
 const SOURCE_WORDS: Record<MuxUploaderProps["source"], string> = {
   Mux: "Plays from Mux through a signed address.",
@@ -45,6 +48,15 @@ export function MuxUploader({ videoId, configured, uploadState, inFlight, source
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<FormState>(null);
   const [pending, startTransition] = useTransition();
+
+  // While an upload is in flight the webhook may finish it at any moment, so
+  // the page re-reads the row every few seconds and the card moves on by
+  // itself. Nothing is asked of Mux by this; it only redraws what the row says.
+  useEffect(() => {
+    if (!inFlight || busy) return;
+    const timer = setInterval(() => router.refresh(), REFRESH_EVERY_MS);
+    return () => clearInterval(timer);
+  }, [inFlight, busy, router]);
 
   function chooseFile(chosen: File | null) {
     setFile(chosen);

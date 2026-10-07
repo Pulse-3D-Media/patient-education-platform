@@ -635,8 +635,8 @@ describe("saveVideoAction", () => {
       expect(await saveVideoAction(null, form({ ...fields, id, title: "Vitest Total Ankle Replacement (edited)", muxPlaybackId: playbackId }))).toMatchObject({ ok: expect.any(String) });
       expect(asked()).not.toHaveBeenCalled();
 
-      // Clearing the box goes back to the CDN file, with nothing to ask.
-      expect(await saveVideoAction(null, form({ ...fields, id, muxPlaybackId: "", muxAssetId: "" }))).toMatchObject({ ok: expect.any(String) });
+      // Clearing the box goes back to the CDN file, with nothing to ask. (The form says what it was showing, as the real one does.)
+      expect(await saveVideoAction(null, form({ ...fields, id, muxPlaybackId: "", muxAssetId: "", shownMuxPlaybackId: playbackId, shownMuxAssetId: "AssetId00AbCdEf" }))).toMatchObject({ ok: expect.any(String) });
       expect(await prisma.video.findUnique({ where: { id }, select: { muxPlaybackId: true, muxAssetId: true } })).toEqual({ muxPlaybackId: null, muxAssetId: null });
       expect(asked()).not.toHaveBeenCalled();
     });
@@ -726,6 +726,36 @@ describe("saveVideoAction", () => {
       expect(await saveVideoAction(null, form({ ...fields, videoUrl: "", muxPlaybackId: "", uploadPending: "1" }))).toMatchObject({ error: expect.stringContaining("cannot be published") });
     });
 
+    it("a form drawn before an upload finished keeps what the upload wrote (ids and length), while a box the staff member changed still wins", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      asked().mockResolvedValue({ ok: true });
+      const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
+      // The row as the form was drawn: nothing on it yet.
+      const video = await prisma.video.create({ data: { title: `Vitest stale form ${randomBytes(3).toString("hex")}`, category: "KNEE", videoUrl: null, isPublished: false } });
+      createdVideoIds.push(video.id);
+      // The upload finishes in the background and writes the ids and the length.
+      await prisma.video.update({ where: { id: video.id }, data: { muxPlaybackId: playbackId, muxAssetId: "AssetFromUpload0", durationSeconds: 110 } });
+
+      // The stale form is saved with its empty boxes, as it showed them: the upload's values stay, and the video can even be published.
+      const stale = { ...fields, id: video.id, videoUrl: "", muxPlaybackId: "", muxAssetId: "", durationSeconds: "", shownMuxPlaybackId: "", shownMuxAssetId: "", shownDurationSeconds: "", notes: "Edited on a stale page" };
+      expect(await saveVideoAction(null, form(stale))).toMatchObject({ ok: expect.any(String) });
+      expect(await prisma.video.findUnique({ where: { id: video.id } })).toMatchObject({
+        muxPlaybackId: playbackId,
+        muxAssetId: "AssetFromUpload0",
+        durationSeconds: 110,
+        isPublished: true,
+        notes: "Edited on a stale page",
+      });
+      expect(asked()).not.toHaveBeenCalled();
+
+      // A box the staff member changed on purpose still wins: a typed length, and a cleared id (with the video unpublished).
+      const fresh = { ...stale, muxPlaybackId: playbackId, muxAssetId: "AssetFromUpload0", shownMuxPlaybackId: playbackId, shownMuxAssetId: "AssetFromUpload0", shownDurationSeconds: "1:50" };
+      expect(await saveVideoAction(null, form({ ...fresh, durationSeconds: "3:00" }))).toMatchObject({ ok: expect.any(String) });
+      expect(await prisma.video.findUnique({ where: { id: video.id } })).toMatchObject({ muxPlaybackId: playbackId, durationSeconds: 180 });
+      expect(await saveVideoAction(null, form({ ...fresh, isPublished: "", muxPlaybackId: "", muxAssetId: "", shownDurationSeconds: "3:00", durationSeconds: "3:00" }))).toMatchObject({ ok: expect.any(String) });
+      expect(await prisma.video.findUnique({ where: { id: video.id } })).toMatchObject({ muxPlaybackId: null, muxAssetId: null, durationSeconds: 180 });
+    });
+
     it("lets an edit clear a Mux-only video's id (leaving nothing to play) only while it stays unpublished, and never touches an upload in flight", async () => {
       signInAs("user_staff", { pulseStaff: true });
       const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
@@ -734,8 +764,9 @@ describe("saveVideoAction", () => {
       });
       createdVideoIds.push(video.id);
 
-      expect(await saveVideoAction(null, form({ ...fields, id: video.id, videoUrl: "", muxPlaybackId: "" }))).toMatchObject({ error: expect.stringContaining("cannot be published") });
-      expect(await saveVideoAction(null, form({ ...fields, id: video.id, videoUrl: "", muxPlaybackId: "", isPublished: "" }))).toMatchObject({ ok: expect.any(String) });
+      const clearing = { ...fields, id: video.id, videoUrl: "", muxPlaybackId: "", shownMuxPlaybackId: playbackId };
+      expect(await saveVideoAction(null, form(clearing))).toMatchObject({ error: expect.stringContaining("cannot be published") });
+      expect(await saveVideoAction(null, form({ ...clearing, isPublished: "" }))).toMatchObject({ ok: expect.any(String) });
       expect(await prisma.video.findUnique({ where: { id: video.id } })).toMatchObject({
         videoUrl: null,
         muxPlaybackId: null,

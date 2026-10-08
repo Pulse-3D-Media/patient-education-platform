@@ -9,7 +9,7 @@ import { INPUT, PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styl
 import { CATEGORIES } from "@/lib/categories";
 import type { Sender } from "@/lib/sender-name";
 import { qrFileName, watchLink } from "@/lib/share-link";
-import { createLinkAction } from "./actions";
+import { createLinkAction, createQrCodeAction } from "./actions";
 
 /** One video this clinic may share, as the Shared links page shows it. */
 export type ProcedureItem = {
@@ -26,6 +26,9 @@ type Filter = Category | "ALL";
 
 /** The link a row just made, for its menu. */
 type MadeLink = { code: string; senderName: string | null };
+
+/** The printed code a row just made (or found already live), for its menu. */
+type MadeCode = { id: string; created: boolean; senderName: string | null };
 
 /**
  * Everything on the Shared links page below its title: the category pills
@@ -44,6 +47,13 @@ type MadeLink = { code: string; senderName: string | null };
  * One row's box is open at a time. Closing it (Close, or Escape) does not
  * delete a link already made, and pressing Create link again asks for a
  * doctor again and makes another one.
+ *
+ * PRINTED QR CODE, the second button on each row, asks the same question and
+ * then makes the PERMANENT code for that procedure from that doctor (or, when
+ * that doctor already has one for it, shows that one: there is one live code
+ * per procedure per doctor). Its menu has Print and Download, as often as
+ * the office likes; the code is listed under "Printed QR codes" below the
+ * procedures, where it can be retired or replaced. See lib/qr-code.ts.
  *
  * Filtering is instant and happens in the browser: this is a client
  * component because the open row, the pressed pill and the typed words are
@@ -231,21 +241,25 @@ function CreateLink({
   onActivate: () => void;
   onClose: () => void;
 }) {
-  const [stage, setStage] = useState<"picking" | "made">("picking");
+  const [stage, setStage] = useState<"picking" | "made" | "code-made">("picking");
+  /** Which button opened the box: a one-time patient link, or the printed code. */
+  const [kind, setKind] = useState<"link" | "code">("link");
   const [pending, setPending] = useState(false);
   const [made, setMade] = useState<MadeLink | null>(null);
+  const [madeCode, setMadeCode] = useState<MadeCode | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Set the moment a doctor is chosen, before React has redrawn the dropdown
   // as disabled, so a second choice while the first is on its way makes nothing.
   const busy = useRef(false);
 
-  function press() {
+  function press(which: "link" | "code") {
     if (busy.current) return;
     if (blocked) {
       setError(blocked);
       return;
     }
     setError(null);
+    setKind(which);
     setStage("picking");
     onActivate();
   }
@@ -256,6 +270,17 @@ function CreateLink({
     setPending(true);
     setError(null);
     try {
+      if (kind === "code") {
+        const result = await createQrCodeAction(video.id, senderUserId);
+        if (result.ok) {
+          const sender = senders.find((person) => person.userId === senderUserId);
+          setMadeCode({ id: result.id, created: result.created, senderName: sender?.patientName ?? sender?.name ?? null });
+          setStage("code-made");
+        } else {
+          setError(result.error);
+        }
+        return;
+      }
       const result = await createLinkAction(video.id, senderUserId);
       if (result.ok) {
         setMade({ code: result.code, senderName: result.senderName });
@@ -274,17 +299,41 @@ function CreateLink({
 
   return (
     <div className="flex flex-col items-start gap-3 lg:items-end">
-      <button
-        type="button"
-        onClick={press}
-        disabled={pending}
-        aria-expanded={active}
-        className="inline-flex h-11 items-center rounded-lg bg-brand px-5 text-base font-medium text-on-brand transition hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
-      >
-        {pending ? "Creating..." : "Create link"}
-      </button>
+      <div className="flex flex-wrap gap-2 lg:justify-end">
+        <button
+          type="button"
+          onClick={() => press("link")}
+          disabled={pending}
+          aria-expanded={active && kind === "link"}
+          className="inline-flex h-11 items-center rounded-lg bg-brand px-5 text-base font-medium text-on-brand transition hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60"
+        >
+          {pending && kind === "link" ? "Creating..." : "Create link"}
+        </button>
+        <button
+          type="button"
+          onClick={() => press("code")}
+          disabled={pending}
+          aria-expanded={active && kind === "code"}
+          className={`${SECONDARY_BUTTON} disabled:cursor-wait disabled:opacity-60`}
+        >
+          {pending && kind === "code" ? "Making..." : "Printed QR code"}
+        </button>
+      </div>
       {active && stage === "picking" && (
-        <DoctorPicker title={video.title} senders={senders} pending={pending} error={error} onChoose={choose} onClose={onClose} />
+        <DoctorPicker
+          title={video.title}
+          question={kind === "code" ? "Which doctor is this printed code from?" : "Which doctor is this link from?"}
+          hint={
+            kind === "code"
+              ? "Choosing a doctor makes the code, or shows the one this doctor already has for this procedure."
+              : "Choosing a doctor makes the link. Only people holding a seat are listed."
+          }
+          senders={senders}
+          pending={pending}
+          error={error}
+          onChoose={choose}
+          onClose={onClose}
+        />
       )}
       {!active && error && (
         <p role="alert" className="max-w-sm text-sm text-problem lg:text-right">
@@ -292,6 +341,7 @@ function CreateLink({
         </p>
       )}
       {active && stage === "made" && made && <LinkMenu key={made.code} title={video.title} link={made} baseUrl={baseUrl} onClose={onClose} />}
+      {active && stage === "code-made" && madeCode && <CodeMenu key={madeCode.id} title={video.title} code={madeCode} onClose={onClose} />}
     </div>
   );
 }
@@ -320,6 +370,8 @@ function useBoxBehaviour(box: React.RefObject<HTMLElement | null>, focusTarget: 
  */
 function DoctorPicker({
   title,
+  question,
+  hint,
   senders,
   pending,
   error,
@@ -327,6 +379,8 @@ function DoctorPicker({
   onClose,
 }: {
   title: string;
+  question: string;
+  hint: string;
   senders: Sender[];
   pending: boolean;
   error: string | null;
@@ -343,12 +397,12 @@ function DoctorPicker({
       ref={box}
       tabIndex={-1}
       role="group"
-      aria-label={`Choose the doctor for a new ${title} link`}
+      aria-label={`${question} ${title}`}
       className="w-full max-w-md rounded-xl border border-brand/50 bg-overlay p-4 shadow-panel outline-none"
     >
       <div className="flex items-start justify-between gap-3">
         <label htmlFor={selectId} className="pt-1 text-sm font-semibold text-ink">
-          Which doctor is this link from?
+          {question}
         </label>
         <button
           type="button"
@@ -369,7 +423,7 @@ function DoctorPicker({
         className={`${INPUT} mt-2 disabled:opacity-60`}
       >
         <option value="" disabled>
-          {pending ? "Creating link..." : "Choose a doctor..."}
+          {pending ? "Making it..." : "Choose a doctor..."}
         </option>
         {senders.map((sender) => (
           <option key={sender.userId} value={sender.userId}>
@@ -382,7 +436,7 @@ function DoctorPicker({
           {error}
         </p>
       ) : (
-        <p className="mt-2 text-xs text-ink-muted">Choosing a doctor makes the link. Only people holding a seat are listed.</p>
+        <p className="mt-2 text-xs text-ink-muted">{hint}</p>
       )}
     </div>
   );
@@ -434,6 +488,54 @@ function LinkMenu({ title, link, baseUrl, onClose }: { title: string; link: Made
         </a>
       </div>
       <p className="mt-3 text-xs text-ink-muted">Closing this does not cancel the link. Create link again makes a new one.</p>
+    </div>
+  );
+}
+
+/**
+ * The small menu for a printed code: Print and Download, and Close. The same
+ * code every time, so the office can print it or put it on its own handouts
+ * as often as it likes.
+ */
+function CodeMenu({ title, code, onClose }: { title: string; code: MadeCode; onClose: () => void }) {
+  const menu = useRef<HTMLDivElement>(null);
+  const none = useRef<HTMLElement>(null);
+  useBoxBehaviour(menu, none, onClose);
+
+  return (
+    <div
+      ref={menu}
+      tabIndex={-1}
+      role="group"
+      aria-label={`Printed QR code for ${title}`}
+      className="w-full max-w-md rounded-xl border border-brand/50 bg-overlay p-4 shadow-panel outline-none"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-semibold text-ink" role="status">
+          {code.created ? "Printed QR code made" : "This doctor already has a printed code for this procedure"}
+          {code.senderName ? `. Surgeon: ${code.senderName}` : ""}
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-soft transition hover:bg-wash hover:text-ink"
+        >
+          <CloseIcon className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <a href={`/admin/qr-codes/${code.id}`} target="_blank" rel="noopener" className={SECONDARY_BUTTON}>
+          Print
+        </a>
+        <a href={`/admin/qr-codes/${code.id}/image`} download className={SECONDARY_BUTTON}>
+          Download QR code
+        </a>
+      </div>
+      <p className="mt-3 text-xs text-ink-muted">
+        This code does not run out. Print or download it as often as you like: every patient who scans it gets a link of their own. It is listed under
+        Printed QR codes at the bottom of this page, where it can be retired.
+      </p>
     </div>
   );
 }

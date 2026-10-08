@@ -32,15 +32,13 @@ vi.mock("./actions", () => ({
 describe("SettingsForm", () => {
   const html = renderToStaticMarkup(<SettingsForm settings={SETTINGS_DEFAULTS} />);
 
-  it("marks the QR flag as not active yet, and only the QR flag", () => {
-    expect(html.match(/not active yet/gi)).toHaveLength(1);
-    // The line sits in the QR row: after its label, and that row is the last one.
-    expect(html.indexOf("not active yet")).toBeGreaterThan(html.indexOf("QR scans per day to flag"));
-    expect(html.indexOf("QR scans per day to flag")).toBeGreaterThan(html.indexOf("Grace days"));
+  it("marks nothing as not active yet: the printed-code flag is read since printed QR codes were built", () => {
+    expect(html).not.toMatch(/not active yet/i);
+    expect(html.indexOf("Printed-code links per day to flag")).toBeGreaterThan(html.indexOf("Grace days"));
   });
 
   it("still draws all five settings with their defaults", () => {
-    for (const label of ["Unclaimed link days", "Days after first play", "Maximum renewals", "Grace days", "QR scans per day to flag"]) {
+    for (const label of ["Unclaimed link days", "Days after first play", "Maximum renewals", "Grace days", "Printed-code links per day to flag"]) {
       expect(html).toContain(label);
     }
     expect(html).toContain("Default 90.");

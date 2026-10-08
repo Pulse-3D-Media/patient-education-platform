@@ -35,6 +35,7 @@ model Video {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   shares          Share[]
+  qrCodes         QrCode[]
 
   @@index([category])
 }
@@ -95,6 +96,7 @@ model Clinic {
   brandTheme       String? // "light" for light staff screens (/library and /admin); empty or "dark" means dark, which is what every clinic had before. Checked by parseBrandTheme in lib/branding.ts. The patient page and /pulse ignore it
   shares           Share[]
   clinicNotes      ClinicNote[]
+  qrCodes          QrCode[]
 
   // The pricing version this clinic is pinned to, once it has a subscription
   // (billing sets it). Empty means the active version. Activating a new
@@ -413,6 +415,38 @@ model Share {
   lastRenewedAt      DateTime? // when the clinic last turned it back on
   renewalRequests    Int       @default(0) // how many "ask my clinic" requests have been recorded on this link (at most one a day), for the Pulse reports. Only ever goes up, never reset. Counts from October 2026: 0 on every link before that, whatever was asked then
 
+  // The printed QR code that handed this link out, when one did (see QrCode).
+  // Empty for every link an office or a surgeon made by hand, which is every
+  // link made before printed codes existed.
+  qrCodeId String?
+  qrCode   QrCode? @relation(fields: [qrCodeId], references: [id], onDelete: Restrict) // a code is retired, never deleted, so its links always know where they came from
+
   @@index([clinicId])
   @@index([clinicId, createdAt]) // "links this clinic made in the last 30 days", for the Pulse reports
+  @@index([qrCodeId, createdAt]) // "links this printed code handed out today", for the daily flag
+}
+
+/// A permanent QR code a clinic prints and keeps: on pamphlets, posters,
+/// intake packets. It is not a patient link. Scanning it opens /q/<code>, and
+/// the patient's tap on Play makes a NEW patient link (a Share) for that one
+/// patient, with the usual expiry rules; the printed code itself never runs
+/// out. One code is for one procedure from one surgeon at one clinic, and at
+/// most one is live for each such trio. A code is retired, never deleted, and
+/// a retired code never works again: a replacement is a new row with a new code.
+/// Nothing here is about a patient.
+model QrCode {
+  id                 String    @id @default(cuid())
+  code               String    @unique // the long random code in the printed address: 25 lowercase letters and digits, about 128 bits, made by Node's cryptographic generator (lib/db/qr-codes.ts). A secret like a key: never logged
+  clinicId           String // the tenant column. Always filter by it.
+  clinic             Clinic    @relation(fields: [clinicId], references: [id])
+  videoId            String
+  video              Video     @relation(fields: [videoId], references: [id])
+  senderUserId       String // the surgeon's Clerk user id. The links it hands out name them while they hold a seat here, and only the clinic once they do not
+  senderFallbackName String? // "Dr. First Last" from Clerk when the code was made, for when no name has been chosen for them on /admin/people (the patient page never asks Clerk)
+  liveKey            String?   @unique // "<clinicId>:<videoId>:<senderUserId>" while the code is live, empty once it is retired. The unique column is what makes "one live code per procedure per surgeon" true even when two admins press at once
+  createdAt          DateTime  @default(now())
+  retiredAt          DateTime? // when an office admin retired it (or replaced it). Set once; the code never works again
+  shares             Share[]
+
+  @@index([clinicId, retiredAt])
 }

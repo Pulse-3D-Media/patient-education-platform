@@ -42,7 +42,8 @@ export const SETTINGS_HELP: Record<keyof Settings, string> = {
   viewDays:
     "Once a patient first plays their video, how many more days the link works. Then it pauses, and the clinic can turn it back on for the same number of days again (see Maximum renewals). A clinic can be given its own number. Applies to links made from now on; a link already sent keeps the number it was made with.",
   graceDays: "How many days a clinic keeps using the library after a payment fails, before it is switched off.",
-  qrDailyFlag: "If one QR code is scanned more than this many times in a day, it is flagged on the reports for a look.",
+  qrDailyFlag:
+    "If one printed QR code gives patients this many links or more in one day (counted from midnight UTC), it is flagged on the clinic's page here for a look. A sign to look, never a limit: nothing is stopped by it. A link is made only when a patient taps Play, so this counts links, not scans and not people.",
   maxRenewals:
     "How many times a clinic can turn a paused patient link back on. 0 means never. Unlike the day counts, this is not copied onto each link: a change applies to every link at once, links already sent included.",
 };
@@ -54,6 +55,4 @@ export const SETTINGS_HELP: Record<keyof Settings, string> = {
  * entry here; lib/settings-defaults.test.ts fails until this list matches
  * what the code really reads.
  */
-export const SETTINGS_NOT_ACTIVE: Partial<Record<keyof Settings, string>> = {
-  qrDailyFlag: "Saved, but not active yet: nothing reads this number until permanent QR codes and reports are built.",
-};
+export const SETTINGS_NOT_ACTIVE: Partial<Record<keyof Settings, string>> = {};

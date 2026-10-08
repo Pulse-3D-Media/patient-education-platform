@@ -22,7 +22,8 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
  *
  * Everything not listed in STAFF_PATHS is public. That covers the patient
  * page (/watch), the sign-in and sign-up pages, the health check
- * (/api/health, for an uptime monitor), /api/webhooks, and later /q.
+ * (/api/health, for an uptime monitor), /api/webhooks, and /q (a printed QR
+ * code's page, and the route its Play tap posts to).
  */
 
 /** The path prefixes that need a signed-in user. Everything under them too. */

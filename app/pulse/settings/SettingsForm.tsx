@@ -27,7 +27,7 @@ const FIELDS: { name: keyof Settings; label: string; unit: string; min?: number;
   { name: "viewDays", label: "Days after first play", unit: "days", max: MAX_LINK_DAYS },
   { name: "maxRenewals", label: "Maximum renewals", unit: "times", min: MIN_RENEWALS, max: MAX_RENEWALS },
   { name: "graceDays", label: "Grace days", unit: "days" },
-  { name: "qrDailyFlag", label: "QR scans per day to flag", unit: "scans" },
+  { name: "qrDailyFlag", label: "Printed-code links per day to flag", unit: "links" },
 ];
 
 export function SettingsForm({ settings }: { settings: Settings }) {

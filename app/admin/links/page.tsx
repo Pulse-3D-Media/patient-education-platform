@@ -9,12 +9,14 @@ import { clinicIsOpen } from "@/lib/clinic-status";
 import { ShareTermsError, type ShareTerms } from "@/lib/expiry";
 import { formatDuration } from "@/lib/format";
 import { getClinicAccess } from "@/lib/db/access";
+import { listLiveQrCodesForClinic } from "@/lib/db/qr-codes";
 import { getShareTerms } from "@/lib/db/shares";
 import { listUsableVideos } from "@/lib/db/videos";
 import { errorKind } from "@/lib/error-kind";
 import { listSenders, type Sender } from "@/lib/senders";
 import { AdminFrame } from "../AdminFrame";
 import { LinkRows } from "./LinkRows";
+import { PrintedCodes } from "./PrintedCodes";
 
 /**
  * Shared links, at /admin/links: where the office makes a link for a
@@ -35,6 +37,12 @@ import { LinkRows } from "./LinkRows";
  * needs to find one again. Links already sent keep working on their own
  * rules (lib/expiry.ts). The overview (/admin) still shows the newest few
  * and a handful of counts.
+ *
+ * PRINTED QR CODES are the exception (Prompt 9): a permanent code printed on
+ * a pamphlet or a poster has to be findable, so it can be retired. Each row
+ * has a second button, Printed QR code, and the bottom of the page lists the
+ * clinic's live printed codes (PrintedCodes), at most a hundred. See
+ * lib/qr-code.ts.
  *
  * How long a link works is described in the words it is made with: the page
  * reads the clinic's share terms (getShareTerms) from the same settings
@@ -76,11 +84,12 @@ export default async function LinksPage() {
   // createShare() applies when a link is made (lib/access.ts), so a row and
   // its button can never disagree.
   const access = await getClinicAccess(clinic.id);
-  const [videos, baseUrl, terms, senders] = await Promise.all([
+  const [videos, baseUrl, terms, senders, printed] = await Promise.all([
     access ? listUsableVideos(access) : [],
     getBaseUrl(),
     readShareTerms(clinic.id),
     readSenders(clinic.id),
+    listLiveQrCodesForClinic(clinic.id),
   ]);
 
   // What the page says when there is nothing to list.
@@ -126,6 +135,18 @@ export default async function LinksPage() {
         emptyProceduresText={emptyProceduresText}
         linksCanBeMade={terms !== null}
         senders={senders}
+      />
+      <PrintedCodes
+        total={printed.total}
+        codes={printed.rows.map((code) => ({
+          id: code.id,
+          videoTitle: code.videoTitle,
+          isPlaceholder: code.isPlaceholder,
+          isPublished: code.isPublished,
+          surgeonName: code.surgeonName,
+          surgeonSeated: code.surgeonSeated,
+          madeOn: code.createdAt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Denver" }),
+        }))}
       />
     </AdminFrame>
   );

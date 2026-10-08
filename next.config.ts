@@ -21,6 +21,11 @@ const nextConfig: NextConfig = {
           dev: process.env.NODE_ENV === "development",
         }),
       },
+      // The patient's pages, a link's and a printed QR code's (and the route its
+      // Play tap posts to): never in a search engine, whatever asks, a HEAD
+      // request included. The pages also say so in their own HTML.
+      { source: "/watch/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+      { source: "/q/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
     ];
   },
 };

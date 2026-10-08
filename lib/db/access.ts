@@ -171,6 +171,30 @@ export async function lockShareForRenewal(tx: Prisma.TransactionClient, clinicId
 }
 
 /**
+ * One printed QR code, read for the transaction that hands out a patient link
+ * from it, with the row held against change until that transaction ends.
+ * Null when no code has that id.
+ *
+ * "FOR SHARE", like the clinic and video reads above: two patients scanning
+ * the same code at once do not wait for each other, but retiring or
+ * replacing the code (an UPDATE of this row) waits until the link being made
+ * is committed, and a retirement that landed first is seen here, so the link
+ * is refused. A code can never hand out a link after the moment it was
+ * retired. Taken AFTER the clinic's lock, the same order every other path
+ * takes, so the two can never wait on each other in a circle. In this file
+ * with the other locking reads so the overlap test can wrap it
+ * (qr-codes.race.test.ts).
+ */
+export async function lockQrCodeForIssue(tx: Prisma.TransactionClient, qrCodeId: string): Promise<{ retiredAt: Date | null } | null> {
+  const rows = await tx.$queryRaw<{ retiredAt: Date | null }[]>`
+    SELECT "retiredAt"
+    FROM "QrCode"
+    WHERE "id" = ${qrCodeId}
+    FOR SHARE`;
+  return rows[0] ?? null;
+}
+
+/**
  * What one clinic may use right now: open or not, the categories on its
  * plan, and whether it is shown placeholders. Null for an unknown clinic.
  * One query; the pages then apply the rule to whatever they list.

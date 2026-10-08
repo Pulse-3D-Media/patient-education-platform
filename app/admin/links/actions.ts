@@ -2,10 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { getCurrentClinicId } from "@/lib/clinic";
+import { createQrCode, getLiveQrCodeSender, replaceQrCode, retireQrCode } from "@/lib/db/qr-codes";
 import { createShare, SenderRefusedError, ShareRefusedError } from "@/lib/db/shares";
+import { errorKind } from "@/lib/error-kind";
 import { ShareTermsError } from "@/lib/expiry";
+import { getSignedInName } from "@/lib/people";
 import { isClinicAdmin } from "@/lib/roles";
 import { resolveSender } from "@/lib/senders";
+import type { ActionResult } from "../people/actions";
 
 /**
  * The Server Action behind the Create link button on the Shared links page
@@ -73,5 +77,95 @@ export async function createLinkAction(videoId: unknown, senderUserId: unknown):
     // Anything else is ours to read. Only the kind of error is logged: no link, no id.
     console.error("Making a share link from Shared links failed", error instanceof Error ? error.name : "unknown error");
     return { ok: false, error: COULD_NOT_MAKE_LINK };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Printed QR codes (see the top of lib/qr-code.ts). The same gate as Create
+// link: an office admin of an open clinic, checked here on the server. The
+// clinic comes from the signed-in admin, never from the browser; a code's id
+// sent by the browser is looked up within that clinic only, so another
+// clinic's code is never found. The admin's name for the clinic log comes
+// from Clerk.
+// ---------------------------------------------------------------------------
+
+/** What the "Printed QR code" button gets back: the live code for that procedure and surgeon (made now, or already there), or a sentence to show. */
+export type QrCodeResult = { ok: true; id: string; created: boolean } | { ok: false; error: string };
+
+/** Shown when a printed-code change failed for a reason the admin cannot do anything about. */
+const COULD_NOT_CHANGE_CODE = "That could not be done just now. Nothing was changed. Try again in a moment.";
+
+/**
+ * Make the printed code for one procedure from one surgeon, or hand back the
+ * one that is already live for them (one per procedure per surgeon). Pressing
+ * twice, or two admins at once, ends with one code.
+ */
+export async function createQrCodeAction(videoId: unknown, senderUserId: unknown): Promise<QrCodeResult> {
+  try {
+    if (!(await isClinicAdmin())) return { ok: false, error: NOT_ALLOWED_MESSAGE };
+    const clinicId = await getCurrentClinicId();
+    if (!clinicId) return { ok: false, error: NOT_ALLOWED_MESSAGE };
+    if (typeof videoId !== "string" || !videoId.trim()) return { ok: false, error: "No video was selected." };
+
+    const sender = await resolveSender(clinicId, senderUserId);
+    if (!sender.ok) return { ok: false, error: sender.message };
+
+    const actor = (await getSignedInName()) ?? "An office admin";
+    const made = await createQrCode(clinicId, videoId.trim(), sender.sender, actor);
+    revalidatePath("/admin/links");
+    return { ok: true, id: made.id, created: made.created };
+  } catch (error) {
+    if (error instanceof ShareRefusedError || error instanceof SenderRefusedError) return { ok: false, error: error.message };
+    console.error("Making a printed QR code failed", errorKind(error));
+    return { ok: false, error: COULD_NOT_CHANGE_CODE };
+  }
+}
+
+/** Retire one of this clinic's printed codes: every printed copy stops handing out links. Links it already handed out keep working. */
+export async function retireQrCodeAction(qrCodeId: unknown): Promise<ActionResult> {
+  try {
+    if (!(await isClinicAdmin())) return { error: NOT_ALLOWED_MESSAGE };
+    const clinicId = await getCurrentClinicId();
+    if (!clinicId) return { error: NOT_ALLOWED_MESSAGE };
+    if (typeof qrCodeId !== "string" || !qrCodeId) return { error: "We couldn't find that printed code for your clinic." };
+
+    const actor = (await getSignedInName()) ?? "An office admin";
+    const outcome = await retireQrCode(clinicId, qrCodeId, actor);
+    if (outcome.ok) revalidatePath("/admin/links");
+    return outcome.ok ? { message: outcome.message } : { error: outcome.message };
+  } catch (error) {
+    console.error("Retiring a printed QR code failed", errorKind(error));
+    return { error: COULD_NOT_CHANGE_CODE };
+  }
+}
+
+/**
+ * Replace one of this clinic's printed codes with a new one for the same
+ * procedure and the same surgeon, in one step: the old code stops, the new
+ * one has to be printed. The surgeon is the old code's, never one sent by the
+ * browser, and must still be in the clinic and hold a seat; otherwise nothing
+ * changes and the admin is told to retire it and make a new one from someone
+ * who does.
+ */
+export async function replaceQrCodeAction(qrCodeId: unknown): Promise<ActionResult> {
+  try {
+    if (!(await isClinicAdmin())) return { error: NOT_ALLOWED_MESSAGE };
+    const clinicId = await getCurrentClinicId();
+    if (!clinicId) return { error: NOT_ALLOWED_MESSAGE };
+    const notFound = { error: "We couldn't find that printed code for your clinic, or it was already retired." };
+    if (typeof qrCodeId !== "string" || !qrCodeId) return notFound;
+
+    const senderUserId = await getLiveQrCodeSender(clinicId, qrCodeId);
+    if (!senderUserId) return notFound;
+    const sender = await resolveSender(clinicId, senderUserId);
+    if (!sender.ok) return { error: `${sender.message} The old code was left as it was.` };
+
+    const actor = (await getSignedInName()) ?? "An office admin";
+    const outcome = await replaceQrCode(clinicId, qrCodeId, sender.sender, actor);
+    if (outcome.ok) revalidatePath("/admin/links");
+    return outcome.ok ? { message: outcome.message } : { error: outcome.message };
+  } catch (error) {
+    console.error("Replacing a printed QR code failed", errorKind(error));
+    return { error: COULD_NOT_CHANGE_CODE };
   }
 }

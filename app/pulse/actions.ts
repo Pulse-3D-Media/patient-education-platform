@@ -372,7 +372,7 @@ const LABELS: Record<keyof Settings, string> = {
   unclaimedDays: "Unclaimed link days",
   viewDays: "Days after first play",
   graceDays: "Grace days",
-  qrDailyFlag: "QR scans per day to flag",
+  qrDailyFlag: "Printed-code links per day to flag",
   maxRenewals: "Maximum renewals",
 };
 

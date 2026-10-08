@@ -25,7 +25,8 @@ import { AdminFrame } from "./AdminFrame";
  * for each section, so Shared links, People and Billing are one tap away.
  *
  * Everything on it is bounded: five counts done in the database, and the
- * newest RECENT_LINKS links. There is no full list of links anywhere on the
+ * newest RECENT_LINKS links made by the office or a surgeon (not the ones
+ * printed QR codes handed to patients). There is no full list of links anywhere on the
  * clinic side, on purpose: the office never needs to find a link again, and
  * /admin/links is where new ones are made.
  *
@@ -70,7 +71,8 @@ export default async function AdminOverviewPage() {
   const now = new Date();
   const [summary, recent, waiting, settings] = await Promise.all([
     summarizeSharesForClinic(clinic.id),
-    listRecentSharesForClinic(clinic.id, RECENT_LINKS),
+    // Links the office and the surgeons made; the links printed QR codes gave patients would otherwise crowd them out.
+    listRecentSharesForClinic(clinic.id, RECENT_LINKS, { madeByHand: true }),
     listRenewalRequestsForClinic(clinic.id, WAITING_LINKS, now),
     // For the word on a link that has run out: "Paused" while it can be turned back on, "Expired" once it cannot.
     getSettings(),

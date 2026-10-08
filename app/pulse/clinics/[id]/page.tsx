@@ -11,6 +11,7 @@ import { getClinicBilling } from "@/lib/db/billing";
 import { getCategoryAvailability } from "@/lib/db/category-config";
 import { getClinicForPulse } from "@/lib/db/clinics";
 import { NOTES_PAGE_SIZE, countNotesForClinic, listNotesForClinic } from "@/lib/db/notes";
+import { listQrCodesForPulse, type PulseQrCodeRow } from "@/lib/db/qr-codes";
 import { getSeatSummary } from "@/lib/db/seats";
 import { getSettings } from "@/lib/db/settings";
 import { countSharesForClinic, listRecentSharesForClinic } from "@/lib/db/shares";
@@ -68,7 +69,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
   // First, because it may add an entry to the log that is read just below. Null when Clerk cannot be read.
   const board = clinic.clerkOrgId ? await checkSeats(clinic.id).catch(() => null) : null;
 
-  const [settings, shares, shareCount, noteCount, availability, billing, storedSeats] = await Promise.all([
+  const [settings, shares, shareCount, noteCount, availability, billing, storedSeats, printed] = await Promise.all([
     getSettings(),
     listRecentSharesForClinic(clinic.id, RECENT_LINK_LIMIT),
     countSharesForClinic(clinic.id),
@@ -76,6 +77,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
     getCategoryAvailability(),
     getClinicBilling(clinic.id),
     getSeatSummary(clinic.id),
+    listQrCodesForPulse(clinic.id),
   ]);
   // One page of the log, never the whole of it. A typed-in page number past the end lands on the last page.
   const notesInfo = pageInfo(readPage((await searchParams).notes), noteCount, NOTES_PAGE_SIZE);
@@ -257,62 +259,75 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
     </Section>
   );
 
+  const flagged = printed.rows.filter((code) => code.issuedToday >= settings.qrDailyFlag).length;
+
   const links = (
-    <Section
-      title="Recent links"
-      blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made.`}
-    >
-      {shares.length === 0 ? (
-        <p className="text-sm text-[#667085]">No links yet.</p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-[15px]">
-            <thead className="text-xs uppercase tracking-wider text-[#667085]">
-              <tr className="border-b border-white/10">
-                <th className="px-3 py-2 font-medium">Code</th>
-                <th className="px-3 py-2 font-medium">Procedure</th>
-                <th className="px-3 py-2 font-medium">Category</th>
-                <th className="px-3 py-2 font-medium">Expires</th>
-                <th className="px-3 py-2 text-right font-medium">Play starts</th>
-                <th className="px-3 py-2 font-medium">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shares.map((share) => {
-                const state = shareExpiryState(share, now);
-                const expired = state.kind === "expired";
-                // Expires: the date, plus how it got there (lib/expiry.ts). A link
-                // nobody has played yet stops on its unclaimed date unless it is
-                // played first; a legacy link's date is fixed and says so.
-                const expires =
-                  state.kind === "expired"
-                    ? `Expired ${formatDate(state.expiresAt)}`
-                    : state.kind === "awaiting"
-                      ? `${formatDate(state.unclaimedUntil)} if never played; ${state.daysAfterFirstPlay} days after the first play`
-                      : state.kind === "played"
-                        ? `${formatDate(state.expiresAt)} (first played ${formatDate(state.firstPlayedAt)})`
-                        : `${formatDate(state.expiresAt)} (fixed date, made before the first-play rule)`;
-                return (
-                  <tr key={share.id} className="border-b border-white/5 last:border-b-0">
-                    <td className="px-3 py-2 text-[#bfbfbf]">{share.code}</td>
-                    <td className="px-3 py-2">
-                      <span className="flex flex-wrap items-center gap-2">
-                        {share.video.title}
-                        {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-[#bfbfbf]">{categoryLabel(share.video.category)}</td>
-                    <td className={`px-3 py-2 ${expired ? "text-[#667085]" : "text-[#bfbfbf]"}`}>{expires}</td>
-                    <td className="px-3 py-2 text-right text-[#bfbfbf]">{share.viewCount}</td>
-                    <td className="px-3 py-2 text-[#bfbfbf]">{formatDate(share.createdAt)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Section>
+    <>
+      <Section
+        title="Printed QR codes"
+        blurb={`Permanent codes this clinic printed. Each one hands every patient who taps Play a link of their own. Read-only here; the clinic retires and replaces them on Shared links. ${
+          printed.total > printed.rows.length ? `Showing the newest ${printed.rows.length} of ${printed.total}, live ones first.` : ""
+        }`}
+      >
+        <PrintedCodesTable rows={printed.rows} flagAt={settings.qrDailyFlag} />
+      </Section>
+      <Section
+        title="Recent links"
+        blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made.`}
+      >
+        {shares.length === 0 ? (
+          <p className="text-sm text-[#667085]">No links yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-left text-[15px]">
+              <thead className="text-xs uppercase tracking-wider text-[#667085]">
+                <tr className="border-b border-white/10">
+                  <th className="px-3 py-2 font-medium">Code</th>
+                  <th className="px-3 py-2 font-medium">Procedure</th>
+                  <th className="px-3 py-2 font-medium">Category</th>
+                  <th className="px-3 py-2 font-medium">Expires</th>
+                  <th className="px-3 py-2 text-right font-medium">Play starts</th>
+                  <th className="px-3 py-2 font-medium">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shares.map((share) => {
+                  const state = shareExpiryState(share, now);
+                  const expired = state.kind === "expired";
+                  // Expires: the date, plus how it got there (lib/expiry.ts). A link
+                  // nobody has played yet stops on its unclaimed date unless it is
+                  // played first; a legacy link's date is fixed and says so.
+                  const expires =
+                    state.kind === "expired"
+                      ? `Expired ${formatDate(state.expiresAt)}`
+                      : state.kind === "awaiting"
+                        ? `${formatDate(state.unclaimedUntil)} if never played; ${state.daysAfterFirstPlay} days after the first play`
+                        : state.kind === "played"
+                          ? `${formatDate(state.expiresAt)} (first played ${formatDate(state.firstPlayedAt)})`
+                          : `${formatDate(state.expiresAt)} (fixed date, made before the first-play rule)`;
+                  return (
+                    <tr key={share.id} className="border-b border-white/5 last:border-b-0">
+                      <td className="px-3 py-2 text-[#bfbfbf]">{share.code}</td>
+                      <td className="px-3 py-2">
+                        <span className="flex flex-wrap items-center gap-2">
+                          {share.video.title}
+                          {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
+                          {share.qrCodeId && <span className="rounded-md bg-white/10 px-2 py-0.5 text-[12px] text-[#bfbfbf]">From a printed code</span>}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-[#bfbfbf]">{categoryLabel(share.video.category)}</td>
+                      <td className={`px-3 py-2 ${expired ? "text-[#667085]" : "text-[#bfbfbf]"}`}>{expires}</td>
+                      <td className="px-3 py-2 text-right text-[#bfbfbf]">{share.viewCount}</td>
+                      <td className="px-3 py-2 text-[#bfbfbf]">{formatDate(share.createdAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+    </>
   );
 
   const notesSection = (
@@ -394,7 +409,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
             { id: "details", label: "Details", content: details },
             { id: "branding", label: "Branding", content: branding },
             { id: "people", label: "People", content: peopleSection },
-            { id: "links", label: "Links", content: links },
+            { id: "links", label: flagged > 0 ? `Links (${flagged} flagged)` : "Links", content: links },
             { id: "notes", label: `Notes${noteCount ? ` (${noteCount})` : ""}`, content: notesSection },
           ]}
         />
@@ -457,4 +472,59 @@ function planWords(plan: NonNullable<Awaited<ReturnType<typeof getClinicBilling>
   const seats = `${plan.surgeonSeats} ${plan.surgeonSeats === 1 ? "seat" : "seats"}`;
   const per = plan.interval === "YEAR" ? "year" : "month";
   return `${categories}; ${seats}; ${formatCents(plan.totalCents)} a ${per}; prices version ${plan.pricingVersion.version}; accepted by ${plan.acceptedByName} on ${formatDate(plan.createdAt)}`;
+}
+
+/**
+ * A clinic's printed QR codes, read-only: the procedure, the surgeon, when it
+ * was made and retired, and how many links it handed out. The two counts are
+ * links MADE by a tap on Play, not scans and not people (a scan nobody taps
+ * makes nothing; one patient visiting twice makes two). "Today" is since
+ * midnight UTC; "30 days" is the 30 times 24 hours before now. A code at or
+ * over the qrDailyFlag setting today is flagged: a sign to look, not a limit,
+ * and nothing is stopped by it.
+ */
+function PrintedCodesTable({ rows, flagAt }: { rows: PulseQrCodeRow[]; flagAt: number }) {
+  if (rows.length === 0) return <p className="text-sm text-[#667085]">No printed codes yet.</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[720px] text-left text-[15px]">
+        <thead className="text-xs uppercase tracking-wider text-[#667085]">
+          <tr className="border-b border-white/10">
+            <th className="px-3 py-2 font-medium">Procedure</th>
+            <th className="px-3 py-2 font-medium">Surgeon</th>
+            <th className="px-3 py-2 font-medium">Status</th>
+            <th className="px-3 py-2 text-right font-medium">Links today (UTC)</th>
+            <th className="px-3 py-2 text-right font-medium">Links, last 30 days</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((code) => {
+            const flagged = code.issuedToday >= flagAt;
+            return (
+              <tr key={code.id} className="border-b border-white/5 last:border-b-0">
+                <td className="px-3 py-2">
+                  <span className="flex flex-wrap items-center gap-2">
+                    {code.videoTitle}
+                    {code.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-[#bfbfbf]">
+                  {code.surgeonName ?? "No name set"}
+                  {!code.surgeonSeated && !code.retiredAt && <span className="block text-sm text-[#f3b94d]">No seat now: its links name only the clinic</span>}
+                </td>
+                <td className="px-3 py-2 text-[#bfbfbf]">
+                  {code.retiredAt ? `Retired ${formatDate(code.retiredAt)}` : `Live since ${formatDate(code.createdAt)}`}
+                </td>
+                <td className={`px-3 py-2 text-right ${flagged ? "font-semibold text-[#f3b94d]" : "text-[#bfbfbf]"}`}>
+                  {code.issuedToday}
+                  {flagged && <span className="block text-sm font-normal">Flagged: {flagAt} or more today</span>}
+                </td>
+                <td className="px-3 py-2 text-right text-[#bfbfbf]">{code.issuedRecently}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }

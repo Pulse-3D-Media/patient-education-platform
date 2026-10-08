@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { randomInt } from "crypto";
+import { createHash, randomInt } from "crypto";
 import { accessRefusalMessage, decideVideoAccess, type AccessDecision, type AccessReason } from "../access";
 import {
   addDays,
@@ -17,7 +17,7 @@ import {
 } from "../expiry";
 import { isClerkUserId } from "../seats";
 import { effectiveSenderName } from "../sender-name";
-import { lockClinicAccess, lockSenderSeat, lockShareForRenewal, lockVideoFacts } from "./access";
+import { lockClinicAccess, lockQrCodeForIssue, lockSenderSeat, lockShareForRenewal, lockVideoFacts } from "./access";
 import { prisma } from "./client";
 import { getSettings, lockSettings } from "./settings";
 
@@ -28,9 +28,10 @@ import { getSettings, lockSettings } from "./settings";
  *
  * Functions used on the clinic side take clinicId as their first argument
  * and filter by it (rule 1 in CLAUDE.md). That is what keeps one clinic from
- * ever seeing another clinic's links. The three exceptions, getShareByCode,
- * recordSharePlay and requestShareRenewal, serve the public patient page,
- * where there is no clinic.
+ * ever seeing another clinic's links. The exceptions, getShareByCode,
+ * recordSharePlay and requestShareRenewal (the patient page) and
+ * issueShareFromQrCode (a printed QR code's page), are public, where there
+ * is no clinic: the code in the address is the key.
  *
  * How long a link works is decided by the rule in lib/expiry.ts. A link made
  * here stops after the platform's unclaimed days if nobody plays it, and the
@@ -245,6 +246,160 @@ async function writeShare(clinicId: string, videoId: string, now: Date, sender: 
   });
 }
 
+// ---------------------------------------------------------------------------
+// Links handed out by a printed QR code (see QrCode in the schema, and the
+// top of lib/qr-code.ts). The printed code never runs out; each patient who
+// taps Play on its page gets a link of their own, made here, with exactly the
+// rules every other link has.
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a link handed out by a printed code is: 16 characters. Never the
+ * 10 (or, for old links, 6) of a link made by hand, so the two kinds can
+ * never claim each other's code.
+ */
+const CHILD_CODE_LENGTH = 16;
+
+/**
+ * The code of the link one visit's Play tap gets: worked out from the
+ * printed code's row id and the visit's one-time key (isAttemptKey in
+ * lib/qr-code.ts), through SHA-256. The same visit asking twice (a dropped
+ * connection, a tap that was sent again) always works out the same code, so
+ * the second ask finds the link the first one made instead of making
+ * another. A different visit has a different key, so it gets a different
+ * link. Nothing is stored to make this work: not the key, and nothing about
+ * the phone or the person.
+ *
+ * Each character comes from one byte of the hash, taken modulo 36. That
+ * leans very slightly towards the first few characters; it does not matter,
+ * because the link cannot be guessed without the visit's key, which is
+ * random and never leaves that page.
+ */
+export function childShareCode(qrCodeId: string, attemptKey: string): string {
+  const digest = createHash("sha256").update(`${qrCodeId}:${attemptKey}`).digest();
+  let code = "";
+  for (let i = 0; i < CHILD_CODE_LENGTH; i++) {
+    code += CODE_CHARACTERS[digest[i] % CODE_CHARACTERS.length];
+  }
+  return code;
+}
+
+/** Why a printed code handed out nothing: no code has that value, it was retired, or the clinic may not use the video right now (the access rule's reason). */
+export type QrIssueRefusal = "no-such-code" | "retired" | AccessReason;
+
+/** What issueShareFromQrCode() did: the patient's link, or why there is none. */
+export type QrIssueOutcome = { ok: true; code: string } | { ok: false; reason: QrIssueRefusal };
+
+/**
+ * A patient tapped Play on a printed code's page (/q/<code>): make the link
+ * for this visit, or find the one this visit already made. Returns the link's
+ * code, or why there is none.
+ *
+ * Public on purpose, like getShareByCode: the patient is not signed in and
+ * belongs to no clinic. The printed code in the address is the key, and the
+ * clinic, the video and the surgeon all come from its row, never from the
+ * request. The visit's one-time key decides only which link this is (see
+ * childShareCode), never what it grants.
+ *
+ * THE CHECKS, in one transaction, in the order every other path locks:
+ * the clinic's row (lockClinicAccess, FOR SHARE), then the printed code's row
+ * (lockQrCodeForIssue, FOR SHARE), then the video's (lockVideoFacts). So:
+ *
+ *   - a code retired or replaced a moment ago hands out nothing, and one
+ *     being retired right now waits for this link to be written first (the
+ *     link, like every issued link, then keeps working by its own rules);
+ *   - the clinic must be able to use the video at this moment, by the same
+ *     rule as createShare (decideVideoAccess): open, on its plan, published,
+ *     a placeholder only while the clinic is shown them. A plan change, a
+ *     pause or an unpublish either waits or is seen;
+ *   - the link carries the days in the settings at this moment (the
+ *     settings lock), exactly as a link made by hand does.
+ *
+ * WHO IT IS FROM. The surgeon on the printed code, while they hold a seat at
+ * this clinic (read with a share lock, lockSenderSeat), with the name chosen
+ * for them on /admin/people or, if none, the "Dr. First Last" recorded when
+ * the code was made. When they hold no seat here any more (let go, or left),
+ * the link is from the clinic only: no surgeon's id, no name (decided by Evan
+ * on 2026-10-08: the printed code keeps working, and /admin/links flags it).
+ *
+ * A RETRY of the same visit (the same key) finds its link before anything is
+ * checked, so a dropped connection never costs the patient a second link,
+ * and a retry after the code was retired still gets the link it was given.
+ * Two tries of the same visit at the same instant: one insert wins, the
+ * other is refused by the unique code (P2002) and finds the winner's link.
+ *
+ * A link setting outside its limits throws a ShareTermsError, as it does for
+ * createShare, and nothing is written. `now` is the server's clock unless a
+ * test hands in its own.
+ */
+export async function issueShareFromQrCode(qrCode: string, attemptKey: string, now: Date = new Date()): Promise<QrIssueOutcome> {
+  const qr = await prisma.qrCode.findUnique({
+    where: { code: qrCode },
+    select: { id: true, clinicId: true, videoId: true, senderUserId: true, senderFallbackName: true, retiredAt: true },
+  });
+  if (!qr) return { ok: false, reason: "no-such-code" };
+  const code = childShareCode(qr.id, attemptKey);
+
+  // This visit asked before, and its link was made: hand it back.
+  const made = await findVisitLink(code, qr.id);
+  if (made) return made;
+  if (qr.retiredAt) return { ok: false, reason: "retired" };
+
+  try {
+    return await prisma.$transaction(async (tx): Promise<QrIssueOutcome> => {
+      const access = await lockClinicAccess(tx, qr.clinicId, now);
+      const live = await lockQrCodeForIssue(tx, qr.id);
+      if (!live || live.retiredAt) return { ok: false, reason: "retired" };
+
+      const decision: AccessDecision = access
+        ? decideVideoAccess(access, await lockVideoFacts(tx, qr.videoId))
+        : { allowed: false, reason: "clinic-closed" };
+      if (!decision.allowed) return { ok: false, reason: decision.reason };
+
+      // The same numbers createShare copies onto a link, read the same way.
+      const settings = await lockSettings(tx);
+      const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: qr.clinicId }, select: { viewDaysOverride: true } });
+      const terms = resolveShareTerms(settings, clinic);
+
+      const seat = await lockSenderSeat(tx, qr.clinicId, qr.senderUserId);
+      await tx.share.create({
+        data: {
+          code,
+          clinicId: qr.clinicId,
+          videoId: qr.videoId,
+          expiryPolicy: "FIRST_PLAY",
+          expiresAt: addDays(now, terms.unclaimedDays),
+          daysAfterFirstPlay: terms.daysAfterFirstPlay,
+          senderUserId: seat ? qr.senderUserId : null,
+          senderName: seat ? effectiveSenderName(seat.displayName, qr.senderFallbackName) : null,
+          qrCodeId: qr.id,
+        },
+        select: { id: true },
+      });
+      return { ok: true, code };
+    });
+  } catch (error) {
+    if (!isCodeClash(error)) throw error;
+    // Another try of this same visit wrote the link a moment ago.
+    const again = await findVisitLink(code, qr.id);
+    if (again) return again;
+    throw error;
+  }
+}
+
+/**
+ * The link a visit's code already names, if this printed code made it. A
+ * link with that code from anywhere else would mean two different visits
+ * hashed to the same 16 characters, which in practice never happens; it is
+ * refused loudly rather than handed to the wrong person.
+ */
+async function findVisitLink(code: string, qrCodeId: string): Promise<QrIssueOutcome | null> {
+  const share = await prisma.share.findUnique({ where: { code }, select: { qrCodeId: true } });
+  if (!share) return null;
+  if (share.qrCodeId !== qrCodeId) throw new Error("A printed code's link clashed with another link's code.");
+  return { ok: true, code };
+}
+
 /**
  * Every share link this clinic has created, newest first, with the title and
  * category of the video each one points at, whether that video is a
@@ -266,10 +421,16 @@ export async function listSharesForClinic(clinicId: string) {
  * fields as listSharesForClinic. For the admin overview, which shows a
  * short recent list and sends people to /admin/links for the rest. `limit`
  * caps the rows read, so the overview never loads the whole history.
+ *
+ * `madeByHand` leaves out the links printed QR codes handed out to patients
+ * (the overview lists the links the office and the surgeons made; a busy
+ * waiting-room poster would otherwise push them all off). Without it, every
+ * link is listed, as on the clinic's /pulse page, which marks the printed
+ * ones (qrCodeId is set).
  */
-export async function listRecentSharesForClinic(clinicId: string, limit: number) {
+export async function listRecentSharesForClinic(clinicId: string, limit: number, options: { madeByHand?: boolean } = {}) {
   return prisma.share.findMany({
-    where: { clinicId },
+    where: { clinicId, ...(options.madeByHand ? { qrCodeId: null } : {}) },
     include: { video: { select: { title: true, category: true, isPlaceholder: true, isPublished: true } } },
     orderBy: { createdAt: "desc" },
     take: Math.max(1, Math.min(limit, 20)),
@@ -338,7 +499,7 @@ export async function summarizeSharesForClinic(clinicId: string): Promise<ShareS
  * these is meant to be seen by the patient. Nothing else about the clinic
  * is read here: not its status, its plan, its notes or its notice.
  */
-const PATIENT_CLINIC_FIELDS = { name: true, logoUrl: true, phone: true, brandColor: true, brandFont: true } as const;
+export const PATIENT_CLINIC_FIELDS = { name: true, logoUrl: true, phone: true, brandColor: true, brandFont: true } as const;
 
 /**
  * Look a share up by the code in its URL, with the video it plays and the

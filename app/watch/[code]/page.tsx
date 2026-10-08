@@ -1,19 +1,13 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
-import { patientLook, type Look } from "@/app/brand-look";
-import { ClinicLogo } from "@/components/ui/ClinicLogo";
+import { patientLook } from "@/app/brand-look";
 import { ClockIcon, PauseIcon, SearchIcon } from "@/components/ui/icons";
-import { LOGO_URL } from "@/lib/brand";
 import { getSettings } from "@/lib/db/settings";
 import { getShareByCode } from "@/lib/db/shares";
 import { canRequestRenewal, isExpired, renewalState } from "@/lib/expiry";
-import { EDUCATION_ONLY } from "@/lib/education-note";
-import { describeDuration } from "@/lib/format";
 import { playbackForShare } from "@/lib/playback-auth";
 import { windowCoversVideo } from "@/lib/playback-source";
-import { senderLines } from "@/lib/sender-name";
 import { AskClinic } from "./AskClinic";
-import { CallButton } from "./CallButton";
+import { PatientViewer, Unavailable } from "../PatientPage";
 import { WatchPlayer } from "./WatchPlayer";
 
 /**
@@ -144,8 +138,6 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
     );
   }
 
-  const length = describeDuration(share.video.durationSeconds);
-
   // What the player loads, made here on the server for this link
   // (lib/playback-auth.ts): the plain file for a video still on the CDN, or
   // a signed Mux address that lives no longer than the link does. A link
@@ -157,146 +149,23 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   const endsSoon = willNotExtend && !windowCoversVideo(now, share.expiresAt, share.video.durationSeconds);
 
   return (
-    <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
-      <BrandBand />
-      {share.video.isPlaceholder && <PlaceholderBar />}
-
-      {/* 46px at the top keeps the first line clear of a phone's notch and status bar. When the placeholder bar is there, it carries that clearance instead. */}
-      <div className={`mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-10 sm:px-8 ${share.video.isPlaceholder ? "pt-6" : "pt-[46px]"}`}>
-        {/* The logo's row is a fixed 44px tall whether the picture loads, loads late, or never loads, so nothing under it moves. */}
-        {look.logoUrl && (
-          <div className="mb-3">
-            <ClinicLogo src={look.logoUrl} name={share.clinic.name} boxClassName="h-11 w-[220px] max-w-full" fallback="blank" />
-          </div>
-        )}
-
-        {/* Who sent it comes first: it is the first thing an anxious person wants to know. Always written out, so it never depends on the logo.
-            "Dr. Jane Smith, DO" with "Summit Orthopedics" on the line under it, or "From Summit Orthopedics" for a link made before surgeons were recorded. */}
-        <p className="text-[15px] font-semibold tracking-[.01em] break-words text-[#46555e]">
-          {senderLines(share.senderName, share.clinic.name).map((line, i) => (
-            <span key={i} className="block">
-              {line}
-            </span>
-          ))}
-        </p>
-        <h1 className="mt-1.5 text-[29px] leading-[1.15] font-bold tracking-[-.022em]">{share.video.title}</h1>
-        <p className="mt-2.5 text-[20px] leading-[1.5] text-[#3a4c56]">
-          Your surgeon shared this so you can see what happens during your operation.
-        </p>
-
-        {/* Said only when the time left cannot hold one whole viewing and the first play will not add any: honest, calm, and the number to call. */}
-        {endsSoon && (
-          <p role="note" className="mt-5 rounded-xl bg-[#eef1f4] px-4 py-3 text-[16px] leading-[1.5] text-[#3a4c56]">
-            This link stops working in a few minutes, so the video may stop before the end. {share.clinic.name} can send you a fresh link.
-          </p>
-        )}
-
-        <div className="mt-6">
-          <WatchPlayer
-            source={source}
-            title={share.video.title}
-            code={share.code}
-            clinicName={share.clinic.name}
-            logoUrl={look.logoUrl}
-            senderName={share.senderName}
-            call={look.call}
-          />
-        </div>
-
-        {/* "About 2 minutes", so nobody has to decide whether they have time to start it. */}
-        {length && (
-          <p className="mt-5 flex items-center gap-2 text-[16px] font-medium text-[#46555e]">
-            <ClockIcon className="h-5 w-5 shrink-0" />
-            {length}
-          </p>
-        )}
-
-        {/* The second half is for the spouse or adult child who was never in the room. */}
-        <p className="mt-4 border-t border-[#e3e7eb] pt-4 text-[19px] leading-[1.52] text-[#3a4c56]">
-          Watch it as many times as you like, and show it to anyone coming with you.
-        </p>
-
-        {/* Plain words only: never a screen, a popup or a box to tick before the video. The wording is Van's, approved by Evan; ask before changing it. */}
-        <p className="mt-4 text-[16px] leading-[1.5] text-[#46555e]">{EDUCATION_ONLY}</p>
-
-        {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
-        <div className="mt-auto pt-10">
-          {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-          <img src={LOGO_URL} alt="Pulse 3D" className="h-6 w-auto" />
-        </div>
-      </div>
-    </main>
-  );
-}
-
-/** The thin band of the clinic's colour across the very top of the page. Decoration only. */
-function BrandBand() {
-  return <div aria-hidden="true" className="h-1.5 shrink-0 bg-brand" />;
-}
-
-/**
- * The calm page for a link that is expired, taken down or does not exist. Same white
- * ground, a soft circular icon, plain words, nothing that reads as an alarm,
- * and nothing to do but ask the practice. Never the words "error" or
- * "invalid", and nothing red.
- *
- * When the clinic is known and has a valid phone number, the one thing left
- * to do gets one large button: call the office. It is a plain tel: link, so
- * the phone asks before it dials.
- *
- * The paused page is the same frame with its own middle (`children`): the
- * "ask my clinic" piece, which changes its own words after the tap.
- */
-function Unavailable({
-  look,
-  icon,
-  heading,
-  body,
-  note,
-  children,
-}: {
-  look: Look;
-  icon: ReactNode;
-  heading?: string;
-  body?: string;
-  note?: string;
-  children?: ReactNode;
-}) {
-  return (
-    <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
-      <BrandBand />
-      <div className="flex flex-1 flex-col items-center justify-center px-8 pb-10 pt-[46px] text-center">
-        <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#eef1f4] text-[#52616a]">{icon}</div>
-        {children ?? (
-          <>
-            <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
-            <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">{body}</p>
-            {note && <p className="mt-3 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">{note}</p>}
-            {look.call && <CallButton call={look.call} />}
-          </>
-        )}
-        {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-        <img src={LOGO_URL} alt="Pulse 3D" className="mt-12 h-6 w-auto" />
-      </div>
-    </main>
-  );
-}
-
-/**
- * The bar across the top of a placeholder link. The video below it carries a
- * real procedure name but plays a sample animation, so the patient is told
- * before anything else on the page. It keeps to the page's own rules: 16px
- * text, and #5a3d00 on #fff3d6 measures 9.1:1 against a 4.5:1 floor. Amber,
- * not red, because nothing has gone wrong.
- *
- * It carries the 46px notch clearance itself, so the page below drops its own.
- */
-function PlaceholderBar() {
-  return (
-    <div role="note" className="border-b-2 border-[#e2a12a] bg-[#fff3d6] px-6 pb-3.5 pt-[46px] sm:px-8">
-      <p className="mx-auto max-w-2xl text-[16px] leading-[1.45] text-[#5a3d00]">
-        <strong className="font-bold">Placeholder.</strong> This plays a sample animation, not this procedure.
-      </p>
-    </div>
+    <PatientViewer
+      look={look}
+      clinicName={share.clinic.name}
+      senderName={share.senderName}
+      video={share.video}
+      endsSoon={endsSoon}
+      player={
+        <WatchPlayer
+          source={source}
+          title={share.video.title}
+          code={share.code}
+          clinicName={share.clinic.name}
+          logoUrl={look.logoUrl}
+          senderName={share.senderName}
+          call={look.call}
+        />
+      }
+    />
   );
 }

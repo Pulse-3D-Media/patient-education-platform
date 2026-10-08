@@ -7,6 +7,7 @@ import { useVideoSource } from "@/components/ui/useVideoSource";
 import { CloseIcon, FullscreenIcon, PhoneIcon, PlayIcon } from "@/components/ui/icons";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
 import type { PlaybackSource } from "@/lib/playback-source";
+import { issueLink, newVisitKey } from "@/app/q/[code]/issue-link";
 import { recordPlay, refreshPlayback } from "./actions";
 import { CallNumber } from "./CallButton";
 
@@ -108,6 +109,22 @@ import { CallNumber } from "./CallButton";
  * now has. When the link's time runs out while the page is open the player
  * says so in the same calm words as the expired page, with the clinic's
  * number, and renews nothing.
+ *
+ * ON A PRINTED QR CODE'S PAGE (/q/<code>: `qrCode` set, no `code` yet) there
+ * is no patient link until the patient taps Play. The tap does two things at
+ * once: it starts the video straight away, inside the tap, because phones
+ * (iPhone Safari above all) only allow a video with sound to start in the
+ * tap itself, not after waiting on the network; and it asks the server for
+ * this visit's own link (issueLink, POST /q/<code>/issue). When the link
+ * comes back the address bar is quietly changed to it (/watch/<new code>),
+ * so a bookmark, a reload or the address passed to a relative is this
+ * patient's link, not the poster's, and the play start, the deadline and
+ * any fresh stream address all belong to that link from then on. No second
+ * tap and no screen in between. A dropped connection is asked again with the
+ * same one-time key (newVisitKey), so it never makes a second link; if the
+ * server says the code cannot hand out a link right now (retired a moment
+ * ago, the clinic closed), the video stops and the calm "not available"
+ * panel says so, with the clinic's number. Opening the page makes nothing.
  */
 export function WatchPlayer({
   source,
@@ -117,11 +134,15 @@ export function WatchPlayer({
   logoUrl,
   senderName,
   call,
+  qrCode,
 }: {
   /** What to play, made on the server for this link. */
   source: PlaybackSource;
   title: string;
-  code: string;
+  /** The patient link this page is for, or null on a printed code's page before the first tap. */
+  code: string | null;
+  /** The printed code, on a printed code's page: the first tap on Play asks for this visit's own link. */
+  qrCode?: string;
   clinicName: string;
   /** The clinic's logo for the strip on the picture, or null to use its name. */
   logoUrl: string | null;
@@ -146,6 +167,14 @@ export function WatchPlayer({
   /** The link's time ran out while the page was open (a stream's token was not renewed). Said calmly, with no Try again. */
   const [ended, setEnded] = useState(false);
   const [slow, setSlow] = useState(false);
+  /** A printed code that cannot hand out a link right now (retired, or the clinic cannot show this video). Said calmly, with no Try again. */
+  const [unavailable, setUnavailable] = useState(false);
+  /** The patient link this page plays for: the one in the address, or, on a printed code's page, the one the first tap got. */
+  const shareCode = useRef<string | null>(code);
+  /** The request for this visit's link while it is on its way, so a second ask waits for the same answer. */
+  const issuing = useRef<Promise<string | null> | null>(null);
+  /** This visit's one-time key, made at the first tap and sent with every try. */
+  const visitKey = useRef<string | null>(null);
   /** A grant for the link's new deadline, handed back when the first play moved it; used in place of asking the server at the next refresh. */
   const pendingGrant = useRef<PlaybackSource | null>(null);
   const { reload } = useVideoSource(video, source, {
@@ -154,7 +183,9 @@ export function WatchPlayer({
       const ready = pendingGrant.current;
       pendingGrant.current = null;
       if (ready) return ready;
-      const answer = await refreshPlayback(code);
+      const linkCode = await ensureCode();
+      if (!linkCode) return { kind: "unavailable" };
+      const answer = await refreshPlayback(linkCode);
       return answer.ok ? answer.source : answer.reason === "ended" ? null : { kind: "unavailable" };
     },
     onEnded: () => {
@@ -192,7 +223,42 @@ export function WatchPlayer({
     return () => window.cancelAnimationFrame(frameId);
   }, []);
 
+  /**
+   * The patient link this page plays for. On a printed code's page, the first
+   * call asks the server for this visit's link (see the note at the top) and
+   * every later call waits for the same answer; a request that could not get
+   * through is asked again next time, with the same key. Null when there is
+   * no link (yet, or at all).
+   */
+  function ensureCode(): Promise<string | null> {
+    if (shareCode.current) return Promise.resolve(shareCode.current);
+    if (!qrCode) return Promise.resolve(null);
+    if (!issuing.current) {
+      visitKey.current ??= newVisitKey();
+      issuing.current = issueLink(qrCode, visitKey.current).then((answer) => {
+        if (answer.kind === "issued") {
+          shareCode.current = answer.code;
+          // The address bar now shows this patient's own link. Next.js keeps its router in step with this call.
+          window.history.replaceState(null, "", `/watch/${answer.code}`);
+          return answer.code;
+        }
+        if (answer.kind === "unavailable") {
+          video.current?.pause();
+          clearSlow();
+          setUnavailable(true);
+          return null;
+        }
+        // The server could not be reached: the next ask tries again, with the same key, so no second link is made.
+        issuing.current = null;
+        return null;
+      });
+    }
+    return issuing.current;
+  }
+
   function play() {
+    // On a printed code's page, ask for this visit's link now, alongside the play below (never before it: the play must start inside the tap).
+    if (qrCode) void ensureCode();
     video.current?.play().catch((error: unknown) => {
       // Most refusals mean "not yet" and the Play button simply stays (see
       // lib/playback.ts). Only a video that cannot be played at all is a failure.
@@ -237,7 +303,8 @@ export function WatchPlayer({
     counted.current = true;
     // Recorded in the background, one attempt. If it does not get through,
     // the video still plays; the play is just not counted (see actions.ts).
-    recordPlay(code)
+    ensureCode()
+      .then((linkCode) => (linkCode ? recordPlay(linkCode) : { recorded: false, playback: undefined }))
       .then((answer) => {
         // The first play moved the deadline: the stream's next refresh uses this grant, for the link's new window.
         if (answer.playback) pendingGrant.current = answer.playback;
@@ -352,7 +419,7 @@ export function WatchPlayer({
 
   const isBig = big !== "no";
   /** Nothing is playing and nothing can be: the failure panel, or the link's time ran out. The layout treats both alike. */
-  const stopped = failed || ended;
+  const stopped = failed || ended || unavailable;
 
   return (
     <div>
@@ -480,11 +547,17 @@ export function WatchPlayer({
               // The same panel says, in the expired page's words, that the link's time ran out while the page was open;
               // there is no Try again then, because nothing is renewed once access has ended.
               <div role="alert" className="relative flex flex-1 flex-col items-center justify-center gap-3 rounded-[18px] bg-[#12202a] px-5 py-6 text-center">
-                <p className="text-[20px] leading-[1.35] font-semibold text-white">{ended ? "This link has expired." : "The video did not load."}</p>
-                <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">
-                  {ended ? `Links stay open for a set time. ${clinicName} can send you a fresh one whenever you need it.` : "Check your connection, then try again."}
+                <p className="text-[20px] leading-[1.35] font-semibold text-white">
+                  {unavailable ? "This video isn't available right now." : ended ? "This link has expired." : "The video did not load."}
                 </p>
-                {!ended && (
+                <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">
+                  {unavailable
+                    ? `Please ask ${clinicName} about it.`
+                    : ended
+                      ? `Links stay open for a set time. ${clinicName} can send you a fresh one whenever you need it.`
+                      : "Check your connection, then try again."}
+                </p>
+                {!ended && !unavailable && (
                   <button
                     ref={retryButton}
                     type="button"
@@ -502,7 +575,7 @@ export function WatchPlayer({
                       className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[16px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
                     >
                       <PhoneIcon className="h-5 w-5 shrink-0" />
-                      {ended ? "Call" : "Still stuck? Call"} {call.label}
+                      {ended || unavailable ? "Call" : "Still stuck? Call"} {call.label}
                     </a>
                     <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[16px] text-white" />
                   </>

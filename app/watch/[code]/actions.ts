@@ -34,7 +34,10 @@ function cleanCode(code: unknown): string | null {
  * deadline (lib/playback-auth.ts), because the one the page loaded with was
  * bounded by the old one and may be shorter than the time the link now has.
  * The player swaps to it at its next refresh. A video still on the CDN needs
- * none, and nothing is handed out for a play that was not recorded.
+ * none, and nothing is handed out for a play that was not recorded, or on a
+ * link where the "for education only" box has never been ticked (a recorded
+ * tick is what hands out the video in the first place: POST
+ * /watch/<code>/accept; this action must not be a way round it).
  */
 export async function recordPlay(code: string): Promise<{ recorded: boolean; playback?: PlaybackSource }> {
   const clean = cleanCode(code);
@@ -43,7 +46,7 @@ export async function recordPlay(code: string): Promise<{ recorded: boolean; pla
     const result = await recordSharePlay(clean);
     if (!result.recorded || !result.firstPlay) return { recorded: result.recorded };
     const share = await getShareByCode(clean);
-    if (!share || !usesProtectedPlayback(share.video)) return { recorded: true };
+    if (!share || !usesProtectedPlayback(share.video) || !share.disclaimerFirstAcceptedAt) return { recorded: true };
     return { recorded: true, playback: playbackForShare(share, new Date()) };
   } catch (error) {
     // The kind of failure goes to the server log, never to the patient's
@@ -60,7 +63,11 @@ export type PlaybackRefresh = { ok: true; source: PlaybackSource } | { ok: false
  * Called by the player a little before a signed address runs out, while the
  * patient still has the page open. The link is looked up and judged again,
  * exactly as the page judges it: working and its video published gets a
- * fresh grant bounded by the link's deadline; a link that has run out,
+ * fresh grant bounded by the link's deadline, but only once the "for
+ * education only" box has been ticked on it (a tick is recorded before the
+ * player ever has a video to refresh, so this changes nothing for a real
+ * patient; it stops this action being a way to get the video without one).
+ * A link that has run out,
  * paused, been taken down or never existed gets "ended", and the player
  * says so calmly and renews nothing. A link the browser invents gets
  * nothing. A failure on the server is "unavailable": logged there by its
@@ -73,6 +80,7 @@ export async function refreshPlayback(code: string): Promise<PlaybackRefresh> {
     const now = new Date();
     const share = await getShareByCode(clean);
     if (!share || isExpired(share, now) || !share.video.isPublished) return { ok: false, reason: "ended" };
+    if (!share.disclaimerFirstAcceptedAt) return { ok: false, reason: "ended" };
     const source = playbackForShare(share, now);
     if (source.kind === "unavailable") return { ok: false, reason: "unavailable" };
     return { ok: true, source };

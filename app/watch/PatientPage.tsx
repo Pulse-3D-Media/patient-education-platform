@@ -89,7 +89,7 @@ export function PatientViewer({
           Watch it as many times as you like, and show it to anyone coming with you.
         </p>
 
-        {/* Plain words only: never a screen, a popup or a box to tick before the video. The wording is Van's, approved by Evan; ask before changing it. */}
+        {/* The same thing as the box above the video, as plain words under it (the box itself is in the player). The wording is Van's, approved by Evan; ask before changing it. */}
         <p className="mt-4 text-[16px] leading-[1.5] text-[#46555e]">{EDUCATION_ONLY}</p>
 
         {/* The logo is a picture, not a link: the patient has nowhere else to go. */}

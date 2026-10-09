@@ -1,6 +1,7 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
+import { DISCLAIMER } from "@/lib/education-note";
 import * as shares from "@/lib/db/shares";
 import { addDays } from "@/lib/expiry";
 import * as renewalEmail from "@/lib/renewal-email";
@@ -136,8 +137,22 @@ describe("a link whose video streams from Mux", () => {
     delete process.env.MUX_SIGNING_PRIVATE_KEY;
   });
 
-  it("the first play hands back a grant for the link's new deadline; later plays and CDN videos hand back none", async () => {
+  /** A Mux link on which the patient ticked the "for education only" box, as every real player has before it plays or refreshes. */
+  async function tickedMuxLink() {
     const share = await shares.createShare(clinicId, muxVideoId);
+    expect((await shares.acceptShareDisclaimer(share.code, DISCLAIMER.version)).recorded).toBe(true);
+    return share;
+  }
+
+  it("never hands out an address, by a first play or a refresh, on a link where the box was never ticked", async () => {
+    const share = await shares.createShare(clinicId, muxVideoId);
+    // The play is still counted; no video comes back with it.
+    expect(await recordPlay(share.code)).toEqual({ recorded: true });
+    expect(await refreshPlayback(share.code)).toEqual({ ok: false, reason: "ended" });
+  });
+
+  it("the first play hands back a grant for the link's new deadline; later plays and CDN videos hand back none", async () => {
+    const share = await tickedMuxLink();
     const first = await recordPlay(share.code);
     expect(first.recorded).toBe(true);
     expect(first.playback?.kind).toBe("stream");
@@ -156,7 +171,7 @@ describe("a link whose video streams from Mux", () => {
   });
 
   it("refreshPlayback hands a working link a fresh address bounded by its deadline, and nothing to a link that is over, taken down, unknown or made up", async () => {
-    const share = await shares.createShare(clinicId, muxVideoId);
+    const share = await tickedMuxLink();
     const answer = await refreshPlayback(share.code);
     expect(answer.ok).toBe(true);
     if (!answer.ok || answer.source.kind !== "stream") return;
@@ -168,7 +183,7 @@ describe("a link whose video streams from Mux", () => {
     expect(await refreshPlayback(share.code)).toEqual({ ok: false, reason: "ended" });
 
     // A working link whose video was taken down.
-    const other = await shares.createShare(clinicId, muxVideoId);
+    const other = await tickedMuxLink();
     await prisma.video.update({ where: { id: muxVideoId }, data: { isPublished: false } });
     try {
       expect(await refreshPlayback(other.code)).toEqual({ ok: false, reason: "ended" });
@@ -182,7 +197,7 @@ describe("a link whose video streams from Mux", () => {
   });
 
   it("refreshPlayback answers unavailable, not the CDN file and not an exception, when Mux is not configured or the server fails", async () => {
-    const share = await shares.createShare(clinicId, muxVideoId);
+    const share = await tickedMuxLink();
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
     delete process.env.MUX_SIGNING_KEY_ID;

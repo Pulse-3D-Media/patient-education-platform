@@ -15,9 +15,12 @@ import { SourceLoader, type LoaderHooks } from "./video-source-loader";
  *     the source changes or the player closes;
  *   - the player's callbacks are read fresh each time they are needed, so
  *     the loader always calls the latest ones;
- *   - `reload(startAt)` is what Try again calls.
+ *   - `reload(startAt)` is what Try again calls;
+ *   - `null` means "nothing to play yet": no loader is made and the element
+ *     is left empty. The patient page starts there, because it hands out the
+ *     video only after the "for education only" box is ticked.
  */
-export function useVideoSource(videoRef: RefObject<HTMLVideoElement | null>, source: PlaybackSource, hooks: LoaderHooks) {
+export function useVideoSource(videoRef: RefObject<HTMLVideoElement | null>, source: PlaybackSource | null, hooks: LoaderHooks) {
   const latestHooks = useRef(hooks);
   useEffect(() => {
     latestHooks.current = hooks;
@@ -25,6 +28,7 @@ export function useVideoSource(videoRef: RefObject<HTMLVideoElement | null>, sou
 
   const loader = useRef<SourceLoader | null>(null);
   useEffect(() => {
+    if (!source) return;
     const made = new SourceLoader({ getElement: () => videoRef.current, getHooks: () => latestHooks.current });
     loader.current = made;
     void made.attach(source);

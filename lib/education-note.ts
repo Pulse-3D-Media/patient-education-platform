@@ -1,13 +1,44 @@
 /**
+ * The "for education only" words on the patient page and the printed
+ * pamphlet. Pure, so the page, the pamphlet and the server read the same
+ * words. Never add the word "consent", and never suggest that ticking the box
+ * replaces or satisfies informed consent: the product supports the consent
+ * conversation, it does not take part in it (see "Writing copy" in CLAUDE.md).
+ * Neither wording is changed without asking.
+ */
+
+/**
  * The one quiet sentence under the video on the patient page, and on the
  * printed pamphlet. Van's wording, approved by Evan on 2026-10-02.
- *
- * Do not change it without asking (see "Writing copy" in CLAUDE.md), and never
- * add the word "consent": the product supports the consent conversation, it
- * does not take part in it. It is plain text wherever it appears, never a
- * screen, a popup or a box to tick before the video plays.
- *
- * Pure, so the patient page and the pamphlet read the same words.
  */
 export const EDUCATION_ONLY =
   "This video is for education only. It is not medical advice. Ask your doctor about anything you are unsure of.";
+
+/**
+ * The box a patient ticks before the video will play (decided by Evan and Van
+ * at the huddle on 2026-10-08). The words and their version live together
+ * here ON PURPOSE: changing the words means changing the version, so the
+ * record on each link (Share.disclaimerVersion) always says which words were
+ * ticked. Use the date the new words were approved as the version.
+ */
+export const DISCLAIMER = {
+  version: "2026-10-08",
+  text: "I understand this video is for education only. It is not medical advice, and I will ask my doctor about anything I am unsure of.",
+} as const;
+
+/** What a well-formed version looks like ("2026-10-08"), whether or not it is the current one. */
+export function isDisclaimerVersionShape(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/**
+ * What a patient page sent as the version it showed: the current one, a
+ * well-formed but older or newer one (the page was drawn by another
+ * deployment, around a release that changed the words), or junk. The routes
+ * record only the current one; a "stale" page is asked to reload, so the
+ * patient ticks the words that will be recorded.
+ */
+export function judgeAcceptedVersion(value: unknown): "current" | "stale" | "malformed" {
+  if (!isDisclaimerVersionShape(value)) return "malformed";
+  return value === DISCLAIMER.version ? "current" : "stale";
+}

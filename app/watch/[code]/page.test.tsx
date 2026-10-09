@@ -240,6 +240,65 @@ describe("the education line", () => {
   });
 });
 
+describe("the 'for education only' box before the video", () => {
+  const BOX = "I understand this video is for education only. It is not medical advice, and I will ask my doctor about anything I am unsure of.";
+
+  it("is above the video, unticked, large, and never says consent", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+
+    expect(html).toContain(BOX);
+    expect(html.indexOf(BOX)).toBeLessThan(html.indexOf("<video"));
+    const box = /<input[^>]*type="checkbox"[^>]*>/.exec(html)![0];
+    // No checked or disabled attribute (the class list mentions "disabled:" for a style, which does not count).
+    expect(box).not.toMatch(/\schecked[=\s/>]/);
+    expect(box).not.toMatch(/\sdisabled[=\s/>]/);
+    // A 28px square in a row at least 48px tall, with the words at the page's 20px body size.
+    expect(box).toContain("h-7 w-7");
+    expect(html).toMatch(/<label[^>]*min-h-12[^>]*>/);
+    expect(html).toMatch(/<span class="text-\[20px\][^"]*">I understand this video/);
+    expect(html.toLowerCase()).not.toContain("consent");
+  });
+
+  it("keeps Play visibly not ready, with one line saying why", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+
+    expect(html).toMatch(/<button[^>]*aria-label="Play Vitest Total Knee Replacement"[^>]*aria-disabled="true"/);
+    expect(html).toContain("Tick the box above to play");
+    expect(html).not.toContain("Tap to play");
+  });
+
+  it("puts no playable address in the page: the video comes only from the accept route, after the tick", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+
+    expect(html).not.toContain("example.com/vitest.mp4");
+    expect(html).not.toMatch(/<video[^>]*\ssrc=/);
+    expect(html).not.toContain("stream.mux.com");
+  });
+
+  it("shows the poster staff set on the video's box until then, a picture and nothing that plays", async () => {
+    const clinic = await makeClinic({});
+    const withPoster = await prisma.video.create({
+      data: { title: "Vitest Poster Knee", category: "KNEE", videoUrl: "https://example.com/vitest-poster.mp4", posterUrl: "https://example.com/still.jpg", isPublished: true },
+      select: { id: true },
+    });
+    createdVideoIds.push(withPoster.id);
+    const html = await render(await makeShare(clinic.id, withPoster.id));
+
+    expect(html).toMatch(/<video[^>]*poster="https:\/\/example\.com\/still\.jpg"/);
+    expect(html).not.toContain("vitest-poster.mp4");
+  });
+
+  it("is not on a page that cannot play: an expired link has no box", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId, true));
+
+    expect(html).not.toContain('type="checkbox"');
+  });
+});
+
 describe("what stays the same", () => {
   it("a placeholder link still says so before anything else on the page", async () => {
     const clinic = await makeClinic({ brandColor: "#7a1f2b", logoUrl: "https://example.com/summit.png" });

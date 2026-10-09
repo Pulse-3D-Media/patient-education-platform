@@ -281,6 +281,25 @@ describe("the link a patient's Play tap gets", () => {
     });
   });
 
+  it("carries the tick of the 'for education only' box onto the new link, once: a retry of the same visit writes nothing more", async () => {
+    const surgeon = surgeonId();
+    const clinic = await makeClinic([surgeon]);
+    const qr = await codeOf((await createQrCode(clinic, video.id, sender(surgeon), "Ann Admin")).id);
+    const visit = key();
+    const at = new Date();
+    const first = await issueShareFromQrCode(qr, visit, { disclaimerVersion: "2026-10-08", now: at });
+    expect(first.ok).toBe(true);
+    // The same visit asking again (a dropped connection) finds its link and counts nothing twice.
+    expect(await issueShareFromQrCode(qr, visit, { disclaimerVersion: "2026-10-08" })).toEqual(first);
+    const share = await prisma.share.findUniqueOrThrow({ where: { code: (first as { code: string }).code } });
+    expect(share).toMatchObject({ disclaimerFirstAcceptedAt: at, disclaimerAcceptances: 1, disclaimerVersion: "2026-10-08", viewCount: 0, firstPlayedAt: null });
+
+    // A link made without one (the tests' own calls) has no record.
+    const plain = await issueShareFromQrCode(qr, key());
+    const bare = await prisma.share.findUniqueOrThrow({ where: { code: (plain as { code: string }).code } });
+    expect(bare).toMatchObject({ disclaimerFirstAcceptedAt: null, disclaimerAcceptances: 0, disclaimerVersion: null });
+  });
+
   it("names the surgeon by the name recorded when the code was made, when none was chosen for them", async () => {
     const surgeon = surgeonId();
     const clinic = await makeClinic([surgeon]);

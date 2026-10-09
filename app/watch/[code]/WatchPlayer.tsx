@@ -1,21 +1,55 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ClinicMark, OnPicture, pictureRatio } from "@/components/ui/ClinicMark";
 import { useModalFocus } from "@/components/ui/useModalFocus";
 import { useVideoSource } from "@/components/ui/useVideoSource";
 import { CloseIcon, FullscreenIcon, PhoneIcon, PlayIcon } from "@/components/ui/icons";
+import { DISCLAIMER } from "@/lib/education-note";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
 import type { PlaybackSource } from "@/lib/playback-source";
 import { issueLink, newVisitKey } from "@/app/q/[code]/issue-link";
+import { acceptDisclaimer } from "../accept-disclaimer";
 import { recordPlay, refreshPlayback } from "./actions";
 import { CallNumber } from "./CallButton";
 
 /**
- * The patient's player: the video with one big Play button over it.
+ * The patient's player: the "for education only" box, then the video with
+ * one big Play button over it.
  *
- * Before the first tap, the Play button is the only thing on screen (the
- * rules file: nothing to click except play). After it, the browser's own
+ * THE BOX COMES FIRST (decided by Evan and Van on 2026-10-08). Above the
+ * video, unticked: "I understand this video is for education only..."
+ * (DISCLAIMER in lib/education-note.ts). Until it is ticked the video is
+ * frozen: the page's HTML carries no playable address at all, only a still,
+ * and Play is drawn dimmed with "Tick the box above to play" on it (a tap on
+ * it moves to the box instead). Ticking it posts to the page's accept route
+ * (acceptDisclaimer: /watch/<code>/accept, which records the tick on the
+ * link, or /q/<code>/accept on a printed code, which records nothing yet),
+ * and the answer is the video. The player starts loading it at once, while
+ * the patient's thumb moves from the box to Play, so the Play tap starts it
+ * straight away, inside the tap, which is the only moment an iPhone allows
+ * sound. While the answer is on its way Play says "Getting the video ready".
+ *
+ *   - Slow or failed: the ask is tried again by itself (see
+ *     accept-disclaimer.ts); if nothing gets through, a calm line under the
+ *     box says so with a Try again button, the box stays ticked, and nothing
+ *     else changes. Never an error page.
+ *   - The link stopped working since the page was drawn (it ran out, paused,
+ *     was taken down): the page is loaded again, and the server shows the
+ *     right calm page (the paused one has Ask my clinic). On a printed code,
+ *     the calm "not available" panel.
+ *   - Ticked, unticked, ticked again: one request per page load. Unticking
+ *     before the first play dims Play again and keeps the video the answer
+ *     brought; ticking again asks nothing (unless the first ask never got
+ *     through, when it is the same as Try again). Once the video has started
+ *     the box stays ticked and cannot be unticked: it has done its job.
+ *
+ * Nothing about the tick is kept in the browser (no cookie, no storage): a
+ * reload shows the box unticked again, and a tick there is a new record.
+ *
+ * Before the first tap on Play, the box and Play are the only things to press
+ * (the rules file: nothing to click but play, and since October 2026 the box
+ * before it). After it, the browser's own
  * controls take over, because those are the controls a patient already knows
  * from every other video on their phone, and the ones their screen reader
  * and their captions setting already work with. They are never hidden or
@@ -98,14 +132,15 @@ import { CallNumber } from "./CallButton";
  * the video without the strip, and that is the browser's to decide.
  * Picture-in-picture is left as it is (it too shows the video alone).
  *
- * WHAT IT PLAYS is a PlaybackSource the page made on the server
- * (lib/playback-auth.ts): a plain file for a video still on the CDN, or a
+ * WHAT IT PLAYS is a PlaybackSource made on the server (lib/playback-auth.ts)
+ * and handed over by the accept route once the box is ticked: a plain file
+ * for a video still on the CDN, or a
  * signed, expiring Mux stream for one that has moved. useVideoSource puts it
  * on the element, and, for a stream, asks the server for a fresh address a
  * little before the token runs out (refreshPlayback, which checks the link
  * again). The first real play may move the link's deadline (recordPlay); the
  * answer then carries a grant for the new deadline, which replaces the one
- * the page loaded with, so the stream never stops short of the time the link
+ * the tick brought, so the stream never stops short of the time the link
  * now has. When the link's time runs out while the page is open the player
  * says so in the same calm words as the expired page, with the clinic's
  * number, and renews nothing.
@@ -127,7 +162,7 @@ import { CallNumber } from "./CallButton";
  * panel says so, with the clinic's number. Opening the page makes nothing.
  */
 export function WatchPlayer({
-  source,
+  poster,
   title,
   code,
   clinicName,
@@ -136,8 +171,8 @@ export function WatchPlayer({
   call,
   qrCode,
 }: {
-  /** What to play, made on the server for this link. */
-  source: PlaybackSource;
+  /** A still for the video's box before the box is ticked (a signed Mux still, or the poster staff set), or null. Never a playable address. */
+  poster: string | null;
   title: string;
   /** The patient link this page is for, or null on a printed code's page before the first tap. */
   code: string | null;
@@ -161,6 +196,19 @@ export function WatchPlayer({
   /** Where to pick up after Try again, and the page's scroll position to put back after the big view closes. */
   const resumeAt = useRef(0);
   const scrollBack = useRef(0);
+
+  const tickBox = useRef<HTMLInputElement>(null);
+  const tickId = useId();
+  /** The box is ticked right now. */
+  const [ticked, setTicked] = useState(false);
+  /** What to play: nothing until a tick's answer brings it (see the note at the top). */
+  const [source, setSource] = useState<PlaybackSource | null>(null);
+  /** The tick's ask is on its way, so a second tick (or Try again) while it is on its way never sends a second ask. */
+  const acceptInFlight = useRef(false);
+  /** No answer got through: a calm line and Try again under the box. */
+  const [acceptTrouble, setAcceptTrouble] = useState(false);
+  /** A stream played through hls.js arrives a moment after the answer (the library loads first); Play waits for the element to have it. */
+  const [attached, setAttached] = useState(false);
 
   const [started, setStarted] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -209,19 +257,45 @@ export function WatchPlayer({
 
   useEffect(() => () => window.clearTimeout(slowTimer.current), []);
 
-  // A file that is missing or blocked can fail within a fraction of a second,
-  // BEFORE this component is live in the browser and listening: the server
-  // sent the <video> in the page's HTML, and the browser started fetching it
-  // at once. The "error" event has then already come and gone, and onError
-  // below never hears it (measured: the event at about 0.3s, React attached
-  // after it). The element remembers, though, so it is asked once, a frame
-  // after the page comes alive.
-  useEffect(() => {
-    const frameId = window.requestAnimationFrame(() => {
-      if (video.current?.error) setFailed(true);
-    });
-    return () => window.cancelAnimationFrame(frameId);
-  }, []);
+  // (Before the box existed, a file in the page's HTML could fail before this component was listening, and an
+  // effect here asked the element afterwards. The HTML carries no address now: the file arrives after the tick,
+  // when the listeners below are already attached.)
+
+  /** The box was ticked or unticked. Ticking asks for the video, once per page load (see the note at the top). */
+  function onTick(event: React.ChangeEvent<HTMLInputElement>) {
+    const checked = event.target.checked;
+    setTicked(checked);
+    if (checked && !source) void accept();
+  }
+
+  /** Tell the server the box was ticked, and take the video it hands back. */
+  async function accept() {
+    if (acceptInFlight.current) return;
+    const target = code ? ({ kind: "link", code } as const) : qrCode ? ({ kind: "printed", code: qrCode } as const) : null;
+    if (!target) return;
+    acceptInFlight.current = true;
+    setAcceptTrouble(false);
+    const answer = await acceptDisclaimer(target, DISCLAIMER.version);
+    acceptInFlight.current = false;
+    if (answer.kind === "ready") {
+      setSource(answer.source);
+    } else if (answer.kind === "failed") {
+      setAcceptTrouble(true);
+    } else if (answer.kind === "not-working" && !code) {
+      // A printed code that cannot hand out the video right now: the calm panel, as for a refused Play tap.
+      setUnavailable(true);
+    } else {
+      // A link that stopped working since the page was drawn, or words the server no longer records: the server
+      // draws the right page again (the paused page has Ask my clinic; the box comes back unticked with the new words).
+      window.location.reload();
+    }
+  }
+
+  /** Play was tapped before it could start: take the patient to the box instead. */
+  function pointToBox() {
+    tickBox.current?.focus();
+    tickBox.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
 
   /**
    * The patient link this page plays for. On a printed code's page, the first
@@ -235,7 +309,7 @@ export function WatchPlayer({
     if (!qrCode) return Promise.resolve(null);
     if (!issuing.current) {
       visitKey.current ??= newVisitKey();
-      issuing.current = issueLink(qrCode, visitKey.current).then((answer) => {
+      issuing.current = issueLink(qrCode, visitKey.current, DISCLAIMER.version).then((answer) => {
         if (answer.kind === "issued") {
           shareCode.current = answer.code;
           // The address bar now shows this patient's own link. Next.js keeps its router in step with this call.
@@ -248,6 +322,11 @@ export function WatchPlayer({
           setUnavailable(true);
           return null;
         }
+        if (answer.kind === "stale") {
+          // The words on this page are not the ones the server records any more: draw the page again.
+          window.location.reload();
+          return null;
+        }
         // The server could not be reached: the next ask tries again, with the same key, so no second link is made.
         issuing.current = null;
         return null;
@@ -257,6 +336,10 @@ export function WatchPlayer({
   }
 
   function play() {
+    if (!ready) {
+      pointToBox();
+      return;
+    }
     // On a printed code's page, ask for this visit's link now, alongside the play below (never before it: the play must start inside the tap).
     if (qrCode) void ensureCode();
     video.current?.play().catch((error: unknown) => {
@@ -417,12 +500,45 @@ export function WatchPlayer({
     if (next && !frame.current?.contains(next)) closeButton.current?.focus();
   }
 
+  /** Play can start the video: the box is ticked and the video is on the element (a file, or the phone's own HLS, is put on in the same moment; hls.js a moment later). */
+  const ready = ticked && source !== null && (attached || source.kind !== "stream");
+
   const isBig = big !== "no";
   /** Nothing is playing and nothing can be: the failure panel, or the link's time ran out. The layout treats both alike. */
   const stopped = failed || ended || unavailable;
 
   return (
     <div>
+      {/* The box. Large on purpose: the whole row is the tap target (at least 48px tall), the square itself is 28px, and the
+          words are the page's 20px body text. It stays where it is after the first play, ticked, so nothing on the page moves. */}
+      <div className="mb-4 rounded-2xl border-2 border-[#c9c3b6] bg-white px-4 py-3">
+        <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3.5 py-1">
+          <input
+            ref={tickBox}
+            id={tickId}
+            type="checkbox"
+            checked={ticked}
+            onChange={onTick}
+            disabled={started}
+            className="mt-0.5 h-7 w-7 shrink-0 cursor-pointer accent-[#12333f] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668] disabled:cursor-default"
+          />
+          <span className="text-[20px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
+        </label>
+        {/* No answer got through: said calmly, with one way to try again. The box stays ticked. */}
+        {acceptTrouble && (
+          <div role="alert" className="mt-2 flex flex-col items-start gap-2 border-t border-[#e3e7eb] pt-3">
+            <p className="text-[17px] leading-[1.45] text-[#3a4c56]">We couldn&apos;t get the video ready. Check your connection, then try again.</p>
+            <button
+              type="button"
+              onClick={() => void accept()}
+              className="flex h-12 shrink-0 items-center rounded-full bg-[#12333f] px-7 text-[17px] font-semibold text-white transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* This outer box keeps the video's place on the page while the player itself is expanded, so nothing below it jumps.
           It is a grid, and never shorter than what it holds (min-h-fit), so that in the one case where the player sits
           inside it rather than over it (the failure panel, below) the box grows to fit instead of squeezing or cutting
@@ -477,10 +593,11 @@ export function WatchPlayer({
           <div className={`relative flex flex-1 flex-col ${isBig ? "min-h-32" : "min-h-0"}`}>
             <video
               ref={video}
-              // A plain file goes in the page's HTML so the browser starts fetching at once (useVideoSource leaves it be).
-              // A stream is put on by the hook once the page is awake; until then its signed still stands in.
-              src={source.kind === "file" ? source.src : undefined}
-              poster={source.kind === "stream" ? source.poster : undefined}
+              // Nothing to play until the box is ticked: the page's HTML has a still at most. After the tick, a plain file
+              // goes on here and the browser starts fetching at once (useVideoSource leaves it be); a stream is put on by
+              // the hook. The still stays until the first frame replaces it.
+              src={source?.kind === "file" ? source.src : undefined}
+              poster={source?.kind === "stream" ? source.poster : (poster ?? undefined)}
               preload="auto"
               playsInline
               // The browser's controls arrive with the first play, as they always have here: before it, the big
@@ -490,6 +607,8 @@ export function WatchPlayer({
               tabIndex={started && !stopped ? 0 : -1}
               // nofullscreen: Chromium's own full-screen button would show the video without the strip. See the note at the top.
               controlsList="nodownload nofullscreen"
+              // The element has started taking the video (for hls.js, the moment the library is attached): Play is ready.
+              onLoadStart={() => setAttached(true)}
               onPlay={onPlay}
               onPlaying={onPlaying}
               onWaiting={onWaiting}
@@ -525,17 +644,25 @@ export function WatchPlayer({
             {!started && !stopped && (
               // The keyboard focus ring is drawn just inside the edge, because the
               // rounded box clips anything drawn outside it.
+              // Visibly not ready until the box is ticked and the video has arrived: the circle is dimmed and its line
+              // says why. Not `disabled`, so a tap still does something useful: it takes the patient to the box.
               <button
                 type="button"
                 onClick={play}
                 aria-label={`Play ${title}`}
+                aria-disabled={ready ? undefined : true}
+                aria-describedby={ready ? undefined : `${tickId}-why`}
                 className="absolute inset-0 flex flex-col items-center justify-center gap-4 rounded-[18px] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
               >
-                <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white text-[#12333f] shadow-[0_10px_34px_rgba(0,0,0,.4)] transition active:scale-95">
+                <span
+                  className={`flex h-20 w-20 items-center justify-center rounded-full bg-white shadow-[0_10px_34px_rgba(0,0,0,.4)] transition ${
+                    ready ? "text-[#12333f] active:scale-95" : "text-[#9aa5ac] opacity-70"
+                  }`}
+                >
                   <PlayIcon className="ml-1 h-10 w-10" />
                 </span>
-                <span className="rounded-full bg-white px-4 py-2 text-[17px] font-semibold text-[#12333f] shadow-[0_4px_16px_rgba(0,0,0,.3)]">
-                  Tap to play
+                <span id={`${tickId}-why`} className="rounded-full bg-white px-4 py-2 text-[17px] font-semibold text-[#12333f] shadow-[0_4px_16px_rgba(0,0,0,.3)]">
+                  {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
                 </span>
               </button>
             )}

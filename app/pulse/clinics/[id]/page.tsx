@@ -273,13 +273,13 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
       </Section>
       <Section
         title="Recent links"
-        blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made.`}
+        blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made. "Disclaimer accepted" is the anonymous record of the "for education only" box on the patient page: when it was first ticked on that link, and how many ticks were recorded (at most one per page load; not people). Recorded from October 2026.`}
       >
         {shares.length === 0 ? (
           <p className="text-sm text-[#667085]">No links yet.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-[15px]">
+            <table className="w-full min-w-[780px] text-left text-[15px]">
               <thead className="text-xs uppercase tracking-wider text-[#667085]">
                 <tr className="border-b border-white/10">
                   <th className="px-3 py-2 font-medium">Code</th>
@@ -287,6 +287,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
                   <th className="px-3 py-2 font-medium">Category</th>
                   <th className="px-3 py-2 font-medium">Expires</th>
                   <th className="px-3 py-2 text-right font-medium">Play starts</th>
+                  <th className="px-3 py-2 font-medium">Disclaimer accepted</th>
                   <th className="px-3 py-2 font-medium">Created</th>
                 </tr>
               </thead>
@@ -318,6 +319,20 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
                       <td className="px-3 py-2 text-[#bfbfbf]">{categoryLabel(share.video.category)}</td>
                       <td className={`px-3 py-2 ${expired ? "text-[#667085]" : "text-[#bfbfbf]"}`}>{expires}</td>
                       <td className="px-3 py-2 text-right text-[#bfbfbf]">{share.viewCount}</td>
+                      <td className="px-3 py-2 text-[#bfbfbf]">
+                        {/* Pulse staff only: the clinic side shows nothing about the box. */}
+                        {share.disclaimerFirstAcceptedAt ? (
+                          <>
+                            {formatDateTime(share.disclaimerFirstAcceptedAt)}
+                            <span className="block text-[13px] text-[#667085]">
+                              {share.disclaimerAcceptances} {share.disclaimerAcceptances === 1 ? "tick" : "ticks"}
+                              {share.disclaimerVersion ? `, wording of ${share.disclaimerVersion}` : ""}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-[#667085]">Not ticked</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-[#bfbfbf]">{formatDate(share.createdAt)}</td>
                     </tr>
                   );

@@ -85,6 +85,35 @@ export function playbackForShare(share: { expiresAt: Date; video: PlayableVideo 
 }
 
 /**
+ * The picture the patient page shows on the video's box BEFORE the "for
+ * education only" box is ticked: a still, never anything that plays. The
+ * page's HTML carries no playable address at all until the tick (the accept
+ * routes hand that out), so this is all the video's box has to show.
+ *
+ *   - a video on Mux: its signed still (Mux's thumbnail, a picture), bounded
+ *     like any token by `windowEnd`, the link's deadline;
+ *   - otherwise, or when Mux cannot sign here: the poster Pulse staff set on
+ *     /pulse/videos, or nothing, and the box stays dark until the tick lets
+ *     the file load its own first frame.
+ *
+ * Never logs: a deployment without Mux signing is reported once the patient
+ * ticks the box and playbackForVideo is asked for the video itself.
+ */
+export function posterForVideo(video: PlayableVideo & { posterUrl: string | null }, now: Date, windowEnd: Date | null): string | null {
+  if (usesProtectedPlayback(video) && video.muxPlaybackId && muxIsConfigured()) {
+    const expiresAt = tokenExpiry(now, windowEnd, null);
+    if (expiresAt) {
+      try {
+        return signedThumbnailUrl(video.muxPlaybackId, expiresAt);
+      } catch {
+        // A key that will not sign: no still, and the tick will show the calm "did not load" panel.
+      }
+    }
+  }
+  return video.posterUrl ?? null;
+}
+
+/**
  * A source for the library: the clinic's plan is asked about the video
  * first (the same rule that lets a link be made), and nothing is signed
  * when the answer is no. Null means refused: the clinic is not open, the

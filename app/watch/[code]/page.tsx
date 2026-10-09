@@ -4,7 +4,7 @@ import { ClockIcon, PauseIcon, SearchIcon } from "@/components/ui/icons";
 import { getSettings } from "@/lib/db/settings";
 import { getShareByCode } from "@/lib/db/shares";
 import { canRequestRenewal, isExpired, renewalState } from "@/lib/expiry";
-import { playbackForShare } from "@/lib/playback-auth";
+import { posterForVideo } from "@/lib/playback-auth";
 import { windowCoversVideo } from "@/lib/playback-source";
 import { AskClinic } from "./AskClinic";
 import { PatientViewer, Unavailable } from "../PatientPage";
@@ -28,9 +28,12 @@ import { WatchPlayer } from "./WatchPlayer";
  * Top to bottom it answers the questions an anxious person has, in order: who
  * sent me this ("Dr. Jane Smith, DO" and "Summit Orthopedics" under it: the
  * surgeon's name was copied onto the link when it was made; a link made
- * before that says "From Summit Orthopedics"), what is it, why, how long will it take. Under the video, one
- * quiet sentence says it is for education only, not medical advice (lib/education-note.ts): plain
- * text, never a step before the video. The Pulse 3D logo sits
+ * before that says "From Summit Orthopedics"), what is it, why, how long will it take. Just above the
+ * video, a box to tick: "I understand this video is for education only..." (DISCLAIMER in
+ * lib/education-note.ts; decided by Evan and Van on 2026-10-08). The video stays frozen until it is
+ * ticked: this page puts no playable address in its HTML, only a still, and the player gets the video
+ * from POST /watch/<code>/accept, which records the tick on the link first (see WatchPlayer). Under
+ * the video, one quiet sentence says the same thing as plain text. The Pulse 3D logo sits
  * at the very bottom, small, because the practice sent this, not us.
  *
  * THE CLINIC'S OWN LOOK. The page belongs to the practice that sent it, so
@@ -138,13 +141,15 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
     );
   }
 
-  // What the player loads, made here on the server for this link
-  // (lib/playback-auth.ts): the plain file for a video still on the CDN, or
-  // a signed Mux address that lives no longer than the link does. A link
-  // that has only minutes left, which the first play will not extend (it
-  // was played already, or is a legacy link), is told so in plain words
-  // rather than letting the video stop part-way with no explanation.
-  const source = playbackForShare(share, now);
+  // What the video's box shows before the box is ticked: a still, never
+  // anything that plays (lib/playback-auth.ts). The video itself is handed
+  // out by POST /watch/<code>/accept once the tick is recorded: the plain
+  // file for a video still on the CDN, or a signed Mux address that lives no
+  // longer than the link does. A link that has only minutes left, which the
+  // first play will not extend (it was played already, or is a legacy link),
+  // is told so in plain words rather than letting the video stop part-way
+  // with no explanation.
+  const poster = posterForVideo(share.video, now, share.expiresAt);
   const willNotExtend = share.expiryPolicy !== "FIRST_PLAY" || share.firstPlayedAt !== null;
   const endsSoon = willNotExtend && !windowCoversVideo(now, share.expiresAt, share.video.durationSeconds);
 
@@ -157,7 +162,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
       endsSoon={endsSoon}
       player={
         <WatchPlayer
-          source={source}
+          poster={poster}
           title={share.video.title}
           code={share.code}
           clinicName={share.clinic.name}

@@ -29,20 +29,26 @@ import { CallNumber } from "./CallButton";
  * the patient's thumb moves from the box to Play, so the Play tap starts it
  * straight away, inside the tap, which is the only moment an iPhone allows
  * sound. While the answer is on its way Play says "Getting the video ready".
+ * Ticking NEVER starts the video by itself: only the Play tap does.
+ *
+ * ONCE TICKED, THE BOX GOES AWAY (Evan, 2026-10-10): it folds up over a
+ * quarter of a second (at once for someone whose phone asks for less
+ * motion), so the eye can follow the video moving up into its place, and the
+ * keyboard's focus moves to Play, which turns from dimmed to ready as soon as
+ * the video has arrived. It cannot be unticked: once ticked, the decision is
+ * made for this page load. A reload brings the box back, unticked.
  *
  *   - Slow or failed: the ask is tried again by itself (see
- *     accept-disclaimer.ts); if nothing gets through, a calm line under the
- *     box says so with a Try again button, the box stays ticked, and nothing
- *     else changes. Never an error page.
+ *     accept-disclaimer.ts); if nothing gets through, a calm line where the
+ *     box was says so with a Try again button, and nothing else changes.
+ *     Never an error page.
  *   - The link stopped working since the page was drawn (it ran out, paused,
  *     was taken down): the page is loaded again, and the server shows the
  *     right calm page (the paused one has Ask my clinic). On a printed code,
  *     the calm "not available" panel.
- *   - Ticked, unticked, ticked again: one request per page load. Unticking
- *     before the first play dims Play again and keeps the video the answer
- *     brought; ticking again asks nothing (unless the first ask never got
- *     through, when it is the same as Try again). Once the video has started
- *     the box stays ticked and cannot be unticked: it has done its job.
+ *   - One request per page load: the box is gone once ticked, so it cannot
+ *     be ticked twice; only Try again asks again, and only when no answer
+ *     got through.
  *
  * Nothing about the tick is kept in the browser (no cookie, no storage): a
  * reload shows the box unticked again, and a tick there is a new record.
@@ -198,6 +204,7 @@ export function WatchPlayer({
   const scrollBack = useRef(0);
 
   const tickBox = useRef<HTMLInputElement>(null);
+  const playButton = useRef<HTMLButtonElement>(null);
   const tickId = useId();
   /** The box is ticked right now. */
   const [ticked, setTicked] = useState(false);
@@ -205,7 +212,7 @@ export function WatchPlayer({
   const [source, setSource] = useState<PlaybackSource | null>(null);
   /** The tick's ask is on its way, so a second tick (or Try again) while it is on its way never sends a second ask. */
   const acceptInFlight = useRef(false);
-  /** No answer got through: a calm line and Try again under the box. */
+  /** No answer got through: a calm line and Try again where the box was. */
   const [acceptTrouble, setAcceptTrouble] = useState(false);
   /** A stream played through hls.js arrives a moment after the answer (the library loads first); Play waits for the element to have it. */
   const [attached, setAttached] = useState(false);
@@ -261,11 +268,13 @@ export function WatchPlayer({
   // effect here asked the element afterwards. The HTML carries no address now: the file arrives after the tick,
   // when the listeners below are already attached.)
 
-  /** The box was ticked or unticked. Ticking asks for the video, once per page load (see the note at the top). */
+  /** The box was ticked: it folds away, focus goes to Play, and the video is asked for (once per page load; see the note at the top). */
   function onTick(event: React.ChangeEvent<HTMLInputElement>) {
-    const checked = event.target.checked;
-    setTicked(checked);
-    if (checked && !source) void accept();
+    if (!event.target.checked || ticked) return;
+    setTicked(true);
+    // The box is about to disappear with the focus in it; put the focus on Play, where the next step is.
+    playButton.current?.focus({ preventScroll: true });
+    if (!source) void accept();
   }
 
   /** Tell the server the box was ticked, and take the video it hands back. */
@@ -510,23 +519,35 @@ export function WatchPlayer({
   return (
     <div>
       {/* The box. Large on purpose: the whole row is the tap target (at least 48px tall), the square itself is 28px, and the
-          words are the page's 20px body text. It stays where it is after the first play, ticked, so nothing on the page moves. */}
-      <div className="mb-4 rounded-2xl border-2 border-[#c9c3b6] bg-white px-4 py-3">
-        <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3.5 py-1">
-          <input
-            ref={tickBox}
-            id={tickId}
-            type="checkbox"
-            checked={ticked}
-            onChange={onTick}
-            disabled={started}
-            className="mt-0.5 h-7 w-7 shrink-0 cursor-pointer accent-[#12333f] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668] disabled:cursor-default"
-          />
-          <span className="text-[20px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
-        </label>
-        {/* No answer got through: said calmly, with one way to try again. The box stays ticked. */}
-        {acceptTrouble && (
-          <div role="alert" className="mt-2 flex flex-col items-start gap-2 border-t border-[#e3e7eb] pt-3">
+          words are the page's 20px body text. Once ticked it folds away (the grid row shrinks from its full height to
+          nothing, so the fold needs no measuring) and is taken out of reach of the keyboard and screen readers (inert). */}
+      <div
+        data-education-box=""
+        inert={ticked || undefined}
+        className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none ${
+          ticked ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100"
+        }`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="mb-4 rounded-2xl border-2 border-[#c9c3b6] bg-white px-4 py-3">
+            <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3.5 py-1">
+              <input
+                ref={tickBox}
+                id={tickId}
+                type="checkbox"
+                checked={ticked}
+                onChange={onTick}
+                className="mt-0.5 h-7 w-7 shrink-0 cursor-pointer accent-[#12333f] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
+              />
+              <span className="text-[20px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      {/* No answer got through: said calmly where the box was, with one way to try again. */}
+      {acceptTrouble && (
+        <div className="mb-4 rounded-2xl border-2 border-[#c9c3b6] bg-white px-4 py-3">
+          <div role="alert" className="flex flex-col items-start gap-2">
             <p className="text-[17px] leading-[1.45] text-[#3a4c56]">We couldn&apos;t get the video ready. Check your connection, then try again.</p>
             <button
               type="button"
@@ -536,8 +557,8 @@ export function WatchPlayer({
               Try again
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* This outer box keeps the video's place on the page while the player itself is expanded, so nothing below it jumps.
           It is a grid, and never shorter than what it holds (min-h-fit), so that in the one case where the player sits
@@ -647,6 +668,7 @@ export function WatchPlayer({
               // Visibly not ready until the box is ticked and the video has arrived: the circle is dimmed and its line
               // says why. Not `disabled`, so a tap still does something useful: it takes the patient to the box.
               <button
+                ref={playButton}
                 type="button"
                 onClick={play}
                 aria-label={`Play ${title}`}

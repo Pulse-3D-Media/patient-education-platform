@@ -15,6 +15,8 @@ import {
   MAX_RENEWALS,
   MIN_LINK_DAYS,
   MIN_RENEWALS,
+  afterFirstPlaySentence,
+  patientDeadline,
   RENEWAL_REQUEST_GAP_MS,
   renewalState,
   resolveShareTerms,
@@ -264,6 +266,50 @@ describe("canRequestRenewal", () => {
     expect(canRequestRenewal({ renewalRequestedAt: T }, T)).toBe(false);
     expect(canRequestRenewal({ renewalRequestedAt: T }, new Date(T.getTime() + DAY_MS - 1))).toBe(false);
     expect(canRequestRenewal({ renewalRequestedAt: T }, addDays(T, 1))).toBe(true);
+  });
+});
+
+describe("patientDeadline", () => {
+  it("for a first-play link nobody has played: the days copied onto THIS link, never a default", () => {
+    expect(patientDeadline(facts({ daysAfterFirstPlay: 10 }), T)).toEqual({ kind: "after-first-play", days: 10 });
+    expect(patientDeadline(facts({ daysAfterFirstPlay: 3 }), T)).toEqual({ kind: "after-first-play", days: 3 });
+  });
+
+  it("for a played first-play link: the deadline the first play set", () => {
+    const share = facts({ firstPlayedAt: T, expiresAt: addDays(T, 10) });
+    expect(patientDeadline(share, addDays(T, 2))).toEqual({ kind: "until", deadline: addDays(T, 10) });
+  });
+
+  it("for a legacy (FIXED) link, played or not: its fixed date", () => {
+    const legacy = facts({ expiryPolicy: "FIXED", daysAfterFirstPlay: null, expiresAt: addDays(T, 60) });
+    expect(patientDeadline(legacy, T)).toEqual({ kind: "until", deadline: addDays(T, 60) });
+    expect(patientDeadline({ ...legacy, firstPlayedAt: T }, T)).toEqual({ kind: "until", deadline: addDays(T, 60) });
+  });
+
+  it("for a first-play link with no usable number on it (which nothing writes): its date, never a made-up number of days", () => {
+    expect(patientDeadline(facts({ daysAfterFirstPlay: null }), T)).toEqual({ kind: "until", deadline: addDays(T, 90) });
+    expect(patientDeadline(facts({ daysAfterFirstPlay: 0 }), T)).toEqual({ kind: "until", deadline: addDays(T, 90) });
+  });
+
+  it("says nothing at the deadline itself or after it, and still speaks one millisecond before", () => {
+    const played = facts({ firstPlayedAt: T, expiresAt: addDays(T, 10) });
+    const deadline = addDays(T, 10);
+    expect(patientDeadline(played, new Date(deadline.getTime() - 1))).toEqual({ kind: "until", deadline });
+    expect(patientDeadline(played, deadline)).toBeNull();
+    expect(patientDeadline(played, addDays(T, 11))).toBeNull();
+    // A link nobody played, at its unclaimed deadline: over too, not "works for 7 days".
+    expect(patientDeadline(facts(), new Date(addDays(T, 90).getTime() - 1))).toEqual({ kind: "after-first-play", days: 7 });
+    expect(patientDeadline(facts(), addDays(T, 90))).toBeNull();
+    // A legacy link at its date.
+    expect(patientDeadline(facts({ expiryPolicy: "FIXED", daysAfterFirstPlay: null, expiresAt: T }), T)).toBeNull();
+  });
+});
+
+describe("afterFirstPlaySentence", () => {
+  it("is plain, with the number written in and the word right for one", () => {
+    expect(afterFirstPlaySentence(10)).toBe("Once you start watching, this link works for 10 days.");
+    expect(afterFirstPlaySentence(1)).toBe("Once you start watching, this link works for 1 day.");
+    expect(afterFirstPlaySentence(10)).not.toMatch(/expire/i);
   });
 });
 

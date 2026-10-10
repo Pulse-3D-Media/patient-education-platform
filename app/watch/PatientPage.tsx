@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import type { Look } from "@/app/brand-look";
 import { ClinicLogo } from "@/components/ui/ClinicLogo";
-import { ClockIcon } from "@/components/ui/icons";
+import { CalendarIcon, ClockIcon } from "@/components/ui/icons";
 import { LOGO_URL } from "@/lib/brand";
+import { afterFirstPlaySentence, type PatientDeadline } from "@/lib/expiry";
 import { describeDuration } from "@/lib/format";
 import { senderLines } from "@/lib/sender-name";
 import { CallButton } from "./[code]/CallButton";
+import { LinkDeadline } from "./LinkDeadline";
 
 /**
  * The patient's page, drawn the same way for a patient link (/watch/<code>)
@@ -25,6 +27,14 @@ import { CallButton } from "./[code]/CallButton";
  * used to sit under the video said the same thing, and was taken off the
  * patient page when the box arrived (option B, chosen by Evan on 2026-10-10).
  * The printed pamphlet still carries it (EDUCATION_ONLY).
+ *
+ * Under the video's length, one quiet line says when the link stops working
+ * (decided by Evan and Van on 2026-10-08, so a patient knows to ask for more
+ * time before it runs out): "Once you start watching, this link works for 10
+ * days." before the first play, "This link works until Friday, October 18."
+ * after it, or for an older link with a fixed date (patientDeadline() in
+ * lib/expiry.ts). When the "stops working in a few minutes" note is showing,
+ * that note says it and this line is left out.
  */
 export function PatientViewer({
   look,
@@ -32,6 +42,8 @@ export function PatientViewer({
   senderName,
   video,
   endsSoon,
+  deadline,
+  now,
   player,
 }: {
   look: Look;
@@ -41,6 +53,10 @@ export function PatientViewer({
   video: { title: string; isPlaceholder: boolean; durationSeconds: number | null };
   /** The link has only minutes left and the first play will not add any: say so, calmly. */
   endsSoon: boolean;
+  /** When the link stops working, in the page's words (patientDeadline in lib/expiry.ts). Null says nothing. */
+  deadline: PatientDeadline;
+  /** The server's clock when the page was drawn: only decides whether a date's year is written. */
+  now: Date;
   player: ReactNode;
 }) {
   const length = describeDuration(video.durationSeconds);
@@ -87,10 +103,20 @@ export function PatientViewer({
           </p>
         )}
 
-        {/* The second half is for the spouse or adult child who was never in the room. */}
-        <p className="mt-4 border-t border-[#e3e7eb] pt-4 text-[19px] leading-[1.52] text-[#3a4c56]">
-          Watch it as many times as you like, and show it to anyone coming with you.
-        </p>
+        {/* When the link stops working, so the patient can ask for more time before it does. The same size and colour as the length above: a fact, never a warning. */}
+        {deadline && !endsSoon && (
+          // On a narrow phone a long date wraps to a second line; the icon stays beside the first.
+          <p className={`${length ? "mt-2.5" : "mt-5"} flex items-start gap-2 text-[16px] leading-6 font-medium text-[#46555e]`}>
+            <CalendarIcon className="mt-0.5 h-5 w-5 shrink-0" />
+            <span>
+              {deadline.kind === "after-first-play" ? (
+                afterFirstPlaySentence(deadline.days)
+              ) : (
+                <LinkDeadline deadlineMs={deadline.deadline.getTime()} nowMs={now.getTime()} />
+              )}
+            </span>
+          </p>
+        )}
 
         {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
         <div className="mt-auto pt-10">

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { getSettings } from "@/lib/db/settings";
+import { describeLinkDate } from "@/lib/format";
 import WatchPage from "./page";
 
 /**
@@ -37,6 +38,8 @@ const createdVideoIds: string[] = [];
 let videoId = "";
 let placeholderVideoId = "";
 let unpublishedVideoId = "";
+/** A published video whose length is not known: the page never says "a few minutes" for it, so a deadline's edge can be seen plainly. */
+let noLengthVideoId = "";
 
 const LONG_NAME = "The Intermountain Center for Advanced Orthopedic, Spine and Sports Medicine Surgery of Greater Salt Lake";
 
@@ -75,7 +78,8 @@ beforeAll(async () => {
   videoId = (await make({})).id;
   placeholderVideoId = (await make({ isPlaceholder: true })).id;
   unpublishedVideoId = (await make({ isPublished: false })).id;
-  createdVideoIds.push(videoId, placeholderVideoId, unpublishedVideoId);
+  noLengthVideoId = (await make({ durationSeconds: null })).id;
+  createdVideoIds.push(videoId, placeholderVideoId, unpublishedVideoId, noLengthVideoId);
 });
 
 afterAll(async () => {
@@ -228,6 +232,155 @@ describe("the education line", () => {
       expect(html).toContain("I understand this video is for education only.");
       expect(html.toLowerCase()).not.toContain("consent");
     }
+  });
+});
+
+describe("when the link stops working (decided 2026-10-08)", () => {
+  const DAY = 86_400_000;
+
+  /** A link of any kind, written straight to the database the way createShare and the first play leave it. */
+  async function makeLink(clinicId: string, data: Partial<Prisma.ShareUncheckedCreateInput>) {
+    const share = await prisma.share.create({
+      data: { code: code(), clinicId, videoId, expiresAt: new Date(Date.now() + 30 * DAY), ...data },
+      select: { code: true, expiresAt: true },
+    });
+    return share;
+  }
+
+  /** The line's own markup: one 16px line in the page's small-text grey, nothing louder. */
+  function deadlineLine(html: string) {
+    return /<p class="[^"]*"><svg[^>]*>(?:(?!<\/svg>).)*<\/svg><span>(?:Once you start watching|This link works until)[^<]*<\/span><\/p>/.exec(html)?.[0] ?? null;
+  }
+
+  it("a first-play link nobody has played: 'Once you start watching, this link works for 10 days.', from the link's own number", async () => {
+    const clinic = await makeClinic({});
+    for (const days of [10, 3, 1]) {
+      const link = await makeLink(clinic.id, { expiryPolicy: "FIRST_PLAY", daysAfterFirstPlay: days, expiresAt: new Date(Date.now() + 90 * DAY) });
+      const html = await render(link.code);
+      expect(html).toContain(`Once you start watching, this link works for ${days} ${days === 1 ? "day" : "days"}.`);
+      expect(html).not.toContain("This link works until");
+    }
+  });
+
+  it("a played first-play link: 'This link works until <the deadline's date>.', drawn first in Utah time and rewritten by the phone in its own", async () => {
+    const clinic = await makeClinic({});
+    const link = await makeLink(clinic.id, {
+      expiryPolicy: "FIRST_PLAY",
+      daysAfterFirstPlay: 10,
+      firstPlayedAt: new Date(Date.now() - 2 * DAY),
+      expiresAt: new Date(Date.now() + 8 * DAY),
+      viewCount: 1,
+    });
+    const html = await render(link.code);
+    expect(html).toContain(`This link works until ${describeLinkDate(link.expiresAt, new Date(), "America/Denver")}.`);
+    expect(html).not.toContain("Once you start watching");
+  });
+
+  it("a legacy (fixed-date) link, played or not: 'This link works until <its date>.'", async () => {
+    const clinic = await makeClinic({});
+    for (const viewCount of [0, 4]) {
+      const link = await makeLink(clinic.id, { viewCount, expiresAt: new Date(Date.now() + 45 * DAY) });
+      const html = await render(link.code);
+      expect(html).toContain(`This link works until ${describeLinkDate(link.expiresAt, new Date(), "America/Denver")}.`);
+    }
+  });
+
+  it("is one quiet line: 16px, the small-text grey, under the video's length, never red, never 'expire'", async () => {
+    const clinic = await makeClinic({});
+    const link = await makeLink(clinic.id, { expiryPolicy: "FIRST_PLAY", daysAfterFirstPlay: 10 });
+    const html = await render(link.code);
+    const line = deadlineLine(html);
+    expect(line).not.toBeNull();
+    expect(line).toContain("text-[16px]");
+    expect(line).toContain("text-[#46555e]");
+    expect(line!.toLowerCase()).not.toMatch(/red|danger|problem|expire/);
+    // Under the length line ("About 2 minutes"), not above the video.
+    expect(html.indexOf("About 2 minutes")).toBeLessThan(html.indexOf(line!));
+    expect(html.indexOf("<video")).toBeLessThan(html.indexOf(line!));
+  });
+
+  it("no longer says 'watch it as many times as you like' (Van, 2026-10-08)", async () => {
+    const clinic = await makeClinic({});
+    const html = await render((await makeLink(clinic.id, {})).code);
+    expect(html).not.toContain("as many times as you like");
+    expect(html).not.toContain("anyone coming with you");
+  });
+
+  it("gives way to 'stops working in a few minutes' when that applies, so the page never says both", async () => {
+    const clinic = await makeClinic({});
+    // Played, and one minute left on a 110-second video.
+    const link = await makeLink(clinic.id, {
+      expiryPolicy: "FIRST_PLAY",
+      daysAfterFirstPlay: 10,
+      firstPlayedAt: new Date(Date.now() - 10 * DAY),
+      expiresAt: new Date(Date.now() + 60_000),
+      viewCount: 1,
+    });
+    const html = await render(link.code);
+    expect(html).toContain("stops working in a few minutes");
+    expect(deadlineLine(html)).toBeNull();
+    expect(html).not.toContain("This link works until");
+  });
+
+  describe("at the deadline itself", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("a played link: one millisecond before, the 'few minutes' note says it; at the deadline, the link has paused and no date is shown", async () => {
+      const clinic = await makeClinic({});
+      const deadline = new Date(Date.now() + 3 * DAY);
+      const link = await makeLink(clinic.id, {
+        expiryPolicy: "FIRST_PLAY",
+        daysAfterFirstPlay: 10,
+        firstPlayedAt: new Date(deadline.getTime() - 10 * DAY),
+        expiresAt: deadline,
+        viewCount: 1,
+      });
+
+      // Only the page's clock is moved; nothing else is faked.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(deadline.getTime() - 1));
+      const before = await render(link.code);
+      expect(before).toContain("stops working in a few minutes");
+      expect(before).not.toContain("This link works until");
+
+      vi.setSystemTime(deadline);
+      const at = await render(link.code);
+      expect(at).not.toContain("This link works until");
+      expect(at).not.toContain("Once you start watching");
+      // The paused page (renewals are left on the testing branch, as the paused tests below require) or, if not, the calm expired one.
+      expect(at).toMatch(/This link has paused|This link has expired/);
+    });
+
+    it("a legacy link to a video of unknown length (no 'few minutes' note): the date one millisecond before, the calm expired page at it", async () => {
+      const clinic = await makeClinic({});
+      const deadline = new Date(Date.now() + 3 * DAY);
+      const link = await makeLink(clinic.id, { videoId: noLengthVideoId, expiresAt: deadline });
+
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(deadline.getTime() - 1));
+      const before = await render(link.code);
+      expect(before).toContain(`This link works until ${describeLinkDate(deadline, new Date(), "America/Denver")}.`);
+      expect(before).not.toContain("stops working in a few minutes");
+
+      vi.setSystemTime(deadline);
+      const at = await render(link.code);
+      expect(at).toContain("This link has expired");
+      expect(at).not.toContain("This link works until");
+    });
+
+    it("a first-play link nobody played, at its unclaimed deadline: the calm expired page, not 'works for 10 days'", async () => {
+      const clinic = await makeClinic({});
+      const deadline = new Date(Date.now() + 5 * DAY);
+      const link = await makeLink(clinic.id, { expiryPolicy: "FIRST_PLAY", daysAfterFirstPlay: 10, expiresAt: deadline });
+
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(deadline);
+      const html = await render(link.code);
+      expect(html).toContain("This link has expired");
+      expect(html).not.toContain("Once you start watching");
+    });
   });
 });
 

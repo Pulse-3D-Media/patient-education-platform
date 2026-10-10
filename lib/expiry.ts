@@ -192,6 +192,43 @@ export function shareExpiryState(share: ShareExpiryFacts, now: Date): ShareExpir
   return { kind: "fixed", expiresAt: share.expiresAt };
 }
 
+/**
+ * What the patient page tells the patient about when their link stops
+ * working (decided by Evan and Van on 2026-10-08, so they know to ask for a
+ * renewal in time). Worked out from shareExpiryState() above, with no rule
+ * of its own:
+ *
+ *   after-first-play   a first-play link nobody has played yet: "Once you
+ *                      start watching, this link works for 10 days", with
+ *                      the days copied onto this link when it was made.
+ *   until              a played first-play link, or a legacy (FIXED) link:
+ *                      "This link works until Friday, October 18". The date
+ *                      is the link's own deadline; the page writes it in the
+ *                      patient's own time zone (app/watch/LinkDeadline.tsx).
+ *   null               a link that has stopped working (at its deadline or
+ *                      after): the page shows its calm paused or expired
+ *                      page instead, and says nothing about a date.
+ */
+export type PatientDeadline = { kind: "after-first-play"; days: number } | { kind: "until"; deadline: Date } | null;
+
+export function patientDeadline(share: ShareExpiryFacts, now: Date): PatientDeadline {
+  const state = shareExpiryState(share, now);
+  switch (state.kind) {
+    case "expired":
+      return null;
+    case "awaiting":
+      return { kind: "after-first-play", days: state.daysAfterFirstPlay };
+    case "played":
+    case "fixed":
+      return { kind: "until", deadline: state.expiresAt };
+  }
+}
+
+/** "Once you start watching, this link works for 10 days." (or "1 day"). The patient page's line for a link nobody has played yet. */
+export function afterFirstPlaySentence(days: number): string {
+  return `Once you start watching, this link works for ${days} ${days === 1 ? "day" : "days"}.`;
+}
+
 /** "6 days left", "1 day left", or "Less than a day left". Rounded to the nearest day, for reading, not for deciding. */
 export function daysLeftText(expiresAt: Date, now: Date): string {
   const days = Math.round((expiresAt.getTime() - now.getTime()) / DAY_MS);

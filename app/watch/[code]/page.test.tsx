@@ -220,23 +220,73 @@ describe("the tap-to-call button", () => {
 describe("the education line", () => {
   const SENTENCE = "This video is for education only. It is not medical advice. Ask your doctor about anything you are unsure of.";
 
-  it("sits under the video as plain text, at the page's smallest size or larger, and never says consent", async () => {
+  it("is no longer under the video: the box above it is the page's one statement (option B, 2026-10-10)", async () => {
+    const clinic = await makeClinic({});
+    for (const video of [videoId, placeholderVideoId]) {
+      const html = await render(await makeShare(clinic.id, video));
+      expect(html).not.toContain(SENTENCE);
+      expect(html).toContain("I understand this video is for education only.");
+      expect(html.toLowerCase()).not.toContain("consent");
+    }
+  });
+});
+
+describe("the 'for education only' box before the video", () => {
+  const BOX = "I understand this video is for education only. It is not medical advice, and I will ask my doctor about anything I am unsure of.";
+
+  it("is above the video, unticked, large, and never says consent", async () => {
     const clinic = await makeClinic({});
     const html = await render(await makeShare(clinic.id, videoId));
 
-    expect(html).toContain(SENTENCE);
-    // Under the video, not a step before it.
-    expect(html.indexOf(SENTENCE)).toBeGreaterThan(html.indexOf("<video"));
-    // A paragraph of words, 16px: nothing to tap, nothing to tick.
-    expect(html).toMatch(new RegExp(`<p class="[^"]*text-\\[16px\\][^"]*">${SENTENCE.replace(/\./g, "\\.")}</p>`));
+    expect(html).toContain(BOX);
+    expect(html.indexOf(BOX)).toBeLessThan(html.indexOf("<video"));
+    const box = /<input[^>]*type="checkbox"[^>]*>/.exec(html)![0];
+    // No checked or disabled attribute (the class list mentions "disabled:" for a style, which does not count).
+    expect(box).not.toMatch(/\schecked[=\s/>]/);
+    expect(box).not.toMatch(/\sdisabled[=\s/>]/);
+    // A 28px square in a row at least 48px tall, with the words at the page's 20px body size.
+    expect(box).toContain("h-7 w-7");
+    expect(html).toMatch(/<label[^>]*min-h-12[^>]*>/);
+    expect(html).toMatch(/<span class="text-\[20px\][^"]*">I understand this video/);
     expect(html.toLowerCase()).not.toContain("consent");
   });
 
-  it("is on a placeholder link too", async () => {
+  it("keeps Play visibly not ready, with one line saying why", async () => {
     const clinic = await makeClinic({});
-    const html = await render(await makeShare(clinic.id, placeholderVideoId));
+    const html = await render(await makeShare(clinic.id, videoId));
 
-    expect(html).toContain(SENTENCE);
+    expect(html).toMatch(/<button[^>]*aria-label="Play Vitest Total Knee Replacement"[^>]*aria-disabled="true"/);
+    expect(html).toContain("Tick the box above to play");
+    expect(html).not.toContain("Tap to play");
+  });
+
+  it("puts no playable address in the page: the video comes only from the accept route, after the tick", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+
+    expect(html).not.toContain("example.com/vitest.mp4");
+    expect(html).not.toMatch(/<video[^>]*\ssrc=/);
+    expect(html).not.toContain("stream.mux.com");
+  });
+
+  it("shows the poster staff set on the video's box until then, a picture and nothing that plays", async () => {
+    const clinic = await makeClinic({});
+    const withPoster = await prisma.video.create({
+      data: { title: "Vitest Poster Knee", category: "KNEE", videoUrl: "https://example.com/vitest-poster.mp4", posterUrl: "https://example.com/still.jpg", isPublished: true },
+      select: { id: true },
+    });
+    createdVideoIds.push(withPoster.id);
+    const html = await render(await makeShare(clinic.id, withPoster.id));
+
+    expect(html).toMatch(/<video[^>]*poster="https:\/\/example\.com\/still\.jpg"/);
+    expect(html).not.toContain("vitest-poster.mp4");
+  });
+
+  it("is not on a page that cannot play: an expired link has no box", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId, true));
+
+    expect(html).not.toContain('type="checkbox"');
   });
 });
 
@@ -492,10 +542,10 @@ describe("a video that has moved to Mux", () => {
     expect(html).toMatch(/<video[^>]*poster="https:\/\/image\.mux\.com\/[^"]*thumbnail\.jpg\?token=[^"]+"/);
     expect(html).not.toMatch(/<video[^>]*\ssrc=/);
     expect(html).not.toContain("example.com/vitest-cdn-copy.mp4");
-    // The strip, the sender lines, the controls setting and the education note survive the player change.
+    // The strip, the sender lines, the controls setting and the education box survive the player change.
     expect(html).toContain("data-video-strip");
     expect(html).toContain('controlsList="nodownload nofullscreen"');
-    expect(html).toContain("This video is for education only.");
+    expect(html).toContain("I understand this video is for education only.");
     expect(html).not.toMatch(/stops working in a few minutes/);
   });
 

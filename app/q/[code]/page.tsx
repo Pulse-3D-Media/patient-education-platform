@@ -6,7 +6,7 @@ import { ClockIcon, SearchIcon } from "@/components/ui/icons";
 import { decideVideoAccess } from "@/lib/access";
 import { getClinicAccess } from "@/lib/db/access";
 import { getQrCodeByCode } from "@/lib/db/qr-codes";
-import { playbackForVideo } from "@/lib/playback-auth";
+import { posterForVideo } from "@/lib/playback-auth";
 import { isQrCodeShape } from "@/lib/qr-code";
 
 /**
@@ -17,8 +17,11 @@ import { isQrCodeShape } from "@/lib/qr-code";
  * the top of lib/qr-code.ts.
  *
  * OPENING THIS PAGE MAKES NOTHING. It reads the printed code and draws the
- * page. The patient's own link is made only when they tap Play (the player
- * posts to /q/<code>/issue), and the address bar then changes to that link.
+ * page, with the "for education only" box above the video and no playable
+ * address in the HTML. Ticking the box gets the video (POST /q/<code>/accept,
+ * which writes nothing); the patient's own link is made only when they tap
+ * Play (the player posts to /q/<code>/issue, carrying the tick, which is
+ * recorded on the new link), and the address bar then changes to that link.
  * So a text message previewing the address, an email scanner, a crawler or a
  * HEAD request never leave a trail of patient links.
  *
@@ -86,13 +89,10 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
     );
   }
 
-  // What the player loads before the tap, so the tap can start it at once. A
-  // video on the CDN is its plain address; a Mux video gets the usual
-  // short-lived signed address, bounded by nothing but the token's own hour
-  // (the printed code's permission is the clinic's access, checked above),
-  // and from the first play on the player renews it through the patient's
-  // own link.
-  const source = playbackForVideo(qr.video, new Date(), null);
+  // A still for the video's box until the box is ticked; never anything that
+  // plays. The tick gets the video from /q/<code>/accept (the same checks as
+  // above, made again), so the Play tap can start it at once.
+  const poster = posterForVideo(qr.video, new Date(), null);
 
   return (
     <PatientViewer
@@ -103,7 +103,7 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
       endsSoon={false}
       player={
         <WatchPlayer
-          source={source}
+          poster={poster}
           title={qr.video.title}
           code={null}
           qrCode={qr.code}

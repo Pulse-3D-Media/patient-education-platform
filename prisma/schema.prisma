@@ -415,6 +415,14 @@ model Share {
   lastRenewedAt      DateTime? // when the clinic last turned it back on
   renewalRequests    Int       @default(0) // how many "ask my clinic" requests have been recorded on this link (at most one a day), for the Pulse reports. Only ever goes up, never reset. Counts from October 2026: 0 on every link before that, whatever was asked then
 
+  // The "for education only" box on the patient page (lib/education-note.ts).
+  // A record about the LINK, never about who ticked it: no address, no
+  // device, no cookie, nothing about the person (rule 2). Empty and 0 on every
+  // link made before the box existed (October 2026).
+  disclaimerFirstAcceptedAt DateTime? // set once, the first time the box was ticked on this link; never moved again
+  disclaimerAcceptances     Int       @default(0) // one per recorded tick (one per page load at most), like viewCount. Not people
+  disclaimerVersion         String? // the version of the wording ticked most recently ("2026-10-08"), from DISCLAIMER_VERSION
+
   // The printed QR code that handed this link out, when one did (see QrCode).
   // Empty for every link an office or a surgeon made by hand, which is every
   // link made before printed codes existed.

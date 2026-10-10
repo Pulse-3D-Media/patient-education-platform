@@ -16,6 +16,7 @@ const route = await import("./route");
 
 const CODE = "abcdefghijklmnopqrstuvwx1";
 const KEY = "3f2b8a1c-5d4e-4f6a-9b7c-0d1e2f3a4b5c";
+const V = "2026-10-08";
 
 function post(code: string, body: unknown) {
   const request = new Request(`http://localhost/q/${code}/issue`, { method: "POST", body: typeof body === "string" ? body : JSON.stringify(body) });
@@ -30,18 +31,19 @@ afterEach(() => {
 describe("POST /q/<code>/issue", () => {
   it("answers with this visit's link, never cached and never indexed", async () => {
     vi.mocked(issueShareFromQrCode).mockResolvedValue({ ok: true, code: "k7m2xq4v9p8a7b6c" });
-    const response = await post(CODE, { key: KEY });
+    const response = await post(CODE, { key: KEY, accepted: V });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ code: "k7m2xq4v9p8a7b6c" });
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(response.headers.get("X-Robots-Tag")).toContain("noindex");
-    expect(issueShareFromQrCode).toHaveBeenCalledWith(CODE, KEY);
+    // The tick of the "for education only" box goes onto the new link.
+    expect(issueShareFromQrCode).toHaveBeenCalledWith(CODE, KEY, { disclaimerVersion: V });
   });
 
   it("answers every refusal the same way, so the page says only 'not available' and nothing about why", async () => {
     for (const reason of ["no-such-code", "retired", "clinic-closed", "not-on-plan", "unpublished", "placeholder-hidden"] as const) {
       vi.mocked(issueShareFromQrCode).mockResolvedValueOnce({ ok: false, reason });
-      const response = await post(CODE, { key: KEY });
+      const response = await post(CODE, { key: KEY, accepted: V });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ code: null });
     }
@@ -49,9 +51,12 @@ describe("POST /q/<code>/issue", () => {
 
   it("refuses a malformed code or key before the database is asked", async () => {
     for (const [code, body] of [
-      ["short", { key: KEY }],
-      [CODE.toUpperCase(), { key: KEY }],
-      [CODE, { key: "x" }],
+      ["short", { key: KEY, accepted: V }],
+      [CODE.toUpperCase(), { key: KEY, accepted: V }],
+      [CODE, { key: "x", accepted: V }],
+      // No tick of the box: the page never sends Play without one.
+      [CODE, { key: KEY }],
+      [CODE, { key: KEY, accepted: "yes" }],
       [CODE, {}],
       [CODE, "not json"],
       [CODE, { key: 12345678901234567 }],
@@ -61,10 +66,16 @@ describe("POST /q/<code>/issue", () => {
     expect(issueShareFromQrCode).not.toHaveBeenCalled();
   });
 
+  it("answers 409 for words the server no longer records, so the page reloads, before the database is asked", async () => {
+    const response = await post(CODE, { key: KEY, accepted: "2020-01-01" });
+    expect(response.status).toBe(409);
+    expect(issueShareFromQrCode).not.toHaveBeenCalled();
+  });
+
   it("answers a failure with 500 for the page to try again, and logs only the kind", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(issueShareFromQrCode).mockRejectedValue(new Error(`connection to postgres://user:secret@db.example/neondb failed for ${CODE}`));
-    const response = await post(CODE, { key: KEY });
+    const response = await post(CODE, { key: KEY, accepted: V });
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ code: null });
     const logged = JSON.stringify(log.mock.calls);
@@ -76,7 +87,7 @@ describe("POST /q/<code>/issue", () => {
   it("answers a link setting out of range calmly, as 'not available'", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(issueShareFromQrCode).mockRejectedValue(new ShareTermsError("out of range"));
-    const response = await post(CODE, { key: KEY });
+    const response = await post(CODE, { key: KEY, accepted: V });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ code: null });
   });

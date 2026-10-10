@@ -73,22 +73,30 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-/** The calm-page rules: no Play button, nothing alarming. */
+/** The calm-page rules: no Play button and no box, nothing alarming. */
 function expectCalm(html: string) {
-  expect(html).not.toContain("Tap to play");
+  expect(html).not.toContain("Tick the box above to play");
+  expect(html).not.toContain('type="checkbox"');
   expect(html.toLowerCase()).not.toMatch(/error|invalid|403|404/);
 }
 
 describe("a live printed code", () => {
-  it("draws the patient page: the surgeon, the clinic, the procedure, Play, and the education line, and makes no link", async () => {
+  it("draws the patient page: the surgeon, the clinic, the procedure, the box unticked and Play not ready, and makes no link", async () => {
     const { clinic, code } = await setUp();
     const html = await render(code);
     expect(html).toContain("Dr. Jane Smith, DO");
     expect(html).toContain(clinic.name);
     expect(html).toContain("Vitest Total Knee Replacement");
-    expect(html).toContain("Tap to play");
-    expect(html).toContain("This video is for education only.");
-    expect(html).toContain("https://example.com/vitest.mp4");
+    expect(html).toContain("I understand this video is for education only.");
+    expect(html).toMatch(/<input[^>]*type="checkbox"/);
+    expect(html).not.toMatch(/<input[^>]*checked/);
+    expect(html).toContain("Tick the box above to play");
+    expect(html).toMatch(/<button[^>]*aria-disabled="true"/);
+    // The box is the page's one "for education only" statement: the old sentence under the video is gone.
+    expect(html).not.toContain("This video is for education only.");
+    // No playable address before the tick: the video comes from /q/<code>/accept.
+    expect(html).not.toContain("https://example.com/vitest.mp4");
+    expect(html).not.toMatch(/<video[^>]*\ssrc=/);
     // No patient link exists yet, and none is in the page.
     expect(html).not.toContain("/watch/");
     expect(await prisma.share.count({ where: { clinicId: clinic.id } })).toBe(0);
@@ -100,7 +108,7 @@ describe("a live printed code", () => {
     const html = await render(code);
     expect(html).not.toContain("Dr. Jane Smith");
     expect(html).toContain(`From ${clinic.name}`);
-    expect(html).toContain("Tap to play");
+    expect(html).toContain("Tick the box above to play");
   });
 });
 

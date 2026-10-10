@@ -19,3 +19,13 @@ export function qrFileName(title: string, code: string) {
     .replace(/^-|-$/g, "");
   return `${slug}-${code}.png`;
 }
+
+/**
+ * Could this be a patient link's code? Letters and digits, at most 20. Only
+ * for refusing junk before the database is asked (the accept route): the
+ * length is not checked further, because links made before October 2026
+ * have 6 characters, new ones 10 and a printed code's 16.
+ */
+export function isShareCodeShape(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9]{1,20}$/.test(value);
+}

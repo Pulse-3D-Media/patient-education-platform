@@ -592,7 +592,7 @@ describe("who a link is from, on People and on the pamphlet", () => {
     expect(html.match(/<span class="block">Jane Smith, PA-C<\/span><span class="block">Vitest pages clinic \(hip\)<\/span>/g)).toHaveLength(2);
     expect(html).not.toContain("Sent by");
     expect(html.match(/Placeholder: plays a sample animation, not this procedure/g)).toHaveLength(2);
-    // The same "for education only" sentence the patient page carries, on each half.
+    // The "for education only" sentence, on each half (the patient page says it with its box instead).
     expect(html.match(/This video is for education only\. It is not medical advice\. Ask your doctor about anything you are unsure of\./g)).toHaveLength(2);
 
     const olderHtml = await render(() => PrintPage({ params: Promise.resolve({ code: older.code }) } as never), `/admin/print/${older.code}`);

@@ -10,8 +10,11 @@
  * Action can be sent to any address.
  */
 
-/** What the ask came to: this visit's link, a calm "not available" (nothing will change that by asking again), or no answer at all. */
-export type IssueAnswer = { kind: "issued"; code: string } | { kind: "unavailable" } | { kind: "failed" };
+/**
+ * What the ask came to: this visit's link, a calm "not available" (nothing will change that by asking again),
+ * "stale" (the page showed "for education only" words the server no longer records: reload), or no answer at all.
+ */
+export type IssueAnswer = { kind: "issued"; code: string } | { kind: "unavailable" } | { kind: "stale" } | { kind: "failed" };
 
 /** How many times a request that got no answer (a dropped connection, a server failure) is sent, and the wait before each repeat. */
 const TRIES = 3;
@@ -29,10 +32,15 @@ export function newVisitKey(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Ask for this visit's link, trying again (with the same key) when no answer came. `fetcher` and `wait` are the browser's own unless a test hands in its own. */
+/**
+ * Ask for this visit's link, trying again (with the same key) when no answer came. `accepted` is the version of
+ * the "for education only" words the patient ticked (DISCLAIMER in lib/education-note.ts): the server writes the
+ * tick's record onto the new link. `fetcher` and `wait` are the browser's own unless a test hands in its own.
+ */
 export async function issueLink(
   qrCode: string,
   visitKey: string,
+  accepted: string,
   fetcher: typeof fetch = fetch,
   wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<IssueAnswer> {
@@ -42,11 +50,12 @@ export async function issueLink(
       const response = await fetcher(`/q/${encodeURIComponent(qrCode)}/issue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: visitKey }),
+        body: JSON.stringify({ key: visitKey, accepted }),
         cache: "no-store",
       });
       // A server failure (500, or the firewall's 429 while the limit holds): try again shortly.
       if (response.status >= 500 || response.status === 429) continue;
+      if (response.status === 409) return { kind: "stale" };
       const body = (await response.json().catch(() => null)) as { code?: unknown } | null;
       if (response.ok && typeof body?.code === "string") return { kind: "issued", code: body.code };
       return { kind: "unavailable" };

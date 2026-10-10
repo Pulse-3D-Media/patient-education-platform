@@ -29,9 +29,9 @@ import { getSettings, lockSettings } from "./settings";
  * Functions used on the clinic side take clinicId as their first argument
  * and filter by it (rule 1 in CLAUDE.md). That is what keeps one clinic from
  * ever seeing another clinic's links. The exceptions, getShareByCode,
- * recordSharePlay and requestShareRenewal (the patient page) and
- * issueShareFromQrCode (a printed QR code's page), are public, where there
- * is no clinic: the code in the address is the key.
+ * recordSharePlay, requestShareRenewal and acceptShareDisclaimer (the
+ * patient page) and issueShareFromQrCode (a printed QR code's page), are
+ * public, where there is no clinic: the code in the address is the key.
  *
  * How long a link works is decided by the rule in lib/expiry.ts. A link made
  * here stops after the platform's unclaimed days if nobody plays it, and the
@@ -328,11 +328,28 @@ export type QrIssueOutcome = { ok: true; code: string } | { ok: false; reason: Q
  * Two tries of the same visit at the same instant: one insert wins, the
  * other is refused by the unique code (P2002) and finds the winner's link.
  *
+ * THE "FOR EDUCATION ONLY" BOX. The patient ticked it on the printed code's
+ * page before Play (POST /q/<code>/accept), when there was no link yet to
+ * write it on. So the Play tap brings the wording's version here
+ * (`disclaimerVersion`, checked by the route), and the new link is written
+ * with its record already in it: first accepted now, one acceptance, that
+ * version. The time is this moment on the server's clock, the Play tap, a
+ * few seconds after the tick itself. A retry of the same visit finds its link
+ * and writes nothing, so a dropped connection never counts the tick twice.
+ *
  * A link setting outside its limits throws a ShareTermsError, as it does for
  * createShare, and nothing is written. `now` is the server's clock unless a
  * test hands in its own.
  */
-export async function issueShareFromQrCode(qrCode: string, attemptKey: string, now: Date = new Date()): Promise<QrIssueOutcome> {
+export async function issueShareFromQrCode(
+  qrCode: string,
+  attemptKey: string,
+  options: { disclaimerVersion?: string | null; now?: Date } = {},
+): Promise<QrIssueOutcome> {
+  const now = options.now ?? new Date();
+  const accepted = options.disclaimerVersion
+    ? { disclaimerFirstAcceptedAt: now, disclaimerAcceptances: 1, disclaimerVersion: options.disclaimerVersion }
+    : {};
   const qr = await prisma.qrCode.findUnique({
     where: { code: qrCode },
     select: { id: true, clinicId: true, videoId: true, senderUserId: true, senderFallbackName: true, retiredAt: true },
@@ -373,6 +390,7 @@ export async function issueShareFromQrCode(qrCode: string, attemptKey: string, n
           senderUserId: seat ? qr.senderUserId : null,
           senderName: seat ? effectiveSenderName(seat.displayName, qr.senderFallbackName) : null,
           qrCodeId: qr.id,
+          ...accepted,
         },
         select: { id: true },
       });
@@ -605,6 +623,68 @@ export async function recordSharePlay(code: string, now: Date = new Date()): Pro
   // Nothing was written: the link stopped working between the read and the write. Say why, from a fresh read.
   const again = await prisma.share.findUnique({ where: { code }, select: PLAY_FIELDS });
   return whyNotWorking(again, now) ?? EXPIRED_MEANWHILE;
+}
+
+/** What acceptShareDisclaimer() did: recorded the tick (with what the player needs to play this link), or wrote nothing. */
+export type DisclaimerRecord =
+  | { recorded: true; share: { expiresAt: Date; video: { videoUrl: string | null; muxPlaybackId: string | null; durationSeconds: number | null } } }
+  | { recorded: false };
+
+/** The row the UPDATE hands back: the link's deadline and the video's playback fields, so no second read is needed. */
+type AcceptedRow = { expiresAt: Date; videoUrl: string | null; muxPlaybackId: string | null; durationSeconds: number | null };
+
+/**
+ * A patient ticked the "for education only" box on a patient link's page
+ * (POST /watch/<code>/accept). Record it on the LINK, and hand back what the
+ * route needs to give the player its video. Public, like recordSharePlay:
+ * the code in the address is the key, and nothing about the person is read
+ * or written (rule 2): no address, no device, no cookie, no time zone.
+ *
+ * ONE UPDATE does the check and the record together. Its WHERE is the
+ * patient page's own test (the link exists, it is before its deadline, and
+ * its video is published), so a link that is expired, paused, taken down or
+ * unknown gets nothing written and nothing back. Its SET:
+ *
+ *   - disclaimerAcceptances goes up by one (one per recorded tick; the
+ *     player sends at most one per page load, like viewCount);
+ *   - disclaimerFirstAcceptedAt is set only if it is still empty
+ *     (COALESCE), so it is the first tick ever on this link and never moves;
+ *   - disclaimerVersion becomes the wording just ticked.
+ *
+ * Two ticks at once on the same link (two phones, a forwarded link): Postgres
+ * runs two UPDATEs of one row one after the other and re-reads the row for
+ * the second, so both are counted, and the second finds the first time
+ * already set and keeps it. lib/db/shares.disclaimer.test.ts forces exactly
+ * that overlap.
+ *
+ * `version` must be the current wording's version: the route checks that
+ * before calling. `now` is the server's clock unless a test hands in its own.
+ * `db` is the shared client unless a test hands in a transaction (to hold
+ * the row and prove the second tick waits).
+ */
+export async function acceptShareDisclaimer(
+  code: string,
+  version: string,
+  now: Date = new Date(),
+  db: Pick<Prisma.TransactionClient, "$queryRaw"> = prisma,
+): Promise<DisclaimerRecord> {
+  const rows = await db.$queryRaw<AcceptedRow[]>`
+    UPDATE "Share" AS s
+    SET "disclaimerAcceptances" = s."disclaimerAcceptances" + 1,
+        "disclaimerFirstAcceptedAt" = COALESCE(s."disclaimerFirstAcceptedAt", ${now}),
+        "disclaimerVersion" = ${version}
+    FROM "Video" AS v
+    WHERE s."code" = ${code}
+      AND v."id" = s."videoId"
+      AND v."isPublished" = true
+      AND s."expiresAt" > ${now}
+    RETURNING s."expiresAt", v."videoUrl", v."muxPlaybackId", v."durationSeconds"`;
+  const row = rows[0];
+  if (!row) return { recorded: false };
+  return {
+    recorded: true,
+    share: { expiresAt: row.expiresAt, video: { videoUrl: row.videoUrl, muxPlaybackId: row.muxPlaybackId, durationSeconds: row.durationSeconds } },
+  };
 }
 
 /**

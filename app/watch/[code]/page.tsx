@@ -32,8 +32,9 @@ import { WatchPlayer } from "./WatchPlayer";
  * video, a box to tick: "I understand this video is for education only..." (DISCLAIMER in
  * lib/education-note.ts; decided by Evan and Van on 2026-10-08). The video stays frozen until it is
  * ticked: this page puts no playable address in its HTML, only a still, and the player gets the video
- * from POST /watch/<code>/accept, which records the tick on the link first (see WatchPlayer). Under
- * the video, one quiet sentence says the same thing as plain text. The Pulse 3D logo sits
+ * from POST /watch/<code>/accept, which records the tick on the link first (see WatchPlayer). The box
+ * is the page's one "for education only" statement (the sentence that used to sit under the video
+ * now appears only on the printed pamphlet). The Pulse 3D logo sits
  * at the very bottom, small, because the practice sent this, not us.
  *
  * THE CLINIC'S OWN LOOK. The page belongs to the practice that sent it, so

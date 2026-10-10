@@ -8,15 +8,18 @@
  */
 
 /**
- * The one quiet sentence under the video on the patient page, and on the
- * printed pamphlet. Van's wording, approved by Evan on 2026-10-02.
+ * The "for education only" sentence on the printed pamphlet. Van's wording,
+ * approved by Evan on 2026-10-02. It also sat under the video on the patient
+ * page until the box below arrived; Evan chose on 2026-10-10 to let the box
+ * be the patient page's one statement (option B), so it is the pamphlet's now.
  */
 export const EDUCATION_ONLY =
   "This video is for education only. It is not medical advice. Ask your doctor about anything you are unsure of.";
 
 /**
  * The box a patient ticks before the video will play (decided by Evan and Van
- * at the huddle on 2026-10-08). The words and their version live together
+ * at the huddle on 2026-10-08), and the patient page's only "for education
+ * only" statement. The words and their version live together
  * here ON PURPOSE: changing the words means changing the version, so the
  * record on each link (Share.disclaimerVersion) always says which words were
  * ticked. Use the date the new words were approved as the version.

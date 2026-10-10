@@ -81,7 +81,7 @@ function expectCalm(html: string) {
 }
 
 describe("a live printed code", () => {
-  it("draws the patient page: the surgeon, the clinic, the procedure, the box unticked, Play not ready, and the education line, and makes no link", async () => {
+  it("draws the patient page: the surgeon, the clinic, the procedure, the box unticked and Play not ready, and makes no link", async () => {
     const { clinic, code } = await setUp();
     const html = await render(code);
     expect(html).toContain("Dr. Jane Smith, DO");
@@ -92,7 +92,8 @@ describe("a live printed code", () => {
     expect(html).not.toMatch(/<input[^>]*checked/);
     expect(html).toContain("Tick the box above to play");
     expect(html).toMatch(/<button[^>]*aria-disabled="true"/);
-    expect(html).toContain("This video is for education only.");
+    // The box is the page's one "for education only" statement: the old sentence under the video is gone.
+    expect(html).not.toContain("This video is for education only.");
     // No playable address before the tick: the video comes from /q/<code>/accept.
     expect(html).not.toContain("https://example.com/vitest.mp4");
     expect(html).not.toMatch(/<video[^>]*\ssrc=/);

@@ -3,7 +3,6 @@ import type { Look } from "@/app/brand-look";
 import { ClinicLogo } from "@/components/ui/ClinicLogo";
 import { ClockIcon } from "@/components/ui/icons";
 import { LOGO_URL } from "@/lib/brand";
-import { EDUCATION_ONLY } from "@/lib/education-note";
 import { describeDuration } from "@/lib/format";
 import { senderLines } from "@/lib/sender-name";
 import { CallButton } from "./[code]/CallButton";
@@ -20,8 +19,12 @@ import { CallButton } from "./[code]/CallButton";
  */
 
 /**
- * The page around the video: who it is from, what it is, the player, how long
- * it takes, and the one "for education only" sentence.
+ * The page around the video: who it is from, what it is, the player (with
+ * the "for education only" box above the video), and how long it takes. The
+ * box is the page's one "for education only" statement: the sentence that
+ * used to sit under the video said the same thing, and was taken off the
+ * patient page when the box arrived (option B, chosen by Evan on 2026-10-10).
+ * The printed pamphlet still carries it (EDUCATION_ONLY).
  */
 export function PatientViewer({
   look,
@@ -88,9 +91,6 @@ export function PatientViewer({
         <p className="mt-4 border-t border-[#e3e7eb] pt-4 text-[19px] leading-[1.52] text-[#3a4c56]">
           Watch it as many times as you like, and show it to anyone coming with you.
         </p>
-
-        {/* The same thing as the box above the video, as plain words under it (the box itself is in the player). The wording is Van's, approved by Evan; ask before changing it. */}
-        <p className="mt-4 text-[16px] leading-[1.5] text-[#46555e]">{EDUCATION_ONLY}</p>
 
         {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
         <div className="mt-auto pt-10">

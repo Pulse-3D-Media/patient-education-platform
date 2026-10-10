@@ -220,23 +220,14 @@ describe("the tap-to-call button", () => {
 describe("the education line", () => {
   const SENTENCE = "This video is for education only. It is not medical advice. Ask your doctor about anything you are unsure of.";
 
-  it("sits under the video as plain text, at the page's smallest size or larger, and never says consent", async () => {
+  it("is no longer under the video: the box above it is the page's one statement (option B, 2026-10-10)", async () => {
     const clinic = await makeClinic({});
-    const html = await render(await makeShare(clinic.id, videoId));
-
-    expect(html).toContain(SENTENCE);
-    // Under the video, not a step before it.
-    expect(html.indexOf(SENTENCE)).toBeGreaterThan(html.indexOf("<video"));
-    // A paragraph of words, 16px: nothing to tap, nothing to tick.
-    expect(html).toMatch(new RegExp(`<p class="[^"]*text-\\[16px\\][^"]*">${SENTENCE.replace(/\./g, "\\.")}</p>`));
-    expect(html.toLowerCase()).not.toContain("consent");
-  });
-
-  it("is on a placeholder link too", async () => {
-    const clinic = await makeClinic({});
-    const html = await render(await makeShare(clinic.id, placeholderVideoId));
-
-    expect(html).toContain(SENTENCE);
+    for (const video of [videoId, placeholderVideoId]) {
+      const html = await render(await makeShare(clinic.id, video));
+      expect(html).not.toContain(SENTENCE);
+      expect(html).toContain("I understand this video is for education only.");
+      expect(html.toLowerCase()).not.toContain("consent");
+    }
   });
 });
 
@@ -551,10 +542,10 @@ describe("a video that has moved to Mux", () => {
     expect(html).toMatch(/<video[^>]*poster="https:\/\/image\.mux\.com\/[^"]*thumbnail\.jpg\?token=[^"]+"/);
     expect(html).not.toMatch(/<video[^>]*\ssrc=/);
     expect(html).not.toContain("example.com/vitest-cdn-copy.mp4");
-    // The strip, the sender lines, the controls setting and the education note survive the player change.
+    // The strip, the sender lines, the controls setting and the education box survive the player change.
     expect(html).toContain("data-video-strip");
     expect(html).toContain('controlsList="nodownload nofullscreen"');
-    expect(html).toContain("This video is for education only.");
+    expect(html).toContain("I understand this video is for education only.");
     expect(html).not.toMatch(/stops working in a few minutes/);
   });
 

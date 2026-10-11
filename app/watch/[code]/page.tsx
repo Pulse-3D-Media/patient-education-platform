@@ -3,7 +3,7 @@ import { patientLook } from "@/app/brand-look";
 import { ClockIcon, PauseIcon, SearchIcon } from "@/components/ui/icons";
 import { getSettings } from "@/lib/db/settings";
 import { getShareByCode } from "@/lib/db/shares";
-import { canRequestRenewal, isExpired, renewalState } from "@/lib/expiry";
+import { canRequestRenewal, isExpired, patientDeadline, renewalState } from "@/lib/expiry";
 import { posterForVideo } from "@/lib/playback-auth";
 import { windowCoversVideo } from "@/lib/playback-source";
 import { AskClinic } from "./AskClinic";
@@ -34,7 +34,11 @@ import { WatchPlayer } from "./WatchPlayer";
  * ticked: this page puts no playable address in its HTML, only a still, and the player gets the video
  * from POST /watch/<code>/accept, which records the tick on the link first (see WatchPlayer). The box
  * is the page's one "for education only" statement (the sentence that used to sit under the video
- * now appears only on the printed pamphlet). The Pulse 3D logo sits
+ * now appears only on the printed pamphlet). Under the video's length, one quiet line says when the
+ * link stops working (decided by Evan and Van on 2026-10-08), so the patient can ask for more time
+ * before it does: "Once you start watching, this link works for 10 days." for a link nobody has
+ * played, else "This link works until Friday, October 18." in the patient's own time zone
+ * (patientDeadline() in lib/expiry.ts, app/watch/LinkDeadline.tsx). The Pulse 3D logo sits
  * at the very bottom, small, because the practice sent this, not us.
  *
  * THE CLINIC'S OWN LOOK. The page belongs to the practice that sent it, so
@@ -161,6 +165,8 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
       senderName={share.senderName}
       video={share.video}
       endsSoon={endsSoon}
+      deadline={patientDeadline(share, now)}
+      now={now}
       player={
         <WatchPlayer
           poster={poster}

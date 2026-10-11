@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { createQrCode, retireQrCode } from "@/lib/db/qr-codes";
+import { getSettings } from "@/lib/db/settings";
 import PrintedCodePage from "./page";
 
 /**
@@ -109,6 +110,37 @@ describe("a live printed code", () => {
     expect(html).not.toContain("Dr. Jane Smith");
     expect(html).toContain(`From ${clinic.name}`);
     expect(html).toContain("Tick the box above to play");
+  });
+});
+
+describe("when the link stops working (decided 2026-10-08)", () => {
+  it("says what the link the Play tap will make carries: the clinic's own number of days when it has one", async () => {
+    const { clinic, code } = await setUp();
+    await prisma.clinic.update({ where: { id: clinic.id }, data: { viewDaysOverride: 12 } });
+    const html = await render(code);
+    expect(html).toContain("Once you start watching, this link works for 12 days.");
+    expect(html).not.toContain("This link works until");
+    expect(html).not.toContain("as many times as you like");
+  });
+
+  it("else the platform's number, the same one a new link would be given", async () => {
+    const { code } = await setUp();
+    const days = (await getSettings()).viewDays;
+    expect(await render(code)).toContain(`Once you start watching, this link works for ${days} ${days === 1 ? "day" : "days"}.`);
+  });
+
+  it("leaves the line out, and still draws the page, when the number cannot be used as days (no link could be made either)", async () => {
+    const { clinic, code } = await setUp();
+    await prisma.clinic.update({ where: { id: clinic.id }, data: { viewDaysOverride: 400 } });
+    const html = await render(code);
+    expect(html).not.toContain("Once you start watching");
+    expect(html).toContain("Tick the box above to play");
+  });
+
+  it("is not on a page that cannot play", async () => {
+    const { clinic, id, code } = await setUp();
+    await retireQrCode(clinic.id, id, "Vitest");
+    expect(await render(code)).not.toContain("Once you start watching");
   });
 });
 

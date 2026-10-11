@@ -6,6 +6,8 @@ import { ClockIcon, SearchIcon } from "@/components/ui/icons";
 import { decideVideoAccess } from "@/lib/access";
 import { getClinicAccess } from "@/lib/db/access";
 import { getQrCodeByCode } from "@/lib/db/qr-codes";
+import { getShareTerms } from "@/lib/db/shares";
+import { ShareTermsError, type ShareTerms } from "@/lib/expiry";
 import { posterForVideo } from "@/lib/playback-auth";
 import { isQrCodeShape } from "@/lib/qr-code";
 
@@ -35,6 +37,15 @@ import { isQrCodeShape } from "@/lib/qr-code";
  *
  * Who it is from: the surgeon on the code while they hold a seat at the
  * clinic, else only the clinic (decided by Evan on 2026-10-08).
+ *
+ * How long it works: the printed code itself never runs out, but the link the
+ * Play tap makes does, and from that tap on the address bar shows that link.
+ * So the page says what a patient link nobody has played yet says: "Once you
+ * start watching, this link works for 10 days.", with the days the new link
+ * will carry (getShareTerms(), the same numbers issueShareFromQrCode()
+ * resolves when it makes the link). If those settings cannot be read as days,
+ * no link could be made either; the page then leaves the line out rather
+ * than failing, and the tap says the video is not available.
  *
  * Always drawn fresh and never cached (force-dynamic: Next.js answers with
  * "private, no-store"), and search engines are told to stay away.
@@ -75,7 +86,8 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
   }
 
   // The same rule a link obeys. One answer for every "no": the patient is not told about the clinic's plan or billing.
-  const access = await getClinicAccess(qr.clinicId);
+  // The days a link made now would carry are read at the same time, so the page waits for one round trip, not two.
+  const [access, terms] = await Promise.all([getClinicAccess(qr.clinicId), termsForNewLink(qr.clinicId)]);
   const decision = access ? decideVideoAccess(access, qr.video) : { allowed: false };
   if (!decision.allowed) {
     return (
@@ -92,7 +104,8 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
   // A still for the video's box until the box is ticked; never anything that
   // plays. The tick gets the video from /q/<code>/accept (the same checks as
   // above, made again), so the Play tap can start it at once.
-  const poster = posterForVideo(qr.video, new Date(), null);
+  const now = new Date();
+  const poster = posterForVideo(qr.video, now, null);
 
   return (
     <PatientViewer
@@ -101,6 +114,8 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
       senderName={qr.senderName}
       video={qr.video}
       endsSoon={false}
+      deadline={terms ? { kind: "after-first-play", days: terms.daysAfterFirstPlay } : null}
+      now={now}
       player={
         <WatchPlayer
           poster={poster}
@@ -115,4 +130,14 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
       }
     />
   );
+}
+
+/** The days a link made for this clinic now would carry, or null when the settings cannot be read as days (the tap would be refused for the same reason). */
+async function termsForNewLink(clinicId: string): Promise<ShareTerms | null> {
+  try {
+    return await getShareTerms(clinicId);
+  } catch (error) {
+    if (error instanceof ShareTermsError) return null;
+    throw error;
+  }
 }

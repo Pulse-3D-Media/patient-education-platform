@@ -133,6 +133,16 @@ export function ClockIcon({ className }: IconProps) {
   );
 }
 
+/** A calendar page: how long the patient's link keeps working. */
+export function CalendarIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="3.5" y="5" width="17" height="15" rx="2" />
+      <path d="M3.5 10h17M8 3v4M16 3v4" />
+    </svg>
+  );
+}
+
 /** A magnifying glass: a link we could not find. */
 /** A closed padlock. On a library tile for a category that is not on the clinic's plan. */
 export function LockIcon({ className }: IconProps) {

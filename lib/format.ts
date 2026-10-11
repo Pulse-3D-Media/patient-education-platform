@@ -27,6 +27,24 @@ export function describeDuration(seconds: number | null | undefined) {
 }
 
 /**
+ * A link's deadline as the patient page writes it: "Friday, October 18", with
+ * the year added only when it is not this year ("Monday, January 4, 2027").
+ * Written in `timeZone` (an IANA name such as "America/Denver"), or, when it
+ * is left out, in the time zone of whatever is running this: on a patient's
+ * phone, the phone's own. `now` only decides whether the year is shown.
+ */
+export function describeLinkDate(deadline: Date, now: Date, timeZone?: string): string {
+  const year = (d: Date) => new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone }).format(d);
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    ...(year(deadline) !== year(now) ? { year: "numeric" } : {}),
+    timeZone,
+  }).format(deadline);
+}
+
+/**
  * The opposite of formatDuration, for the video form on /pulse/videos: turns
  * what a staff member typed into whole seconds. Accepts "4:12" (minutes and
  * seconds), "1:04:12" (hours too) or a plain number of seconds such as "252".

@@ -1,21 +1,22 @@
 /**
- * THE CATALOGUE IS NOW MANAGED AT /pulse/videos. This script is for a fresh
+ * THE CATALOGUE IS MANAGED AT /pulse/videos. This script is for a fresh
  * database only: it puts the first real animation in place so the library
- * is not empty. Anything edited on /pulse/videos (poster, notes, title)
- * survives a rerun, but the address, length and published flag below are
- * written over, so do not rerun it on a database that is in use.
+ * is not empty.
  *
  * Seed for the first library video. Run with: npm run db:seed-video
  *
- * Makes sure the Total Knee Replacement animation (hosted on the Webflow CDN
- * for Phase 1) is in the Video table with the address and length below.
+ * CREATE-ONLY. If a "Total Knee Replacement" video is already in the KNEE
+ * category, this script says so and leaves it exactly as it is: its address,
+ * its length, and above all whether it is published. Unpublishing is the one
+ * way to withdraw a video from every patient link, so a rerun must never
+ * publish it again. To change the file behind a video, edit it on
+ * /pulse/videos.
  *
- * Safe to run more than once. If the video already exists it updates the
- * address and length to match this file, so this file is the record of what
- * the library is currently playing. Edit the values here and rerun to swap
- * the file behind the video.
+ * Against production it also needs --production (see prisma/preflight.ts).
  */
 import { prisma } from "../lib/db/client";
+import { errorKind } from "../lib/error-kind";
+import { preflight } from "./preflight";
 
 const VIDEO = {
   title: "Total Knee Replacement",
@@ -28,21 +29,16 @@ const VIDEO = {
 };
 
 async function main() {
+  preflight();
+
   const existing = await prisma.video.findFirst({
     where: { title: VIDEO.title, category: VIDEO.category },
+    select: { id: true },
   });
 
   if (existing) {
-    const video = await prisma.video.update({
-      where: { id: existing.id },
-      data: {
-        videoUrl: VIDEO.videoUrl,
-        durationSeconds: VIDEO.durationSeconds,
-        isPublished: VIDEO.isPublished,
-      },
-    });
-    console.log(`Updated video "${VIDEO.title}" (${VIDEO.durationSeconds}s).`);
-    console.log(`VIDEO_ID=${video.id}`);
+    console.log(`Video "${VIDEO.title}" already exists. Left exactly as it is (edit it on /pulse/videos).`);
+    console.log(`VIDEO_ID=${existing.id}`);
     return;
   }
 
@@ -53,7 +49,8 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error("Seed failed:", error);
+    // The kind of failure only, never its message (lib/error-kind.ts).
+    console.error("Seed failed:", errorKind(error));
     process.exit(1);
   })
   .finally(async () => {

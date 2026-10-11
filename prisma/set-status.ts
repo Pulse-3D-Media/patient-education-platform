@@ -18,24 +18,28 @@
  *
  * PAUSED and CANCELED do NOT cancel a card subscription in Stripe.
  *
+ * Against production it also needs --production (see prisma/preflight.ts).
+ *
  * Never change a status by hand in the Neon console. It prints what it
  * changed, and refuses to run with missing or unknown arguments.
  */
 import type { StaffAccess } from "@prisma/client";
 import { prisma } from "../lib/db/client";
 import { setClinicStatusByStaff } from "../lib/db/clinics";
+import { errorKind } from "../lib/error-kind";
+import { preflight } from "./preflight";
 
 const SETTINGS: Record<string, StaffAccess | null> = { ACTIVE: "OPEN", OPEN: "OPEN", PAUSED: "PAUSED", CANCELED: "CANCELED", FOLLOW: null };
 
 const WHO = "npm run db:set-status";
 
 async function main() {
-  // npm passes everything after "--" through to this script.
-  const [clinicId, rawSetting, ...reasonWords] = process.argv.slice(2).map((value) => value.trim());
+  // npm passes everything after "--" through to this script; preflight takes --production out.
+  const [clinicId, rawSetting, ...reasonWords] = preflight().map((value) => value.trim());
   const setting = rawSetting?.toUpperCase();
 
   if (!clinicId || !setting) {
-    console.error('Usage: npm run db:set-status -- <clinicId> <SETTING> ["reason"]');
+    console.error('Usage: npm run db:set-status -- <clinicId> <SETTING> ["reason"] [--production]');
     console.error("SETTING is one of: ACTIVE, PAUSED, CANCELED, FOLLOW");
     process.exit(1);
   }
@@ -67,7 +71,8 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error("Set status failed:", error instanceof Error ? error.message : error);
+    // The kind of failure only, never its message (lib/error-kind.ts).
+    console.error("Set status failed:", errorKind(error));
     process.exit(1);
   })
   .finally(async () => {

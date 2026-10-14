@@ -145,21 +145,50 @@ export async function getClinicPlan(clinicId: string): Promise<ClinicPlan | null
 }
 
 /**
- * Link one clinic to one Clerk organization by setting its clerkOrgId.
- * Returns the row as it now is. Used by the db:link-clinic script for a
+ * Link one clinic to one Clerk organization by setting its clerkOrgId, and
+ * log it under the name given. Used by the db:link-clinic script for a
  * clinic that was created before its organization existed (the test clinic
  * was); clinics that sign themselves up are linked by upsertClinicForClerkOrg
  * and never need this.
  *
- * Throws if the clinic does not exist, or if that organization is already
- * linked to a different clinic (clerkOrgId is unique).
+ * RE-POINTING A CLINIC THAT IS ALREADY LINKED is refused with a
+ * ClinicLinkRefusedError unless `relink` is set: it hands the clinic, its
+ * plan, its seats and its links to whoever signs in with the other
+ * organization, so it is never done by accident. The check is made under
+ * the clinic's row lock, with the change and its log entry in the same
+ * transaction. Linking it again to the organization it already has changes
+ * nothing and logs nothing.
+ *
+ * Throws if the clinic does not exist, or (Prisma P2002) if that
+ * organization is already linked to a different clinic (clerkOrgId is
+ * unique).
  */
-export async function linkClinicToClerkOrg(clinicId: string, clerkOrgId: string) {
-  return prisma.clinic.update({
-    where: { id: clinicId },
-    data: { clerkOrgId },
-    select: CLINIC_FIELDS,
-  });
+export async function linkClinicToClerkOrg(clinicId: string, clerkOrgId: string, changedBy: string, options: { relink?: boolean } = {}) {
+  return changeClinicWithLog(
+    clinicId,
+    async (before) => {
+      if (before.clerkOrgId && before.clerkOrgId !== clerkOrgId && !options.relink) {
+        throw new ClinicLinkRefusedError(
+          `This clinic is already linked to ${before.clerkOrgId}. Linking it to ${clerkOrgId} would hand the clinic to whoever signs in with that organization. Nothing was changed. To do it on purpose, add --relink.`,
+        );
+      }
+      return { clerkOrgId };
+    },
+    (before) =>
+      before.clerkOrgId === clerkOrgId ? null : `Clerk organization ${before.clerkOrgId ? "changed" : "linked"}: ${clerkOrgId} (was ${before.clerkOrgId ?? "none"}).`,
+    changedBy,
+  );
+}
+
+/**
+ * Thrown when db:link-clinic would re-point a clinic that is already linked
+ * to another organization without --relink. The message is a plain sentence.
+ */
+export class ClinicLinkRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClinicLinkRefusedError";
+  }
 }
 
 // ---------------------------------------------------------------------------

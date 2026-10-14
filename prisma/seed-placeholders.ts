@@ -1,13 +1,16 @@
 /**
- * THE CATALOGUE IS NOW MANAGED AT /pulse/videos. This script is for a fresh
+ * THE CATALOGUE IS MANAGED AT /pulse/videos. This script is for a fresh
  * database only: it fills every category with sample animations so the app
- * can be tried before the finished ones exist. A placeholder that has since
- * been replaced on /pulse/videos (isPlaceholder off) is left alone by this
- * script, but one that is still a placeholder gets its address, length and
- * published flag written back to what is below, so do not rerun it on a
- * database that is in use.
+ * can be tried before the finished ones exist.
+ *
+ * CREATE-ONLY. A video that already has one of these titles in its category,
+ * placeholder or not, is reported and left exactly as it is: its address,
+ * its length, and above all whether it is published. Unpublishing is the one
+ * way to withdraw a video from every patient link, so a rerun must never
+ * publish it again.
  *
  * Seed for the PLACEHOLDER library. Run with: npm run db:seed-placeholders
+ * Against production it also needs --production (see prisma/preflight.ts).
  *
  * Twelve videos, two per category. Each carries a real procedure name from
  * the production tracker, but the animation that plays is a compressed copy
@@ -27,12 +30,13 @@
  * Never delete a placeholder row or its share links, because every link and
  * QR code already sent points at that row and keeps working after the swap.
  *
- * Safe to run more than once: a placeholder that already exists (same title
- * and category) is updated to match this file rather than duplicated. A real
- * video that has taken one of these titles is left alone and reported.
+ * Safe to run more than once: a video that already exists (same title and
+ * category) is left alone and reported, never duplicated and never changed.
  */
 import type { Category } from "@prisma/client";
 import { prisma } from "../lib/db/client";
+import { errorKind } from "../lib/error-kind";
+import { preflight } from "./preflight";
 
 const CDN = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/";
 
@@ -68,44 +72,40 @@ const PLACEHOLDERS: { title: string; category: Category; file: string; durationS
 ];
 
 async function main() {
+  preflight();
+
   let created = 0;
-  let updated = 0;
   let skipped = 0;
 
   for (const placeholder of PLACEHOLDERS) {
-    const data = {
-      videoUrl: CDN + placeholder.file,
-      durationSeconds: placeholder.durationSeconds,
-      isPublished: true,
-      isPlaceholder: true,
-    };
-
     const existing = await prisma.video.findFirst({
       where: { title: placeholder.title, category: placeholder.category },
+      select: { isPlaceholder: true },
     });
 
-    if (existing && !existing.isPlaceholder) {
-      // A real animation now has this title. Never overwrite it with a sample.
-      skipped++;
-      console.log(`Skipped  ${placeholder.title} (a real video has this title, left alone)`);
-      continue;
-    }
-
     if (existing) {
-      await prisma.video.update({ where: { id: existing.id }, data });
-      updated++;
-      console.log(`Updated  ${placeholder.title} (${placeholder.category}, ${placeholder.durationSeconds}s, shows ${placeholder.shows})`);
+      // Create-only: whatever is there now (a sample, or the finished animation that replaced it) is left exactly as it is,
+      // published or not. Edit it on /pulse/videos.
+      skipped++;
+      console.log(`Exists   ${placeholder.title} (${existing.isPlaceholder ? "a placeholder" : "a real video"}, left alone)`);
       continue;
     }
 
     await prisma.video.create({
-      data: { title: placeholder.title, category: placeholder.category, ...data },
+      data: {
+        title: placeholder.title,
+        category: placeholder.category,
+        videoUrl: CDN + placeholder.file,
+        durationSeconds: placeholder.durationSeconds,
+        isPublished: true,
+        isPlaceholder: true,
+      },
     });
     created++;
     console.log(`Created  ${placeholder.title} (${placeholder.category}, ${placeholder.durationSeconds}s, shows ${placeholder.shows})`);
   }
 
-  console.log(`Placeholders: ${created} created, ${updated} updated, ${skipped} skipped, ${PLACEHOLDERS.length} in this file.`);
+  console.log(`Placeholders: ${created} created, ${skipped} already there and left alone, ${PLACEHOLDERS.length} in this file.`);
 
   // A check that the real library came through untouched.
   const real = await prisma.video.findMany({ where: { isPlaceholder: false }, select: { title: true } });
@@ -114,7 +114,8 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error("Seed failed:", error);
+    // The kind of failure only, never its message (lib/error-kind.ts).
+    console.error("Seed failed:", errorKind(error));
     process.exit(1);
   })
   .finally(async () => {

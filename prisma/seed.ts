@@ -7,12 +7,18 @@
  *
  * Safe to run more than once: if the clinic already exists it just prints the
  * existing id instead of creating a duplicate.
+ *
+ * Against production it also needs --production (see prisma/preflight.ts).
  */
 import { prisma } from "../lib/db/client";
+import { errorKind } from "../lib/error-kind";
+import { preflight } from "./preflight";
 
 const CLINIC_NAME = "Pulse 3D Test Clinic";
 
 async function main() {
+  preflight();
+
   const existing = await prisma.clinic.findFirst({
     where: { name: CLINIC_NAME },
   });
@@ -33,7 +39,8 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error("Seed failed:", error);
+    // The kind of failure only, never its message (lib/error-kind.ts).
+    console.error("Seed failed:", errorKind(error));
     process.exit(1);
   })
   .finally(async () => {

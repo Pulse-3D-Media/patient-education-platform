@@ -7,19 +7,32 @@
  * is the one Clerk shows for the organization (it starts with "org_").
  * Afterwards, anyone signed in with that organization active is that clinic.
  *
+ * A clinic that is already linked to a different organization is refused:
+ * re-pointing it hands the clinic, its plan, its seats and its links to
+ * whoever signs in with the other organization. To do it on purpose, add
+ * --relink. Either way the change goes in the clinic's log on /pulse.
+ *
+ * Against production it also needs --production (see prisma/preflight.ts).
+ *
  * This is the only sanctioned way to change clerkOrgId by hand (never in the
  * Neon console). It prints what it changed, and refuses to run with missing
  * or odd-looking arguments.
  */
 import { prisma } from "../lib/db/client";
-import { linkClinicToClerkOrg } from "../lib/db/clinics";
+import { ClinicLinkRefusedError, linkClinicToClerkOrg } from "../lib/db/clinics";
+import { errorKind } from "../lib/error-kind";
+import { preflight } from "./preflight";
+
+const RELINK_FLAG = "--relink";
 
 async function main() {
-  // npm passes everything after "--" through to this script.
-  const [clinicId, orgId] = process.argv.slice(2).map((value) => value.trim());
+  // npm passes everything after "--" through to this script; preflight takes --production out.
+  const args = preflight();
+  const relink = args.includes(RELINK_FLAG);
+  const [clinicId, orgId] = args.filter((arg) => arg !== RELINK_FLAG).map((value) => value.trim());
 
   if (!clinicId || !orgId) {
-    console.error("Usage: npm run db:link-clinic -- <clinicId> <orgId>");
+    console.error("Usage: npm run db:link-clinic -- <clinicId> <orgId> [--relink] [--production]");
     process.exit(1);
   }
   if (!orgId.startsWith("org_")) {
@@ -36,20 +49,24 @@ async function main() {
     process.exit(1);
   }
 
-  if (before.clerkOrgId === orgId) {
-    console.log(`Clinic "${before.name}" (${before.id}) is already linked to ${orgId}. Nothing changed.`);
-    return;
-  }
-
-  const after = await linkClinicToClerkOrg(clinicId, orgId);
+  // The check for an existing link is made again inside, under the clinic's row lock.
+  const { clinic: after, logged } = await linkClinicToClerkOrg(clinicId, orgId, "npm run db:link-clinic", { relink });
 
   console.log(`Clinic "${after.name}" (${after.id})`);
+  if (!logged) {
+    console.log(`  already linked to ${orgId}. Nothing changed, nothing logged.`);
+    return;
+  }
   console.log(`  clerkOrgId: ${before.clerkOrgId ?? "(none)"} -> ${after.clerkOrgId}`);
+  console.log(`  logged: ${logged}`);
 }
 
 main()
   .catch((error) => {
-    console.error("Link failed:", error instanceof Error ? error.message : error);
+    // Our own refusals are plain sentences. Anything else is named by its kind only, never its message (lib/error-kind.ts).
+    if (error instanceof ClinicLinkRefusedError) console.error(error.message);
+    else if (errorKind(error) === "Prisma P2002") console.error("That organization is already linked to a different clinic. Nothing was changed.");
+    else console.error("Link failed:", errorKind(error));
     process.exit(1);
   })
   .finally(async () => {

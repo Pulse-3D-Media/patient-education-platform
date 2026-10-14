@@ -19,6 +19,8 @@
  * its plan, the log says by how much, and nobody new can be given a seat
  * until that is settled.
  *
+ * Against production it also needs --production (see prisma/preflight.ts).
+ *
  * The same change can be made on /pulse. This script exists for the test
  * clinic and for a clinic set up before /pulse existed. It is the only
  * sanctioned way to change a plan by hand (never in the Neon console). It
@@ -26,12 +28,14 @@
  */
 import { Category } from "@prisma/client";
 import { prisma } from "../lib/db/client";
-import { setClinicPlan } from "../lib/db/clinics";
+import { PlanSeatsRefusedError, setClinicPlan } from "../lib/db/clinics";
+import { errorKind } from "../lib/error-kind";
+import { preflight } from "./preflight";
 
 const ALL_CATEGORIES = Object.values(Category);
 
 function usage(): never {
-  console.error("Usage: npm run db:set-plan -- <clinicId> --categories <all|none|A,B,C> --seats <number> [--allow-fewer-seats]");
+  console.error("Usage: npm run db:set-plan -- <clinicId> --categories <all|none|A,B,C> --seats <number> [--allow-fewer-seats] [--production]");
   console.error(`Categories: ${ALL_CATEGORIES.join(", ")}`);
   process.exit(1);
 }
@@ -62,8 +66,8 @@ function parseSeats(value: string): number {
 }
 
 async function main() {
-  // npm passes everything after "--" through to this script.
-  const args = process.argv.slice(2);
+  // npm passes everything after "--" through to this script; preflight takes --production out.
+  const args = preflight();
   const clinicId = args[0]?.trim();
   const categoriesIndex = args.indexOf("--categories");
   const seatsIndex = args.indexOf("--seats");
@@ -99,7 +103,9 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error("Set plan failed:", error instanceof Error ? error.message : error);
+    // The seat refusal is our own plain sentence. Anything else is named by its kind only, never its message (lib/error-kind.ts).
+    if (error instanceof PlanSeatsRefusedError) console.error(error.message);
+    else console.error("Set plan failed:", errorKind(error));
     process.exit(1);
   })
   .finally(async () => {

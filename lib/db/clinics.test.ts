@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "./client";
 import {
+  ClinicLinkRefusedError,
   PlanSeatsRefusedError,
   getClinicByClerkOrgId,
   linkClinicToClerkOrg,
@@ -291,11 +292,52 @@ describe("linkClinicToClerkOrg", () => {
     const orgId = fakeOrgId();
     expect(await getClinicByClerkOrgId(orgId)).toBeNull();
 
-    const linked = await linkClinicToClerkOrg(unlinked.id, orgId);
-    expect(linked.clerkOrgId).toBe(orgId);
+    const linked = await linkClinicToClerkOrg(unlinked.id, orgId, "npm run db:link-clinic");
+    expect(linked.clinic.clerkOrgId).toBe(orgId);
+    expect(linked.logged).toBe(`Clerk organization linked: ${orgId} (was none).`);
 
     const found = await getClinicByClerkOrgId(orgId);
     expect(found?.id).toBe(unlinked.id);
+
+    // The link is in the clinic's log, under the script's name.
+    const notes = await prisma.clinicNote.findMany({ where: { clinicId: unlinked.id }, select: { kind: true, body: true, authorName: true } });
+    expect(notes).toEqual([{ kind: "STATUS", body: linked.logged, authorName: "npm run db:link-clinic" }]);
+
+    // Linking it again to the same organization changes nothing and logs nothing.
+    const again = await linkClinicToClerkOrg(unlinked.id, orgId, "npm run db:link-clinic");
+    expect(again.logged).toBeNull();
+    expect(await prisma.clinicNote.count({ where: { clinicId: unlinked.id } })).toBe(1);
+  });
+
+  it("refuses to re-point a clinic that is already linked, unless relink is set, and logs the change when it is", async () => {
+    const firstOrg = fakeOrgId();
+    const clinic = await prisma.clinic.create({ data: { name: "Vitest clinic (relink)", clerkOrgId: firstOrg }, select: { id: true } });
+    createdClinicIds.push(clinic.id);
+    const secondOrg = fakeOrgId();
+
+    await expect(linkClinicToClerkOrg(clinic.id, secondOrg, "npm run db:link-clinic")).rejects.toBeInstanceOf(ClinicLinkRefusedError);
+    const unchanged = await prisma.clinic.findUnique({ where: { id: clinic.id }, select: { clerkOrgId: true } });
+    expect(unchanged?.clerkOrgId).toBe(firstOrg);
+    expect(await prisma.clinicNote.count({ where: { clinicId: clinic.id } })).toBe(0);
+
+    const relinked = await linkClinicToClerkOrg(clinic.id, secondOrg, "npm run db:link-clinic", { relink: true });
+    expect(relinked.clinic.clerkOrgId).toBe(secondOrg);
+    expect(relinked.logged).toBe(`Clerk organization changed: ${secondOrg} (was ${firstOrg}).`);
+    expect(await prisma.clinicNote.count({ where: { clinicId: clinic.id } })).toBe(1);
+  });
+
+  it("refuses an organization that is already linked to a different clinic, writing nothing", async () => {
+    const takenOrg = fakeOrgId();
+    const owner = await prisma.clinic.create({ data: { name: "Vitest clinic (org taken)", clerkOrgId: takenOrg }, select: { id: true } });
+    createdClinicIds.push(owner.id);
+    const other = await prisma.clinic.create({ data: { name: "Vitest clinic (wants taken org)" }, select: { id: true } });
+    createdClinicIds.push(other.id);
+
+    await expect(linkClinicToClerkOrg(other.id, takenOrg, "npm run db:link-clinic")).rejects.toMatchObject({ code: "P2002" });
+    const after = await prisma.clinic.findUnique({ where: { id: other.id }, select: { clerkOrgId: true } });
+    expect(after?.clerkOrgId).toBeNull();
+    // The log entry was in the same transaction, so it went with the refused change.
+    expect(await prisma.clinicNote.count({ where: { clinicId: other.id } })).toBe(0);
   });
 });
 

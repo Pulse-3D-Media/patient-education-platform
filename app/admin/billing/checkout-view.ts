@@ -5,7 +5,7 @@ import { CHECKOUT_CLOSED_MESSAGE } from "@/lib/checkout";
 import { getCheckoutFacts } from "@/lib/db/billing";
 import { getCategoryAvailability } from "@/lib/db/category-config";
 import { getActivePricing, getPricingVersion } from "@/lib/db/pricing";
-import { planChangeBlock } from "@/lib/plan-change";
+import { billingPortalAllowed, planChangeBlock } from "@/lib/plan-change";
 import type { PricingConfig } from "@/lib/pricing";
 import { checkoutIsOpen } from "@/lib/stripe";
 
@@ -46,6 +46,8 @@ export type CheckoutOffer =
   | { kind: "contact"; reason: "hospital" | "closed-by-staff" }
   /** The clinic already has a subscription. Its plan is shown, and `change` says how (or why not) it can be changed. */
   | { kind: "subscribed"; change: ChangeOffer }
+  /** A first payment is still under way in Stripe. No picker until it settles or Stripe drops it (FIRST_PAYMENT_UNDER_WAY in lib/billing-state.ts). */
+  | { kind: "first-payment" }
   /** Checkout is not available here (not switched on for this deployment, or no prices have been published). */
   | { kind: "closed"; message: string }
   /** Draw the plan picker. */
@@ -119,7 +121,7 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
   const scheduled = live && clinic.scheduledPlan ? { plan: planFacts(clinic.scheduledPlan), at: facts.scheduledChangeAt } : null;
   const unpaidChange = live && clinic.pendingPlan ? planFacts(clinic.pendingPlan) : null;
   const open = checkoutIsOpen();
-  const portal = open && !clinic.managedByPulse && facts.stripeCustomerId !== null && facts.status !== "NONE" && facts.status !== "INCOMPLETE";
+  const portal = open && !clinic.managedByPulse && facts.stripeCustomerId !== null && billingPortalAllowed(facts.status);
   const base = { billingStatus: facts.status, subscription, waiting, scheduled, unpaidChange, portal };
 
   const eligibility = selfServeEligibility(clinic);
@@ -128,6 +130,8 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
     return { ...base, offer: { kind: "contact", reason: eligibility.reason } };
   }
   if (live) return { ...base, offer: { kind: "subscribed", change: await changeOffer(clinicId, clinic, open) } };
+  // A first payment still under way: no picker, because checkout would refuse a new plan until it settles or Stripe drops it.
+  if (facts.status === "INCOMPLETE") return { ...base, offer: { kind: "first-payment" } };
   if (!open) return { ...base, offer: { kind: "closed", message: CHECKOUT_CLOSED_MESSAGE } };
 
   // The prices. A problem reading them closes the picker with a plain

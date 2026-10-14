@@ -311,6 +311,23 @@ describe("/admin/billing: coming back from Stripe without paying", () => {
   });
 });
 
+describe("/admin/billing: a first payment still under way", () => {
+  it("says so, with a way to check on it, and offers no plan picker, no pay button and no Stripe billing page: checkout would refuse a new plan", async () => {
+    signInAs(await makeClinic({ billing: { status: "INCOMPLETE", plan: "pending" } }), "admin");
+    const html = await renderBilling();
+
+    expect(html).toContain("Your first payment is under way");
+    expect(html).toContain("They open as soon as Stripe confirms your first payment.");
+    expect(html).toContain('href="/admin/billing/return"');
+    expect(html).not.toContain("Continue to payment");
+    expect(html).not.toContain("Get in touch with Pulse 3D and we will turn yours on.");
+    expect(html).not.toContain("Card, invoices and cancelling");
+    expect(html).not.toContain("Pay now");
+    // Said once, not twice.
+    expect(html).not.toContain("A checkout was started for your clinic");
+  });
+});
+
 describe("/admin/billing/return", () => {
   it("cannot grant anything: for a clinic with a checkout waiting it only says it is confirming, and the clinic stays closed", async () => {
     const orgId = await makeClinic({ billing: { status: "NONE", plan: "pending" } });

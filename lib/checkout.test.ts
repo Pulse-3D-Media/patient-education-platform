@@ -133,7 +133,7 @@ function fakeStripe() {
 type Fake = ReturnType<typeof fakeStripe>;
 
 function depsFor(fake: Fake, more: Partial<CheckoutDeps> = {}): CheckoutDeps {
-  return { gateway: fake.gateway, isOpen: true, ...more };
+  return { gateway: fake.gateway, fetchSubscription: fake.fetchSubscription, isOpen: true, ...more };
 }
 
 // ---------------------------------------------------------------------------
@@ -561,10 +561,17 @@ describe("what opens the clinic", () => {
     await checkPayment({ clinicId, gateway: fake.gateway, fetchSubscription: fake.fetchSubscription });
     expect((await billingOf(clinicId))?.status).toBe("INCOMPLETE");
 
-    // Attempt two, different picks. Stripe then gives up on the first subscription.
-    await startCheckout({ clinicId, selection: pick(["KNEE", "HIP"], 1, "MONTH", 8900), actor, origin: ORIGIN, deps: depsFor(fake) });
-    const secondPlanId = (await billingOf(clinicId))?.pendingPlanId;
+    // Stripe gives up on the first subscription. Its notification has not
+    // arrived, so the record still says a first payment is under way.
     fake.subscriptions.set(firstSub, { ...(fake.subscriptions.get(firstSub) as SubscriptionSnapshot), status: "incomplete_expired" });
+
+    // Attempt two, different picks: checkout asks Stripe first, finds the first payment is over, and goes ahead.
+    const second = await startCheckout({ clinicId, selection: pick(["KNEE", "HIP"], 1, "MONTH", 8900), actor, origin: ORIGIN, deps: depsFor(fake) });
+    expect(second.kind).toBe("redirect");
+    const secondPlanId = (await billingOf(clinicId))?.pendingPlanId;
+    expect(secondPlanId).not.toBe((await plansOf(clinicId))[0].id);
+
+    // Then the late notice about the first arrives.
     const lateId = `evt_vitest${tag}late`;
     createdEventIds.push(lateId);
     await handleStripeEvent(
@@ -579,6 +586,45 @@ describe("what opens the clinic", () => {
     fake.pay(fake.sessions[1].id);
     expect(await checkPayment({ clinicId, gateway: fake.gateway, fetchSubscription: fake.fetchSubscription })).toMatchObject({ status: "ACTIVE" });
     expect(await clinicOf(clinicId)).toMatchObject({ status: "ACTIVE", categories: ["KNEE", "HIP"] });
+  });
+
+  it("a first payment still under way: a bigger second checkout is refused, and paying the first starts only what it was for (security audit, 2026-10-08)", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("paid late");
+    await startCheckout({ clinicId, selection: pick(["KNEE"], 1, "MONTH", 5900), actor, origin: ORIGIN, deps: depsFor(fake) });
+    const firstSub = fake.pay(fake.sessions[0].id, "unconfirmed");
+    await checkPayment({ clinicId, gateway: fake.gateway, fetchSubscription: fake.fetchSubscription });
+    expect((await billingOf(clinicId))?.status).toBe("INCOMPLETE");
+    const firstPlanId = (await billingOf(clinicId))?.pendingPlanId;
+
+    const second = await startCheckout({ clinicId, selection: pick(["KNEE", "HIP"], 3, "MONTH", 26700), actor, origin: ORIGIN, deps: depsFor(fake) });
+    expect(second).toMatchObject({ kind: "refused", message: expect.stringContaining("still under way") });
+    expect(fake.sessions).toHaveLength(1);
+    expect(await plansOf(clinicId)).toHaveLength(1);
+    expect((await billingOf(clinicId))?.pendingPlanId).toBe(firstPlanId);
+
+    // The first subscription's payment then goes through.
+    fake.subscriptions.set(firstSub, { ...(fake.subscriptions.get(firstSub) as SubscriptionSnapshot), status: "active", latestInvoicePaid: true });
+    await checkPayment({ clinicId, gateway: fake.gateway, fetchSubscription: fake.fetchSubscription });
+
+    expect(await clinicOf(clinicId)).toMatchObject({ status: "ACTIVE", categories: ["KNEE"], surgeonSeats: 1 });
+    expect((await billingOf(clinicId))?.currentPlanId).toBe(firstPlanId);
+  });
+
+  it("a first payment under way that our record has not heard about yet still stops a second checkout, and the record is brought into line", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("not heard yet");
+    await startCheckout({ clinicId, selection: pick(["KNEE"], 1, "MONTH", 5900), actor, origin: ORIGIN, deps: depsFor(fake) });
+    fake.pay(fake.sessions[0].id, "unconfirmed");
+    expect((await billingOf(clinicId))?.status).toBe("NONE");
+
+    const second = await startCheckout({ clinicId, selection: pick(["HIP"], 2, "MONTH", 11800), actor, origin: ORIGIN, deps: depsFor(fake) });
+
+    expect(second).toMatchObject({ kind: "refused", message: expect.stringContaining("still under way") });
+    expect(fake.sessions).toHaveLength(1);
+    expect(await plansOf(clinicId)).toHaveLength(1);
+    expect((await billingOf(clinicId))?.status).toBe("INCOMPLETE");
+    expect((await clinicOf(clinicId)).status).toBe("PENDING");
   });
 
   it("a clinic whose subscription ended can buy again, and the new plan replaces the old one", async () => {

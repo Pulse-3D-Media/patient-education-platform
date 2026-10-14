@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { handleStripeEvent, retryBillingEvent, type IncomingEvent } from "../billing-events";
 import type { SubscriptionSnapshot } from "../billing-state";
 import { clinicIsOpen } from "../clinic-status";
@@ -16,7 +16,7 @@ import {
 import { prisma } from "./client";
 import { setClinicManagedByPulse, setClinicStatusByStaff } from "./clinics";
 import { createPricingVersion } from "./pricing";
-import { listSeatRows, reserveSeat } from "./seats";
+import { countSeatsInUseIn, listSeatRows, reserveSeat } from "./seats";
 import { getSettings } from "./settings";
 import { ShareRefusedError, createShare } from "./shares";
 
@@ -31,6 +31,12 @@ import { ShareRefusedError, createShare } from "./shares";
  * Everything made here (clinics, their billing rows, plans, notifications,
  * one pricing version that is never made active) is deleted afterwards.
  */
+
+// The real seat count, wrapped so one test can make it fail partway through a reconcile.
+vi.mock("./seats", async (original) => {
+  const actual = await original<typeof import("./seats")>();
+  return { ...actual, countSeatsInUseIn: vi.fn(actual.countSeatsInUseIn) };
+});
 
 const tag = randomBytes(5).toString("hex");
 let serial = 0;
@@ -190,6 +196,26 @@ describe("the first payment", () => {
     const share = await createShare(f.clinicId, videoId);
     expect(share.code).toBeTruthy();
   });
+
+  it("the payment starts the plan the paid subscription is for, even when a bigger plan was left waiting (security audit, 2026-10-08)", async () => {
+    const f = await makeCheckoutClinic("paid-for");
+    // The small plan the subscription was bought for: one category, one seat.
+    const small = await recordAcceptedPlan(f.clinicId, planInput({ categories: ["KNEE"], entitledCategories: ["KNEE"], surgeonSeats: 1, perSeatCents: 5900, totalCents: 5900 }));
+    stripeSays(f, "incomplete", { planId: small.id });
+    await handleStripeEvent(event(f, "customer.subscription.created"), deps);
+    expect(await billingRow(f.clinicId)).toMatchObject({ status: "INCOMPLETE", stripeSubscriptionId: f.subscriptionId, pendingPlanId: small.id });
+    // The bigger plan (Knee and Hip, three seats) left waiting, the way a
+    // second checkout started meanwhile used to leave it. Checkout now
+    // refuses that (lib/checkout.test.ts); this proves the rule on its own.
+    await prisma.clinicBilling.update({ where: { clinicId: f.clinicId }, data: { pendingPlanId: f.planId } });
+
+    stripeSays(f, "active", { planId: small.id });
+    await handleStripeEvent(event(f, "invoice.paid"), deps);
+
+    expect(await clinicRow(f.clinicId)).toMatchObject({ status: "ACTIVE", categories: ["KNEE"], surgeonSeats: 1 });
+    expect(await billingRow(f.clinicId)).toMatchObject({ status: "ACTIVE", currentPlanId: small.id, pendingPlanId: null });
+    expect((await billingNotes(f.clinicId)).at(-1)?.body).toContain("earlier checkout");
+  });
 });
 
 describe("repeats, order and overlap", () => {
@@ -303,21 +329,35 @@ describe("failure and retry", () => {
 
   it("a failure partway through rolls back everything, including the part already written", async () => {
     const f = await makeCheckoutClinic("rollback");
+    // The financial record is written first; counting the seats in use comes
+    // after it. Make that count fail once, which must undo the write.
+    vi.mocked(countSeatsInUseIn).mockRejectedValueOnce(new Error("made-up failure partway through"));
+    stripeSays(f, "active");
+    const paid = event(f, "invoice.paid");
+
+    await expect(handleStripeEvent(paid, deps)).rejects.toThrow(/partway/);
+
+    expect(await billingRow(f.clinicId)).toMatchObject({ status: "NONE", stripeSubscriptionId: null, currentPlanId: null, pendingPlanId: f.planId });
+    expect((await clinicRow(f.clinicId)).status).toBe("PENDING");
+    expect(await billingNotes(f.clinicId)).toHaveLength(0);
+    expect((await eventRow(paid.id)).status).toBe("FAILED");
+  });
+
+  it("a payment marked with ANOTHER clinic's plan starts nothing: it is not guessed at, and a person is asked to look", async () => {
+    const f = await makeCheckoutClinic("foreign-plan");
     // Damage the fixture the way no code path can: point this clinic's
-    // waiting plan at ANOTHER clinic's plan. The financial record is written
-    // first, then the plan is checked and refused, which must undo the write.
-    const other = await makeCheckoutClinic("rollback-other");
+    // waiting plan, and the subscription's mark, at another clinic's plan.
+    const other = await makeCheckoutClinic("foreign-plan-other");
     await prisma.clinicBilling.update({ where: { clinicId: other.clinicId }, data: { pendingPlanId: null } });
     await prisma.clinicBilling.update({ where: { clinicId: f.clinicId }, data: { pendingPlanId: other.planId } });
     stripeSays(f, "active", { planId: other.planId });
     const paid = event(f, "invoice.paid");
 
-    await expect(handleStripeEvent(paid, deps)).rejects.toThrow(/does not belong/);
+    expect((await handleStripeEvent(paid, deps)).status).toBe("ignored");
 
     expect(await billingRow(f.clinicId)).toMatchObject({ status: "NONE", stripeSubscriptionId: null, currentPlanId: null });
-    expect((await clinicRow(f.clinicId)).status).toBe("PENDING");
-    expect(await billingNotes(f.clinicId)).toHaveLength(0);
-    expect((await eventRow(paid.id)).status).toBe("FAILED");
+    expect(await clinicRow(f.clinicId)).toMatchObject({ status: "PENDING", categories: [] });
+    expect((await eventRow(paid.id)).outcome).toMatch(new RegExp(`^${NEEDS_LOOK}`));
   });
 
   it("staff can try a failed notification again from its stored row, and a finished one is left alone", async () => {

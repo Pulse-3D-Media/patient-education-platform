@@ -114,7 +114,7 @@ export default async function BillingPage(props: BillingPageProps = {}) {
         </p>
       )}
 
-      <StatusCard clinic={clinic} managed={managed} canPayHere={canPayHere} repair={checkout?.portal ? "here" : "none"} />
+      <StatusCard clinic={clinic} managed={managed} canPayHere={canPayHere} firstPayment={offer.kind === "first-payment"} repair={checkout?.portal ? "here" : "none"} />
 
       {checkout?.billingStatus === "PAST_DUE" && canRepair && !managed && (
         <section aria-labelledby="missed-heading" className="mt-6 rounded-2xl border border-warn/40 bg-warn/10 p-5 sm:p-6">
@@ -131,7 +131,7 @@ export default async function BillingPage(props: BillingPageProps = {}) {
         </section>
       )}
 
-      {checkout?.waiting && !cameBackWithoutPaying && (
+      {checkout?.waiting && !cameBackWithoutPaying && offer.kind !== "first-payment" && (
         <p className="mt-6 rounded-xl border border-line bg-surface px-5 py-4 text-[15px] text-ink-soft">
           A checkout was started for your clinic and no payment has been confirmed for it. Paid already?{" "}
           <Link href="/admin/billing/return" className="font-medium text-brand-bright underline underline-offset-2">
@@ -333,6 +333,23 @@ function OfferSection({ offer, managed, suggested }: { offer: CheckoutOffer; man
     );
   }
 
+  if (offer.kind === "first-payment") {
+    return (
+      <section aria-labelledby="first-payment-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
+        <h2 id="first-payment-heading" className="text-lg font-semibold">
+          Your first payment is under way
+        </h2>
+        <p className="mt-2 text-ink-soft">
+          Stripe has not confirmed it yet, so your clinic is not open and a new plan cannot be started until it settles. A bank payment can take a few days to clear. If
+          the payment is never completed, Stripe drops it within about a day, and you can choose a plan here again.
+        </p>
+        <Link href="/admin/billing/return" className={`mt-5 ${PRIMARY_BUTTON}`}>
+          Check on your payment
+        </Link>
+      </section>
+    );
+  }
+
   if (offer.kind === "contact") {
     return (
       <section aria-labelledby="next-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
@@ -435,14 +452,32 @@ function SubscriptionCard({ plan, status, renewsAt, endsAt }: { plan: PlanFacts;
 }
 
 /** Where the clinic stands, in one line, with what it means for the rest of the app. */
-function StatusCard({ clinic, managed, canPayHere, repair }: { clinic: ClinicOpenFacts; managed: boolean; canPayHere: boolean; repair: Repair }) {
+function StatusCard({
+  clinic,
+  managed,
+  canPayHere,
+  firstPayment,
+  repair,
+}: {
+  clinic: ClinicOpenFacts;
+  managed: boolean;
+  canPayHere: boolean;
+  /** A first payment is under way in Stripe: the clinic opens when it is confirmed, and nothing else needs doing. */
+  firstPayment: boolean;
+  repair: Repair;
+}) {
   const status = clinic.status;
   const open = clinicIsOpen(clinic);
   const inGrace = open && status === "PAST_DUE";
   const { label, body: words } = inGrace ? GRACE_COPY : STATUS_COPY[status];
   // A missed payment: what to do about it depends on who is looking and whether Stripe's pages can be opened here.
   const body = status === "PAST_DUE" && !managed ? `${words} ${REPAIR_WORDS[repair]}` : words;
-  const next = inGrace || managed ? null : NEXT_STEP[status]?.[canPayHere ? "canPay" : "cannotPay"];
+  const next =
+    inGrace || managed
+      ? null
+      : firstPayment
+        ? "They open as soon as Stripe confirms your first payment."
+        : NEXT_STEP[status]?.[canPayHere ? "canPay" : "cannotPay"];
   return (
     <section
       aria-labelledby="status-heading"

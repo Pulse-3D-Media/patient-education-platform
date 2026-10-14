@@ -1,4 +1,4 @@
-import { SELF_SERVE_REFUSALS, selfServeEligibility } from "./billing-state";
+import { FIRST_PAYMENT_UNDER_WAY, SELF_SERVE_REFUSALS, selfServeEligibility, type BillingFacts } from "./billing-state";
 import { engineInterval, sessionExpiresAt, type PlanSelection } from "./checkout-rules";
 import {
   BillingRefusedError,
@@ -45,6 +45,16 @@ import type { CheckoutGateway, FetchSubscription } from "./stripe";
  *   requests the same page. Every other open page of this customer is
  *   closed, so an abandoned one cannot be paid later.
  *
+ *   ONE FIRST PAYMENT AT A TIME. While Stripe still has a first payment
+ *   under way for the clinic (paid by a method that takes time to clear, or
+ *   not yet confirmed), no new checkout is started, here or under the lock.
+ *   Otherwise both could end up paid, and the record waiting on the second
+ *   while Stripe charges the first. The admin is told to wait for it to
+ *   clear or for Stripe to drop it (decided with the security audit of
+ *   2026-10-08; cancelling the first in Stripe was the alternative, and was
+ *   not chosen, because a bank payment already in flight can still arrive
+ *   for a subscription that has been cancelled).
+ *
  *   NOTHING HERE OPENS A CLINIC. This file never touches a clinic's status,
  *   plan or access. Only the billing rules do that, from what Stripe itself
  *   says about the subscription (reconcileSubscription), whether the news
@@ -66,6 +76,8 @@ export type StartCheckoutResult =
 
 export type CheckoutDeps = {
   gateway: CheckoutGateway;
+  /** How to ask Stripe where one subscription stands now (fetchSubscriptionSnapshot in lib/stripe.ts), for bringing the record into line before a new checkout. */
+  fetchSubscription: FetchSubscription;
   /** Is checkout open on this deployment? (checkoutIsOpen in lib/stripe.ts.) */
   isOpen: boolean;
   now?: Date;
@@ -95,7 +107,18 @@ export async function startCheckout(args: {
   const eligibility = selfServeEligibility(clinic);
   if (!eligibility.eligible) return { kind: "refused", message: SELF_SERVE_REFUSALS[eligibility.reason] };
   if (clinic.facts.status === "ACTIVE" || clinic.facts.status === "PAST_DUE") {
-    return { kind: "refused", message: "Your clinic already has a subscription, so a second one was not started." };
+    return { kind: "refused", message: ALREADY_SUBSCRIBED };
+  }
+
+  // 1b. A first payment still under way. Stripe is asked, because our record
+  //     can be behind it (a notification that has not arrived yet). Nothing
+  //     new is started while one is: a second checkout could be paid
+  //     alongside the first, and the clinic charged twice.
+  if (clinic.facts.stripeCustomerId) {
+    const underWay = await paymentUnderWay({ clinicId, facts: clinic.facts, customerId: clinic.facts.stripeCustomerId, deps });
+    if (underWay === "paid") return { kind: "confirming" };
+    if (underWay === "subscribed") return { kind: "refused", message: ALREADY_SUBSCRIBED };
+    if (underWay === "waiting") return { kind: "refused", message: FIRST_PAYMENT_UNDER_WAY };
   }
 
   // 2. The price, from the server's own numbers.
@@ -229,6 +252,53 @@ function seatWords(seats: number) {
   return `${seats} surgeon ${seats === 1 ? "seat" : "seats"}`;
 }
 
+const ALREADY_SUBSCRIBED = "Your clinic already has a subscription, so a second one was not started.";
+
+/** Stripe's words for a subscription that is over or never started. Neither can be paid any more. */
+const isDead = (status: string) => status === "canceled" || status === "incomplete_expired";
+
+/**
+ * Which of a customer's subscriptions to bring the clinic's record into line
+ * with: the one for the plan the clinic is waiting on, else the one already
+ * on record. Anything else on the customer is not ours to apply (the
+ * webhook flags it for a person when it is being charged).
+ */
+function subscriptionToCheck(facts: BillingFacts, subscriptions: { id: string; planId: string | null; status: string }[]) {
+  return (
+    subscriptions.find((subscription) => facts.pendingPlanId !== null && subscription.planId === facts.pendingPlanId && !isDead(subscription.status)) ??
+    subscriptions.find((subscription) => subscription.id === facts.stripeSubscriptionId)
+  );
+}
+
+/**
+ * Before a new checkout: is a payment for this clinic already under way in
+ * Stripe? The record is brought into line first (the same reconcile the
+ * webhook runs, which grants only what Stripe says was paid), so the answer,
+ * and the Billing page after it, are up to date.
+ *
+ *   "paid"        the earlier payment has just been confirmed: send the
+ *                 admin to the return page, which says so
+ *   "subscribed"  the clinic has a subscription (a failed renewal, say)
+ *   "waiting"     a first payment is still under way, or Stripe has a
+ *                 subscription for the clinic that is neither started nor dead
+ *   null          nothing under way: carry on
+ */
+async function paymentUnderWay(args: { clinicId: string; facts: BillingFacts; customerId: string; deps: CheckoutDeps }) {
+  const { clinicId, facts, customerId, deps } = args;
+  const subscriptions = await deps.gateway.listSubscriptions(customerId);
+  const alive = subscriptions.filter((subscription) => !isDead(subscription.status));
+  if (alive.length === 0 && facts.status !== "INCOMPLETE") return null;
+
+  const target = subscriptionToCheck(facts, subscriptions);
+  if (target) await reconcileSubscription({ clinicId, subscriptionId: target.id, fetchSubscription: deps.fetchSubscription, now: deps.now });
+
+  const after = (await getCheckoutFacts(clinicId))?.facts.status;
+  if (after === "ACTIVE") return "paid";
+  if (after === "PAST_DUE") return "subscribed";
+  if (after === "INCOMPLETE" || alive.length > 0) return "waiting";
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // "Check again": ask Stripe, rather than wait for Stripe to tell us
 // ---------------------------------------------------------------------------
@@ -264,12 +334,8 @@ export async function checkPayment(args: {
   if (!facts.stripeCustomerId) return { status: facts.status, message: "No checkout has been started for your clinic, so there is nothing to check." };
 
   // The subscription to look at: the one for the plan the clinic is waiting
-  // on, else the one already on record. Anything else on the customer is not ours to apply.
-  const subscriptions = await gateway.listSubscriptions(facts.stripeCustomerId);
-  const dead = (status: string) => status === "canceled" || status === "incomplete_expired";
-  const target =
-    subscriptions.find((subscription) => facts.pendingPlanId !== null && subscription.planId === facts.pendingPlanId && !dead(subscription.status)) ??
-    subscriptions.find((subscription) => subscription.id === facts.stripeSubscriptionId);
+  // on, else the one already on record (subscriptionToCheck).
+  const target = subscriptionToCheck(facts, await gateway.listSubscriptions(facts.stripeCustomerId));
 
   if (!target) {
     return { status: facts.status, message: "Stripe has no payment for your clinic yet. If you have just paid, give it a minute and check again." };

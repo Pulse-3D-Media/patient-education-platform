@@ -460,18 +460,14 @@ describe("what stays the same", () => {
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Play Vitest Total Knee Replacement"');
     expect(html).not.toContain("Make the video bigger");
-    // Our full-screen button arrives on the strip with the first play, not before.
+    // No full-screen button of our own: the browser's own one, in its controls, is the way (Evan, 2026-10-15).
     expect(html).not.toContain("Full screen");
-    // The video keeps playsinline, and the browser's own controls lose only "download" and, where the browser
-    // understands it (Chromium), its own full-screen button, which would show the video without the strip. The
-    // patient-video class is what takes that greyed-out button out of Chromium's bar (app/globals.css).
+    // The video keeps playsinline, and the browser's own controls lose only "download": its full-screen button stays.
     expect(html).toMatch(/<video[^>]*playsInline/);
-    expect(html).toContain('controlsList="nodownload nofullscreen"');
-    expect(html).toMatch(/<video[^>]*class="patient-video /);
+    expect(html).toContain('controlsList="nodownload"');
+    expect(html).not.toContain("nofullscreen");
     // The strip is decoration: the clinic and the sender are already on the page as text.
-    expect(html).toMatch(/data-video-strip="" class="video-strip pointer-events-none [^"]*"[^>]*><div class="video-strip-row"><span aria-hidden="true"/);
-    // Play is drawn above the strip's wash, so the white circle is never dimmed by it.
-    expect(html).toMatch(/aria-label="Play Vitest Total Knee Replacement"[^>]*class="absolute inset-0 z-20 /);
+    expect(html).toMatch(/data-video-strip="" class="video-strip w-full shrink-0 select-none"><span aria-hidden="true"/);
   });
 
   it("nothing internal about the clinic is in the page", async () => {
@@ -499,7 +495,7 @@ describe("the strip on the video", () => {
     return html.slice(start, html.indexOf("</div>", start));
   }
 
-  it("is laid over the picture, from before the first play, with the logo and the surgeon's name alone", async () => {
+  it("is a row above the picture, from before the first play, with the logo and the surgeon's name alone", async () => {
     const clinic = await makeClinic({ name: "Vitest Strip Orthopedics", logoUrl: "https://example.com/strip-white.png" });
     const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO"));
     const strip = stripOf(html);
@@ -507,10 +503,12 @@ describe("the strip on the video", () => {
     expect(strip).toContain('src="https://example.com/strip-white.png"');
     expect(strip).toContain(">Dr. Jane Smith, DO<");
     expect(strip).not.toContain("Sent by");
-    // Inside the box over the picture, not in a row above the video: the player's box is now exactly the video's shape.
-    expect(html).toMatch(/class="picture-area pointer-events-none absolute inset-0 z-10" style="--picture-ratio:1.777[^"]*"><div class="picture-fit"><div data-video-strip/);
+    // A row of its own at the top of the player's card, then the video's 16:9 box: nothing of ours over the picture
+    // (Safari draws its own buttons in the picture's top corners, and the strip used to cover them).
+    expect(html).toMatch(/<div class="overflow-hidden rounded-\[18px\] bg-black [^"]*"><div data-video-strip/);
     expect(html).toContain("padding-top:56.25%");
-    expect(html).not.toContain("56.25% + 40px");
+    expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf("padding-top:56.25%"));
+    expect(html).not.toContain("picture-area");
     // Before Play in the page's order, so it is there before the first tap.
     expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Play Vitest Total Knee Replacement"'));
   });
@@ -703,7 +701,7 @@ describe("a video that has moved to Mux", () => {
     expect(html).not.toContain("example.com/vitest-cdn-copy.mp4");
     // The strip, the sender lines, the controls setting and the education box survive the player change.
     expect(html).toContain("data-video-strip");
-    expect(html).toContain('controlsList="nodownload nofullscreen"');
+    expect(html).toContain('controlsList="nodownload"');
     expect(html).toContain("I understand this video is for education only.");
     expect(html).not.toMatch(/stops working in a few minutes/);
   });

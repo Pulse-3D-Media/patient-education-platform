@@ -12,8 +12,8 @@ import {
   PULSE_STAFF_THEME,
   STAFF_GROUND,
   STAFF_LIGHT_GROUND,
-  VIDEO_STRIP_ALPHA,
-  VIDEO_STRIP_MIN_TEXT_PX,
+  VIDEO_STRIP_GROUND,
+  VIDEO_STRIP_INK,
   brandFontLabel,
   brandThemeLabel,
   contrastRatio,
@@ -27,7 +27,6 @@ import {
   relativeLuminance,
   staffTheme,
   themeVars,
-  videoStripGround,
 } from "./branding";
 
 /**
@@ -130,44 +129,17 @@ describe("contrast sums", () => {
 });
 
 describe("the strip on the video", () => {
-  // White words on a black wash at VIDEO_STRIP_ALPHA (its lightest point, where the words are), over whatever the
-  // frame is. Every word on the strip is LARGE text (at least 21px bold for the doctor's name, 19px bold for the
-  // clinic's name: VIDEO_STRIP_MIN_TEXT_PX, checked against the CSS in components/ui/ClinicMark.test.tsx), so the
-  // floor is WCAG's 3:1 for large text, not 4.5:1. The soft shadow on the words is extra and not counted.
-  const LARGE_TEXT = 3;
-
-  it("keeps white words at 3:1 or better over a white frame, the hardest case, with room to spare", () => {
-    const wash = videoStripGround("#ffffff");
-    expect(wash).toBe("#808080");
-    expect(contrastRatio("#ffffff", wash)).toBeGreaterThanOrEqual(LARGE_TEXT);
-    expect(contrastRatio("#ffffff", wash)).toBeCloseTo(3.95, 1);
+  // A slim row above the picture on the player's black (option C, Evan, 2026-10-15). Its words are small (15px to
+  // 18px), so they need the full 4.5:1, with no help from the picture under them: there is none.
+  it("keeps its light grey words well over 4.5:1 on its black", () => {
+    expect(VIDEO_STRIP_GROUND).toBe("#000000");
+    expect(VIDEO_STRIP_INK).toBe("#e3e7eb");
+    expect(contrastRatio(VIDEO_STRIP_INK, VIDEO_STRIP_GROUND)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(VIDEO_STRIP_INK, VIDEO_STRIP_GROUND)).toBeCloseTo(16.9, 0);
   });
 
-  it("keeps them over a black frame (where the wash is simply black)", () => {
-    expect(videoStripGround("#000000")).toBe("#000000");
-    expect(contrastRatio("#ffffff", videoStripGround("#000000"))).toBeCloseTo(21, 1);
-  });
-
-  it("keeps them over every grey in between, and over the brightest pure colours an animation could hold", () => {
-    for (let level = 0; level <= 255; level += 5) {
-      const grey = `#${level.toString(16).padStart(2, "0").repeat(3)}`;
-      expect(contrastRatio("#ffffff", videoStripGround(grey))).toBeGreaterThanOrEqual(LARGE_TEXT);
-    }
-    for (const frame of ["#ffff00", "#00ffff", "#ff00ff", "#00ff00", "#ffffff"]) {
-      expect(contrastRatio("#ffffff", videoStripGround(frame))).toBeGreaterThanOrEqual(LARGE_TEXT);
-    }
-  });
-
-  it("is more see-through than the old solid band (0.6), as Van asked, but not so light that white on white drops near the floor", () => {
-    expect(VIDEO_STRIP_ALPHA).toBe(0.5);
-    expect(VIDEO_STRIP_ALPHA).toBeLessThan(0.6);
-    // At 0.42 the wash over white is about #949494, and white on it is barely 3:1: legal, but no margin for a squint.
-    expect(contrastRatio("#ffffff", "#949494")).toBeLessThan(3.05);
-  });
-
-  it("only uses that floor because every word on it is large: bold and at least 18.66px", () => {
-    expect(VIDEO_STRIP_MIN_TEXT_PX.sender).toBeGreaterThanOrEqual(18.66);
-    expect(VIDEO_STRIP_MIN_TEXT_PX.clinic).toBeGreaterThanOrEqual(18.66);
+  it("is subtle: not pure white, so the clinic's logo stays the brightest thing on the row", () => {
+    expect(contrastRatio(VIDEO_STRIP_INK, VIDEO_STRIP_GROUND)).toBeLessThan(contrastRatio("#ffffff", VIDEO_STRIP_GROUND));
   });
 });
 

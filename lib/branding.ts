@@ -149,29 +149,15 @@ export function contrastRatio(a: string, b: string): number {
 }
 
 /**
- * THE STRIP ON THE VIDEO (ClinicMark): a soft black wash over the top of the
- * picture that fades out under the words (app/globals.css, .video-strip).
- * This is how dark it is where the words are, at its lightest; above them
- * it is a little darker. It was a solid band at 0.6 until the 2026-10-08
- * huddle, where Van asked for it to look see-through.
- *
- * 0.5 is enough because every word on the strip is now LARGE text (the
- * doctor's name is at least 21px semibold, the clinic's name at least 19px
- * bold; WCAG counts 18.66px bold as large), and large text needs 3:1, not
- * 4.5:1. Over pure white the wash comes out #808080, and white on that is
- * 3.9:1; over a black frame it is black, 21:1. Below about 0.42 white on
- * white would drop under 3:1. The words also carry a soft shadow, which the
- * sums do not count. lib/branding.test.ts checks all of it.
+ * THE STRIP ON THE VIDEO (ClinicMark): a slim row above the picture, on the
+ * player's own black, with the logo and the doctor's name in light grey
+ * (app/globals.css, .video-strip; option C, Evan, 2026-10-15). Its words are
+ * small (15px to 18px), so they need the full 4.5:1; light grey on black is
+ * about 16:1. lib/branding.test.ts checks it, and checks that these are the
+ * colours the CSS uses.
  */
-export const VIDEO_STRIP_ALPHA = 0.5;
-
-/** The smallest the strip's words get (app/globals.css): the long-name size of the doctor's name, and the clinic's name. Both are bold enough to count as large text. */
-export const VIDEO_STRIP_MIN_TEXT_PX = { sender: 21, clinic: 19 } as const;
-
-/** What the strip's band looks like over a frame of this colour: the frame, darkened by the band. */
-export function videoStripGround(frame: string): string {
-  return mix(frame, BLACK, VIDEO_STRIP_ALPHA);
-}
+export const VIDEO_STRIP_GROUND = "#000000";
+export const VIDEO_STRIP_INK = "#e3e7eb";
 
 /** `amount` of the way from one colour to another: 0 is `from`, 1 is `to`. */
 function mix(from: string, to: string, amount: number): string {

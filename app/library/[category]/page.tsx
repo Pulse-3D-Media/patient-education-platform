@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { categoryState } from "@/lib/access";
@@ -10,30 +9,35 @@ import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
 import { getCategoryConfigs } from "@/lib/db/category-config";
+import { listFavoriteIdsAmong } from "@/lib/db/personal-videos";
 import { getSeatFor } from "@/lib/db/seats";
 import { countPublishedVideosByKind, listUsableVideosInCategory } from "@/lib/db/videos";
-import { playbackForVideo } from "@/lib/playback-auth";
 import { libraryStripName } from "@/lib/sender-name";
+import { CategoryTabs } from "../CategoryTabs";
 import { EmptyCategory, LockedCategory } from "../CategoryStates";
 import { ComingSoon } from "../ComingSoon";
+import { toLibraryItems } from "../items";
+import { LibraryBrowser } from "../LibraryBrowser";
 import { VideoGrid } from "./VideoGrid";
 
 /**
- * One category: the videos this clinic may use in it, as cards. Tapping
- * one plays it. This is tap two of two.
+ * One category: the videos this clinic may use in it, as cards, under the
+ * same category tabs as the library home with this one lit. Tapping a card
+ * plays it; its heart makes it one of the person's favorites.
  *
  * The list comes from listUsableVideosInCategory(), which applies the
  * clinic's plan and placeholder setting in the query itself, so a video
  * the clinic may not use never has its address sent to the browser. That
  * holds for someone who typed the address of a locked category too: they
- * see the same "not on your plan" page the tile promised, and nothing
+ * see the same "not on your plan" page the home page promised, and nothing
  * playable. The states (coming soon, locked, nothing yet) are decided by
  * categoryState() in lib/access.ts, the same way the library home decides
- * its tiles.
+ * its rows.
  *
- * Everyone in the clinic can browse and play. Only people holding a seat get
- * the Send button (a link is always from a surgeon); the Send action checks
- * the seat again on the server, so a hidden button is never the only check.
+ * Everyone in the clinic can browse, play and heart. Only people holding a
+ * seat get the Send button (a link is always from a surgeon); the Send
+ * action checks the seat again on the server, so a hidden button is never
+ * the only check.
  *
  * Rendered fresh on every request, because what it shows depends on who is
  * signed in (see the note on the library home page).
@@ -41,8 +45,7 @@ import { VideoGrid } from "./VideoGrid";
 export const dynamic = "force-dynamic";
 
 export default async function CategoryPage({ params }: PageProps<"/library/[category]">) {
-  // Same gate as the library home: signed in, in a clinic, question answered,
-  // and the clinic open. Otherwise the right step or a calm page.
+  // Same gate as the library home: signed in, in a clinic, and the clinic open. Otherwise the right step or a calm page.
   const clinic = await requireClinicPage();
   if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink={clinic.isAdmin} />;
 
@@ -63,61 +66,48 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
     userId ? getSeatFor(clinic.id, userId) : null,
   ]);
   const state = categoryState(access, category.value, counts[category.value]);
+  // Which of them this person has hearted, so those hearts start filled. Their own, from the session.
+  const heartedIds = userId ? await listFavoriteIdsAmong(clinic.id, userId, videos.map((video) => video.id)) : [];
 
   // Only plain data crosses into the browser: id, title, duration, whether it
-  // is a placeholder, and what to play (built here on the server, through
-  // lib/playback-auth.ts: the plain file, or a signed Mux address for this
-  // clinic, which the list above has just shown may use the video). The
-  // player asks the server for a fresh address before a signed one runs out
-  // (refreshPlaybackAction), and the plan is checked again then.
-  const now = new Date();
-  const items = videos.map((video) => ({
-    id: video.id,
-    title: video.title,
-    source: playbackForVideo(video, now, null),
-    posterUrl: video.posterUrl,
-    durationSeconds: video.durationSeconds,
-    isPlaceholder: video.isPlaceholder,
-  }));
+  // is a placeholder, and what to play (built on the server through
+  // lib/playback-auth.ts, for videos the list above has just shown this clinic may use).
+  const items = toLibraryItems(videos);
 
   // Nothing published here at all: the same "Coming soon" the library home
-  // shows on the tile, with the category's own sentence. Not on the plan: the
+  // shows, with the category's own sentence. Not on the plan: the
   // category's row says whether it is for sale, which decides whether there
   // is anything to add. The other states need no row.
   const configs = state === "coming-soon" || state === "locked" ? await getCategoryConfigs() : null;
 
   return (
-    <main className="px-5 py-6 sm:px-8">
-      <header className="mb-6">
-        <p className="mb-1 text-sm text-ink-muted">
-          <Link href="/library" className="hover:text-ink">
-            My Library
-          </Link>
-          <span className="mx-2">/</span>
-          <span className="text-ink-soft">{category.label}</span>
-        </p>
-        <h1 className="text-2xl font-semibold sm:text-3xl">{category.label}</h1>
-      </header>
+    <main className="py-6">
+      {/* The pills first, as on every library page; the lit one says which category this is. */}
+      <CategoryTabs categories={access.categories} current={category.slug} />
+      <h1 className="mb-5 px-5 text-2xl font-semibold sm:px-8 sm:text-3xl">{category.label}</h1>
 
-      {items.length > 0 ? (
-        <VideoGrid
-          videos={items}
-          categoryLabel={category.label}
-          clinicName={clinic.name}
-          logoUrl={parseLogoUrl(clinic.logoUrl)}
-          // The strip on the player shows the name patients would see on this person's links: only someone holding a seat
-          // sends links, so only they get a name there (the one chosen for them, else "Dr. First Last" from Clerk).
-          senderName={libraryStripName(seat, clinic.defaultPatientName)}
-          // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
-          canSend={seat !== null}
-        />
-      ) : state === "coming-soon" ? (
-        <ComingSoon label={category.label} config={configs?.[category.value]} />
-      ) : state === "locked" ? (
-        <LockedCategory label={category.label} slug={category.slug} offer={addToPlanOffer(clinic.isAdmin, configs?.[category.value])} />
-      ) : (
-        <EmptyCategory label={category.label} />
-      )}
+      <div className="px-5 sm:px-8">
+        {items.length > 0 ? (
+          <LibraryBrowser
+            heartedIds={heartedIds}
+            // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
+            canSend={seat !== null}
+            clinicName={clinic.name}
+            logoUrl={parseLogoUrl(clinic.logoUrl)}
+            // The player shows the name patients would see on this person's links: only someone holding a seat
+            // sends links, so only they get a name there (the one chosen for them, else "Dr. First Last" from Clerk).
+            senderName={libraryStripName(seat, clinic.defaultPatientName)}
+          >
+            <VideoGrid videos={items} />
+          </LibraryBrowser>
+        ) : state === "coming-soon" ? (
+          <ComingSoon label={category.label} config={configs?.[category.value]} />
+        ) : state === "locked" ? (
+          <LockedCategory label={category.label} slug={category.slug} offer={addToPlanOffer(clinic.isAdmin, configs?.[category.value])} />
+        ) : (
+          <EmptyCategory label={category.label} />
+        )}
+      </div>
     </main>
   );
 }

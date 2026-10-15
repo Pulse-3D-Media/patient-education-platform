@@ -86,8 +86,11 @@ export async function countPublishedVideosByKind(category?: Category): Promise<P
 // keeps an off-plan video's address from ever leaving the server.
 // ---------------------------------------------------------------------------
 
-/** The where-clause for "this clinic may use it". Callers have already checked the clinic is open and has categories. */
-function usableClause(access: ClinicAccess) {
+/**
+ * The where-clause for "this clinic may use it". Callers have already checked the clinic is open and has categories.
+ * Exported for lib/db/personal-videos.ts, which applies it to a person's favorites and plays through the relation.
+ */
+export function usableClause(access: ClinicAccess) {
   return {
     isPublished: true,
     category: { in: access.categories },
@@ -100,12 +103,35 @@ function usableClause(access: ClinicAccess) {
  * the category page. Empty, without a query, when the clinic is not open
  * or the category is not on its plan.
  */
-export async function listUsableVideosInCategory(access: ClinicAccess, category: Category) {
+export async function listUsableVideosInCategory(access: ClinicAccess, category: Category, limit?: number) {
   if (!access.open || !access.categories.includes(category)) return [];
   return prisma.video.findMany({
     where: { ...usableClause(access), category },
-    orderBy: { createdAt: "desc" },
+    // The id breaks a tie between videos added in the same instant, so a row of five is always the same five.
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    // The home page's row for the category asks for its newest few (lib/library-rows.ts); the category page asks for all.
+    ...(limit !== undefined ? { take: limit } : {}),
   });
+}
+
+/**
+ * The search box in the library's top bar: the videos this clinic may use
+ * whose title contains the words asked for, ignoring capitals, in the order
+ * lib/categories lists the categories and then by title. Bounded by `limit`.
+ * The same access rule as every other list, in the query, so a search never
+ * finds a video off the plan, unpublished, or a hidden placeholder. Empty,
+ * without a query, when the clinic is not open or has no categories.
+ */
+export async function searchUsableVideos(access: ClinicAccess, query: string, limit: number) {
+  if (!access.open || access.categories.length === 0 || !query) return [];
+  const videos = await prisma.video.findMany({
+    // Prisma hands `contains` to Postgres's LIKE as it is, where % and _ mean "anything"; escaped here so a search for
+    // "%" finds a title with a % in it, not every title (the clinics search on /pulse does the same).
+    where: { ...usableClause(access), title: { contains: query.replace(/[\\%_]/g, "\\$&"), mode: "insensitive" } },
+    orderBy: [{ title: "asc" }, { id: "asc" }],
+    take: limit,
+  });
+  return sortByLibraryOrder(videos);
 }
 
 /**

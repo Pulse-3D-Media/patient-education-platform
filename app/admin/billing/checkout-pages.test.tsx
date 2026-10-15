@@ -130,6 +130,13 @@ const renderBilling = async (searchParams?: Record<string, string>) =>
   renderToStaticMarkup(await BillingPage(searchParams ? { searchParams: Promise.resolve(searchParams) } : undefined));
 const renderReturn = async () => renderToStaticMarkup(await ReturnPage());
 
+/** A page's HTML after the shell's top bar (which holds the library search box), so "no form" is about the page's own content. */
+function pageContent(html: string): string {
+  const end = html.indexOf("</header>");
+  expect(end).toBeGreaterThan(-1);
+  return html.slice(end);
+}
+
 function showsAnAmount(html: string) {
   return /\$\d/.test(html);
 }
@@ -227,7 +234,7 @@ describe("/admin/billing: who is offered the plan picker", () => {
     const html = await renderBilling();
     expect(html).toContain("managed by Pulse 3D");
     expect(html).not.toContain("Continue to payment");
-    expect(html).not.toContain("<form");
+    expect(pageContent(html)).not.toContain("<form");
   });
 
   it("a clinic Pulse staff paused by hand is told to talk to Pulse first", async () => {
@@ -601,7 +608,7 @@ describe("/admin/billing: arriving from the library's \"Add to your plan\" link 
     const html = await renderBilling({ add: "shoulder" });
     expect(html).toContain("Set up by Pulse 3D");
     expect(html).not.toContain("is ticked below");
-    expect(html).not.toContain("<form");
+    expect(pageContent(html)).not.toContain("<form");
   });
 
   it("a paying clinic on a deployment where card payment is shut is told plan changes are not open", async () => {
@@ -619,7 +626,7 @@ describe("/admin/billing: arriving from the library's \"Add to your plan\" link 
     const html = await renderBilling({ add: "shoulder" });
     expect(html).toContain("not open yet");
     expect(html).not.toContain("is ticked below");
-    expect(html).not.toContain("<form");
+    expect(pageContent(html)).not.toContain("<form");
     expect(html).toContain('id="change"');
   });
 

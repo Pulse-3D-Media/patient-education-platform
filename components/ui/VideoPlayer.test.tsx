@@ -157,3 +157,18 @@ describe("libraryStripName", () => {
     expect(libraryStripName(null, null)).toBeNull();
   });
 });
+
+describe("the heart in the library's player", () => {
+  it("sits beside Close when the library hands one in, filled or not, and is left out otherwise", () => {
+    const on = render({ favorite: { on: true, onToggle: () => {} } });
+    expect(on).toMatch(/aria-pressed="true"[^>]*aria-label="Remove Total Knee Replacement from my favorites"/);
+    expect(buttons(on)).toContain("Close the video and go back to the library");
+
+    const off = render({ favorite: { on: false, onToggle: () => {} } });
+    expect(off).toMatch(/aria-pressed="false"[^>]*aria-label="Add Total Knee Replacement to my favorites"/);
+
+    const none = render();
+    expect(none).not.toContain("my favorites");
+    expect(buttons(none)).toContain("Close the video and go back to the library");
+  });
+});

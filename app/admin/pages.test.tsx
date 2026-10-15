@@ -182,6 +182,13 @@ async function render(page: () => Promise<React.ReactElement>, path: string) {
   return renderToStaticMarkup(await page());
 }
 
+/** A page's HTML after the shell's top bar (which holds the library search box), so a check about the page's own forms is about the page. */
+function afterTopBar(html: string): string {
+  const end = html.indexOf("</header>");
+  expect(end).toBeGreaterThan(-1);
+  return html.slice(end);
+}
+
 /** The words that only belong on /admin/billing (the headings of its plan and estimate cards). */
 const PLAN_WORDS = ["Your plan", "Surgeon seats", "Estimate"];
 
@@ -562,9 +569,10 @@ describe("an admin of a clinic managed by Pulse", () => {
     const html = await render(BillingPage, "/admin/billing");
     expect(html).toContain("managed by Pulse 3D");
     expect(html).toContain("invoiced by agreement");
-    // No form and no submit button anywhere on the page (the only buttons are the shell menu).
-    expect(html).not.toContain("<form");
-    expect(html).not.toContain('type="submit"');
+    // No form and no submit button anywhere in the page's own content (below the top bar, whose only form is the library search).
+    const content = afterTopBar(html);
+    expect(content).not.toContain("<form");
+    expect(content).not.toContain('type="submit"');
   });
 });
 
@@ -675,9 +683,10 @@ describe("a paused link a patient has asked about", () => {
     expect(html).toContain(`value="${id}"`);
     // The form and the page carry the link's id, never its code.
     expect(html).not.toContain(code);
-    // The one thing that submits is Confirm (the shell's own menu buttons are not forms).
-    expect(html.match(/<button[^>]*type="submit"/g)).toHaveLength(1);
-    expect(html.match(/<form/g)).toHaveLength(1);
+    // The one thing in the page's own content that submits is Confirm (the top bar's only form is the library search).
+    const content = afterTopBar(html);
+    expect(content.match(/<button[^>]*type="submit"/g)).toHaveLength(1);
+    expect(content.match(/<form/g)).toHaveLength(1);
     // The navigation marks the overview, where the waiting list lives.
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin"/);
   });

@@ -173,6 +173,32 @@ describe("decideBilling: checkout and the first payment", () => {
     expect(failed.entries).toEqual([]);
   });
 
+  it("a first payment starts the plan the paid subscription is FOR, never a newer plan that is only waiting (security audit, 2026-10-08)", () => {
+    // The admin started again with a bigger plan while the first payment was
+    // still unconfirmed; then the FIRST subscription was paid.
+    const startedAgain = facts({ status: "INCOMPLETE", stripeSubscriptionId: SUB, pendingPlanId: "plan_newer" });
+
+    const paid = decideBilling(startedAgain, snap({ status: "active", latestInvoicePaid: true, planId: PLAN }), NOW, 14);
+    expect(paid.kind === "ignored" || (paid.kind === "apply" && paid.activatePlanId !== "plan_newer")).toBe(true);
+    const d = apply(startedAgain, snap({ planId: PLAN }));
+    expect(d.activatePlanId).toBe(PLAN);
+    expect(d.next).toMatchObject({ status: "ACTIVE", currentPlanId: PLAN, pendingPlanId: null });
+    expect(d.entries.join(" ")).toContain("earlier checkout");
+
+    // The same when the subscription is first seen already failing.
+    const failing = apply(startedAgain, snap({ status: "past_due", latestInvoicePaid: false, planId: PLAN }));
+    expect(failing.activatePlanId).toBe(PLAN);
+    expect(failing.next).toMatchObject({ status: "PAST_DUE", currentPlanId: PLAN, pendingPlanId: null });
+  });
+
+  it("a paid subscription not marked with one of this clinic's plans starts nothing and asks for a look", () => {
+    const waitingOnSub = facts({ status: "INCOMPLETE", stripeSubscriptionId: SUB, pendingPlanId: PLAN });
+    for (const paid of [snap({ planId: null }), snap({ status: "past_due", latestInvoicePaid: false, planId: null }), snap({ status: "unpaid", latestInvoicePaid: false, planId: null })]) {
+      const d = decideBilling(waitingOnSub, paid, NOW, 14);
+      expect(d).toMatchObject({ kind: "ignored", needsLook: true });
+    }
+  });
+
   it("a checkout that expires unpaid goes back to no subscription and frees the waiting plan", () => {
     const started = apply(waiting, snap({ status: "incomplete", latestInvoicePaid: false })).next;
     const expired = apply(started, snap({ status: "incomplete_expired", latestInvoicePaid: false }));
@@ -423,7 +449,8 @@ describe("decideBilling: plan changes on a subscription that is already live", (
 
   it("a FIRST payment is never read as a plan change, and a waiting first checkout is not disturbed by these rules", () => {
     const waitingFirst = facts({ status: "INCOMPLETE", stripeSubscriptionId: SUB, pendingPlanId: P1 });
-    const first = apply(waitingFirst, snap());
+    // The subscription carries the plan it was bought for, P1: a first payment starts that plan.
+    const first = apply(waitingFirst, snap({ planId: P1 }));
     expect(first).toMatchObject({ activatePlanId: P1, planChanged: false });
     expect(first.next).toMatchObject({ currentPlanId: P1, pendingPlanId: null, scheduledPlanId: null });
 

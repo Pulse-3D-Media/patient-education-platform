@@ -2,7 +2,9 @@ import type { Category } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
   REVIEW_MINUTES,
+  billingPortalAllowed,
   classifyPlanChange,
+  invoicePaymentAllowed,
   planChangeBlock,
   readChangeConfirm,
   readChangeRequest,
@@ -158,5 +160,20 @@ describe("reviewMomentIsUsable", () => {
     expect(reviewMomentIsUsable(minutes(5), now, periodStart)).toBe(false);
     expect(reviewMomentIsUsable(minutes(-5), now, minutes(-1))).toBe(false);
     expect(reviewMomentIsUsable(new Date(Number.NaN), now, periodStart)).toBe(false);
+  });
+});
+
+describe("Stripe's own pages: when the Billing page offers them, which the server asks again", () => {
+  it("Stripe's billing page: once a clinic has paid by card (live or ended), never before a first payment is confirmed", () => {
+    expect((["NONE", "INCOMPLETE", "ACTIVE", "PAST_DUE", "CANCELED"] as const).filter(billingPortalAllowed)).toEqual(["ACTIVE", "PAST_DUE", "CANCELED"]);
+  });
+
+  it("paying an invoice from Billing: a missed renewal, or an upgrade waiting for its payment, and never a first payment", () => {
+    expect(invoicePaymentAllowed({ status: "PAST_DUE", pendingPlanId: null })).toBe(true);
+    expect(invoicePaymentAllowed({ status: "ACTIVE", pendingPlanId: "plan_upgrade" })).toBe(true);
+    expect(invoicePaymentAllowed({ status: "ACTIVE", pendingPlanId: null })).toBe(false);
+    for (const status of ["NONE", "INCOMPLETE", "CANCELED"] as const) {
+      expect(invoicePaymentAllowed({ status, pendingPlanId: "plan_first_checkout" })).toBe(false);
+    }
   });
 });

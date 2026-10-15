@@ -174,7 +174,12 @@ export type SubscriptionSnapshot = {
   currentPeriodEnd: Date | null;
   /** When a scheduled cancellation takes effect, or null when none is scheduled. */
   cancelAt: Date | null;
-  /** metadata.billingPlanId, which checkout puts on the subscription itself. */
+  /**
+   * metadata.billingPlanId, which checkout puts on the subscription itself:
+   * the plan this subscription was bought for, and so the plan its first
+   * payment starts. reconcileSubscription blanks it unless it is one of the
+   * clinic's own accepted plans.
+   */
   planId: string | null;
   /**
    * The three facts a PLAN CHANGE is read from. Each is the id of an accepted
@@ -327,14 +332,13 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
         entries.push("Payment recovered. The subscription is active again.");
         break;
       }
-      // First confirmed payment of this subscription.
+      // First confirmed payment of this subscription. What starts is the plan
+      // this subscription was bought for, never one that is only waiting.
+      const paidFor = startPaidForPlan(base, snap, next, entries);
+      if (!paidFor) return notMarkedWithAPlan();
+      activatePlanId = paidFor;
       next.status = "ACTIVE";
-      if (base.pendingPlanId) {
-        activatePlanId = base.pendingPlanId;
-        next.currentPlanId = base.pendingPlanId;
-        next.pendingPlanId = null;
-      }
-      entries.push("First payment confirmed. The subscription is active.");
+      entries.unshift("First payment confirmed. The subscription is active.");
       break;
     }
 
@@ -343,13 +347,12 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
       if (base.status === "PAST_DUE") break; // grace started once; a repeated failure never moves it
       if (base.status !== "ACTIVE") {
         // First seen already failing (we were never told it was active). It
-        // must have been paid once to get here, so the plan takes effect,
-        // and grace starts now, the first time the failure is recorded.
-        if (base.pendingPlanId) {
-          activatePlanId = base.pendingPlanId;
-          next.currentPlanId = base.pendingPlanId;
-          next.pendingPlanId = null;
-        }
+        // must have been paid once to get here, so the plan it was bought for
+        // takes effect, and grace starts now, the first time the failure is
+        // recorded.
+        const paidFor = startPaidForPlan(base, snap, next, entries);
+        if (!paidFor) return notMarkedWithAPlan();
+        activatePlanId = paidFor;
       }
       next.status = "PAST_DUE";
       next.paymentFailedAt = now;
@@ -451,6 +454,47 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
 }
 
 /**
+ * A subscription's first payment: make the plan it was BOUGHT FOR the plan
+ * in force, and return its id, or null when it carries no plan of this
+ * clinic's (then nothing is started; see notMarkedWithAPlan).
+ *
+ * The plan comes from the subscription itself (`snap.planId`, the accepted
+ * plan's id that checkout puts on the subscription's own metadata), never
+ * from which plan the record happens to be waiting on. The two can differ:
+ * an admin may have started a second checkout for a different plan while
+ * the first payment was still unconfirmed, and if the FIRST subscription is
+ * then paid, starting the waiting plan would give the clinic a plan nobody
+ * paid for while Stripe keeps charging for the first one (found by the
+ * security audit of 2026-10-08). Checkout now refuses a second attempt while
+ * a first payment is under way, but this rule stands on its own.
+ *
+ * reconcileSubscription (lib/db/billing.ts) has already blanked `planId`
+ * unless it is one of THIS clinic's accepted plans, so an id here is ours.
+ * The waiting plan is dropped either way: it was not paid for, and on a live
+ * subscription "waiting" means an upgrade waiting for its payment.
+ */
+function startPaidForPlan(base: BillingFacts, snap: SubscriptionSnapshot, next: BillingFacts, entries: string[]): string | null {
+  const paidFor = snap.planId;
+  if (!paidFor) return null;
+  next.currentPlanId = paidFor;
+  next.pendingPlanId = null;
+  if (base.pendingPlanId && base.pendingPlanId !== paidFor) {
+    entries.push("The payment was for an earlier checkout, not the one started last, so the plan from that earlier checkout is the one that started. The later checkout was never paid for.");
+  }
+  return paidFor;
+}
+
+/** A subscription that has been paid for, but is not marked with one of this clinic's accepted plans. Nothing is guessed. */
+function notMarkedWithAPlan(): BillingDecision {
+  return {
+    kind: "ignored",
+    reason:
+      "Stripe says this subscription has been paid for, but it is not marked with one of this clinic's accepted plans, so no plan was started and nothing was changed. Check the subscription in Stripe.",
+    needsLook: true,
+  };
+}
+
+/**
  * Which plan is still waiting for a first payment once a subscription that
  * was never paid has died (it expired, or was cancelled before paying).
  *
@@ -496,6 +540,18 @@ export function sameBillingFacts(a: BillingFacts, b: BillingFacts): boolean {
 export function hasLiveSubscription(status: BillingStatus): boolean {
   return status === "ACTIVE" || status === "PAST_DUE" || status === "INCOMPLETE";
 }
+
+/**
+ * What an admin is told when a new checkout is refused because a first
+ * payment is still under way in Stripe (the record says INCOMPLETE, or Stripe
+ * has a subscription for the clinic that has neither started nor died). A
+ * new plan waits until that payment settles or Stripe drops it: a second
+ * checkout meanwhile could be paid alongside the first. Both the checkout
+ * flow (lib/checkout.ts) and the attempt writer (acceptPlanForCheckout, under
+ * the clinic's row lock) refuse with these words.
+ */
+export const FIRST_PAYMENT_UNDER_WAY =
+  "A payment for your clinic is still under way with Stripe, so a new checkout was not started. If you paid by bank account it can take a few days to clear. If it is never completed, Stripe drops it within about a day, and you can choose a plan again then.";
 
 // ---------------------------------------------------------------------------
 // Who may pay by card

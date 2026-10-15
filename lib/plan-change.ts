@@ -121,6 +121,33 @@ export function planChangeBlock(facts: ChangeBlockFacts): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Stripe's own pages: when they are offered
+// ---------------------------------------------------------------------------
+
+/**
+ * May Stripe's billing page (card, invoices, cancelling) be opened for a
+ * clinic with this billing status? Once it has paid by card: while the
+ * subscription is live, and after it has ended (its invoices are still
+ * there). Not before a first payment has been confirmed. The page draws the
+ * button from this, and openBillingPortal (lib/plan-changes.ts) asks it again
+ * on the server, so a hidden button is never the only thing in the way.
+ */
+export function billingPortalAllowed(status: BillingStatus): boolean {
+  return status === "ACTIVE" || status === "PAST_DUE" || status === "CANCELED";
+}
+
+/**
+ * May an unpaid invoice be paid from the Billing page? Only the two that page
+ * offers: a renewal that failed (PAST_DUE), and an upgrade on a paid-up
+ * subscription that is waiting for its payment. Never a first payment: that
+ * is paid on the checkout page, and a new plan waits while one is under way.
+ * findInvoiceToPay (lib/plan-changes.ts) asks this on the server.
+ */
+export function invoicePaymentAllowed(facts: { status: BillingStatus; pendingPlanId: string | null }): boolean {
+  return facts.status === "PAST_DUE" || (facts.status === "ACTIVE" && facts.pendingPlanId !== null);
+}
+
+// ---------------------------------------------------------------------------
 // What the forms send
 // ---------------------------------------------------------------------------
 

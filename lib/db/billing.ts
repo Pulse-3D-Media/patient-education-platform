@@ -1,5 +1,6 @@
 import { Prisma, type BillingEventStatus, type BillingInterval, type Category, type ClinicStatus } from "@prisma/client";
 import {
+  FIRST_PAYMENT_UNDER_WAY,
   NO_BILLING,
   SELF_SERVE_REFUSALS,
   decideBilling,
@@ -208,6 +209,7 @@ export async function recordAcceptedPlan(clinicId: string, input: AcceptedPlanIn
     if (facts.status === "ACTIVE" || facts.status === "PAST_DUE") {
       throw new BillingRefusedError("This clinic already has a subscription. A plan that is being paid for is changed on the Billing page, not replaced.");
     }
+    if (facts.status === "INCOMPLETE") throw new BillingRefusedError(FIRST_PAYMENT_UNDER_WAY);
     await refuseFewerSeatsThanInUse(tx, clinicId, input.surgeonSeats);
     const plan = await tx.billingPlan.create({ data: { clinicId, ...input }, select: { id: true } });
     await tx.clinicBilling.upsert({
@@ -289,8 +291,9 @@ export type PurchaseAttempt = {
  *
  * Everything that could have changed since the page was drawn is checked
  * again here, under the lock: who may pay by card (a clinic marked managed
- * or paused by Pulse a second ago is refused), and whether a subscription
- * has started in the meantime.
+ * or paused by Pulse a second ago is refused), whether a subscription has
+ * started in the meantime, and whether a first payment is still under way
+ * (INCOMPLETE): a second attempt then could be paid alongside the first.
  *
  * The Stripe customer must already be on file (setStripeCustomer). That
  * order is what lets a notification about the purchase find its clinic.
@@ -314,6 +317,9 @@ export async function acceptPlanForCheckout(
     if (facts.status === "ACTIVE" || facts.status === "PAST_DUE") {
       throw new BillingRefusedError("Your clinic already has a subscription, so a second one was not started.");
     }
+    // A first payment still under way: no second attempt until it settles or
+    // Stripe drops it, or both could end up paid (see FIRST_PAYMENT_UNDER_WAY).
+    if (facts.status === "INCOMPLETE") throw new BillingRefusedError(FIRST_PAYMENT_UNDER_WAY);
     if (!facts.stripeCustomerId) throw new BillingRefusedError("The clinic has no Stripe customer yet, so checkout cannot start.");
     await refuseFewerSeatsThanInUse(tx, clinicId, input.surgeonSeats);
 
@@ -649,14 +655,22 @@ export async function reconcileSubscription(args: {
     // wrote on its own Stripe prices. Any that is not one of THIS clinic's
     // accepted plans is not acted on: it can only come from a price changed
     // by hand in Stripe, and a person is asked to look.
-    const named = [snap.itemPlanId, snap.pendingPlanId, snap.scheduledPlanId].filter((id): id is string => typeof id === "string" && id.length > 0);
+    //
+    // The same goes for the plan the subscription was BOUGHT for (its
+    // metadata, `planId`), which is what a first payment starts: one that is
+    // not this clinic's is blanked, and decideBilling then starts nothing and
+    // asks for a look rather than guessing (lib/billing-state.ts).
+    const isId = (id: string | null | undefined): id is string => typeof id === "string" && id.length > 0;
+    const named = [snap.itemPlanId, snap.pendingPlanId, snap.scheduledPlanId].filter(isId);
+    const asked = isId(snap.planId) ? [...named, snap.planId] : named;
     const known = new Set(
-      named.length > 0 ? (await tx.billingPlan.findMany({ where: { id: { in: named }, clinicId }, select: { id: true } })).map((plan) => plan.id) : [],
+      asked.length > 0 ? (await tx.billingPlan.findMany({ where: { id: { in: asked }, clinicId }, select: { id: true } })).map((plan) => plan.id) : [],
     );
     const ours = (id: string | null | undefined) => (id && known.has(id) ? id : null);
     const strangePlan = named.some((id) => !known.has(id));
     const checked: SubscriptionSnapshot = {
       ...snap,
+      planId: ours(snap.planId),
       itemPlanId: ours(snap.itemPlanId),
       pendingPlanId: ours(snap.pendingPlanId),
       scheduledPlanId: ours(snap.scheduledPlanId),

@@ -76,7 +76,7 @@ export async function startCheckoutAction(_previous: CheckoutFormState, formData
       selection: read.selection,
       actor: { id: userId ?? "unknown", name },
       origin,
-      deps: { gateway: stripeGateway, isOpen: checkoutIsOpen() },
+      deps: { gateway: stripeGateway, fetchSubscription: fetchSubscriptionSnapshot, isOpen: checkoutIsOpen() },
     });
 
     if (result.kind === "redirect") return { redirectTo: result.url };

@@ -159,6 +159,12 @@ describe("acceptPlanForCheckout", () => {
     await expect(acceptPlanForCheckout(subscribed, planInput())).rejects.toThrow(/already has a subscription/);
     await prisma.clinicBilling.update({ where: { clinicId: subscribed }, data: { status: "PAST_DUE" } });
     await expect(acceptPlanForCheckout(subscribed, planInput())).rejects.toThrow(/already has a subscription/);
+    // A first payment still under way: no second attempt until it settles or Stripe drops it.
+    const before = await countPlans(subscribed);
+    await prisma.clinicBilling.update({ where: { clinicId: subscribed }, data: { status: "INCOMPLETE" } });
+    await expect(acceptPlanForCheckout(subscribed, planInput())).rejects.toThrow(/still under way/);
+    await expect(acceptPlanForCheckout(subscribed, planInput(), { forceNew: true })).rejects.toThrow(/still under way/);
+    expect(await countPlans(subscribed)).toBe(before);
 
     const noCustomer = await makeClinic("no customer", { customer: false });
     await expect(acceptPlanForCheckout(noCustomer, planInput())).rejects.toThrow(/no Stripe customer/);

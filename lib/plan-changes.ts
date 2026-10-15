@@ -19,7 +19,9 @@ import {
   PLAN_CHANGES_CLOSED_MESSAGE,
   RENEWAL_REASON_WORDS,
   SAME_PLAN_MESSAGE,
+  billingPortalAllowed,
   classifyPlanChange,
+  invoicePaymentAllowed,
   planChangeBlock,
   reviewMomentIsUsable,
   type ChangeRequest,
@@ -450,7 +452,8 @@ export async function openBillingPortal(args: { clinicId: string; origin: string
   if (!clinic) return { ok: false, message: NOT_FOUND };
   if (clinic.managedByPulse) return { ok: false, message: "Your plan is managed by Pulse 3D and invoiced by agreement, so there is no card or invoice to manage here." };
   const { stripeCustomerId: customerId, stripeSubscriptionId: subscriptionId, status } = clinic.facts;
-  if (!customerId) return { ok: false, message: "Your clinic has not paid by card here, so there is nothing to manage yet." };
+  // The same rule the page draws the button from: not before a first payment has been confirmed.
+  if (!customerId || !billingPortalAllowed(status)) return { ok: false, message: "Your clinic has not paid by card here yet, so there is nothing to manage." };
 
   // Stripe will not let a subscription be cancelled while a schedule is
   // attached to it. A schedule whose change has already happened has nothing
@@ -477,7 +480,8 @@ export async function findInvoiceToPay(args: { clinicId: string; deps: PlanChang
   if (!clinic) return { ok: false, message: NOT_FOUND };
   if (clinic.managedByPulse) return { ok: false, message: "Your plan is managed by Pulse 3D, so there is nothing to pay here." };
   const { stripeCustomerId: customerId, stripeSubscriptionId: subscriptionId } = clinic.facts;
-  if (!customerId || !subscriptionId) return { ok: false, message: "Nothing is waiting to be paid." };
+  // Only where the page offers it (a missed renewal, an upgrade waiting for its payment); never a first payment.
+  if (!customerId || !subscriptionId || !invoicePaymentAllowed(clinic.facts)) return { ok: false, message: "Nothing is waiting to be paid." };
 
   const state = await deps.gateway.getState(subscriptionId);
   const url = state && state.customerId === customerId ? state.openInvoice?.payUrl : null;

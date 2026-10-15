@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
-import { parseLogoUrl } from "@/lib/branding";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
@@ -9,7 +8,6 @@ import { listFavoriteIdsAmong } from "@/lib/db/personal-videos";
 import { getSeatFor } from "@/lib/db/seats";
 import { searchUsableVideos } from "@/lib/db/videos";
 import { SEARCH_LIMIT, readSearchQuery } from "@/lib/library-rows";
-import { libraryStripName } from "@/lib/sender-name";
 import { VideoGrid } from "../[category]/VideoGrid";
 import { CategoryTabs } from "../CategoryTabs";
 import { toLibraryItems } from "../items";
@@ -18,7 +16,7 @@ import { LibraryBrowser } from "../LibraryBrowser";
 /**
  * What the search box in the top bar finds: every video this clinic may
  * use whose title contains the words typed, across all the categories on
- * its plan, as the same cards a category's page shows (play, heart, send).
+ * its plan, as the same cards a category's page shows (watch, heart, send).
  *
  * The words come from the address (?q=...) and are only ever a search: the
  * list is read through the access rule in the query
@@ -57,9 +55,6 @@ export default async function SearchPage({ searchParams }: PageProps<"/library/s
             heartedIds={heartedIds}
             // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
             canSend={seat !== null}
-            clinicName={clinic.name}
-            logoUrl={parseLogoUrl(clinic.logoUrl)}
-            senderName={libraryStripName(seat, clinic.defaultPatientName)}
           >
             <VideoGrid videos={items} />
           </LibraryBrowser>

@@ -101,8 +101,18 @@ export function SendPanel({
   );
 }
 
+/**
+ * What a new link will do, in one line for the surgeon: the same numbers
+ * createShare copied onto it. Shared with the "Show QR on screen" panel.
+ */
+export function linkTermsSentence(daysAfterFirstPlay: number, unclaimedUntil: string): string {
+  // With the year, because a link made in the autumn runs into the next one.
+  const until = new Date(unclaimedUntil).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return `Once the patient plays it, it works for ${daysAfterFirstPlay} ${daysAfterFirstPlay === 1 ? "day" : "days"}. If nobody plays it, it stops on ${until}.`;
+}
+
 /** Shown while the server is making the link: usually well under a second. */
-function Creating() {
+export function Creating() {
   return (
     <div className="mt-8 flex flex-col items-center gap-4 py-10" role="status" aria-live="polite">
       <span
@@ -131,9 +141,6 @@ function Ready({
   /** Make the link again, after the surgeon has changed their name. */
   onRemake: () => void;
 }) {
-  // With the year, because a link made in the autumn runs into the next one.
-  const until = new Date(unclaimedUntil).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-
   return (
     <div className="mt-6 flex flex-col items-center gap-6 sm:flex-row sm:items-start">
       {/* White box behind the QR code: phone cameras read dark modules on white best. */}
@@ -160,9 +167,7 @@ function Ready({
         </div>
 
         {/* The same numbers createShare copied onto this link, so this says what the link will actually do. */}
-        <p className="mt-5 text-sm text-ink-muted">
-          Once the patient plays it, it works for {daysAfterFirstPlay} {daysAfterFirstPlay === 1 ? "day" : "days"}. If nobody plays it, it stops on {until}.
-        </p>
+        <p className="mt-5 text-sm text-ink-muted">{linkTermsSentence(daysAfterFirstPlay, unclaimedUntil)}</p>
 
         <SentAs senderName={senderName} onRemake={onRemake} />
       </div>
@@ -238,7 +243,7 @@ function SentAs({ senderName, onRemake }: { senderName: string | null; onRemake:
 }
 
 /** The server could not make the link. Plain message, one button. */
-function Failed({ error, onRetry }: { error: string; onRetry: () => void }) {
+export function Failed({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <div className="mt-8 py-6 text-center" role="alert">
       <p className="text-lg text-problem">{error}</p>

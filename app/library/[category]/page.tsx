@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { categoryState } from "@/lib/access";
 import { addToPlanOffer } from "@/lib/add-to-plan";
-import { parseLogoUrl } from "@/lib/branding";
 import { categoryFromSlug } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -12,7 +11,6 @@ import { getCategoryConfigs } from "@/lib/db/category-config";
 import { listFavoriteIdsAmong } from "@/lib/db/personal-videos";
 import { getSeatFor } from "@/lib/db/seats";
 import { countPublishedVideosByKind, listUsableVideosInCategory } from "@/lib/db/videos";
-import { libraryStripName } from "@/lib/sender-name";
 import { CategoryTabs } from "../CategoryTabs";
 import { EmptyCategory, LockedCategory } from "../CategoryStates";
 import { ComingSoon } from "../ComingSoon";
@@ -23,7 +21,7 @@ import { VideoGrid } from "./VideoGrid";
 /**
  * One category: the videos this clinic may use in it, as cards, under the
  * same category tabs as the library home with this one lit. Tapping a card
- * plays it; its heart makes it one of the person's favorites.
+ * opens its watch page; its heart makes it one of the person's favorites.
  *
  * The list comes from listUsableVideosInCategory(), which applies the
  * clinic's plan and placeholder setting in the query itself, so a video
@@ -92,11 +90,6 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
             heartedIds={heartedIds}
             // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
             canSend={seat !== null}
-            clinicName={clinic.name}
-            logoUrl={parseLogoUrl(clinic.logoUrl)}
-            // The player shows the name patients would see on this person's links: only someone holding a seat
-            // sends links, so only they get a name there (the one chosen for them, else "Dr. First Last" from Clerk).
-            senderName={libraryStripName(seat, clinic.defaultPatientName)}
           >
             <VideoGrid videos={items} />
           </LibraryBrowser>

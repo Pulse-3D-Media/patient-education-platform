@@ -1,18 +1,21 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { HeartIcon, PlayIcon, ShareIcon } from "@/components/ui/icons";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { formatDuration } from "@/lib/format";
+import { watchPageHref } from "@/lib/library-rows";
 import { useLibrary } from "./LibraryBrowser";
 import type { LibraryItem } from "./library-item";
 
 /**
  * One procedure card, in a row on the library home or in a category's grid.
  *
- * Three actions, each one tap and each at least 44px: the picture plays the
- * video, the heart makes it one of the person's favorites (or not), and the
- * send icon makes a patient link (only for someone holding a seat). Nothing
+ * Three actions, each one tap and each at least 44px: the picture opens the
+ * video's watch page (/library/watch/<id>, where it waits, paused, for a
+ * Play tap), the heart makes it one of the person's favorites (or not), and
+ * the send icon makes a patient link (only for someone holding a seat). Nothing
  * happens on hover but a slight lift: no previews, no autoplay (the speed
  * rule).
  *
@@ -38,11 +41,12 @@ export function VideoCard({ video, size }: { video: LibraryItem; size: "hero" | 
 
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-surface transition hover:-translate-y-0.5 hover:border-brand/70 hover:shadow-lift">
-      {/* The picture is itself a Play button, so the big circle in the middle does what it looks like. */}
-      <button
-        type="button"
-        onClick={() => library.play(video)}
-        aria-label={video.isPlaceholder ? `Play ${video.title} (placeholder animation)` : `Play ${video.title}`}
+      {/* The picture opens the watch page. Not prefetched: a page of cards must stay light, and a watch page is only
+          read when someone taps. */}
+      <Link
+        href={watchPageHref(video.id)}
+        prefetch={false}
+        aria-label={video.isPlaceholder ? `Watch ${video.title} (placeholder animation)` : `Watch ${video.title}`}
         className="group relative block aspect-video w-full overflow-hidden bg-well active:scale-[0.985]"
       >
         <Thumbnail video={video} />
@@ -59,7 +63,7 @@ export function VideoCard({ video, size }: { video: LibraryItem; size: "hero" | 
           <span className="absolute bottom-2.5 right-2.5 rounded-md bg-black/70 px-2 py-0.5 text-sm font-medium text-white">{formatDuration(video.durationSeconds)}</span>
         )}
         {video.isPlaceholder && <span className={`absolute left-2.5 top-2.5 ${PLACEHOLDER_BADGE} shadow-[0_2px_10px_rgba(0,0,0,.5)]`}>Placeholder</span>}
-      </button>
+      </Link>
 
       {/* The title on the left; the heart and, for someone holding a seat, the send icon on the right. */}
       <div className={`flex flex-1 items-center justify-between gap-2 ${size === "grid" ? "px-5 py-4" : "py-2.5 pl-4 pr-2"}`}>
@@ -95,7 +99,7 @@ export function VideoCard({ video, size }: { video: LibraryItem; size: "hero" | 
 }
 
 /** The card's picture: a still, the video's own frame once the card is near the screen, or the branded panel. */
-function Thumbnail({ video }: { video: LibraryItem }) {
+export function Thumbnail({ video }: { video: LibraryItem }) {
   const [failed, setFailed] = useState(false);
   const still = video.posterUrl ?? (video.source.kind === "stream" ? video.source.poster : null);
 

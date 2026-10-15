@@ -115,6 +115,33 @@ export async function listUsableVideosInCategory(access: ClinicAccess, category:
 }
 
 /**
+ * One video, for the library's watch page (/library/watch/<id>), but only
+ * when this clinic may use it right now: the same rule as every list here,
+ * in the query. Null for a video it may not use (off the plan, unpublished,
+ * a hidden placeholder, unknown) and for a clinic that is not open, so the
+ * page cannot tell those apart and shows the same not-found page for all.
+ */
+export async function getUsableVideo(access: ClinicAccess, videoId: string) {
+  if (!access.open || access.categories.length === 0) return null;
+  return prisma.video.findFirst({ where: { ...usableClause(access), id: videoId } });
+}
+
+/**
+ * The watch page's "More in <category>" list: the other videos in the same
+ * category this clinic may use, newest first like the category page, without
+ * the one being watched, at most `limit`. Empty, without a query, when the
+ * clinic is not open or the category is not on its plan.
+ */
+export async function listMoreInCategory(access: ClinicAccess, category: Category, exceptVideoId: string, limit: number) {
+  if (!access.open || !access.categories.includes(category)) return [];
+  return prisma.video.findMany({
+    where: { ...usableClause(access), category, id: { not: exceptVideoId } },
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    take: limit,
+  });
+}
+
+/**
  * The search box in the library's top bar: the videos this clinic may use
  * whose title contains the words asked for, ignoring capitals, in the order
  * lib/categories lists the categories and then by title. Bounded by `limit`.

@@ -4,7 +4,6 @@ import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { ChevronRightIcon, LockIcon } from "@/components/ui/icons";
 import { categoryState } from "@/lib/access";
 import { addToPlanHref, addToPlanOffer } from "@/lib/add-to-plan";
-import { parseLogoUrl } from "@/lib/branding";
 import { CATEGORIES, comingSoonSentence } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -14,7 +13,6 @@ import { listFavoriteIdsAmong, listFavoriteVideos, listMostWatchedVideos } from 
 import { getSeatFor } from "@/lib/db/seats";
 import { countPublishedVideosByKind, listUsableVideosInCategory } from "@/lib/db/videos";
 import { CATEGORY_ROW_LIMIT, showMostWatched } from "@/lib/library-rows";
-import { libraryStripName } from "@/lib/sender-name";
 import { ONLY_PLACEHOLDERS } from "./CategoryStates";
 import { CategoryTabs } from "./CategoryTabs";
 import { toLibraryItems } from "./items";
@@ -46,8 +44,9 @@ import { FavoritesRow, VideoRow } from "./VideoRow";
  * leaves the server for a video the clinic may not use. Favorites and plays
  * are this person's own; no number about them is shown.
  *
- * Tap a card to play it there and then (one tap from opening the library);
- * the player, the Send panel and the hearts are LibraryBrowser's.
+ * Tap a card to open its watch page (/library/watch/<id>), where the video
+ * waits, paused, for a Play tap; the Send panel and the hearts are
+ * LibraryBrowser's.
  *
  * Reads, all at once and each bounded: the clinic's access, the published
  * counts, the category sentences, this person's seat, their favorites and
@@ -116,10 +115,6 @@ export default async function LibraryPage() {
             favorites={toLibraryItems(favorites, now)}
             heartedIds={heartedIds}
             canSend={seat !== null}
-            clinicName={clinic.name}
-            logoUrl={parseLogoUrl(clinic.logoUrl)}
-            // The player shows the name patients would see on this person's links, only when they hold a seat.
-            senderName={libraryStripName(seat, clinic.defaultPatientName)}
           >
             <div className="flex flex-col gap-9">
               {/* First on the page: Home in the sidebar is where favorites are. */}

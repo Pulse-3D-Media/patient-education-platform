@@ -216,7 +216,7 @@ export function ChevronLeftIcon({ className }: IconProps) {
   );
 }
 
-/** A heart: the favorite button on a library card and in the library player. Filled once the video is a favorite. */
+/** A heart: the favorite button on a library card and on the watch page. Filled once the video is a favorite. */
 export function HeartIcon({ className, filled = false }: IconProps & { filled?: boolean }) {
   return (
     <svg viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
@@ -234,11 +234,23 @@ export function MenuIcon({ className }: IconProps) {
   );
 }
 
-/** An arrow pointing left: closes the search box on a phone. */
+/** An arrow pointing left: closes the search box on a phone, and takes the library's watch page back to where the surgeon came from. */
 export function ArrowLeftIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
       <path d="M19 12H5M11 6l-6 6 6 6" />
+    </svg>
+  );
+}
+
+/** A QR code, drawn as its three corner squares and a few dots: "Show QR on screen" on the library's watch page. */
+export function QrIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="3.5" y="3.5" width="6" height="6" rx="1" />
+      <rect x="14.5" y="3.5" width="6" height="6" rx="1" />
+      <rect x="3.5" y="14.5" width="6" height="6" rx="1" />
+      <path d="M14.5 14.5h2.5v2.5M20.5 14.5v.01M14.5 20.5h.01M17.5 20.5h3v-3" />
     </svg>
   );
 }

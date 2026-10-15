@@ -6,8 +6,8 @@ import { VideoCard } from "../VideoCard";
 
 /**
  * A grid of procedure cards: a category's page, and the search results.
- * Each card plays, hearts and (for someone holding a seat) sends with one
- * tap; the player, the Send panel and the hearts belong to the
+ * Each card opens its watch page, hearts and (for someone holding a seat)
+ * sends with one tap; the Send panel and the hearts belong to the
  * LibraryBrowser the page puts this in (app/library/LibraryBrowser.tsx),
  * the same one the library home uses, so a card behaves the same
  * everywhere. Searching is the box in the top bar (AppShell), which searches

@@ -30,7 +30,7 @@ import LibraryPage from "./page";
  * fix themselves is a published Hip video, so Hip is certainly locked for
  * a Knee-only clinic.
  *
- * Tapping (play, send) needs a signed-in browser and is checked on the preview.
+ * Tapping (watch, heart, send) needs a signed-in browser and is checked on the preview.
  */
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -349,7 +349,7 @@ describe("a category's own page", () => {
     signInAs(orgHipAll, "Vitest library clinic (hip)");
     const noSeat = await renderCategory("hip");
     expect(noSeat).toContain(hipTitle);
-    expect(noSeat).toContain(`Play ${hipTitle}`);
+    expect(noSeat).toContain(`Watch ${hipTitle}`);
     expect(noSeat).not.toContain(`Send ${hipTitle} to a patient`);
     expect(noSeat).toContain("Sending one to a patient needs a surgeon seat");
 
@@ -534,7 +534,7 @@ describe("the library home's rows", () => {
   it("each category on the plan is a row of at most five cards, newest first, with View category", async () => {
     const html = await renderHome();
     const knee = section(html, 'id="row-knee"');
-    const plays = [...knee.matchAll(/aria-label="Play [^"]+"/g)];
+    const plays = [...knee.matchAll(/aria-label="Watch [^"]+"/g)];
     expect(plays.length).toBeGreaterThan(0);
     expect(plays.length).toBeLessThanOrEqual(5);
     expect(knee).toContain('aria-label="View Knee"');

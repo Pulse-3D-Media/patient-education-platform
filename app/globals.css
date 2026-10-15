@@ -207,16 +207,14 @@ body {
  *                        width and height). Only on a box whose size comes
  *                        from outside, never from what is in it.
  *   .picture-fit         a box over exactly the picture. The strip sits at
- *                        its top edge.
- *   .below-picture-top   for something that has to start under the strip
- *                        (the library player's title row): the top of the
- *                        picture plus the strip's 32px.
+ *                        its top edge (and, in the library player, the
+ *                        title row just under the strip, in the same box).
  *
  * A browser that cannot measure a box (older than iOS 16) keeps the plain
- * rules: the picture box is the whole video box, and the title row keeps its
- * own top-8, so the strip is at the top of the video's box and nothing
- * collides. These rules are outside Tailwind's layers on purpose, so where
- * they apply they win over a utility class.
+ * rules: the picture box is the whole video box, so the strip is at the top
+ * of the video's box and nothing collides. These rules are outside
+ * Tailwind's layers on purpose, so where they apply they win over a utility
+ * class.
  */
 .picture-fit {
   position: absolute;
@@ -236,8 +234,166 @@ body {
     height: min(100cqh, 100cqw / var(--picture-ratio, 1.7778));
     translate: -50% -50%;
   }
+}
 
-  .below-picture-top {
-    top: calc((100cqh - min(100cqh, 100cqw / var(--picture-ratio, 1.7778))) / 2 + 2rem);
+/*
+ * THE STRIP ON THE VIDEO (ClinicMark): the clinic's logo and the doctor's
+ * name over the top of the picture. Why it looks this way is at the top of
+ * components/ui/ClinicMark.tsx; this is how.
+ *
+ *   .video-strip         the whole strip. A soft wash, not a solid bar:
+ *                        black at --strip-alpha + 0.1 at the very top,
+ *                        --strip-alpha (VIDEO_STRIP_ALPHA, 0.5) down to the
+ *                        bottom of the words, then fading to nothing over
+ *                        the last 0.875rem, so there is no hard edge across
+ *                        the picture. White words with a soft shadow. It is
+ *                        a container, so everything inside is sized from
+ *                        the strip's own width (cqw: 1% of it), which is the
+ *                        picture's width.
+ *   .video-strip-row     narrow (a phone): the logo, with anything for the
+ *                        right end beside it (the full-screen button is an
+ *                        icon alone here, .video-strip-wide-only), then the doctor's name on a
+ *                        line of its own, as wide as the picture. From 44rem
+ *                        (704px) of picture (full screen, the library on a
+ *                        tablet or a computer): all three on one line, with
+ *                        a thin rule between the logo and the name.
+ *   .video-strip-sender  the doctor's name: 26px on a phone, growing with
+ *                        the picture to 32px, about twice the old 15px. A
+ *                        long name (data-long, over LONG_NAME characters) is
+ *                        a step smaller, 21px to 26px. Two lines at most,
+ *                        then "...".
+ *
+ * Each size is a plain number first, for a browser that cannot measure a
+ * box (older than iOS 16), and the one that grows only inside @supports
+ * below (written twice in one rule, the build's minifier keeps only the
+ * second, which such a browser cannot read).
+ */
+.video-strip {
+  container-type: inline-size;
+  padding-bottom: 0.875rem;
+  background: linear-gradient(
+    to bottom,
+    rgb(0 0 0 / calc(var(--strip-alpha, 0.5) + 0.1)) 0,
+    rgb(0 0 0 / var(--strip-alpha, 0.5)) calc(100% - 0.875rem),
+    rgb(0 0 0 / 0) 100%
+  );
+  color: #ffffff;
+  text-shadow:
+    0 1px 2px rgb(0 0 0 / 0.6),
+    0 0 10px rgb(0 0 0 / 0.35);
+}
+
+.video-strip-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "brand end"
+    "sender sender";
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.125rem;
+  padding: 0.375rem 0.75rem 0;
+}
+
+.video-strip-brand {
+  grid-area: brand;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.video-strip-end {
+  grid-area: end;
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: 0.5rem;
+  text-shadow: none;
+}
+
+/* The word beside the full-screen icon: only from 30rem (480px) of picture (the @container rule below). */
+.video-strip-wide-only {
+  display: none;
+}
+
+/* The logo's fixed box: four times as wide as it is tall. */
+.video-strip-logo {
+  height: 28px;
+  aspect-ratio: 4 / 1;
+}
+
+/* The clinic's name, where there is no logo (or until it loads): bold and at least 19px, so it counts as large text. */
+.video-strip-clinic {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.video-strip-sender {
+  grid-area: sender;
+  min-width: 0;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.12;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.video-strip-sender[data-long] {
+  font-size: 22px;
+}
+
+/* The sizes that grow with the picture: the logo, the clinic's name, the doctor's name, a long doctor's name. */
+@supports (width: 1cqw) {
+  .video-strip-logo {
+    height: clamp(24px, 0.75rem + 2.5cqw, 36px);
   }
+
+  .video-strip-clinic {
+    font-size: clamp(19px, 0.75rem + 2cqw, 24px);
+  }
+
+  .video-strip-sender {
+    font-size: clamp(26px, 1rem + 3cqw, 32px);
+  }
+
+  .video-strip-sender[data-long] {
+    font-size: clamp(21px, 0.75rem + 2.4cqw, 26px);
+  }
+}
+
+@container (min-width: 30rem) {
+  .video-strip-wide-only {
+    display: inline;
+  }
+}
+
+@container (min-width: 44rem) {
+  .video-strip-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "brand sender end";
+    column-gap: 1rem;
+    padding: 0.625rem 1rem 0;
+  }
+
+  .video-strip-sender {
+    border-left: 1px solid rgb(255 255 255 / 0.5);
+    padding-left: 1rem;
+  }
+}
+
+/*
+ * The patient player's full-screen button lives on the picture (in the
+ * strip, ClinicMark's `action`), because Chromium's own one has to stay off:
+ * it would show the video without the strip. controlsList="nofullscreen"
+ * already makes Chromium's one do nothing, but it still drew it, greyed
+ * out, next to ours. This takes it out of Chromium's bar altogether. Safari
+ * and Firefox ignore it (Safari's own button cannot be removed at all).
+ */
+.patient-video::-webkit-media-controls-fullscreen-button {
+  display: none;
 }

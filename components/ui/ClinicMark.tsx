@@ -4,19 +4,31 @@ import { ClinicLogo } from "./ClinicLogo";
 import { PLACEHOLDER_CHIP } from "./styles";
 
 /**
- * The strip on the video, like a TV "lower third" but along the top: one
- * thin band laid across the TOP EDGE OF THE PICTURE, with the clinic's logo
- * and the name of the doctor who sent it ("Dr. Jane Smith, DO"), in both players
- * (decided by Evan on 2026-10-02, after Van asked for the doctor and the
- * clinic on the video itself on the September 28 call). It replaced a small
- * white chip that sat in a strip of its own ABOVE the picture.
+ * The strip on the video, like a TV "lower third" but along the top: the
+ * clinic's logo and the name of the doctor who sent it ("Dr. Jane Smith,
+ * DO") laid across the TOP EDGE OF THE PICTURE, in both players (decided by
+ * Evan on 2026-10-02, after Van asked for the doctor and the clinic on the
+ * video itself on the September 28 call). It works like a watermark: it
+ * shows the clinic stands behind the video (kept at the 2026-10-08 huddle).
  *
- *   - The band is black at VIDEO_STRIP_ALPHA (0.6, lib/branding.ts): just
- *     dark enough that the white words read on a white frame (5.7:1), and
- *     see-through enough that the picture still shows under it. 32px tall
- *     (decided by Evan on 2026-10-05: a little thinner than the 40px strip
- *     that used to sit above the picture).
- *   - The logo sits straight on the band: no chip, box, border or shadow.
+ * HOW IT LOOKS (2026-10-08 huddle, built in the player-overlay PR):
+ *
+ *   - See-through, not a solid bar. Behind the words is a soft dark wash
+ *     that fades out under them (black at VIDEO_STRIP_ALPHA, 0.5, where the
+ *     words are, then nothing; lib/branding.ts), and the words carry a soft
+ *     shadow. Van asked for it to look transparent; the wash is the least
+ *     that keeps the words readable on a white frame (3.9:1, and the words
+ *     are all large text, whose floor is 3:1).
+ *   - The doctor's name is about twice the old 15px: 26px on a phone, up
+ *     to 32px on a tablet, a computer or in full screen (it grows with the
+ *     picture's width). A name longer than 28 characters is a step smaller,
+ *     so a 48-character name still fits in full on two lines on a phone;
+ *     anything longer ends in "...". The page always writes it in full.
+ *   - On a narrow picture (a phone) the logo is on one line and the name on
+ *     the line under it; on a wider one they share a line. The sizes and the
+ *     two layouts are CSS (.video-strip in app/globals.css), measured from
+ *     the strip's own width, so the server's HTML is already right.
+ *   - The logo sits straight on the wash: no chip, box, border or shadow.
  *     It keeps its fixed box and loads at low priority (ClinicLogo), so it
  *     never moves anything and never holds up the first frame. No logo, or
  *     one that does not load: the clinic's name in white in its place.
@@ -25,18 +37,29 @@ import { PLACEHOLDER_CHIP } from "./styles";
  *     (decided by Evan on 2026-10-05). No sender recorded: just the
  *     clinic.
  *   - The amber "Placeholder animation" chip, when the video is a sample,
- *     rides at the right end of the same band, so it stays in view for as
- *     long as the picture does.
+ *     rides at the right end, so it stays in view for as long as the picture
+ *     does.
+ *   - `action`: one of OUR controls that belongs on the picture's top edge
+ *     (the patient player's full-screen button) sits at the right end, in
+ *     the strip's own layout, so the strip is never on top of it and it is
+ *     the one thing here that takes a tap.
  *
- * It never takes a tap (pointer-events-none), so whatever is under it still
- * works, and it is never placed over one of our own controls. Screen readers
- * skip the logo and the name (both are already written on the page); the
- * placeholder chip is read.
+ * Apart from `action`, it never takes a tap (pointer-events-none), so
+ * whatever is under it still works. Screen readers skip the logo and the
+ * name (both are already written on the page); the placeholder chip and the
+ * action are read.
  *
- * WHAT IT CAN COVER. It sits over the top 32px of the picture, so an anatomy
- * label or a caption in that band of a frame is under it, dimmed. That was
- * accepted when it was decided; if a video turns out to put something that
- * matters up there, the strip is not moved without asking Evan.
+ * WHAT IT CAN COVER. The top of the picture: about the top third on a phone
+ * (the wash fades out over the last part of that), about a sixth on a tablet
+ * or in full screen. An anatomy label or a caption up there is under it,
+ * dimmed. Safari (iPhone, iPad, Mac) also draws its OWN buttons in the
+ * picture's top corners once the video has started (its full screen and
+ * picture-in-picture top left, its sound button top right); the strip lies
+ * over them. They still work through it, because it takes no taps, but
+ * they are harder to see. That is a layering fact: the browser draws its
+ * buttons as part of the video, and anything the page lays over the picture
+ * is on top of them. The strip is not moved off the picture without asking
+ * Evan.
  *
  * WHAT IT IS NOT: protection. It is drawn by the web page over the video,
  * not burned into the file. A screenshot or a screen recording still works,
@@ -45,10 +68,10 @@ import { PLACEHOLDER_CHIP } from "./styles";
  * (see the players for where that can still happen). It tells a patient who
  * sent this. It does not stop copying.
  *
- * WHY A DARK LOGO IS HARD TO SEE HERE. The band is dark, so a logo drawn for
- * a white page can disappear on it. The chip is not coming back; the
+ * WHY A DARK LOGO IS HARD TO SEE HERE. The wash is dark, so a logo drawn
+ * for a white page can disappear on it. The chip is not coming back; the
  * Branding form says a white or light version of the logo works best on the
- * video, and its preview shows the logo on this band.
+ * video, and its preview shows the logo on this wash.
  */
 export function ClinicMark({
   logoUrl,
@@ -56,6 +79,7 @@ export function ClinicMark({
   senderName = null,
   placeholder = false,
   inFlow = false,
+  action = null,
 }: {
   /** The clinic's checked logo address, or null to write its name instead. */
   logoUrl: string | null;
@@ -67,42 +91,47 @@ export function ClinicMark({
   placeholder?: boolean;
   /** True where there is no picture to lay it over (the patient player's "did not load" panel): it becomes a row of its own. */
   inFlow?: boolean;
+  /** One of our own controls for the strip's right end (the patient player's full-screen button). The only thing on it that takes a tap. */
+  action?: ReactNode;
 }) {
   return (
     <div
       data-video-strip=""
-      className={`pointer-events-none z-10 flex h-8 w-full select-none items-center gap-3 px-3 ${
-        inFlow ? "relative shrink-0" : "absolute inset-x-0 top-0"
-      }`}
-      style={{ backgroundColor: `rgba(0, 0, 0, ${VIDEO_STRIP_ALPHA})` }}
+      className={`video-strip pointer-events-none z-10 w-full select-none ${inFlow ? "relative shrink-0" : "absolute inset-x-0 top-0"}`}
+      style={{ "--strip-alpha": VIDEO_STRIP_ALPHA } as CSSProperties}
     >
-      <span aria-hidden="true" className="flex min-w-0 flex-1 items-center gap-3">
-        {logoUrl ? (
-          // A fixed box, so the band looks the same before, during and after the logo loads, and if it never does.
-          <ClinicLogo src={logoUrl} name={name} boxClassName="h-6 w-24 shrink-0" nameClassName={`${WORDS} leading-none`} />
-        ) : (
-          <span className={`max-w-[45%] shrink-0 truncate leading-none ${WORDS}`}>{name}</span>
-        )}
+      <div className="video-strip-row">
+        <span aria-hidden="true" className="video-strip-brand">
+          {logoUrl ? (
+            // A fixed box, so the strip looks the same before, during and after the logo loads, and if it never does.
+            <ClinicLogo src={logoUrl} name={name} boxClassName="video-strip-logo shrink-0" nameClassName="video-strip-clinic" />
+          ) : (
+            <span className="video-strip-clinic block truncate">{name}</span>
+          )}
+        </span>
         {senderName && (
-          <>
-            <span className="h-4 w-px shrink-0 bg-white/50" />
-            <span className={`line-clamp-2 min-w-0 break-words leading-none ${WORDS}`}>{senderName}</span>
-          </>
+          <span aria-hidden="true" data-long={senderName.length > LONG_NAME || undefined} className="video-strip-sender">
+            {senderName}
+          </span>
         )}
-      </span>
-      {placeholder && <span className={`${PLACEHOLDER_CHIP} shrink-0`}>Placeholder animation</span>}
+        {(placeholder || action) && (
+          <span className="video-strip-end">
+            {placeholder && <span className={PLACEHOLDER_CHIP}>Placeholder animation</span>}
+            {action && <span className="pointer-events-auto">{action}</span>}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
 /**
- * White, 15px (the smallest text the patient page allows), on the band. The
- * clinic's name stays on one line and is cut short if it must be; the
- * doctor's name may take two tight lines (two 15px lines are 30px,
- * inside the 32px band), so a long name on a phone is still read in full
- * rather than cut off. Most names fit on one.
+ * A doctor's name longer than this is drawn a step smaller (data-long, see
+ * .video-strip-sender in app/globals.css), so the longest name the rules
+ * promise (48 characters) still fits in full on two lines on a phone.
+ * "Dr. Jane Smith, DO" is 18.
  */
-const WORDS = "text-[15px] font-semibold text-white";
+export const LONG_NAME = 28;
 
 /**
  * A box laid exactly over the PICTURE inside a video's box, for the strip

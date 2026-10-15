@@ -460,12 +460,18 @@ describe("what stays the same", () => {
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Play Vitest Total Knee Replacement"');
     expect(html).not.toContain("Make the video bigger");
+    // Our full-screen button arrives on the strip with the first play, not before.
+    expect(html).not.toContain("Full screen");
     // The video keeps playsinline, and the browser's own controls lose only "download" and, where the browser
-    // understands it (Chromium), its own full-screen button, which would show the video without the strip.
+    // understands it (Chromium), its own full-screen button, which would show the video without the strip. The
+    // patient-video class is what takes that greyed-out button out of Chromium's bar (app/globals.css).
     expect(html).toMatch(/<video[^>]*playsInline/);
     expect(html).toContain('controlsList="nodownload nofullscreen"');
+    expect(html).toMatch(/<video[^>]*class="patient-video /);
     // The strip is decoration: the clinic and the sender are already on the page as text.
-    expect(html).toMatch(/data-video-strip="" class="pointer-events-none [^"]*"[^>]*><span aria-hidden="true"/);
+    expect(html).toMatch(/data-video-strip="" class="video-strip pointer-events-none [^"]*"[^>]*><div class="video-strip-row"><span aria-hidden="true"/);
+    // Play is drawn above the strip's wash, so the white circle is never dimmed by it.
+    expect(html).toMatch(/aria-label="Play Vitest Total Knee Replacement"[^>]*class="absolute inset-0 z-20 /);
   });
 
   it("nothing internal about the clinic is in the page", async () => {
@@ -509,12 +515,12 @@ describe("the strip on the video", () => {
     expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Play Vitest Total Knee Replacement"'));
   });
 
-  it("with no logo, has the clinic's name in white in its place", async () => {
+  it("with no logo, has the clinic's name in its place", async () => {
     const clinic = await makeClinic({ name: "Vitest Nologo Orthopedics" });
     const strip = stripOf(await render(await shareFrom(clinic.id, "Jane Smith, NP")));
 
     expect(strip).not.toContain("<img");
-    expect(strip).toMatch(/text-white[^"]*">Vitest Nologo Orthopedics</);
+    expect(strip).toContain('<span class="video-strip-clinic block truncate">Vitest Nologo Orthopedics</span>');
     expect(strip).toContain(">Jane Smith, NP<");
   });
 
@@ -523,7 +529,7 @@ describe("the strip on the video", () => {
     const strip = stripOf(await render(await shareFrom(clinic.id, null)));
 
     expect(strip).toContain(">Vitest Older Strip Orthopedics<");
-    expect(strip).not.toContain("bg-white/50");
+    expect(strip).not.toContain("video-strip-sender");
   });
 
   it("is on a placeholder link too, under the amber bar that still says so first", async () => {

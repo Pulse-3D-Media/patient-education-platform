@@ -89,18 +89,25 @@ import { CallNumber } from "./CallButton";
  * failure is sent anywhere. A video that is only slow gets a quiet "still
  * loading" note over the picture instead, so a tap never looks ignored.
  *
- * THE STRIP ON THE VIDEO. A thin dark band across the top edge of the
- * picture carries the clinic's logo (or name) and the doctor's name, "Dr.
- * Jane Smith, DO" (ClinicMark). It is there the whole time: before the first play, while
- * playing, in the large view (both kinds), and as a row of its own above the
- * "did not load" panel, where there is no picture to lay it over. It never
- * takes a tap, and the browser's own controls sit along the BOTTOM of the
- * picture in Chrome, Edge and Android, so it covers none of them there. It
- * is branding, not protection: see ClinicMark.
+ * THE STRIP ON THE VIDEO. A soft dark wash over the top of the picture
+ * carries the clinic's logo (or name) and the doctor's name, "Dr. Jane
+ * Smith, DO" (ClinicMark). It is there the whole time: before the first
+ * play, while playing, in the large view (both kinds), and as a row of its
+ * own above the "did not load" panel, where there is no picture to lay it
+ * over. It never takes a tap, and the browser's own controls sit along the
+ * BOTTOM of the picture in Chrome, Edge and Android, so it covers none of
+ * them there. Safari draws its own buttons in the picture's top corners, and
+ * there the strip lies over them (they still work through it; see
+ * ClinicMark). It is branding, not protection.
  *
- * MAKING IT BIGGER. After play starts, a "Make the video bigger" button
- * appears under the video. What it does depends on what the browser can do,
- * checked at the moment of the tap rather than guessed from the device:
+ * MAKING IT BIGGER. After play starts, a full-screen button (an icon, with
+ * the words "Full screen" beside it where the picture is wide enough) sits
+ * ON the picture, at the right end of the strip, where the strip's own
+ * layout keeps it clear of the words (decided
+ * at the 2026-10-08 huddle: the "Make the video bigger" button that used to
+ * sit under the video looked like a workaround). What it does depends on
+ * what the browser can do, checked at the moment of the tap rather than
+ * guessed from the device:
  *
  *   - Where the browser can put an element of the page full screen, the
  *     whole player goes full screen (not just the video), so the Close
@@ -128,14 +135,17 @@ import { CallNumber } from "./CallButton";
  * THE BROWSER'S OWN FULL-SCREEN BUTTON hands the video to the browser's own
  * player, which shows the video alone: no strip, no Close. So where it can
  * be stopped reliably, it is: with `controlsList="nofullscreen"`, Chrome,
- * Edge and Android Chrome (all Chromium) draw that button greyed out and it
- * does nothing, and a double-click on the picture no longer goes full screen
- * either (measured in Edge, October 2026). The "Make the video bigger"
- * button below, which keeps the strip, is the way to go big there. Whether
- * turning an Android phone sideways still goes full screen by itself is a
- * phone check still owed. Nothing can hide that button in Safari (iPhone, iPad, Mac)
- * or Firefox; there, full screen from the browser's own button still shows
- * the video without the strip, and that is the browser's to decide.
+ * Edge and Android Chrome (all Chromium) make that button do nothing, and a
+ * double-click on the picture no longer goes full screen either (measured
+ * in Edge, October 2026); and the `patient-video` rule in app/globals.css
+ * takes the greyed-out button out of Chromium's bar, so ours is the only
+ * full-screen button there. Whether turning an Android phone sideways still
+ * goes full screen by itself is a phone check still owed. Nothing can hide
+ * or redirect that button in Safari (iPhone, iPad, Mac) or Firefox; Safari
+ * draws it in the picture's TOP-LEFT corner, under the strip, and there full
+ * screen from the browser's own button still shows the video without the
+ * strip. That is the browser's to decide (on an iPhone it is the accepted
+ * limit: the phone's own player shows nothing the page draws).
  * Picture-in-picture is left as it is (it too shows the video alone).
  *
  * WHAT IT PLAYS is a PlaybackSource made on the server (lib/playback-auth.ts)
@@ -640,20 +650,41 @@ export function WatchPlayer({
               // When it has failed, the panel below says so in our words. Without this a screen reader also reads
               // the browser's own "Unable to play media" from the video underneath, the same news twice.
               aria-hidden={stopped || undefined}
-              className={`absolute inset-0 h-full w-full object-contain ${stopped ? "invisible" : ""}`}
+              className={`patient-video absolute inset-0 h-full w-full object-contain ${stopped ? "invisible" : ""}`}
             />
 
-            {/* What is laid over the picture itself, from before the first play on: the strip on its top edge, and, only while
-                the picture is stuck, a "still loading" note just under the strip. Neither takes a tap. */}
+            {/* What is laid over the picture itself, from before the first play on: the strip on its top edge (with the
+                full-screen button at its right end once the video has started, outside the large view, which has Close),
+                and, only while the picture is stuck, a "still loading" note in the middle. Only the button takes a tap. */}
             {!stopped && (
               <OnPicture ratio={ratio}>
-                <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} />
+                <ClinicMark
+                  logoUrl={logoUrl}
+                  name={clinicName}
+                  senderName={senderName}
+                  action={
+                    started && !isBig ? (
+                      <button
+                        ref={biggerButton}
+                        type="button"
+                        onClick={makeBigger}
+                        aria-label="Full screen: make the video fill the screen"
+                        // 48px to tap, but it takes only 40px of the strip's height (-my-1), so the logo's line stays short.
+                        className="-my-1 flex h-12 min-w-12 items-center justify-center gap-2 rounded-full bg-black/55 px-3.5 text-[16px] font-semibold text-white ring-1 ring-white/45 transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
+                      >
+                        <FullscreenIcon className="h-5 w-5 shrink-0" />
+                        {/* The word only where the picture is wide enough for it beside the name; the icon alone on a phone. */}
+                        <span className="video-strip-wide-only">Full screen</span>
+                      </button>
+                    ) : null
+                  }
+                />
                 {/* Said only when the wait has gone on a while, so a tap on a weak signal never looks ignored. The element is always here (while there is a picture) so a screen reader hears the words when they arrive; the "did not load" panel announces itself. */}
                 <p
                   role="status"
                   className={
                     slow
-                      ? "absolute left-3 top-11 max-w-[80%] rounded-xl bg-white/90 px-3 py-1.5 text-[15px] leading-[1.35] font-medium text-[#12333f]"
+                      ? "absolute left-1/2 top-1/2 w-max max-w-[80%] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white/90 px-3 py-1.5 text-center text-[15px] leading-[1.35] font-medium text-[#12333f]"
                       : "sr-only"
                   }
                 >
@@ -674,7 +705,7 @@ export function WatchPlayer({
                 aria-label={`Play ${title}`}
                 aria-disabled={ready ? undefined : true}
                 aria-describedby={ready ? undefined : `${tickId}-why`}
-                className="absolute inset-0 flex flex-col items-center justify-center gap-4 rounded-[18px] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
+                className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 rounded-[18px] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
               >
                 <span
                   className={`flex h-20 w-20 items-center justify-center rounded-full bg-white shadow-[0_10px_34px_rgba(0,0,0,.4)] transition ${
@@ -733,21 +764,6 @@ export function WatchPlayer({
             )}
           </div>
         </div>
-      </div>
-
-      {/* Offered once the video is playing, so that before the first tap there is still nothing to press but Play. Its space is kept from the start, so nothing under the video moves when it appears. */}
-      <div className="mt-3 min-h-12">
-        {started && !stopped && (
-          <button
-            ref={biggerButton}
-            type="button"
-            onClick={makeBigger}
-            className="flex h-12 w-full items-center justify-center gap-2.5 rounded-full border-2 border-[#c9c3b6] bg-white px-5 text-[17px] font-semibold text-[#12333f] transition active:scale-[0.99] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668] sm:w-auto"
-          >
-            <FullscreenIcon className="h-5 w-5 shrink-0" />
-            Make the video bigger
-          </button>
-        )}
       </div>
     </div>
   );

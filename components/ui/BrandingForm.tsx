@@ -46,7 +46,7 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
  * is always dark). The patient card never changes with the mode. "On the
  * video" shows the strip both players lay over the picture (ClinicMark),
  * over a light frame and a dark one, so a clinic can see whether its logo
- * reads on the dark band.
+ * reads on the dark wash.
  * It is a preview only. The server checks every value again when the form
  * is sent, and what the browser thinks is never what gets saved.
  *
@@ -182,8 +182,8 @@ export function BrandingForm({
           <p className="mt-2 text-xs text-ink-muted">
             For your team&rsquo;s screens: the library and this admin area. It is the clinic&rsquo;s setting, the same for everyone who signs
             in. The patient page is always light, and a video always plays on black. Your logo sits straight on the banner with nothing
-            behind it, so a dark logo suits Light and a white or pale logo suits Dark. On the video, your logo sits on a dark band
-            across the top of the picture, so a white or light version of your logo works best there.
+            behind it, so a dark logo suits Light and a white or pale logo suits Dark. On the video, your logo sits on a soft dark
+            shade across the top of the picture, so a white or light version of your logo works best there.
           </p>
         </fieldset>
 
@@ -324,14 +324,15 @@ export function BrandingForm({
         </div>
 
         {/* The strip on the video, as both players draw it, over a light frame and over a dark one, so the clinic can see how its
-            logo reads on the dark band either way. Fixed colours: a video is the same in every mode. The doctor's name is an example. */}
+            logo reads on the dark wash either way. Fixed colours: a video is the same in every mode. The doctor's name is an example.
+            Each frame is the shape of a video (16:9), so the strip is laid out as it would be on a picture this wide. */}
         <div className="overflow-hidden rounded-2xl bg-white text-[#12202a]">
           <p className="px-5 pb-2 pt-4 text-xs font-semibold uppercase tracking-wider text-[#46555e]">On the video</p>
           {[
             { key: "light", ground: "#eef1f4" },
             { key: "dark", ground: "#10181d" },
           ].map((frame) => (
-            <div key={frame.key} className="relative h-20 w-full" style={{ backgroundColor: frame.ground }}>
+            <div key={frame.key} className="relative aspect-video w-full" style={{ backgroundColor: frame.ground }}>
               <ClinicMark key={previewLogo ?? "no-logo"} logoUrl={previewLogo} name={clinicName} senderName="Dr. Jane Smith, DO" />
             </div>
           ))}

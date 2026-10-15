@@ -60,17 +60,29 @@ describe("the strip on the library's player", () => {
     expect(html).toMatch(/<div class="picture-area relative min-h-0 flex-1" style="--picture-ratio:1.777/);
     // The strip is inside that box, in the box over the picture, before the video's controls.
     const area = html.slice(html.indexOf("picture-area"));
-    expect(area.indexOf('class="picture-fit pointer-events-none"')).toBeGreaterThan(-1);
+    expect(area.indexOf('class="picture-fit pointer-events-none flex flex-col"')).toBeGreaterThan(-1);
     expect(area.indexOf("data-video-strip")).toBeGreaterThan(area.indexOf("picture-fit"));
     // Nothing is drawn above the video's box any more.
     expect(html.indexOf("data-video-strip")).toBeGreaterThan(html.indexOf("picture-area"));
   });
 
-  it("starts the title row, with Close, under the strip, so the two never overlap", () => {
+  it("puts the title row, with Close, straight under the strip in the same column, so however tall the strip is the two never overlap", () => {
+    const html = render({ senderName: "Dr. Maria de los Angeles Fernandez-Castillo, DPM" });
+    const fit = html.slice(html.indexOf('class="picture-fit pointer-events-none flex flex-col"'));
+
+    // The strip is in the column's flow (not laid over it), and the title row comes after it.
+    expect(fit).toMatch(/^class="picture-fit pointer-events-none flex flex-col"><div data-video-strip="" class="video-strip [^"]*relative shrink-0"/);
+    expect(fit).toMatch(/<div class="-mt-2 flex items-start justify-between [^"]*"><div class="min-w-0"><h2[^>]*>Total Knee Replacement</);
+    expect(fit.indexOf("data-video-strip")).toBeLessThan(fit.indexOf('aria-label="Close the video and go back to the library"'));
+    expect(html).not.toContain("below-picture-top");
+  });
+
+  it("lets only Close take a tap in that column, and only while it is showing", () => {
     const html = render();
 
-    expect(html).toMatch(/class="below-picture-top absolute inset-x-0 top-8 [^"]*"><div class="min-w-0"><h2[^>]*>Total Knee Replacement</);
-    expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Close the video and go back to the library"'));
+    // The controls are showing when the player opens: Close takes taps, the column around it does not.
+    expect(html).toMatch(/class="[^"]*pointer-events-auto"[^>]*aria-label="Close the video and go back to the library"|aria-label="Close the video and go back to the library"[^>]*class="[^"]*pointer-events-auto"/);
+    expect(html).toContain('class="picture-fit pointer-events-none flex flex-col"');
   });
 });
 

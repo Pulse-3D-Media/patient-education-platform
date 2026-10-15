@@ -149,15 +149,24 @@ export function contrastRatio(a: string, b: string): number {
 }
 
 /**
- * THE STRIP ON THE VIDEO (ClinicMark): a black band at this opacity, laid
- * across the top edge of the picture, with white words and the clinic's logo
- * on it. 0.6 is about as see-through as it can be while white text still
- * reads on the brightest possible frame: over pure white the band comes out
- * #666666, and white on that is 5.7:1 (the floor is 4.5:1; at 0.55 it would
- * be 4.7:1, too close). Over a black frame it is black, 21:1.
- * lib/branding.test.ts checks both.
+ * THE STRIP ON THE VIDEO (ClinicMark): a soft black wash over the top of the
+ * picture that fades out under the words (app/globals.css, .video-strip).
+ * This is how dark it is where the words are, at its lightest; above them
+ * it is a little darker. It was a solid band at 0.6 until the 2026-10-08
+ * huddle, where Van asked for it to look see-through.
+ *
+ * 0.5 is enough because every word on the strip is now LARGE text (the
+ * doctor's name is at least 21px semibold, the clinic's name at least 19px
+ * bold; WCAG counts 18.66px bold as large), and large text needs 3:1, not
+ * 4.5:1. Over pure white the wash comes out #808080, and white on that is
+ * 3.9:1; over a black frame it is black, 21:1. Below about 0.42 white on
+ * white would drop under 3:1. The words also carry a soft shadow, which the
+ * sums do not count. lib/branding.test.ts checks all of it.
  */
-export const VIDEO_STRIP_ALPHA = 0.6;
+export const VIDEO_STRIP_ALPHA = 0.5;
+
+/** The smallest the strip's words get (app/globals.css): the long-name size of the doctor's name, and the clinic's name. Both are bold enough to count as large text. */
+export const VIDEO_STRIP_MIN_TEXT_PX = { sender: 21, clinic: 19 } as const;
 
 /** What the strip's band looks like over a frame of this colour: the frame, darkened by the band. */
 export function videoStripGround(frame: string): string {

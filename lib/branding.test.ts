@@ -13,6 +13,7 @@ import {
   STAFF_GROUND,
   STAFF_LIGHT_GROUND,
   VIDEO_STRIP_ALPHA,
+  VIDEO_STRIP_MIN_TEXT_PX,
   brandFontLabel,
   brandThemeLabel,
   contrastRatio,
@@ -129,33 +130,44 @@ describe("contrast sums", () => {
 });
 
 describe("the strip on the video", () => {
-  // White words on a black band at VIDEO_STRIP_ALPHA, over whatever the frame is. The two ends of every frame there can be.
-  it("keeps white text at 4.5:1 or better over a white frame, the hardest case", () => {
-    const band = videoStripGround("#ffffff");
-    expect(band).toBe("#666666");
-    expect(contrastRatio("#ffffff", band)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio("#ffffff", band)).toBeCloseTo(5.74, 1);
+  // White words on a black wash at VIDEO_STRIP_ALPHA (its lightest point, where the words are), over whatever the
+  // frame is. Every word on the strip is LARGE text (at least 21px bold for the doctor's name, 19px bold for the
+  // clinic's name: VIDEO_STRIP_MIN_TEXT_PX, checked against the CSS in components/ui/ClinicMark.test.tsx), so the
+  // floor is WCAG's 3:1 for large text, not 4.5:1. The soft shadow on the words is extra and not counted.
+  const LARGE_TEXT = 3;
+
+  it("keeps white words at 3:1 or better over a white frame, the hardest case, with room to spare", () => {
+    const wash = videoStripGround("#ffffff");
+    expect(wash).toBe("#808080");
+    expect(contrastRatio("#ffffff", wash)).toBeGreaterThanOrEqual(LARGE_TEXT);
+    expect(contrastRatio("#ffffff", wash)).toBeCloseTo(3.95, 1);
   });
 
-  it("keeps white text at 4.5:1 or better over a black frame (where it is simply black)", () => {
+  it("keeps them over a black frame (where the wash is simply black)", () => {
     expect(videoStripGround("#000000")).toBe("#000000");
     expect(contrastRatio("#ffffff", videoStripGround("#000000"))).toBeCloseTo(21, 1);
   });
 
-  it("keeps it over every grey in between, and over the brightest pure colours an animation could hold", () => {
+  it("keeps them over every grey in between, and over the brightest pure colours an animation could hold", () => {
     for (let level = 0; level <= 255; level += 5) {
       const grey = `#${level.toString(16).padStart(2, "0").repeat(3)}`;
-      expect(contrastRatio("#ffffff", videoStripGround(grey))).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio("#ffffff", videoStripGround(grey))).toBeGreaterThanOrEqual(LARGE_TEXT);
     }
     for (const frame of ["#ffff00", "#00ffff", "#ff00ff", "#00ff00", "#ffffff"]) {
-      expect(contrastRatio("#ffffff", videoStripGround(frame))).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio("#ffffff", videoStripGround(frame))).toBeGreaterThanOrEqual(LARGE_TEXT);
     }
   });
 
-  it("is as see-through as it can be with room to spare: a little lighter and white on white would be too close to the floor", () => {
-    expect(VIDEO_STRIP_ALPHA).toBe(0.6);
-    // At 0.55 the band over white is #737373, and white on it is about 4.7:1: legal, but no margin for a soft edge or a squint.
-    expect(contrastRatio("#ffffff", "#737373")).toBeLessThan(4.8);
+  it("is more see-through than the old solid band (0.6), as Van asked, but not so light that white on white drops near the floor", () => {
+    expect(VIDEO_STRIP_ALPHA).toBe(0.5);
+    expect(VIDEO_STRIP_ALPHA).toBeLessThan(0.6);
+    // At 0.42 the wash over white is about #949494, and white on it is barely 3:1: legal, but no margin for a squint.
+    expect(contrastRatio("#ffffff", "#949494")).toBeLessThan(3.05);
+  });
+
+  it("only uses that floor because every word on it is large: bold and at least 18.66px", () => {
+    expect(VIDEO_STRIP_MIN_TEXT_PX.sender).toBeGreaterThanOrEqual(18.66);
+    expect(VIDEO_STRIP_MIN_TEXT_PX.clinic).toBeGreaterThanOrEqual(18.66);
   });
 });
 

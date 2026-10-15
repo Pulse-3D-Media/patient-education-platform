@@ -30,8 +30,8 @@ import { useVideoSource } from "./useVideoSource";
  * Playback starts as soon as the element mounts (autoPlay), which is inside
  * the tap that opened the player, so sound is allowed.
  *
- * THE STRIP ON THE PICTURE. A thin dark band across the top edge of the
- * picture (ClinicMark) carries what has to stay on screen for as long as the
+ * THE STRIP ON THE PICTURE. A soft dark wash over the top of the picture
+ * (ClinicMark) carries what has to stay on screen for as long as the
  * picture does: the clinic's logo (or name), the signed-in person's name as
  * patients see it on the links they send ("Dr. Jane Smith, DO"),
  * when they hold a seat, and the amber "Placeholder animation" chip when the
@@ -42,9 +42,10 @@ import { useVideoSource } from "./useVideoSource";
  *
  * The title row (with Close) and the controls sit over the picture only
  * while they are showing, and fade away a moment after the last touch. The
- * title row always starts just UNDER the strip (.below-picture-top), so the
- * two never overlap and Close is never under the band. The strip is
- * branding, not protection: see ClinicMark.
+ * title row sits in the same box as the strip, straight under it, so
+ * however tall the strip is (the doctor's name grows with the picture and
+ * may take two lines) the two never overlap and Close is never under it.
+ * The strip is branding, not protection: see ClinicMark.
  *
  * FULL SCREEN. The Full screen button puts the whole player full screen,
  * strip included, wherever the browser can do that for part of a page
@@ -406,28 +407,29 @@ export function VideoPlayer({
           </div>
         )}
 
-        {/* The strip on the picture's top edge: the whole time, failed or not, and never takes a tap. */}
-        <div className="picture-fit pointer-events-none">
-          <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} placeholder={placeholder} />
-        </div>
+        {/* Over the picture, in one box: the strip on its top edge (the whole time, failed or not), then the title band
+            straight under it, in the same column, so however tall the strip is (one line or two, a phone or full screen)
+            Close is never under it. Only Close takes a tap, and only while the band is showing. */}
+        <div className="picture-fit pointer-events-none flex flex-col">
+          <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} placeholder={placeholder} inFlow />
 
-        {/* Title band. It starts just under the strip (below-picture-top; top-8 where a browser cannot place it), so Close is never under the band. */}
-        <div
-          className={`below-picture-top absolute inset-x-0 top-8 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pb-10 pt-3 transition-opacity duration-300 ${fade}`}
-        >
-          <div className="min-w-0">
-            <h2 className="truncate text-xl font-semibold text-white sm:text-2xl">{title}</h2>
-            {subtitle && <p className="text-sm text-[#bfbfbf]">{subtitle}</p>}
+          {/* It starts inside the strip's fade (-mt-2), so the two darks run into each other, while Close (after pt-3) still starts below the strip. */}
+          <div className={`-mt-2 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pb-10 pt-3 transition-opacity duration-300 ${fade}`}>
+            <div className="min-w-0">
+              <h2 className="truncate text-xl font-semibold text-white sm:text-2xl">{title}</h2>
+              {subtitle && <p className="text-sm text-[#bfbfbf]">{subtitle}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close the video and go back to the library"
+              title="Close"
+              // The box around it takes no taps (so the picture under the title still does); Close does, but only while it can be seen.
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 ${visible || stopped ? "pointer-events-auto" : ""}`}
+            >
+              <CloseIcon className="h-5 w-5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close the video and go back to the library"
-            title="Close"
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
-          >
-            <CloseIcon className="h-5 w-5" />
-          </button>
         </div>
 
         {/* Controls band. Not there at all while the video has failed or access ended: there is nothing to control. */}

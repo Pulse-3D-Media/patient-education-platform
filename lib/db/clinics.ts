@@ -47,6 +47,8 @@ const CLINIC_FIELDS = {
   brandFont: true,
   brandTheme: true,
   ownerClerkUserId: true,
+  // The categories on the plan, for the library's sidebar (lib/clinic.ts). Access itself is always decided from getClinicAccess().
+  categories: true,
 } as const;
 
 /** What Clerk tells us about an organization that we keep a copy of. */

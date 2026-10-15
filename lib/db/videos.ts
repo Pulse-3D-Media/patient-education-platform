@@ -86,8 +86,11 @@ export async function countPublishedVideosByKind(category?: Category): Promise<P
 // keeps an off-plan video's address from ever leaving the server.
 // ---------------------------------------------------------------------------
 
-/** The where-clause for "this clinic may use it". Callers have already checked the clinic is open and has categories. */
-function usableClause(access: ClinicAccess) {
+/**
+ * The where-clause for "this clinic may use it". Callers have already checked the clinic is open and has categories.
+ * Exported for lib/db/personal-videos.ts, which applies it to a person's favorites and plays through the relation.
+ */
+export function usableClause(access: ClinicAccess) {
   return {
     isPublished: true,
     category: { in: access.categories },
@@ -100,11 +103,14 @@ function usableClause(access: ClinicAccess) {
  * the category page. Empty, without a query, when the clinic is not open
  * or the category is not on its plan.
  */
-export async function listUsableVideosInCategory(access: ClinicAccess, category: Category) {
+export async function listUsableVideosInCategory(access: ClinicAccess, category: Category, limit?: number) {
   if (!access.open || !access.categories.includes(category)) return [];
   return prisma.video.findMany({
     where: { ...usableClause(access), category },
-    orderBy: { createdAt: "desc" },
+    // The id breaks a tie between videos added in the same instant, so a row of five is always the same five.
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
+    // The home page's row for the category asks for its newest few (lib/library-rows.ts); the category page asks for all.
+    ...(limit !== undefined ? { take: limit } : {}),
   });
 }
 

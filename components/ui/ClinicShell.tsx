@@ -18,7 +18,11 @@ import { AppShell } from "./AppShell";
 export function ClinicShell({ clinic, showAdmin = false, children }: { clinic: CurrentClinic; showAdmin?: boolean; children: ReactNode }) {
   const look = staffLook(clinic);
   return (
-    <AppShell showAdmin={showAdmin} brand={{ style: look.style, fontClass: look.fontClass, theme: look.theme, clinicName: clinic.name, logoUrl: look.logoUrl }}>
+    <AppShell
+      showAdmin={showAdmin}
+      categories={clinic.planCategories}
+      brand={{ style: look.style, fontClass: look.fontClass, theme: look.theme, clinicName: clinic.name, logoUrl: look.logoUrl }}
+    >
       {children}
     </AppShell>
   );

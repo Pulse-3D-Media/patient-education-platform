@@ -1,131 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { VideoPlayer } from "@/components/ui/VideoPlayer";
-import { useModalFocus } from "@/components/ui/useModalFocus";
-import { PlayIcon, ShareIcon } from "@/components/ui/icons";
-import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
-import { formatDuration } from "@/lib/format";
-import type { PlaybackSource } from "@/lib/playback-source";
-import { refreshPlaybackAction, sendShareAction, type SendResult } from "./actions";
-import { SendPanel } from "./SendPanel";
-
-type Item = {
-  id: string;
-  title: string;
-  /** What to play, made on the server for this clinic (lib/playback-auth.ts): a plain file, or a signed Mux stream. */
-  source: PlaybackSource;
-  /** A still for the card, chosen on /pulse. Null means the video's own first frame, or the branded fallback. */
-  posterUrl: string | null;
-  durationSeconds: number | null;
-  isPlaceholder: boolean;
-};
-
-/** The Send panel's state: which video, and the server's answer once it arrives. */
-type Sending = { video: Item; result: SendResult | null };
+import { useMemo, useState } from "react";
+import { useLibrary } from "../LibraryBrowser";
+import type { LibraryItem } from "../library-item";
+import { VideoCard } from "../VideoCard";
 
 /**
- * The procedure cards, the search box, the full-screen player (its controls
- * live in components/ui/VideoPlayer.tsx) and the Send panel.
- *
- * Each card has two actions, both one tap: tapping the thumbnail plays, and
- * the small send icon beside the title creates a patient link and
- * shows it with a QR code, right here, without leaving the page. The send
- * icon is only there for someone holding a seat (`canSend`): a link is
- * always from a surgeon, and the link is from them automatically.
- *
- * This is a client component because tapping a card has to start playback
- * inside the tap itself. Browsers only allow a video to start with sound when
- * the user has just interacted with the page.
- *
- * A card shows the poster still chosen on /pulse when the video has one.
- * Otherwise the thumbnail is the video's own frame at one second, loaded
- * with preload="metadata" so each card costs only a few kilobytes and
- * playback starts faster because the file is already partly fetched. If
- * neither can load, the card shows a branded fallback instead of a broken
- * box.
+ * A category's procedure cards, with a search box. Each card plays, hearts
+ * and (for someone holding a seat) sends with one tap; the player, the Send
+ * panel and the hearts belong to the LibraryBrowser the category page puts
+ * this in (app/library/LibraryBrowser.tsx), the same one the library home
+ * uses, so a card behaves the same in both places.
  *
  * The category page only renders this when there is at least one video;
  * a category with nothing published shows its "Coming soon" block instead.
- *
- * A placeholder video (a sample animation standing in for the procedure it
- * is named after) carries an amber "Placeholder" badge on its thumbnail,
- * and the player shows the same mark the whole time it plays, so it cannot
- * be mistaken for finished work.
  */
-export function VideoGrid({
-  videos,
-  categoryLabel,
-  clinicName,
-  logoUrl,
-  senderName,
-  canSend,
-}: {
-  videos: Item[];
-  categoryLabel: string;
-  /** The clinic's name and checked logo address, for the strip on the picture. */
-  clinicName: string;
-  logoUrl: string | null;
-  /** The signed-in person's name as patients see it, for the strip, when they hold a seat; otherwise null and the strip shows only the clinic. */
-  senderName: string | null;
-  /** True for someone holding a seat: their cards get the Send button. Everyone else can play but not send. */
-  canSend: boolean;
-}) {
-  const [playing, setPlaying] = useState<Item | null>(null);
-  const [sending, setSending] = useState<Sending | null>(null);
+export function VideoGrid({ videos }: { videos: LibraryItem[] }) {
+  const { send } = useLibrary();
   const [query, setQuery] = useState("");
-  const playerDialog = useRef<HTMLDivElement>(null);
-  useModalFocus(playerDialog, playing !== null);
-
-  // Counts Send taps. A server answer is only shown if it belongs to the
-  // latest tap, so closing the panel early (or tapping Try again) can never
-  // be overwritten by an older, slower answer arriving late.
-  const sendCount = useRef(0);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? videos.filter((v) => v.title.toLowerCase().includes(q)) : videos;
   }, [videos, query]);
 
-  /** Open the Send panel for a video and ask the server for its link. */
-  function send(video: Item) {
-    const thisTap = ++sendCount.current;
-    setSending({ video, result: null });
-    sendShareAction(video.id)
-      // The request itself can fail before the server answers (the tablet dropped off the Wi-Fi, the server was
-      // restarting). Without this the panel would say "Creating link..." for ever. It may be that a link WAS made
-      // and only the answer was lost, so the words do not claim otherwise; an unused link simply expires.
-      .catch((): SendResult => ({ ok: false, error: "We could not reach the server. Check the connection, then try again." }))
-      .then((result) => {
-        if (sendCount.current === thisTap) setSending({ video, result });
-      });
-  }
-
-  function closeSend() {
-    sendCount.current++;
-    setSending(null);
-  }
-
-  // Escape closes whichever overlay is open. The Close buttons do the same
-  // for touch. While one is open the page behind it does not scroll.
-  const overlayOpen = playing !== null || sending !== null;
-  useEffect(() => {
-    if (!overlayOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      setPlaying(null);
-      sendCount.current++; // same as closeSend(): a late server answer is ignored
-      setSending(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [overlayOpen]);
-
   return (
     <>
-      {!canSend && (
+      {!send && (
         <p className="mb-5 max-w-2xl text-base text-ink-soft">
           Play any video here. Sending one to a patient needs a surgeon seat: ask your clinic&apos;s office admin if you should have one.
         </p>
@@ -152,128 +53,11 @@ export function VideoGrid({
         <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 2xl:grid-cols-3">
           {shown.map((video) => (
             <li key={video.id}>
-              <ProcedureCard video={video} onPlay={() => setPlaying(video)} onSend={canSend ? () => send(video) : null} />
+              <VideoCard video={video} size="grid" />
             </li>
           ))}
         </ul>
       )}
-
-      {playing && (
-        <div ref={playerDialog} tabIndex={-1} data-theme="dark" className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-black text-ink pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]" role="dialog" aria-modal="true" aria-label={`${playing.title}, from ${clinicName}`}>
-          <VideoPlayer
-            key={playing.id}
-            source={playing.source}
-            // Before a signed address runs out, the player asks the server for a fresh one; the clinic's plan is checked again then.
-            refresh={async () => {
-              const answer = await refreshPlaybackAction(playing.id);
-              return answer.ok ? answer.source : answer.reason === "ended" ? null : { kind: "unavailable" };
-            }}
-            title={playing.title}
-            subtitle={categoryLabel}
-            placeholder={playing.isPlaceholder}
-            // The still chosen on /pulse; for a stream, the signed still from the video itself.
-            poster={playing.posterUrl ?? (playing.source.kind === "stream" ? playing.source.poster : undefined)}
-            clinicName={clinicName}
-            logoUrl={logoUrl}
-            senderName={senderName}
-            onClose={() => setPlaying(null)}
-          />
-        </div>
-      )}
-
-      {sending && (
-        <SendPanel
-          key={sending.video.id}
-          title={sending.video.title}
-          placeholder={sending.video.isPlaceholder}
-          result={sending.result}
-          onRetry={() => send(sending.video)}
-          onClose={closeSend}
-        />
-      )}
     </>
-  );
-}
-
-/** One card. `onSend` is null for someone without a seat: the card then has no Send button. */
-function ProcedureCard({ video, onPlay, onSend }: { video: Item; onPlay: () => void; onSend: (() => void) | null }) {
-  const [thumbFailed, setThumbFailed] = useState(false);
-
-  return (
-    <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-line bg-surface transition hover:-translate-y-0.5 hover:border-brand/70 hover:shadow-lift">
-      {/* The thumbnail is itself a Play button, so the big circle in the middle does what it looks like. */}
-      <button
-        type="button"
-        onClick={onPlay}
-        aria-label={video.isPlaceholder ? `Play ${video.title} (placeholder animation)` : `Play ${video.title}`}
-        className="group relative block aspect-video w-full overflow-hidden bg-well active:scale-[0.985]"
-      >
-        {thumbFailed ? (
-          <BrandedFallback />
-        ) : video.posterUrl || video.source.kind === "stream" ? (
-          // The still chosen on /pulse, or, for a video that streams from Mux, the signed still Mux makes from the video itself.
-          // A picture, never a stream: a grid of cards must not load a streaming library or a playlist per card.
-          // eslint-disable-next-line @next/next/no-img-element -- a CDN or Mux still, no resizing needed
-          <img
-            src={video.posterUrl ?? (video.source.kind === "stream" ? video.source.poster : "")}
-            alt=""
-            referrerPolicy="no-referrer"
-            onError={() => setThumbFailed(true)}
-            className="h-full w-full object-cover transition group-hover:scale-[1.03]"
-          />
-        ) : video.source.kind === "unavailable" ? (
-          <BrandedFallback />
-        ) : (
-          <video
-            src={`${video.source.src}#t=1`}
-            preload="metadata"
-            muted
-            playsInline
-            tabIndex={-1}
-            aria-hidden="true"
-            onError={() => setThumbFailed(true)}
-            className="h-full w-full object-cover transition group-hover:scale-[1.03]"
-          />
-        )}
-        <span className="absolute inset-0 flex items-center justify-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-black/55 text-white ring-1 ring-white/30 backdrop-blur transition group-hover:bg-brand group-hover:text-on-brand group-hover:ring-brand-bright">
-            <PlayIcon className="ml-1 h-7 w-7" />
-          </span>
-        </span>
-        {video.durationSeconds != null && (
-          <span className="absolute bottom-3 right-3 rounded-md bg-black/70 px-2 py-0.5 text-sm font-medium text-white">
-            {formatDuration(video.durationSeconds)}
-          </span>
-        )}
-        {video.isPlaceholder && (
-          <span className={`absolute left-3 top-3 ${PLACEHOLDER_BADGE} shadow-[0_2px_10px_rgba(0,0,0,.5)]`}>Placeholder</span>
-        )}
-      </button>
-
-      {/* Title on the left, the send icon on the right. Playing is the thumbnail above. */}
-      <div className="flex flex-1 items-center justify-between gap-4 px-5 py-4">
-        <h3 className="line-clamp-2 min-w-0 text-xl font-semibold leading-snug">{video.title}</h3>
-        {onSend && (
-          <button
-            type="button"
-            onClick={onSend}
-            aria-label={`Send ${video.title} to a patient`}
-            title="Send to a patient"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-line-strong text-ink-soft transition hover:border-brand hover:text-ink active:scale-[0.95]"
-          >
-            <ShareIcon className="h-5 w-5" />
-          </button>
-        )}
-      </div>
-    </article>
-  );
-}
-
-/** Shown when a thumbnail cannot load. Quiet, on-brand, never a broken image. */
-function BrandedFallback() {
-  return (
-    <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-surface to-brand-hover/40">
-      <span className="rounded-lg bg-brand px-3 py-1.5 text-lg font-bold text-on-brand">P3</span>
-    </span>
   );
 }

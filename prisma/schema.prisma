@@ -19,23 +19,24 @@ enum Category {
 
 /// Pulse 3D's own library. Not owned by any clinic.
 model Video {
-  id              String   @id @default(cuid())
+  id              String          @id @default(cuid())
   title           String // "Total Knee Replacement"
   category        Category
   videoUrl        String? // the MP4 on the Webflow CDN, read only through lib/playback-auth.ts, never directly. Optional since October 2026: a video uploaded from the app lives in Mux only and has none. A video needs this or muxPlaybackId before it can be published
   durationSeconds Int?
-  isPublished     Boolean  @default(false) // staging: Van finishes animations before they go live
-  isPlaceholder   Boolean  @default(false) // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
+  isPublished     Boolean         @default(false) // staging: Van finishes animations before they go live
+  isPlaceholder   Boolean         @default(false) // a sample animation stands in for this procedure. Shown, but marked everywhere it appears. Not the same as isPublished.
   posterUrl       String? // a still shown on the library card instead of the video's own first frame; empty means the branded fallback
   notes           String? // internal, for Pulse staff on /pulse/videos: what the file is, what is still to do. Never shown to a clinic
-  muxPlaybackId   String?  @unique // the SIGNED Mux playback id, once the video has moved to protected playback. Set, the video plays only through a signed Mux address (lib/playback-auth.ts) and videoUrl is kept as the record of where the file came from, never as a fallback. Empty means the file at videoUrl plays as before
+  muxPlaybackId   String?         @unique // the SIGNED Mux playback id, once the video has moved to protected playback. Set, the video plays only through a signed Mux address (lib/playback-auth.ts) and videoUrl is kept as the record of where the file came from, never as a fallback. Empty means the file at videoUrl plays as before
   muxAssetId      String? // the Mux asset the playback id belongs to, so staff can find it in the Mux dashboard. A note for staff; nothing plays from it
-  muxUploadId     String?  @unique // an upload to Mux that is in flight for this video (Mux's direct upload id), so the webhook and "Check with Mux" can find the row. Cleared when the asset is ready, cancelled or failed. The video keeps playing what it had the whole time
+  muxUploadId     String?         @unique // an upload to Mux that is in flight for this video (Mux's direct upload id), so the webhook and "Check with Mux" can find the row. Cleared when the asset is ready, cancelled or failed. The video keeps playing what it had the whole time
   muxUploadState  String? // where that upload stands, in a word checked by parseUploadState() in lib/mux-upload.ts: "waiting" (address handed out, file not yet at Mux), "preparing" (Mux has the file), "failed" (the last upload did not finish; the row was left as it was). Empty means no upload in flight and nothing to report
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
   shares          Share[]
   qrCodes         QrCode[]
+  personalVideos  PersonalVideo[]
 
   @@index([category])
 }
@@ -75,17 +76,17 @@ model Clinic {
   // Set by Pulse staff on /pulse. Nothing here is shown to the clinic except
   // noticeText (top of its /admin) and the effect of showPlaceholders and
   // viewDaysOverride.
-  managedByPulse   Boolean      @default(false) // enterprise or comped: billing screens hidden, plan edited by Pulse
+  managedByPulse   Boolean         @default(false) // enterprise or comped: billing screens hidden, plan edited by Pulse
   statusReason     String? // why staff set the status by hand
   statusChangedBy  String? // who last changed the status: a staff name, or "billing" later
   statusChangedAt  DateTime? // when the status was last changed
   notes            String? // the old single notes box. Superseded by ClinicNote (its text was copied over); kept, never read (rule 4)
   noticeText       String? // a line shown at the top of that clinic's /admin
-  showPlaceholders Boolean      @default(true) // false hides placeholder videos from this clinic's library
+  showPlaceholders Boolean         @default(true) // false hides placeholder videos from this clinic's library
   viewDaysOverride Int? // days a patient link works after the first play, instead of AppSettings.viewDays; copied onto each new link when it is made
   phone            String? // the clinic's phone, stored as digits only; see lib/phone.ts
-  categories       Category[]   @default([]) // the categories on the clinic's plan; empty means none yet
-  surgeonSeats     Int          @default(0) // surgeon seats the clinic pays for
+  categories       Category[]      @default([]) // the categories on the clinic's plan; empty means none yet
+  surgeonSeats     Int             @default(0) // surgeon seats the clinic pays for
   // The clinic's own look, on its /admin, /library and patient pages. Set by
   // the clinic's admin on /admin/branding or by Pulse staff on /pulse; the
   // last save wins and every change is logged. Both are checked by
@@ -97,6 +98,7 @@ model Clinic {
   shares           Share[]
   clinicNotes      ClinicNote[]
   qrCodes          QrCode[]
+  personalVideos   PersonalVideo[]
 
   // The pricing version this clinic is pinned to, once it has a subscription
   // (billing sets it). Empty means the active version. Activating a new
@@ -457,4 +459,30 @@ model QrCode {
   shares             Share[]
 
   @@index([clinicId, retiredAt])
+}
+
+/// One staff member's own relationship to one video in the library: whether
+/// they hearted it, and how often they have played it there. Per person,
+/// never shared with anyone else in the clinic, and never shown as a number
+/// anywhere on the clinic side (the library only uses it to order "My
+/// favorites" and "Most watched"). Staff data only: a Clerk user id, never
+/// anything about a patient. Written only by lib/db/personal-videos.ts, with
+/// one INSERT ... ON CONFLICT, so a repeated or simultaneous heart or play
+/// always ends in one row. A row is never deleted when its video leaves the
+/// clinic's plan: the library just does not show it, and it is back if the
+/// category returns.
+model PersonalVideo {
+  id           String    @id @default(cuid())
+  clinicId     String // the tenant column. Always filter by it.
+  clinic       Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  clerkUserId  String // the staff member's Clerk user id, from the session. An id only
+  videoId      String
+  video        Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  favoritedAt  DateTime? // when they hearted it; empty means not a favorite. Set again when re-hearted, so "My favorites" shows the newest first
+  playCount    Int       @default(0) // library plays: one per time the player was opened and the video actually started playing. Never shown
+  lastPlayedAt DateTime? // when that last happened
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([clinicId, clerkUserId, videoId]) // one row per person per video per clinic, which is what makes a repeated heart or play harmless
 }

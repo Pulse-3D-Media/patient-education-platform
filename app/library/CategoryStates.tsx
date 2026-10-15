@@ -43,17 +43,8 @@ export function LockedCategory({ label, slug, offer }: { label: string; slug: st
   );
 }
 
-/** The dimmed tile for a category on the plan whose only videos are placeholders this clinic is not shown. Not a link. */
-export function EmptyTile({ label, image }: { label: string; image: string }) {
-  return (
-    <QuietTile
-      label={label}
-      image={image}
-      badge="Nothing yet"
-      sentence="Only placeholder animations so far, and your clinic sees finished animations only."
-    />
-  );
-}
+/** The one line the library home shows under a category on the plan whose only videos are placeholders this clinic is not shown. */
+export const ONLY_PLACEHOLDERS = "Only placeholder animations so far, and your clinic sees finished animations only.";
 
 /** The same message on the category's own page. */
 export function EmptyCategory({ label }: { label: string }) {
@@ -62,26 +53,6 @@ export function EmptyCategory({ label }: { label: string }) {
       Its animations are placeholders for now, and your clinic is set to see finished animations only. They will appear here as each one is
       finished.
     </QuietBlock>
-  );
-}
-
-/** A dimmed, non-link tile: the picture faded and grey, the label, a badge, and one sentence. */
-function QuietTile({ label, image, badge, sentence }: { label: string; image: string; badge: string; sentence: string }) {
-  return (
-    <div aria-disabled="true" className="relative block aspect-[16/9] overflow-hidden rounded-2xl border border-dashed border-line-strong bg-surface">
-      {/* eslint-disable-next-line @next/next/no-img-element -- CDN still, no resizing needed */}
-      <img src={image} alt="" className="absolute inset-0 h-full w-full object-cover opacity-25 grayscale" />
-      <span className="absolute inset-0 bg-gradient-to-t from-veil/85 via-veil/40 to-transparent" />
-      <span className="absolute inset-x-0 bottom-0 flex flex-col gap-1 p-5">
-        <span className="flex items-center justify-between gap-3">
-          <span className="text-2xl font-semibold text-ink-soft sm:text-[26px]">{label}</span>
-          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-veil/50 px-3 py-1 text-sm text-ink-soft backdrop-blur">
-            {badge}
-          </span>
-        </span>
-        <span className="text-sm text-ink-quiet">{sentence}</span>
-      </span>
-    </div>
   );
 }
 

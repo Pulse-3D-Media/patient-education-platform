@@ -7,7 +7,8 @@ import { clinicIsOpen } from "./clinic-status";
 import { getClinicByClerkOrgId, upsertClinicForClerkOrg } from "./db/clinics";
 import { ADMIN_ROLE, isClinicAdmin } from "./roles";
 import { defaultSenderName } from "./sender-name";
-import type { ClinicStatus, PracticeType } from "@prisma/client";
+import type { Category, ClinicStatus, PracticeType } from "@prisma/client";
+import { inLibraryOrder } from "./access";
 
 /**
  * Which clinic is using the app right now, and who in it.
@@ -48,6 +49,11 @@ export type CurrentClinic = {
    * for them; the library's player shows it on the strip (lib/sender-name.ts).
    */
   defaultPatientName: string | null;
+  /**
+   * The categories on the clinic's plan, in library order, for the sidebar and the drawer (navigation only, so a
+   * courtesy: what a page may show is always decided from getClinicAccess() and the access rule).
+   */
+  planCategories: Category[];
 };
 
 /**
@@ -128,6 +134,7 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     isOwner: clinic.ownerClerkUserId === userId,
     isAdmin,
     defaultPatientName: defaultSenderName(membership.publicUserData?.firstName, membership.publicUserData?.lastName),
+    planCategories: inLibraryOrder(clinic.categories),
   };
 });
 

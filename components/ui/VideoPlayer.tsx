@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { pictureRatio } from "./ClinicMark";
-import { CloseIcon } from "./icons";
+import { CloseIcon, HeartIcon } from "./icons";
 import { PlayerOverlay } from "./PlayerOverlay";
 import { PRIMARY_BUTTON } from "./styles";
 import { usePlayerControls } from "./usePlayerControls";
@@ -60,6 +60,8 @@ export function VideoPlayer({
   logoUrl = null,
   senderName = null,
   onClose,
+  favorite,
+  onFirstPlay,
 }: {
   /** What to play, made on the server for this clinic. */
   source: PlaybackSource;
@@ -79,6 +81,10 @@ export function VideoPlayer({
   /** The signed-in person's name as patients see it ("Dr. Jane Smith, DO") when they hold a seat; null shows the clinic's name. */
   senderName?: string | null;
   onClose: () => void;
+  /** The heart beside Close: whether this video is one of the person's favorites, and what a tap does. Left out, there is no heart. */
+  favorite?: { on: boolean; onToggle: () => void };
+  /** Called once, the first time the video actually starts playing after the player opened (to count a library play). Never again for this opening, Try again included. */
+  onFirstPlay?: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const vid = useRef<HTMLVideoElement>(null);
@@ -86,6 +92,8 @@ export function VideoPlayer({
   const slowTimer = useRef<number | undefined>(undefined);
   /** Where to pick up after Try again. */
   const resumeAt = useRef(0);
+  /** Whether this opening of the player has already been counted as a play. A ref, so Try again and a pause never count twice. */
+  const counted = useRef(false);
 
   const [failed, setFailed] = useState(false);
   /** Access ended while the player was open (the server would not renew the stream). Said calmly, with no Try again. */
@@ -184,7 +192,14 @@ export function VideoPlayer({
           autoPlay
           playsInline
           controlsList="nodownload"
-          onPlaying={clearSlow}
+          onPlaying={() => {
+            clearSlow();
+            // The first time the picture really moves after opening: one library play (the browser's "playing" event, not the tap).
+            if (!counted.current) {
+              counted.current = true;
+              onFirstPlay?.();
+            }
+          }}
           onCanPlay={clearSlow}
           onWaiting={() => {
             // Out of data and waiting for more. Say so only if it goes on for a while.
@@ -216,7 +231,25 @@ export function VideoPlayer({
           placeholder={placeholder}
           showControls={!stopped}
           slow={slow && !stopped}
-          topRight={close}
+          topRight={
+            favorite ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={favorite.onToggle}
+                  aria-pressed={favorite.on}
+                  aria-label={favorite.on ? `Remove ${title} from my favorites` : `Add ${title} to my favorites`}
+                  title={favorite.on ? "Remove from my favorites" : "Add to my favorites"}
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/45 text-white drop-shadow-[0_1px_3px_rgba(0,0,0,.6)] hover:bg-black/60"
+                >
+                  <HeartIcon filled={favorite.on} className={`h-5 w-5 ${favorite.on ? "text-brand-bright" : ""}`} />
+                </button>
+                {close}
+              </div>
+            ) : (
+              close
+            )
+          }
         />
 
         {stopped && (

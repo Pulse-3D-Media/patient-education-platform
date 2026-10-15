@@ -106,9 +106,10 @@ export default async function LibraryPage() {
               were skimmed past). The name is plain text in the body colour; only "Add to your plan" is a link, at the end of its own row. */}
           <ul className="max-w-2xl divide-y divide-line rounded-xl border border-line">
             {more.map(({ category, offer }) => (
-              <li key={category.value} className="flex min-h-14 items-center gap-3 px-4">
+              <li key={category.value} className="flex min-h-14 items-center gap-3 px-4 py-1">
                 <LockIcon className="h-5 w-5 shrink-0 text-ink-muted" />
-                <span className="text-lg text-ink">{category.label}</span>
+                {/* On a phone a long name ("Orthopedic Spine") may take two lines; the row grows rather than the name being cut. */}
+                <span className="min-w-0 text-lg leading-snug text-ink">{category.label}</span>
                 {offer === "link" ? (
                   // Not prefetched: the library stays light, and Billing is only read when someone asks for it.
                   <Link

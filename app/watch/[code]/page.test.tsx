@@ -460,12 +460,14 @@ describe("what stays the same", () => {
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Play Vitest Total Knee Replacement"');
     expect(html).not.toContain("Make the video bigger");
-    // The video keeps playsinline, and the browser's own controls lose only "download" and, where the browser
-    // understands it (Chromium), its own full-screen button, which would show the video without the strip.
+    // No full-screen button of our own: the browser's own one, in its controls, is the way (Evan, 2026-10-15).
+    expect(html).not.toContain("Full screen");
+    // The video keeps playsinline, and the browser's own controls lose only "download": its full-screen button stays.
     expect(html).toMatch(/<video[^>]*playsInline/);
-    expect(html).toContain('controlsList="nodownload nofullscreen"');
+    expect(html).toContain('controlsList="nodownload"');
+    expect(html).not.toContain("nofullscreen");
     // The strip is decoration: the clinic and the sender are already on the page as text.
-    expect(html).toMatch(/data-video-strip="" class="pointer-events-none [^"]*"[^>]*><span aria-hidden="true"/);
+    expect(html).toMatch(/data-video-strip="" class="video-strip w-full shrink-0 select-none"><span aria-hidden="true"/);
   });
 
   it("nothing internal about the clinic is in the page", async () => {
@@ -493,7 +495,7 @@ describe("the strip on the video", () => {
     return html.slice(start, html.indexOf("</div>", start));
   }
 
-  it("is laid over the picture, from before the first play, with the logo and the surgeon's name alone", async () => {
+  it("is a row above the picture, from before the first play, with the logo and the surgeon's name alone", async () => {
     const clinic = await makeClinic({ name: "Vitest Strip Orthopedics", logoUrl: "https://example.com/strip-white.png" });
     const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO"));
     const strip = stripOf(html);
@@ -501,20 +503,22 @@ describe("the strip on the video", () => {
     expect(strip).toContain('src="https://example.com/strip-white.png"');
     expect(strip).toContain(">Dr. Jane Smith, DO<");
     expect(strip).not.toContain("Sent by");
-    // Inside the box over the picture, not in a row above the video: the player's box is now exactly the video's shape.
-    expect(html).toMatch(/class="picture-area pointer-events-none absolute inset-0 z-10" style="--picture-ratio:1.777[^"]*"><div class="picture-fit"><div data-video-strip/);
+    // A row of its own at the top of the player's card, then the video's 16:9 box: nothing of ours over the picture
+    // (Safari draws its own buttons in the picture's top corners, and the strip used to cover them).
+    expect(html).toMatch(/<div class="overflow-hidden rounded-\[18px\] bg-black [^"]*"><div data-video-strip/);
     expect(html).toContain("padding-top:56.25%");
-    expect(html).not.toContain("56.25% + 40px");
+    expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf("padding-top:56.25%"));
+    expect(html).not.toContain("picture-area");
     // Before Play in the page's order, so it is there before the first tap.
     expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Play Vitest Total Knee Replacement"'));
   });
 
-  it("with no logo, has the clinic's name in white in its place", async () => {
+  it("with no logo, has the clinic's name in its place", async () => {
     const clinic = await makeClinic({ name: "Vitest Nologo Orthopedics" });
     const strip = stripOf(await render(await shareFrom(clinic.id, "Jane Smith, NP")));
 
     expect(strip).not.toContain("<img");
-    expect(strip).toMatch(/text-white[^"]*">Vitest Nologo Orthopedics</);
+    expect(strip).toContain('<span class="video-strip-clinic block truncate">Vitest Nologo Orthopedics</span>');
     expect(strip).toContain(">Jane Smith, NP<");
   });
 
@@ -523,7 +527,7 @@ describe("the strip on the video", () => {
     const strip = stripOf(await render(await shareFrom(clinic.id, null)));
 
     expect(strip).toContain(">Vitest Older Strip Orthopedics<");
-    expect(strip).not.toContain("bg-white/50");
+    expect(strip).not.toContain("video-strip-sender");
   });
 
   it("is on a placeholder link too, under the amber bar that still says so first", async () => {
@@ -697,7 +701,7 @@ describe("a video that has moved to Mux", () => {
     expect(html).not.toContain("example.com/vitest-cdn-copy.mp4");
     // The strip, the sender lines, the controls setting and the education box survive the player change.
     expect(html).toContain("data-video-strip");
-    expect(html).toContain('controlsList="nodownload nofullscreen"');
+    expect(html).toContain('controlsList="nodownload"');
     expect(html).toContain("I understand this video is for education only.");
     expect(html).not.toMatch(/stops working in a few minutes/);
   });

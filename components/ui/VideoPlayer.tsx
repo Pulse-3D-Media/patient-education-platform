@@ -10,6 +10,8 @@ import {
   PauseIcon,
   PlayIcon,
   ReplayIcon,
+  SkipBackIcon,
+  SkipForwardIcon,
   VolumeIcon,
 } from "./icons";
 import { PRIMARY_BUTTON } from "./styles";
@@ -19,31 +21,38 @@ import type { PlaybackSource } from "@/lib/playback-source";
 import { useVideoSource } from "./useVideoSource";
 
 /**
- * The full-screen procedure player, with our own controls instead of the
- * browser's: title top-left, a scrub bar with the current time and length,
- * play/pause and replay on the left, sound and fullscreen on the right.
+ * The library's full-screen procedure player, for the surgeon in the room.
+ * Our own controls, laid out the way a phone's or Vimeo's player does it
+ * (Evan, 2026-10-15, with a Vimeo screenshot: the earlier layout, with a big
+ * title band and a control bar across the whole screen, was clunky on a
+ * Samsung phone held sideways):
  *
- * The controls fade out after a moment while the video plays and come back
- * on any mouse movement or tap. Every control is at least 44px so it works
- * on a tablet held in one hand.
+ *   - In the middle of the picture: back 10 seconds, play or pause (start
+ *     again once it has ended), forward 10 seconds.
+ *   - Along the bottom of the picture: the time ("0:46 / 1:52") with sound
+ *     and full screen at the right, and a thin progress bar to drag.
+ *   - Top left of the picture: the procedure's name, small.
+ *   - All of that fades away a moment after the last touch while the video
+ *     plays, and comes back on any touch or mouse movement.
+ *
+ * Every control is at least 44px to tap. Why our own controls rather than
+ * the browser's: decided by Evan on 2026-09-18, after a version with the
+ * browser's controls was tried and turned down; these look like them.
+ *
+ * TAPPING THE PICTURE. With a finger: a tap shows the controls, and a tap
+ * while they are showing hides them (the middle button plays and pauses).
+ * With a mouse: a click plays or pauses, and a double-click is full screen.
  *
  * Playback starts as soon as the element mounts (autoPlay), which is inside
  * the tap that opened the player, so sound is allowed.
  *
- * THE STRIP ON THE PICTURE. A thin dark band across the top edge of the
- * picture (ClinicMark) carries what has to stay on screen for as long as the
- * picture does: the clinic's logo (or name), the signed-in person's name as
- * patients see it on the links they send ("Dr. Jane Smith, DO"),
- * when they hold a seat, and the amber "Placeholder animation" chip when the
- * video is a sample standing in for the named procedure. It sits on the
- * picture's own top edge, not the screen's, even where the picture is
- * letterboxed (OnPicture's arithmetic, in app/globals.css), and comes along
- * when the player goes full screen. It never takes a tap.
- *
- * The title row (with Close) and the controls sit over the picture only
- * while they are showing, and fade away a moment after the last touch. The
- * title row always starts just UNDER the strip (.below-picture-top), so the
- * two never overlap and Close is never under the band. The strip is
+ * THE STRIP ABOVE THE PICTURE (ClinicMark): the clinic's logo (or name), the
+ * signed-in person's name as patients see it on the links they send ("Dr.
+ * Jane Smith, DO"), when they hold a seat, the amber "Placeholder
+ * animation" chip when the video is a sample, and Close at its right end. It
+ * sits right on top of the picture, the strip and the picture kept together
+ * as one unit as large as fits (.picture-unit in app/globals.css), never
+ * over the picture, and it does not fade: Close is always there. It is
  * branding, not protection: see ClinicMark.
  *
  * FULL SCREEN. The Full screen button puts the whole player full screen,
@@ -55,9 +64,9 @@ import { useVideoSource } from "./useVideoSource";
  *
  * WHEN THE VIDEO WILL NOT LOAD. A missing file, a blocked one, or a
  * connection that drops part-way: the picture is replaced by a calm panel
- * with one sentence and a Try again button, and the title bar (with Close)
- * stays up. Try again fetches the file afresh and carries on from where it
- * stopped. A video that is only slow gets a quiet "still loading" note
+ * with one sentence and a Try again button (Close stays in the strip). Try
+ * again fetches the file afresh and carries on from where it stopped. A
+ * video that is only slow gets a quiet "still loading" note in the middle
  * instead. Nothing technical is shown.
  *
  * A file can also fail BEFORE this component is listening (the browser
@@ -99,7 +108,7 @@ export function VideoPlayer({
   poster?: string;
   /** True for a sample animation standing in for the named procedure. Keeps a chip on the strip the whole time. */
   placeholder?: boolean;
-  /** The clinic's name, for the strip on the picture (in place of the logo when there is none). */
+  /** The clinic's name, for the strip (in place of the logo when there is none). */
   clinicName: string;
   /** The clinic's checked logo address for the strip, or null to show its name. */
   logoUrl?: string | null;
@@ -116,17 +125,18 @@ export function VideoPlayer({
   const resumeAt = useRef(0);
 
   const [playing, setPlaying] = useState(false);
+  /** The video played to its end: the middle button starts it again. */
+  const [finished, setFinished] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [muted, setMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
   const [visible, setVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [failed, setFailed] = useState(false);
   /** Access ended while the player was open (the server would not renew the stream). Said calmly, with no Try again. */
   const [ended, setEnded] = useState(false);
   const [slow, setSlow] = useState(false);
-  /** The video's shape, width over height, once the file says; 16:9 until then. Places the strip on the picture's top edge. */
+  /** The video's shape, width over height, once the file says; 16:9 until then. Keeps the strip on the picture's top edge. */
   const [ratio, setRatio] = useState(() => pictureRatio(undefined, undefined));
   const { reload } = useVideoSource(vid, source, {
     onFailure: () => fail(),
@@ -202,7 +212,6 @@ export function VideoPlayer({
     const point = resumePoint(vid.current?.currentTime);
     if (point > 0) resumeAt.current = point;
     clearSlow();
-    // The title bar holds Close, so it stays up for as long as the panel does.
     window.clearTimeout(hideTimer.current);
     setVisible(true);
     setFailed(true);
@@ -232,16 +241,9 @@ export function VideoPlayer({
   const togglePlay = () => {
     const v = vid.current;
     if (!v || stopped) return;
+    if (v.ended) v.currentTime = 0;
     if (v.paused) start(v);
     else v.pause();
-    reveal();
-  };
-
-  const restart = () => {
-    const v = vid.current;
-    if (!v || stopped) return;
-    v.currentTime = 0;
-    start(v);
     reveal();
   };
 
@@ -258,15 +260,6 @@ export function VideoPlayer({
     v.muted = !v.muted;
     setMuted(v.muted);
     reveal();
-  };
-
-  const changeVolume = (value: number) => {
-    const v = vid.current;
-    if (!v) return;
-    v.volume = value;
-    v.muted = value === 0;
-    setVolume(value);
-    setMuted(v.muted);
   };
 
   const toggleFullscreen = () => {
@@ -309,14 +302,23 @@ export function VideoPlayer({
     else if (e.key === "f") toggleFullscreen();
   };
 
-  // A tap on the picture brings the controls back first; a second tap pauses.
-  const onVideoClick = () => {
-    if (!visible) reveal();
-    else togglePlay();
+  /** A tap or click on the picture itself (not on one of the controls): see TAPPING THE PICTURE at the top. */
+  const onPictureTap = (e: React.PointerEvent) => {
+    if ((e.target as Element).closest("button, input, [role=alert]")) return;
+    if (e.pointerType === "mouse") {
+      togglePlay();
+    } else if (visible && playing) {
+      window.clearTimeout(hideTimer.current);
+      setVisible(false);
+    } else {
+      reveal();
+    }
   };
 
   const pct = duration ? (time / duration) * 100 : 0;
-  const fade = visible || stopped ? "opacity-100" : "pointer-events-none opacity-0";
+  const shown = visible || stopped;
+  /** The controls fade together; while faded they take no taps, so the first tap only brings them back. */
+  const fade = shown ? "opacity-100" : "pointer-events-none opacity-0";
 
   return (
     <div
@@ -327,187 +329,183 @@ export function VideoPlayer({
       aria-label={`${title}, video player`}
       onKeyDown={onKey}
       onMouseMove={reveal}
-      onTouchStart={reveal}
       className="flex min-h-0 flex-1 select-none flex-col bg-black outline-none"
     >
-      {/* The video's box. "picture-area" lets the strip and the title row find the picture's top edge inside it (app/globals.css);
+      {/* The space for the picture. "picture-area" lets the unit inside find the largest size that fits (app/globals.css);
           its size always comes from the screen, never from what is in it, which that needs. */}
       <div className="picture-area relative min-h-0 flex-1" style={{ "--picture-ratio": ratio } as CSSProperties}>
-        <video
-          ref={vid}
-          // A plain file goes on the element here; a stream is put on by useVideoSource once the player is awake.
-          src={source.kind === "file" ? source.src : undefined}
-          poster={poster}
-          autoPlay
-          playsInline
-          controlsList="nodownload"
-          onClick={onVideoClick}
-          onDoubleClick={toggleFullscreen}
-          onPlay={() => {
-            setPlaying(true);
-            reveal();
-          }}
-          onPause={() => {
-            setPlaying(false);
-            reveal();
-          }}
-          onPlaying={clearSlow}
-          onCanPlay={clearSlow}
-          onWaiting={() => {
-            // Out of data and waiting for more. Say so only if it goes on for a while.
-            window.clearTimeout(slowTimer.current);
-            slowTimer.current = window.setTimeout(() => setSlow(true), SLOW_AFTER_MS);
-          }}
-          onError={fail}
-          onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-          onLoadedMetadata={(e) => {
-            const v = e.currentTarget;
-            setDuration(v.duration);
-            setRatio(pictureRatio(v.videoWidth, v.videoHeight));
-            // After Try again, go back to where the video stopped.
-            if (resumeAt.current > 0) {
-              v.currentTime = Math.min(resumeAt.current, v.duration || resumeAt.current);
-              resumeAt.current = 0;
-            }
-          }}
-          onVolumeChange={(e) => {
-            setMuted(e.currentTarget.muted);
-            setVolume(e.currentTarget.volume);
-          }}
-          aria-label={title}
-          // When it has failed, the panel below says so in our words; the hidden video should not say it again.
-          aria-hidden={stopped || undefined}
-          className={`absolute inset-0 h-full w-full object-contain ${stopped ? "invisible" : ""}`}
-        />
-
-        {/* Said only when the wait has gone on a while. It sits over the picture, but only while the picture is stuck. The element is always here so a screen reader hears the words when they arrive. */}
-        <p
-          role="status"
-          className={
-            slow && !stopped
-              ? "pointer-events-none absolute left-1/2 top-1/2 z-10 w-max max-w-[86%] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-black/70 px-4 py-2 text-center text-base text-white"
-              : "sr-only"
-          }
-        >
-          {slow && !stopped ? "Still loading. A slow connection can take a little longer." : ""}
-        </p>
-
-        {stopped && (
-          // Calm, and never the word "error". Announced to a screen reader when it appears. The same panel says, with
-          // no Try again, that the video is no longer on the clinic's plan when the server would not renew the stream.
-          <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
-            <p className="text-xl font-semibold text-white">{ended ? "This video is no longer available to your clinic." : "This video did not load."}</p>
-            <p className="text-base text-[#bfbfbf]">{ended ? "It has come off your clinic's plan. Your office admin can add it back on Billing." : "Check your connection, then try again."}</p>
-            {!ended && (
-              <button ref={retryButton} type="button" onClick={retry} className={`${PRIMARY_BUTTON} min-h-12`}>
-                Try again
+        {/* The strip and the picture as one unit: the strip sits right on top of the picture, never over it. */}
+        <div className="picture-unit">
+          <ClinicMark
+            logoUrl={logoUrl}
+            name={clinicName}
+            senderName={senderName}
+            placeholder={placeholder}
+            action={
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close the video and go back to the library"
+                title="Close"
+                className="-mr-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white hover:bg-white/15"
+              >
+                <CloseIcon className="h-5 w-5" />
               </button>
+            }
+          />
+
+          {/* The picture, with our controls laid over it. */}
+          <div className="relative min-h-0 flex-1" onPointerUp={onPictureTap} onDoubleClick={stopped ? undefined : toggleFullscreen}>
+            <video
+              ref={vid}
+              // A plain file goes on the element here; a stream is put on by useVideoSource once the player is awake.
+              src={source.kind === "file" ? source.src : undefined}
+              poster={poster}
+              autoPlay
+              playsInline
+              controlsList="nodownload"
+              onPlay={() => {
+                setPlaying(true);
+                setFinished(false);
+                reveal();
+              }}
+              onPause={() => {
+                setPlaying(false);
+                reveal();
+              }}
+              onEnded={() => setFinished(true)}
+              onPlaying={clearSlow}
+              onCanPlay={clearSlow}
+              onWaiting={() => {
+                // Out of data and waiting for more. Say so only if it goes on for a while.
+                window.clearTimeout(slowTimer.current);
+                slowTimer.current = window.setTimeout(() => setSlow(true), SLOW_AFTER_MS);
+              }}
+              onError={fail}
+              onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+              onLoadedMetadata={(e) => {
+                const v = e.currentTarget;
+                setDuration(v.duration);
+                setRatio(pictureRatio(v.videoWidth, v.videoHeight));
+                // After Try again, go back to where the video stopped.
+                if (resumeAt.current > 0) {
+                  v.currentTime = Math.min(resumeAt.current, v.duration || resumeAt.current);
+                  resumeAt.current = 0;
+                }
+              }}
+              onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
+              aria-label={title}
+              // When it has failed, the panel below says so in our words; the hidden video should not say it again.
+              aria-hidden={stopped || undefined}
+              className={`absolute inset-0 h-full w-full object-contain ${stopped ? "invisible" : ""}`}
+            />
+
+            {/* The procedure's name, small, top left: with the other controls, so it fades with them. */}
+            <div className={`pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-black/60 to-transparent px-4 pb-8 pt-2.5 transition-opacity duration-300 ${fade}`}>
+              <h2 className="truncate text-base font-semibold text-white">{title}</h2>
+              {subtitle && <p className="text-xs text-[#bfbfbf]">{subtitle}</p>}
+            </div>
+
+            {/* Said only when the wait has gone on a while, in the middle, in place of the play button. The element is always
+                here so a screen reader hears the words when they arrive. */}
+            <p
+              role="status"
+              className={
+                slow && !stopped
+                  ? "pointer-events-none absolute left-1/2 top-1/2 w-max max-w-[86%] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-black/70 px-4 py-2 text-center text-base text-white"
+                  : "sr-only"
+              }
+            >
+              {slow && !stopped ? "Still loading. A slow connection can take a little longer." : ""}
+            </p>
+
+            {/* The middle: back 10 seconds, play or pause, forward 10 seconds, each on a soft dark circle so it reads over a white frame. */}
+            {!stopped && !slow && (
+              <div className={`absolute inset-0 flex items-center justify-center gap-6 transition-opacity duration-300 sm:gap-10 ${fade}`}>
+                <Control onClick={() => seekBy(-10)} label="Back 10 seconds" size="h-14 w-14 bg-black/35">
+                  <SkipBackIcon className="h-8 w-8" />
+                </Control>
+                <Control onClick={togglePlay} label={finished ? "Play again" : playing ? "Pause" : "Play"} size="h-16 w-16 bg-black/45">
+                  {finished ? <ReplayIcon className="h-8 w-8" /> : playing ? <PauseIcon className="h-8 w-8" /> : <PlayIcon className="ml-0.5 h-8 w-8" />}
+                </Control>
+                <Control onClick={() => seekBy(10)} label="Forward 10 seconds" size="h-14 w-14 bg-black/35">
+                  <SkipForwardIcon className="h-8 w-8" />
+                </Control>
+              </div>
+            )}
+
+            {stopped && (
+              // Calm, and never the word "error". Announced to a screen reader when it appears. The same panel says, with
+              // no Try again, that the video is no longer on the clinic's plan when the server would not renew the stream.
+              <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+                <p className="text-xl font-semibold text-white">{ended ? "This video is no longer available to your clinic." : "This video did not load."}</p>
+                <p className="text-base text-[#bfbfbf]">{ended ? "It has come off your clinic's plan. Your office admin can add it back on Billing." : "Check your connection, then try again."}</p>
+                {!ended && (
+                  <button ref={retryButton} type="button" onClick={retry} className={`${PRIMARY_BUTTON} min-h-12`}>
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* The bottom: the time, sound and full screen, then the progress bar. Not there at all while the video has failed
+                or access ended: there is nothing to control. */}
+            {!stopped && (
+              <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-3 pt-8 transition-opacity duration-300 sm:px-4 ${fade}`}>
+                <div className="flex items-center justify-between">
+                  <span className="pl-1 text-sm font-medium tabular-nums text-white">
+                    {formatDuration(time)} <span className="text-[#bfbfbf]">/ {formatDuration(duration)}</span>
+                  </span>
+                  <div className="flex items-center">
+                    <Control onClick={toggleMute} label={muted ? "Unmute" : "Mute"} size="h-11 w-11">
+                      {muted ? <MuteIcon className="h-5 w-5" /> : <VolumeIcon className="h-5 w-5" />}
+                    </Control>
+                    <Control onClick={toggleFullscreen} label={fullscreen ? "Exit full screen" : "Full screen"} size="h-11 w-11">
+                      {fullscreen ? <ExitFullscreenIcon className="h-5 w-5" /> : <FullscreenIcon className="h-5 w-5" />}
+                    </Control>
+                  </div>
+                </div>
+
+                {/* Progress bar: a thin drawn track and thumb, with an invisible range input over it for dragging (taller than
+                    it looks, so a finger finds it). */}
+                <div className="relative flex h-7 items-center">
+                  <div className="h-1 w-full rounded-full bg-white/30">
+                    <div className="h-full rounded-full bg-brand-bright" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 rounded-full bg-white shadow" style={{ left: `${pct}%` }} />
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 0}
+                    step={0.1}
+                    value={time}
+                    onChange={(e) => {
+                      const v = vid.current;
+                      if (v) v.currentTime = Number(e.target.value);
+                      reveal();
+                    }}
+                    aria-label="Seek"
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                </div>
+              </div>
             )}
           </div>
-        )}
-
-        {/* The strip on the picture's top edge: the whole time, failed or not, and never takes a tap. */}
-        <div className="picture-fit pointer-events-none">
-          <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} placeholder={placeholder} />
         </div>
-
-        {/* Title band. It starts just under the strip (below-picture-top; top-8 where a browser cannot place it), so Close is never under the band. */}
-        <div
-          className={`below-picture-top absolute inset-x-0 top-8 flex items-start justify-between gap-4 bg-gradient-to-b from-black/75 to-transparent px-5 pb-10 pt-3 transition-opacity duration-300 ${fade}`}
-        >
-          <div className="min-w-0">
-            <h2 className="truncate text-xl font-semibold text-white sm:text-2xl">{title}</h2>
-            {subtitle && <p className="text-sm text-[#bfbfbf]">{subtitle}</p>}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close the video and go back to the library"
-            title="Close"
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20"
-          >
-            <CloseIcon className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* Controls band. Not there at all while the video has failed or access ended: there is nothing to control. */}
-        {!stopped && (
-          <div
-            className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-5 pb-3 pt-12 transition-opacity duration-300 ${fade}`}
-          >
-            <div className="flex items-center justify-between text-sm font-medium text-white">
-              <span>{formatDuration(time)}</span>
-              <span className="text-[#bfbfbf]">{formatDuration(duration)}</span>
-            </div>
-
-            {/* Scrub bar: a drawn track and thumb, with an invisible range input over it for dragging */}
-            <div className="relative flex h-8 items-center">
-              <div className="h-1 w-full rounded-full bg-white/25">
-                <div className="h-full rounded-full bg-brand-bright" style={{ width: `${pct}%` }} />
-              </div>
-              <span
-                className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 rounded-full bg-white shadow"
-                style={{ left: `${pct}%` }}
-              />
-              <input
-                type="range"
-                min={0}
-                max={duration || 0}
-                step={0.1}
-                value={time}
-                onChange={(e) => {
-                  const v = vid.current;
-                  if (v) v.currentTime = Number(e.target.value);
-                  reveal();
-                }}
-                aria-label="Seek"
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1">
-                <Control onClick={togglePlay} label={playing ? "Pause" : "Play"}>
-                  {playing ? <PauseIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
-                </Control>
-                <Control onClick={restart} label="Start over">
-                  <ReplayIcon className="h-6 w-6" />
-                </Control>
-              </div>
-              <div className="flex items-center gap-1">
-                <Control onClick={toggleMute} label={muted ? "Unmute" : "Mute"}>
-                  {muted ? <MuteIcon className="h-6 w-6" /> : <VolumeIcon className="h-6 w-6" />}
-                </Control>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={muted ? 0 : volume}
-                  onChange={(e) => changeVolume(Number(e.target.value))}
-                  aria-label="Volume"
-                  className="hidden w-24 accent-brand-bright sm:block"
-                />
-                <Control onClick={toggleFullscreen} label={fullscreen ? "Exit full screen" : "Full screen"}>
-                  {fullscreen ? <ExitFullscreenIcon className="h-6 w-6" /> : <FullscreenIcon className="h-6 w-6" />}
-                </Control>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-function Control({ onClick, label, children }: { onClick: () => void; label: string; children: React.ReactNode }) {
+/** One of the player's round buttons: white icon, no box, a soft circle under the finger or the mouse. */
+function Control({ onClick, label, size, children }: { onClick: () => void; label: string; size: string; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="flex h-12 w-12 items-center justify-center rounded-full text-white transition hover:bg-white/15 active:bg-white/25"
+      className={`flex shrink-0 items-center justify-center rounded-full text-white drop-shadow-[0_1px_3px_rgba(0,0,0,.6)] transition hover:bg-white/15 active:bg-white/25 ${size}`}
     >
       {children}
     </button>

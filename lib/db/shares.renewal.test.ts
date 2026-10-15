@@ -71,6 +71,11 @@ async function read(code: string) {
   return prisma.share.findUniqueOrThrow({ where: { code } });
 }
 
+/** A link's row id, which is what the clinic side names a link by (never its code). */
+async function idOf(code: string) {
+  return (await read(code)).id;
+}
+
 async function notesFor(clinicId: string) {
   return prisma.clinicNote.findMany({ where: { clinicId }, orderBy: { createdAt: "asc" } });
 }
@@ -114,7 +119,7 @@ describe("when a played link runs out", () => {
     const after = addDays(T, settings.unclaimedDays + 1);
     expect(renewalState(await read(share.code), max, after)).toEqual({ kind: "finished", reason: "never-played" });
     expect(await requestShareRenewal(share.code, after)).toEqual({ kind: "refused", reason: "not-paused" });
-    expect((await renewShareForClinic(clinic, share.code, "Pat Lee", after)).ok).toBe(false);
+    expect((await renewShareForClinic(clinic, await idOf(share.code), "Pat Lee", after)).ok).toBe(false);
   });
 });
 
@@ -126,7 +131,10 @@ describe("the patient's request", () => {
     const first = await requestShareRenewal(code, paused);
     expect(first.kind).toBe("requested");
     if (first.kind !== "requested") throw new Error("unreachable");
-    expect(first.facts).toMatchObject({ code, senderName: null, renewalsLeft: max, daysPerRenewal: 10, requestedAt: paused, clinic: { id: clinic } });
+    expect(first.facts).toMatchObject({ shareId: await idOf(code), senderName: null, renewalsLeft: max, daysPerRenewal: 10, requestedAt: paused, clinic: { id: clinic } });
+    // What the clinic is told names the link by its id: the code, which plays the video, is nowhere in it.
+    expect(first.facts).not.toHaveProperty("code");
+    expect(JSON.stringify(first.facts)).not.toContain(code);
     expect(first.facts.videoTitle).toMatch(/^Vitest renewal video/);
     expect((await read(code)).renewalRequestedAt?.getTime()).toBe(paused.getTime());
 
@@ -199,7 +207,7 @@ describe("the clinic turning a link back on", () => {
     expect((await requestShareRenewal(code, paused)).kind).toBe("requested");
     const notesBefore = (await notesFor(clinic)).length;
 
-    const outcome = await renewShareForClinic(clinic, code, "Pat Lee", addDays(T, 12));
+    const outcome = await renewShareForClinic(clinic, await idOf(code), "Pat Lee", addDays(T, 12));
     expect(outcome).toMatchObject({ ok: true, expiresAt: addDays(T, 22), renewalsUsed: 1, renewalsLeft: max - 1 });
     expect(outcome.message).toContain("Done. The link works again until");
 
@@ -228,7 +236,7 @@ describe("the clinic turning a link back on", () => {
     const code = await makePlayed(clinic, video);
     let clock = addDays(T, 11);
     for (let renewal = 1; renewal <= max; renewal++) {
-      const outcome = await renewShareForClinic(clinic, code, "Pat Lee", clock);
+      const outcome = await renewShareForClinic(clinic, await idOf(code), "Pat Lee", clock);
       expect(outcome).toMatchObject({ ok: true, renewalsUsed: renewal, renewalsLeft: max - renewal, expiresAt: addDays(clock, 10) });
       if (renewal === max) expect(outcome.message).toContain("That was its last renewal.");
       // It works again until then, and has paused (or finished) the day after.
@@ -240,7 +248,7 @@ describe("the clinic turning a link back on", () => {
     expect(row.renewalsUsed).toBe(max);
     expect(renewalState(row, max, clock)).toEqual({ kind: "finished", reason: "no-renewals-left" });
     expect(await requestShareRenewal(code, clock)).toEqual({ kind: "refused", reason: "not-paused" });
-    const refused = await renewShareForClinic(clinic, code, "Pat Lee", clock);
+    const refused = await renewShareForClinic(clinic, await idOf(code), "Pat Lee", clock);
     expect(refused).toMatchObject({ ok: false, reason: "finished" });
     expect(refused.message).toContain("the maximum");
     expect((await read(code)).renewalsUsed).toBe(max);
@@ -250,25 +258,25 @@ describe("the clinic turning a link back on", () => {
     const notesBefore = (await notesFor(clinic)).length;
 
     const working = await makePlayed(clinic, video);
-    const stillWorking = await renewShareForClinic(clinic, working, "Pat Lee", addDays(T, 5));
+    const stillWorking = await renewShareForClinic(clinic, await idOf(working), "Pat Lee", addDays(T, 5));
     expect(stillWorking).toMatchObject({ ok: false, reason: "working" });
     expect(stillWorking.message).toContain("already working");
 
     const legacy = await makeLegacy(clinic, video, addDays(T, -1));
-    const legacyOutcome = await renewShareForClinic(clinic, legacy, "Pat Lee", T);
+    const legacyOutcome = await renewShareForClinic(clinic, await idOf(legacy), "Pat Lee", T);
     expect(legacyOutcome).toMatchObject({ ok: false, reason: "finished" });
     expect(legacyOutcome.message).toContain("older rule");
 
     const settings = await getSettings();
     const unplayed = await createShare(clinic, video, { now: T });
-    const neverPlayed = await renewShareForClinic(clinic, unplayed.code, "Pat Lee", addDays(T, settings.unclaimedDays + 1));
+    const neverPlayed = await renewShareForClinic(clinic, await idOf(unplayed.code), "Pat Lee", addDays(T, settings.unclaimedDays + 1));
     expect(neverPlayed).toMatchObject({ ok: false, reason: "finished" });
     expect(neverPlayed.message).toContain("never played");
 
     const hidden = await makeVideo(true);
     const toHidden = await makePlayed(clinic, hidden);
     await prisma.video.update({ where: { id: hidden }, data: { isPublished: false } });
-    expect(await renewShareForClinic(clinic, toHidden, "Pat Lee", addDays(T, 11))).toMatchObject({ ok: false, reason: "unpublished" });
+    expect(await renewShareForClinic(clinic, await idOf(toHidden), "Pat Lee", addDays(T, 11))).toMatchObject({ ok: false, reason: "unpublished" });
 
     for (const code of [working, legacy, unplayed.code, toHidden]) {
       const row = await read(code);
@@ -278,14 +286,16 @@ describe("the clinic turning a link back on", () => {
     expect((await notesFor(clinic)).length).toBe(notesBefore);
   });
 
-  it("finds no link for another clinic's code or a forged one, so nothing is written", async () => {
+  it("finds no link for another clinic's link, a forged id or the link's code, so nothing is written", async () => {
     const other = await makeClinic();
     const code = await makePlayed(clinic, video);
     const paused = addDays(T, 11);
 
-    expect(await renewShareForClinic(other, code, "Someone Else", paused)).toMatchObject({ ok: false, reason: "no-such-link" });
+    expect(await renewShareForClinic(other, await idOf(code), "Someone Else", paused)).toMatchObject({ ok: false, reason: "no-such-link" });
     expect(await renewShareForClinic(clinic, "zzzzzz", "Pat Lee", paused)).toMatchObject({ ok: false, reason: "no-such-link" });
     expect(await renewShareForClinic(clinic, "", "Pat Lee", paused)).toMatchObject({ ok: false, reason: "no-such-link" });
+    // The link's own code is not a key any more: only its id finds it.
+    expect(await renewShareForClinic(clinic, code, "Pat Lee", paused)).toMatchObject({ ok: false, reason: "no-such-link" });
 
     expect((await read(code)).renewalsUsed).toBe(0);
     expect(await notesFor(other)).toHaveLength(0);
@@ -296,16 +306,16 @@ describe("the clinic turning a link back on", () => {
     const code = await makePlayed(pausedClinic, video);
     await prisma.clinic.update({ where: { id: pausedClinic }, data: { status: "PAUSED" } });
     const when = addDays(T, 11);
-    const outcome = await renewShareForClinic(pausedClinic, code, "Pat Lee", when);
+    const outcome = await renewShareForClinic(pausedClinic, await idOf(code), "Pat Lee", when);
     expect(outcome).toMatchObject({ ok: false, reason: "clinic-closed" });
     expect(outcome.message).toContain("not open");
     expect((await read(code)).renewalsUsed).toBe(0);
 
     await prisma.clinic.update({ where: { id: pausedClinic }, data: { status: "PAST_DUE", graceEndsAt: addDays(when, -1) } });
-    expect(await renewShareForClinic(pausedClinic, code, "Pat Lee", when)).toMatchObject({ ok: false, reason: "clinic-closed" });
+    expect(await renewShareForClinic(pausedClinic, await idOf(code), "Pat Lee", when)).toMatchObject({ ok: false, reason: "clinic-closed" });
 
     await prisma.clinic.update({ where: { id: pausedClinic }, data: { graceEndsAt: addDays(when, 1) } });
-    expect(await renewShareForClinic(pausedClinic, code, "Pat Lee", when)).toMatchObject({ ok: true, renewalsUsed: 1 });
+    expect(await renewShareForClinic(pausedClinic, await idOf(code), "Pat Lee", when)).toMatchObject({ ok: true, renewalsUsed: 1 });
   });
 });
 
@@ -317,7 +327,7 @@ describe("a legacy link", () => {
     expect(await recordSharePlay(code, T)).toEqual({ recorded: false, reason: "expired" });
     expect(renewalState(before, max, T)).toEqual({ kind: "finished", reason: "legacy" });
     expect(await requestShareRenewal(code, T)).toEqual({ kind: "refused", reason: "not-paused" });
-    expect((await renewShareForClinic(clinic, code, "Pat Lee", T)).ok).toBe(false);
+    expect((await renewShareForClinic(clinic, await idOf(code), "Pat Lee", T)).ok).toBe(false);
 
     expect(await read(code)).toEqual(before);
   });
@@ -344,16 +354,18 @@ describe("the overview's waiting list", () => {
     void pausedNotAsked;
 
     const list = await listRenewalRequestsForClinic(mine, 10, addDays(T, 12));
-    expect(list.map((row) => row.code)).toEqual([askedSecond, askedFirst]);
+    expect(list.map((row) => row.id)).toEqual([await idOf(askedSecond), await idOf(askedFirst)]);
+    // The rows carry no code: the overview's button is built from the id.
+    expect(JSON.stringify(list)).not.toContain(askedSecond);
     expect(list[0]).toMatchObject({ renewalsLeft: max, daysPerRenewal: 10, isPlaceholder: true, senderName: null });
     expect(list[0].videoTitle).toMatch(/^Vitest renewal video/);
     expect(list[0].requestedAt.getTime()).toBe(paused.getTime() + 1000);
 
     // Bounded, and turning one back on takes it off the list.
     expect(await listRenewalRequestsForClinic(mine, 1, addDays(T, 12))).toHaveLength(1);
-    expect((await renewShareForClinic(mine, askedSecond, "Pat Lee", addDays(T, 12))).ok).toBe(true);
-    expect((await listRenewalRequestsForClinic(mine, 10, addDays(T, 12))).map((row) => row.code)).toEqual([askedFirst]);
-    expect((await listRenewalRequestsForClinic(theirs, 10, addDays(T, 12))).map((row) => row.code)).toEqual([otherClinics]);
+    expect((await renewShareForClinic(mine, await idOf(askedSecond), "Pat Lee", addDays(T, 12))).ok).toBe(true);
+    expect((await listRenewalRequestsForClinic(mine, 10, addDays(T, 12))).map((row) => row.id)).toEqual([await idOf(askedFirst)]);
+    expect((await listRenewalRequestsForClinic(theirs, 10, addDays(T, 12))).map((row) => row.id)).toEqual([await idOf(otherClinics)]);
   });
 
   it("drops a link that can no longer be turned back on", async () => {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RenewalRequestFacts } from "./db/shares";
 import type { Person } from "./people";
-import { notifyClinicOfRenewalRequest, reactivateLink, renewalRequestEmail } from "./renewal-email";
+import { notifyClinicOfRenewalRequest, reactivateLink, renewalRequestEmail, renewalRequestKey } from "./renewal-email";
 
 /**
  * The email a clinic gets when a patient asks for a paused link back, with
@@ -10,7 +10,8 @@ import { notifyClinicOfRenewalRequest, reactivateLink, renewalRequestEmail } fro
  * link was made and how many renewals are left, and nothing about a patient
  * (there is nothing to say); the one button opens the app's page and the
  * email says opening it turns nothing on; names cannot become markup; every
- * admin and no member is written to, once, under an idempotency key; and
+ * admin and no member is written to, each in a copy of their own, once,
+ * under an idempotency key that is a fingerprint, not the code; and
  * without settings, an origin, an organization or any admins, nothing is
  * sent and a reason is answered.
  */
@@ -18,7 +19,7 @@ import { notifyClinicOfRenewalRequest, reactivateLink, renewalRequestEmail } fro
 const env = { RESEND_API_KEY: "re_made_up_key_for_tests_only", EMAIL_FROM: "Pulse 3D <links@example.test>" };
 
 const facts: RenewalRequestFacts = {
-  code: "k7m2xq",
+  shareId: "cmshare0000000000000000001",
   videoTitle: "Total Knee <Replacement>",
   senderName: "Dr. Jane Smith",
   createdAt: new Date("2026-09-15T16:00:00.000Z"),
@@ -33,15 +34,18 @@ function person(userId: string, role: "admin" | "member", email: string): Person
 }
 const people = [person("user_a", "admin", "office@example.test"), person("user_b", "admin", "manager@example.test"), person("user_c", "member", "surgeon@example.test")];
 
-/** A stand-in for fetch that remembers each message it was handed. */
+type Sent = { to: string[]; subject: string; text: string; html: string };
+
+/** A stand-in for fetch that remembers each request (its address, its key, and every email in it; a batch holds several). */
 function service(status = 200) {
-  const sent: { to: string[]; subject: string; text: string; html: string; key: string | undefined }[] = [];
-  const send = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body));
-    sent.push({ to: body.to, subject: body.subject, text: body.text, html: body.html, key: (init?.headers as Record<string, string>)["Idempotency-Key"] });
+  const requests: { url: string; key: string | undefined; emails: Sent[] }[] = [];
+  const send = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Sent | Sent[];
+    requests.push({ url: String(url), key: (init?.headers as Record<string, string>)["Idempotency-Key"], emails: Array.isArray(body) ? body : [body] });
     return new Response("{}", { status });
   }) as unknown as typeof fetch;
-  return { send, sent };
+  const sent = () => requests.flatMap((request) => request.emails);
+  return { send, requests, sent };
 }
 
 afterEach(() => {
@@ -49,7 +53,7 @@ afterEach(() => {
 });
 
 describe("renewalRequestEmail", () => {
-  const url = reactivateLink("https://example.test", facts.code);
+  const url = reactivateLink("https://example.test", facts.shareId);
   const email = renewalRequestEmail(facts, url);
 
   it("names the procedure, the surgeon, when the link was made and how many renewals are left, in the subject and both bodies", () => {
@@ -76,7 +80,7 @@ describe("renewalRequestEmail", () => {
   });
 
   it("has one button that opens the reactivate page in the app, and says opening it turns nothing on", () => {
-    expect(url).toBe("https://example.test/admin/reactivate/k7m2xq");
+    expect(url).toBe("https://example.test/admin/reactivate/cmshare0000000000000000001");
     expect(email.text).toContain(url);
     expect(email.html).toContain(`href="${url}"`);
     expect(email.html.match(/<a /g)).toHaveLength(1);
@@ -101,14 +105,39 @@ describe("renewalRequestEmail", () => {
 describe("notifyClinicOfRenewalRequest", () => {
   const listPeople = async () => people;
 
-  it("emails every admin and no member, in one message, under a key made from the link and the request time", async () => {
-    const { send, sent } = service();
+  it("emails every admin and no member, each a copy addressed to them alone, in one request under one key", async () => {
+    const { send, requests, sent } = service();
     expect(await notifyClinicOfRenewalRequest(facts, "https://example.test", { env, fetch: send, people: listPeople })).toEqual({ told: true, recipients: 2 });
-    expect(sent).toHaveLength(1);
-    expect(sent[0].to).toEqual(["office@example.test", "manager@example.test"]);
-    expect(sent[0].to).not.toContain("surgeon@example.test");
-    expect(sent[0].text).toContain("https://example.test/admin/reactivate/k7m2xq");
-    expect(sent[0].key).toBe(`renewal-request-k7m2xq-${facts.requestedAt.getTime()}`);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("https://api.resend.com/emails/batch");
+    expect(requests[0].key).toBe(renewalRequestKey(facts.shareId, facts.requestedAt));
+    // One copy per admin, and no copy names anyone but its own admin.
+    expect(sent().map((email) => email.to)).toEqual([["office@example.test"], ["manager@example.test"]]);
+    expect(JSON.stringify(sent())).not.toContain("surgeon@example.test");
+    for (const email of sent()) {
+      // The same words for each: the one button, the trusted origin.
+      expect(email.subject).toBe(renewalRequestEmail(facts, reactivateLink("https://example.test", facts.shareId)).subject);
+      expect(email.text).toContain("https://example.test/admin/reactivate/cmshare0000000000000000001");
+      expect(email.html.match(/<a /g)).toHaveLength(1);
+    }
+  });
+
+  it("makes the key from a fingerprint of the link's id and the request time", async () => {
+    const key = renewalRequestKey(facts.shareId, facts.requestedAt);
+    expect(key).toMatch(/^renewal-request-[0-9a-f]{64}$/);
+    expect(key).not.toContain(facts.shareId);
+    // Stable, so a resend of the same request is a repeat Resend drops.
+    expect(renewalRequestKey("cmshare0000000000000000001", new Date(facts.requestedAt.getTime()))).toBe(key);
+    // A different link, or the same link asked about on another day, is a new email.
+    expect(renewalRequestKey("cmshare0000000000000000002", facts.requestedAt)).not.toBe(key);
+    expect(renewalRequestKey(facts.shareId, new Date(facts.requestedAt.getTime() + 24 * 60 * 60 * 1000))).not.toBe(key);
+
+    // And the same request notified twice sends under the same key.
+    const { send, requests } = service();
+    await notifyClinicOfRenewalRequest(facts, "https://example.test", { env, fetch: send, people: listPeople });
+    await notifyClinicOfRenewalRequest(facts, "https://example.test", { env, fetch: send, people: listPeople });
+    expect(requests.map((request) => request.key)).toEqual([key, key]);
+    expect(JSON.stringify(requests.map((request) => request.key))).not.toContain(facts.shareId);
   });
 
   it("sends nothing when email is not set up, and does not even read the clinic's people", async () => {
@@ -116,13 +145,13 @@ describe("notifyClinicOfRenewalRequest", () => {
     const read = vi.fn(listPeople);
     expect(await notifyClinicOfRenewalRequest(facts, "https://example.test", { env: {}, fetch: send, people: read })).toEqual({ told: false, reason: "not-configured" });
     expect(read).not.toHaveBeenCalled();
-    expect(sent).toHaveLength(0);
+    expect(sent()).toHaveLength(0);
   });
 
   it("sends nothing without a trusted origin to build the button from", async () => {
     const { send, sent } = service();
     expect(await notifyClinicOfRenewalRequest(facts, null, { env, fetch: send, people: listPeople })).toEqual({ told: false, reason: "no-origin" });
-    expect(sent).toHaveLength(0);
+    expect(sent()).toHaveLength(0);
   });
 
   it("sends nothing for a clinic with no organization, or with no admins in it", async () => {
@@ -131,7 +160,7 @@ describe("notifyClinicOfRenewalRequest", () => {
     expect(await notifyClinicOfRenewalRequest(noOrg, "https://example.test", { env, fetch: send, people: listPeople })).toEqual({ told: false, reason: "no-organization" });
     const membersOnly = async () => people.filter((one) => one.role === "member");
     expect(await notifyClinicOfRenewalRequest(facts, "https://example.test", { env, fetch: send, people: membersOnly })).toEqual({ told: false, reason: "no-admins" });
-    expect(sent).toHaveLength(0);
+    expect(sent()).toHaveLength(0);
   });
 
   it("answers a reason, and never throws, when the people cannot be read or the service refuses", async () => {

@@ -6,7 +6,7 @@ import { ADMIN_SECTIONS, activeAdminSection } from "@/lib/admin-nav";
 
 /**
  * The row of section links at the top of every clinic admin page: Overview,
- * Shared links, People, Billing, Reports. One row on every screen size: on
+ * Shared links, People, Branding, Billing. One row on every screen size: on
  * a phone it scrolls sideways rather than wrapping or hiding anything, so
  * the current section is always in reach with one thumb.
  *
@@ -35,7 +35,6 @@ export function AdminNav() {
                 }`}
               >
                 {section.label}
-                {section.coming && <span className="text-xs uppercase tracking-wider text-ink-muted">Coming</span>}
               </Link>
             </li>
           );

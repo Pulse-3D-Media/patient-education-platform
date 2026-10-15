@@ -763,6 +763,24 @@ describe("Stripe's billing page, and recovering from a failed payment", () => {
     expect(await findInvoiceToPay({ clinicId: f.clinicId, deps: depsFor(f.fake) })).toMatchObject({ ok: false, message: expect.stringContaining("Nothing is waiting") });
   });
 
+  it("a first payment still under way: neither 'Pay now' nor Stripe's billing page is handed out, though Stripe has an open invoice (rule 8)", async () => {
+    const f = await makePayingClinic("first payment", { categories: ["KNEE"], seats: 1 });
+    // Stripe holds an unpaid invoice for the subscription; the record says its first payment is not confirmed.
+    f.fake.setCard(f.customerId, "declined");
+    f.fake.renew(f.subscriptionId);
+    for (const status of ["INCOMPLETE", "NONE"] as const) {
+      await prisma.clinicBilling.update({ where: { clinicId: f.clinicId }, data: { status, currentPlanId: null, pendingPlanId: f.planId } });
+
+      expect(await findInvoiceToPay({ clinicId: f.clinicId, deps: depsFor(f.fake) })).toEqual({ ok: false, message: "Nothing is waiting to be paid." });
+      expect(await openBillingPortal({ clinicId: f.clinicId, origin: ORIGIN, deps: depsFor(f.fake) })).toMatchObject({ ok: false, message: expect.stringContaining("not paid by card") });
+    }
+    expect(f.fake.calls.createPortalSession).toBe(0);
+
+    // A paid-up subscription with no upgrade waiting has nothing to pay either, whatever Stripe holds.
+    await prisma.clinicBilling.update({ where: { clinicId: f.clinicId }, data: { status: "ACTIVE", currentPlanId: f.planId, pendingPlanId: null } });
+    expect(await findInvoiceToPay({ clinicId: f.clinicId, deps: depsFor(f.fake) })).toEqual({ ok: false, message: "Nothing is waiting to be paid." });
+  });
+
   it("a clinic whose subscription has ended can still reach Stripe's billing page for its invoices", async () => {
     const f = await makePayingClinic("ended", { categories: ["KNEE"], seats: 1 });
     const sub = f.fake.subscriptions.get(f.subscriptionId);

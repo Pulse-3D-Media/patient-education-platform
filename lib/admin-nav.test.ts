@@ -14,7 +14,12 @@ describe("activeAdminSection", () => {
     expect(activeAdminSection("/admin/people/anything")).toBe("/admin/people");
     expect(activeAdminSection("/admin/branding")).toBe("/admin/branding");
     expect(activeAdminSection("/admin/billing")).toBe("/admin/billing");
-    expect(activeAdminSection("/admin/reports")).toBe("/admin/reports");
+  });
+
+  it("has no Reports section: clinics get no reports, and /admin/reports only redirects", () => {
+    expect(activeAdminSection("/admin/reports")).toBeNull();
+    expect(ADMIN_SECTIONS.some((section) => section.href.startsWith("/admin/reports"))).toBe(false);
+    expect(ADMIN_SECTIONS.some((section) => /report/i.test(section.label) || /report/i.test(section.blurb))).toBe(false);
   });
 
   it("counts the QR picture and the pamphlet as Shared links", () => {
@@ -32,10 +37,9 @@ describe("activeAdminSection", () => {
     expect(activeAdminSection("/library")).toBeNull();
   });
 
-  it("has Branding between People and Billing, and it is not marked as coming", () => {
+  it("has Branding between People and Billing, and nothing after Billing", () => {
     const labels = ADMIN_SECTIONS.map((section) => section.label);
-    expect(labels).toEqual(["Overview", "Shared links", "People", "Branding", "Billing", "Reports"]);
-    expect(ADMIN_SECTIONS.find((section) => section.href === "/admin/branding")?.coming).toBeUndefined();
+    expect(labels).toEqual(["Overview", "Shared links", "People", "Branding", "Billing"]);
   });
 
   it("lists every section with an address under /admin", () => {

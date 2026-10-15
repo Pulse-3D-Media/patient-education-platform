@@ -272,6 +272,10 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).toContain("not counting links you have cancelled");
     expect(html).not.toContain("all links");
     for (const href of ["/admin/links", "/admin/people", "/admin/billing"]) expect(html).toContain(`href="${href}"`);
+    // No Reports section, in the navigation or the cards: clinics get no reports (Van, 2026-10-08).
+    expect(html).not.toContain('href="/admin/reports"');
+    expect(html).not.toContain(">Reports<");
+    expect(html).not.toContain(">Coming<");
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin"/);
     expect(html).not.toContain(">Create link<");
     for (const word of PLAN_WORDS) expect(html).not.toContain(word);

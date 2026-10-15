@@ -256,10 +256,7 @@ function SectionCards(): ReactNode {
               href={section.href}
               className="flex h-full flex-col rounded-2xl border border-line bg-surface p-5 transition hover:border-brand/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-bright"
             >
-              <span className="flex items-center gap-2 text-lg font-semibold text-ink">
-                {section.label}
-                {section.coming && <span className="text-xs font-normal uppercase tracking-wider text-ink-muted">Coming</span>}
-              </span>
+              <span className="text-lg font-semibold text-ink">{section.label}</span>
               <span className="mt-1 text-sm text-ink-soft">{section.blurb}</span>
             </Link>
           </li>

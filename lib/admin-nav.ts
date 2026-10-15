@@ -6,15 +6,18 @@
  *
  * Each section has one job (see "The four surfaces" in CLAUDE.md). Adding a
  * section is one entry here; the navigation renders from this list.
+ *
+ * There is no Reports section, on purpose: clinics get no reports or usage
+ * numbers at all for now (decided by Van on 2026-10-08), so /admin/reports
+ * only sends an old bookmark back to the overview. Reports are for Pulse
+ * staff, on /pulse/reports.
  */
 
 export type AdminSection = {
-  href: "/admin" | "/admin/links" | "/admin/people" | "/admin/branding" | "/admin/billing" | "/admin/reports";
+  href: "/admin" | "/admin/links" | "/admin/people" | "/admin/branding" | "/admin/billing";
   label: string;
   /** One line under the title on that section's page, and the description on the overview's cards. */
   blurb: string;
-  /** True for a section that exists as a placeholder page only. */
-  coming?: boolean;
 };
 
 export const ADMIN_SECTIONS: AdminSection[] = [
@@ -23,7 +26,6 @@ export const ADMIN_SECTIONS: AdminSection[] = [
   { href: "/admin/people", label: "People", blurb: "Everyone who can sign in, who is a surgeon, and who is an admin." },
   { href: "/admin/branding", label: "Branding", blurb: "Your logo, colour, font and phone, as your team and your patients see them." },
   { href: "/admin/billing", label: "Billing", blurb: "The categories and surgeon seats on your plan, and what it comes to." },
-  { href: "/admin/reports", label: "Reports", blurb: "How your links get used. Coming later.", coming: true },
 ];
 
 /**

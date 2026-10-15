@@ -128,7 +128,7 @@ export default async function AdminOverviewPage() {
         ) : (
           <ul className="mt-3 divide-y divide-line rounded-2xl border border-line bg-surface">
             {waiting.map((request) => (
-              <li key={request.code} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <li key={request.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="flex flex-wrap items-center gap-2 text-[15px] text-ink">
                     {request.videoTitle}
@@ -139,7 +139,7 @@ export default async function AdminOverviewPage() {
                     {formatDate(request.requestedAt)} &middot; {request.renewalsLeft} {request.renewalsLeft === 1 ? "renewal" : "renewals"} left
                   </p>
                 </div>
-                <Link href={`/admin/reactivate/${request.code}`} className={PRIMARY_BUTTON}>
+                <Link href={`/admin/reactivate/${request.id}`} className={PRIMARY_BUTTON}>
                   Turn it back on
                 </Link>
               </li>

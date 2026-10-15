@@ -72,13 +72,13 @@ async function makePaused() {
 }
 
 /** The same read as the real one, with no lock: what a reactivation would do without the row lock. */
-async function readPlain(tx: Prisma.TransactionClient, clinicId: string, code: string) {
+async function readPlain(tx: Prisma.TransactionClient, clinicId: string, shareId: string) {
   const rows = await tx.$queryRaw<access.LockedShareRow[]>`
     SELECT s."id", s."code", s."expiryPolicy"::text AS "expiryPolicy", s."expiresAt", s."firstPlayedAt", s."daysAfterFirstPlay",
            s."renewalsUsed", s."renewalRequestedAt", v."title" AS "videoTitle", v."isPublished" AS "videoIsPublished"
     FROM "Share" s
     JOIN "Video" v ON v."id" = s."videoId"
-    WHERE s."code" = ${code} AND s."clinicId" = ${clinicId}`;
+    WHERE s."id" = ${shareId} AND s."clinicId" = ${clinicId}`;
   return rows[0] ?? null;
 }
 
@@ -90,13 +90,15 @@ async function readPlain(tx: Prisma.TransactionClient, clinicId: string, code: s
  */
 async function renewWhileAnotherStarts(code: string, read = real.lockShareForRenewal) {
   const now = addDays(T, 11);
+  // The clinic side names a link by its row id, never its code.
+  const { id } = await prisma.share.findUniqueOrThrow({ where: { code }, select: { id: true } });
   let secondFinishedDuringWait = false;
   let second: Promise<RenewalOutcome> = Promise.resolve({ ok: false, reason: "no-such-link", message: "" });
 
   vi.mocked(access.lockShareForRenewal).mockImplementationOnce(async (tx, clinicId, wanted) => {
     const row = await read(tx, clinicId, wanted);
     let done = false;
-    second = renewShareForClinic(clinic, code, "Second admin", now).then((outcome) => {
+    second = renewShareForClinic(clinic, id, "Second admin", now).then((outcome) => {
       done = true;
       return outcome;
     });
@@ -105,7 +107,7 @@ async function renewWhileAnotherStarts(code: string, read = real.lockShareForRen
     return row;
   });
 
-  const first = await renewShareForClinic(clinic, code, "First admin", now);
+  const first = await renewShareForClinic(clinic, id, "First admin", now);
   return { first, second: await second, secondFinishedDuringWait };
 }
 

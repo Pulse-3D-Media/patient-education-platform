@@ -7,15 +7,21 @@ import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getSettings } from "@/lib/db/settings";
-import { getShareForClinic } from "@/lib/db/shares";
+import { getShareByIdForClinic } from "@/lib/db/shares";
 import { finishedLinkMessage, renewalState } from "@/lib/expiry";
 import { AdminFrame } from "../../AdminFrame";
 import { ReactivateForm } from "./ReactivateForm";
 
 /**
- * Turn a paused link back on: /admin/reactivate/<code>. This is where the
+ * Turn a paused link back on: /admin/reactivate/<id>. This is where the
  * button in the "a patient is asking" email lands, and where the overview's
  * "Links waiting to be reactivated" sends an admin.
+ *
+ * THE ADDRESS CARRIES THE LINK'S ROW ID, NEVER ITS CODE. The code is what
+ * plays the video; this address sits in an email (which the email service
+ * keeps), in browser history and in the hosting logs. The id plays nothing.
+ * An address with a code in it (none was ever emailed) finds nothing here
+ * and gets not-found, like any other id this clinic does not have.
  *
  * OPENING THIS PAGE CHANGES NOTHING. Mail programs and filters open links
  * on their own to scan them, and an email can be forwarded, so the page
@@ -24,9 +30,9 @@ import { ReactivateForm } from "./ReactivateForm";
  * link back on.
  *
  * Who may see it: a signed-in office admin of the clinic the link belongs
- * to. A member gets the admins-only page. A code that is not one of this
+ * to. A member gets the admins-only page. An id that is not one of this
  * clinic's links (a forged one, or another clinic's) gets not-found, which
- * also gives nothing away about which codes exist. A clinic that is not
+ * also gives nothing away about which links exist. A clinic that is not
  * open (paused, cancelled, grace over, or never on a plan) is told why and
  * offered nothing to press: links cannot be turned back on for it.
  *
@@ -37,8 +43,8 @@ import { ReactivateForm } from "./ReactivateForm";
  */
 export const dynamic = "force-dynamic";
 
-export default async function ReactivatePage({ params }: PageProps<"/admin/reactivate/[code]">) {
-  const { code } = await params;
+export default async function ReactivatePage({ params }: PageProps<"/admin/reactivate/[id]">) {
+  const { id } = await params;
   const clinic = await requireClinicPage();
 
   if (!clinic.isAdmin) {
@@ -60,7 +66,7 @@ export default async function ReactivatePage({ params }: PageProps<"/admin/react
     );
   }
 
-  const share = await getShareForClinic(clinic.id, code);
+  const share = await getShareByIdForClinic(clinic.id, id);
   if (!share) notFound();
 
   const now = new Date();
@@ -100,7 +106,7 @@ export default async function ReactivatePage({ params }: PageProps<"/admin/react
 
         {/* Always drawn, so the "Done" sentence survives the page's own refresh after Confirm (see ReactivateForm). */}
         <ReactivateForm
-          code={share.code}
+          shareId={share.id}
           paused={canReactivate}
           days={state.kind === "paused" ? state.daysPerRenewal : 0}
           renewalsLeft={state.kind === "paused" ? state.renewalsLeft : 0}

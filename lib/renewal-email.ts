@@ -16,7 +16,7 @@ import { listPeople, type Person } from "./people";
  * The email says so, so nobody goes looking for a name that is not there.
  *
  * ONE BUTTON, AND IT IS NOT A ONE-CLICK ACTION. "Reactivate this link" opens
- * a page in the app (/admin/reactivate/<code>) that needs a sign-in, checks
+ * a page in the app (/admin/reactivate/<id>) that needs a sign-in, checks
  * the person is an admin of THAT clinic, and has its own Confirm button.
  * Mail programs and hospital filters open links by themselves to scan them,
  * and a forwarded email must not be able to turn anything on; a GET that
@@ -27,26 +27,30 @@ import { listPeople, type Person } from "./people";
  * deployment already knows is its own (pickTrustedOrigin in the caller),
  * never from the Host header as the browser sent it: an address that ends
  * up in someone's inbox must not be one an attacker chose.
+ *
+ * NO LINK CODE ANYWHERE IN IT. The patient link's code is what plays the
+ * video, and Resend keeps every message it sends (and the key it was sent
+ * under), so the email names the link by its row id instead: in the
+ * button's address and in the idempotency key. The id plays nothing, and
+ * the page it opens asks for an admin of that clinic.
  */
 
 /**
  * The idempotency key for one request's email. One request per link per
- * day is the rule, so the link and the moment the request was recorded
- * name it, and a resend of the same request is a repeat, not a second
- * email. The key sits in Resend's logs, so it is a SHA-256 fingerprint of
- * the two rather than the link's code written out: the same inputs always
- * give the same key, so a retry still matches. (The button's address in
- * the email itself still carries the code, and Resend keeps the message
- * too; this keeps it out of the key, not out of Resend.)
+ * day is the rule, so the link (its row id) and the moment the request was
+ * recorded name it, and a resend of the same request is a repeat, not a
+ * second email. The key sits in Resend's logs, so it is a SHA-256
+ * fingerprint of the two: the same inputs always give the same key, so a
+ * retry still matches.
  */
-export function renewalRequestKey(code: string, requestedAt: Date): string {
-  const fingerprint = createHash("sha256").update(`${code}:${requestedAt.getTime()}`).digest("hex");
+export function renewalRequestKey(shareId: string, requestedAt: Date): string {
+  const fingerprint = createHash("sha256").update(`${shareId}:${requestedAt.getTime()}`).digest("hex");
   return `renewal-request-${fingerprint}`;
 }
 
-/** The page in the app where the link is turned back on. */
-export function reactivateLink(origin: string, code: string): string {
-  return `${origin}/admin/reactivate/${code}`;
+/** The page in the app where the link is turned back on, by the link's row id (never its code). */
+export function reactivateLink(origin: string, shareId: string): string {
+  return `${origin}/admin/reactivate/${shareId}`;
 }
 
 /** "Sep 15, 2026", in Utah time, like the admin area. */
@@ -137,14 +141,14 @@ export async function notifyClinicOfRenewalRequest(
   const admins = people.filter((person) => person.role === "admin").map((person) => person.email);
   if (admins.length === 0) return { told: false, reason: "no-admins" };
 
-  const message = renewalRequestEmail(facts, reactivateLink(origin, facts.code));
+  const message = renewalRequestEmail(facts, reactivateLink(origin, facts.shareId));
   const outcome = await sendEmail(
     {
       to: admins,
       // Each admin gets a copy addressed to them alone, so no admin sees the others' addresses.
       separately: true,
       ...message,
-      idempotencyKey: renewalRequestKey(facts.code, facts.requestedAt),
+      idempotencyKey: renewalRequestKey(facts.shareId, facts.requestedAt),
     },
     { env: options.env, fetch: options.fetch },
   );

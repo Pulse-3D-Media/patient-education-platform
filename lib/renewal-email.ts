@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { RenewalRequestFacts } from "./db/shares";
 import { emailIsConfigured, sendEmail, type EmailEnv } from "./email";
 import { listPeople, type Person } from "./people";
@@ -27,6 +28,21 @@ import { listPeople, type Person } from "./people";
  * never from the Host header as the browser sent it: an address that ends
  * up in someone's inbox must not be one an attacker chose.
  */
+
+/**
+ * The idempotency key for one request's email. One request per link per
+ * day is the rule, so the link and the moment the request was recorded
+ * name it, and a resend of the same request is a repeat, not a second
+ * email. The key sits in Resend's logs, so it is a SHA-256 fingerprint of
+ * the two rather than the link's code written out: the same inputs always
+ * give the same key, so a retry still matches. (The button's address in
+ * the email itself still carries the code, and Resend keeps the message
+ * too; this keeps it out of the key, not out of Resend.)
+ */
+export function renewalRequestKey(code: string, requestedAt: Date): string {
+  const fingerprint = createHash("sha256").update(`${code}:${requestedAt.getTime()}`).digest("hex");
+  return `renewal-request-${fingerprint}`;
+}
 
 /** The page in the app where the link is turned back on. */
 export function reactivateLink(origin: string, code: string): string {
@@ -125,9 +141,10 @@ export async function notifyClinicOfRenewalRequest(
   const outcome = await sendEmail(
     {
       to: admins,
+      // Each admin gets a copy addressed to them alone, so no admin sees the others' addresses.
+      separately: true,
       ...message,
-      // One request per link per day is the rule; the key makes a resend of the same request a repeat, not a second email.
-      idempotencyKey: `renewal-request-${facts.code}-${facts.requestedAt.getTime()}`,
+      idempotencyKey: renewalRequestKey(facts.code, facts.requestedAt),
     },
     { env: options.env, fetch: options.fetch },
   );

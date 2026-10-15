@@ -8,9 +8,10 @@ import { getClinicAccess } from "@/lib/db/access";
 import { getCategoryConfigs } from "@/lib/db/category-config";
 import { prisma } from "@/lib/db/client";
 import { recordLibraryPlay, setFavorite } from "@/lib/db/personal-videos";
-import { countPublishedVideosByKind } from "@/lib/db/videos";
+import { countPublishedVideosByKind, searchUsableVideos } from "@/lib/db/videos";
 import { FAVORITES_EMPTY } from "@/lib/library-rows";
 import CategoryPage from "./[category]/page";
+import SearchPage from "./search/page";
 import LibraryPage from "./page";
 
 /**
@@ -607,5 +608,52 @@ describe("the library home's rows", () => {
     expect(html).toContain('href="/library"');
     expect(html).toMatch(new RegExp(`aria-pressed="true"[^>]*aria-label="Remove ${titles[1]} from my favorites"`));
     expect(html).toMatch(new RegExp(`aria-pressed="false"[^>]*aria-label="Add ${titles[0]} to my favorites"`));
+  });
+
+  it("puts the pills first on a category's page and keeps no headline on the home page", async () => {
+    signInAs(orgRows, "Vitest library clinic (rows)");
+    const category = await renderCategory("knee");
+    expect(category.indexOf('aria-label="Categories"')).toBeLessThan(category.indexOf("<h1"));
+    const home = await renderHome();
+    expect(home).toMatch(/<h1 class="sr-only">My Procedure Library<\/h1>/);
+  });
+
+  /** Render the search results the way the server does, for what was typed. */
+  async function renderSearch(q: string | undefined) {
+    signInAs(orgRows, "Vitest library clinic (rows)");
+    return renderToStaticMarkup(await SearchPage({ searchParams: Promise.resolve(q === undefined ? {} : { q }) } as never));
+  }
+
+  it("search finds what the clinic may use, by any part of the title, ignoring capitals, with no pill lit", async () => {
+    const html = await renderSearch(`ROWS KNEE`);
+    for (const title of titles) expect(html).toContain(title);
+    expect(html).not.toContain('aria-current="page"');
+    expect(html).toContain('aria-label="Categories"');
+    // The cards have their hearts, filled where this person hearted.
+    expect(html).toMatch(new RegExp(`aria-pressed="true"[^>]*aria-label="Remove ${titles[1]} from my favorites"`));
+  });
+
+  it("search never finds a video off the plan, and says so plainly when nothing matches", async () => {
+    const html = await renderSearch(hipTitle);
+    expect(html).not.toContain(hipSrc);
+    expect(html).toContain("No procedures match");
+    expect(html).not.toContain("<article");
+  });
+
+  it("search reads % and _ as themselves, and an empty search goes home", async () => {
+    const access = await getClinicAccess(rowsClinic);
+    if (!access) throw new Error("clinic missing");
+    for (const wild of ["%", "_"]) {
+      for (const video of await searchUsableVideos(access, wild, 60)) expect(video.title).toContain(wild);
+    }
+    await expect(renderSearch("   ")).rejects.toThrow("redirect:/library");
+    await expect(renderSearch(undefined)).rejects.toThrow("redirect:/library");
+  });
+
+  it("search shows a clinic that is not open the calm page", async () => {
+    signInAs(orgPending, "Vitest library clinic (pending)");
+    const html = renderToStaticMarkup(await SearchPage({ searchParams: Promise.resolve({ q: "knee" }) } as never));
+    expect(html).toContain("Choose a plan to start");
+    expect(html).not.toContain("<article");
   });
 });

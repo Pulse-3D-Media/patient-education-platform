@@ -115,6 +115,26 @@ export async function listUsableVideosInCategory(access: ClinicAccess, category:
 }
 
 /**
+ * The search box in the library's top bar: the videos this clinic may use
+ * whose title contains the words asked for, ignoring capitals, in the order
+ * lib/categories lists the categories and then by title. Bounded by `limit`.
+ * The same access rule as every other list, in the query, so a search never
+ * finds a video off the plan, unpublished, or a hidden placeholder. Empty,
+ * without a query, when the clinic is not open or has no categories.
+ */
+export async function searchUsableVideos(access: ClinicAccess, query: string, limit: number) {
+  if (!access.open || access.categories.length === 0 || !query) return [];
+  const videos = await prisma.video.findMany({
+    // Prisma hands `contains` to Postgres's LIKE as it is, where % and _ mean "anything"; escaped here so a search for
+    // "%" finds a title with a % in it, not every title (the clinics search on /pulse does the same).
+    where: { ...usableClause(access), title: { contains: query.replace(/[\\%_]/g, "\\$&"), mode: "insensitive" } },
+    orderBy: [{ title: "asc" }, { id: "asc" }],
+    take: limit,
+  });
+  return sortByLibraryOrder(videos);
+}
+
+/**
  * Every video this clinic may use, across the categories on its plan, for
  * the procedure picker on /admin/links. Sorted by category in the order
  * lib/categories lists them, then by title. Empty, without a query, when

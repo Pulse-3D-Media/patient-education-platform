@@ -82,10 +82,9 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
 
   return (
     <main className="py-6">
-      <header className="mb-5 px-5 sm:px-8">
-        <h1 className="text-2xl font-semibold sm:text-3xl">{category.label}</h1>
-      </header>
+      {/* The pills first, as on every library page; the lit one says which category this is. */}
       <CategoryTabs categories={access.categories} current={category.slug} />
+      <h1 className="mb-5 px-5 text-2xl font-semibold sm:px-8 sm:text-3xl">{category.label}</h1>
 
       <div className="px-5 sm:px-8">
         {items.length > 0 ? (

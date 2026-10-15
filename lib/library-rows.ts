@@ -4,7 +4,9 @@
  * The home page is a column of rows, Netflix-style (decided by Evan on
  * 2026-10-15), top to bottom:
  *
- *   1. Category tabs: "All" and the categories on the clinic's plan.
+ *   1. Category tabs: "All" and the categories on the clinic's plan,
+ *      centered at the top of every library page, under the search box in
+ *      the top bar (which searches the whole library, SEARCH_PATH).
  *   2. My favorites: the videos this person hearted, newest heart first,
  *      as bigger cards. With none, one quiet line (FAVORITES_EMPTY).
  *   3. Most watched: this person's own most-played videos across every
@@ -43,5 +45,22 @@ export function showMostWatched(videos: readonly unknown[]): boolean {
   return videos.length >= MOST_WATCHED_MIN;
 }
 
-/** The address of "My favorites" on the home page, for the sidebar. */
-export const FAVORITES_HREF = "/library#favorites";
+/** The library's search results page. The search box in the top bar opens it with ?q=... */
+export const SEARCH_PATH = "/library/search";
+
+/** The longest search the box takes and the page reads. A procedure name is far shorter. */
+export const SEARCH_MAX_LENGTH = 80;
+
+/** The most results a search shows. A bound, not a promise: the whole library is far smaller. */
+export const SEARCH_LIMIT = 60;
+
+/**
+ * What a search asked for, from the address: trimmed, inner spaces folded to
+ * one, cut to SEARCH_MAX_LENGTH. Null for nothing usable (empty, missing, or
+ * sent twice, which a person typing never does).
+ */
+export function readSearchQuery(value: string | string[] | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const query = value.replace(/\s+/g, " ").trim().slice(0, SEARCH_MAX_LENGTH).trim();
+  return query.length > 0 ? query : null;
+}

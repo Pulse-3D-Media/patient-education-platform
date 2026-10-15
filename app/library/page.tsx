@@ -25,7 +25,7 @@ import { FavoritesRow, VideoRow } from "./VideoRow";
  * The library home, laid out like Netflix (decided by Evan on 2026-10-15;
  * the rules and limits are in lib/library-rows.ts). Top to bottom:
  *
- *   1. Category tabs: "All" and the categories on the clinic's plan.
+ *   1. Category pills, centered: "All" and the categories on the plan (no headline).
  *   2. My favorites: what this person hearted, as bigger cards, or one
  *      quiet line when there is nothing yet.
  *   3. Most watched: this person's own most-played videos, once they have
@@ -104,10 +104,9 @@ export default async function LibraryPage() {
 
   return (
     <main className="py-6">
-      <header className="mb-5 px-5 sm:px-8">
-        <h1 className="text-2xl font-semibold sm:text-3xl">My Procedure Library</h1>
-        {mine.length === 0 && <p className="mt-1 text-base text-ink-soft">Your clinic&apos;s plan has no categories yet.</p>}
-      </header>
+      {/* No headline on the page (Evan, 2026-10-15): the pills say where you are. A screen reader still gets one. */}
+      <h1 className="sr-only">My Procedure Library</h1>
+      {mine.length === 0 && <p className="mb-5 px-5 text-base text-ink-soft sm:px-8">Your clinic&apos;s plan has no categories yet.</p>}
 
       {mine.length > 0 && (
         <>
@@ -123,8 +122,8 @@ export default async function LibraryPage() {
             senderName={libraryStripName(seat, clinic.defaultPatientName)}
           >
             <div className="flex flex-col gap-9">
-              {/* The sidebar's "My favorites" comes here (/library#favorites); scroll-mt keeps the heading clear of the sticky banner. */}
-              <section id="favorites" aria-labelledby="favorites-heading" className="scroll-mt-20">
+              {/* First on the page: Home in the sidebar is where favorites are. */}
+              <section id="favorites" aria-labelledby="favorites-heading">
                 <RowHeading id="favorites-heading" title="My favorites" />
                 <FavoritesRow />
               </section>

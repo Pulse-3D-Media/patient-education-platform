@@ -232,7 +232,10 @@ describe("requestReactivation", () => {
     const told = vi.mocked(renewalEmail.notifyClinicOfRenewalRequest);
     expect(told).toHaveBeenCalledOnce();
     const [facts, origin] = told.mock.calls[0];
-    expect(facts).toMatchObject({ code: paused, videoTitle: "Vitest watch video", daysPerRenewal: 10, clinic: { id: clinicId } });
+    const { id: pausedId } = await prisma.share.findUniqueOrThrow({ where: { code: paused }, select: { id: true } });
+    expect(facts).toMatchObject({ shareId: pausedId, videoTitle: "Vitest watch video", daysPerRenewal: 10, clinic: { id: clinicId } });
+    // The email is built from the facts alone, and the code (which plays the video) is not among them.
+    expect(JSON.stringify(facts)).not.toContain(paused);
     expect(facts.requestedAt.getTime()).toBe(row.renewalRequestedAt!.getTime());
     // A developer's own computer is a trusted origin; a Host header alone never is (lib/trusted-origin.ts).
     expect(origin).toBe("http://localhost:3000");

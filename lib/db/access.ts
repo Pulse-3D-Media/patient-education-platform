@@ -146,9 +146,10 @@ export type LockedShareRow = {
 
 /**
  * One of this clinic's share links, read for a reactivation with the row
- * held against every other change until the transaction ends. Null when no
- * link of THIS clinic has that code: the clinic id is in the WHERE, so
- * another clinic's link finds nothing, and so does a code nobody has.
+ * held against every other change until the transaction ends, found by the
+ * link's row id (never its code: see /admin/reactivate). Null when no link
+ * of THIS clinic has that id: the clinic id is in the WHERE, so another
+ * clinic's link finds nothing, and so does an id nobody has.
  *
  * "FOR NO KEY UPDATE" is the lock an ordinary UPDATE takes, on the Share
  * row only (the video row is joined for its title and published flag, but
@@ -159,13 +160,13 @@ export type LockedShareRow = {
  * turned back on and does nothing. In this file with the other locking
  * reads so the overlap test can wrap it (shares.renewal.race.test.ts).
  */
-export async function lockShareForRenewal(tx: Prisma.TransactionClient, clinicId: string, code: string): Promise<LockedShareRow | null> {
+export async function lockShareForRenewal(tx: Prisma.TransactionClient, clinicId: string, shareId: string): Promise<LockedShareRow | null> {
   const rows = await tx.$queryRaw<LockedShareRow[]>`
     SELECT s."id", s."code", s."expiryPolicy"::text AS "expiryPolicy", s."expiresAt", s."firstPlayedAt", s."daysAfterFirstPlay",
            s."renewalsUsed", s."renewalRequestedAt", v."title" AS "videoTitle", v."isPublished" AS "videoIsPublished"
     FROM "Share" s
     JOIN "Video" v ON v."id" = s."videoId"
-    WHERE s."code" = ${code} AND s."clinicId" = ${clinicId}
+    WHERE s."id" = ${shareId} AND s."clinicId" = ${clinicId}
     FOR NO KEY UPDATE OF s`;
   return rows[0] ?? null;
 }

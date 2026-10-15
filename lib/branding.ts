@@ -149,20 +149,15 @@ export function contrastRatio(a: string, b: string): number {
 }
 
 /**
- * THE STRIP ON THE VIDEO (ClinicMark): a black band at this opacity, laid
- * across the top edge of the picture, with white words and the clinic's logo
- * on it. 0.6 is about as see-through as it can be while white text still
- * reads on the brightest possible frame: over pure white the band comes out
- * #666666, and white on that is 5.7:1 (the floor is 4.5:1; at 0.55 it would
- * be 4.7:1, too close). Over a black frame it is black, 21:1.
- * lib/branding.test.ts checks both.
+ * THE STRIP ON THE VIDEO (ClinicMark): a slim row above the picture, on the
+ * player's own black, with the logo and the doctor's name in light grey
+ * (app/globals.css, .video-strip; option C, Evan, 2026-10-15). Its words are
+ * small (15px to 18px), so they need the full 4.5:1; light grey on black is
+ * about 16:1. lib/branding.test.ts checks it, and checks that these are the
+ * colours the CSS uses.
  */
-export const VIDEO_STRIP_ALPHA = 0.6;
-
-/** What the strip's band looks like over a frame of this colour: the frame, darkened by the band. */
-export function videoStripGround(frame: string): string {
-  return mix(frame, BLACK, VIDEO_STRIP_ALPHA);
-}
+export const VIDEO_STRIP_GROUND = "#000000";
+export const VIDEO_STRIP_INK = "#e3e7eb";
 
 /** `amount` of the way from one colour to another: 0 is `from`, 1 is `to`. */
 function mix(from: string, to: string, amount: number): string {

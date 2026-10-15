@@ -688,6 +688,21 @@ export async function acceptShareDisclaimer(
 }
 
 /**
+ * One of this clinic's shares, by its row id, for /admin/reactivate/<id>.
+ * The same as getShareForClinic() below except for the key: that page's
+ * address is in the email the office admins get, and in browser history and
+ * the hosting logs, so it carries the row id, which plays nothing, rather
+ * than the patient link's code, which does. Null for an id that is not one
+ * of this clinic's links, whoever's it is.
+ */
+export async function getShareByIdForClinic(clinicId: string, shareId: string) {
+  return prisma.share.findFirst({
+    where: { id: shareId, clinicId },
+    include: { video: { select: { title: true, isPlaceholder: true, isPublished: true } }, clinic: { select: { name: true } } },
+  });
+}
+
+/**
  * One of this clinic's shares, by code, for the admin pages (the QR picture
  * and the pamphlet), with its video's title and placeholder mark and the
  * clinic's name for the lines saying who sent it. Returns null if the code does not exist
@@ -713,7 +728,7 @@ function renewalsAllowed(settings: { maxRenewals: number }): number {
 
 /** The fields the reactivation rule reads, plus what the request needs to tell the clinic. */
 const RENEWAL_REQUEST_FIELDS = {
-  code: true,
+  id: true,
   createdAt: true,
   expiryPolicy: true,
   expiresAt: true,
@@ -729,10 +744,12 @@ const RENEWAL_REQUEST_FIELDS = {
 /**
  * What the clinic is told when a patient asks for a paused link back. All
  * of it is about the link, the video, the surgeon and the clinic; nothing
- * about the patient exists to include (rule 2).
+ * about the patient exists to include (rule 2). The link is named by its
+ * row id, never its code: the code plays the video, and the email goes
+ * through an outside service that keeps what it sends.
  */
 export type RenewalRequestFacts = {
-  code: string;
+  shareId: string;
   videoTitle: string;
   /** "Dr. Jane Smith", or null for a link made before surgeons were recorded. */
   senderName: string | null;
@@ -815,7 +832,7 @@ export async function requestShareRenewal(code: string, now: Date = new Date()):
   return {
     kind: "requested",
     facts: {
-      code: share.code,
+      shareId: share.id,
       videoTitle: share.video.title,
       senderName: share.senderName,
       createdAt: share.createdAt,
@@ -838,12 +855,13 @@ function dayWords(date: Date): string {
 }
 
 /**
- * An office admin pressed Confirm on /admin/reactivate/<code>: turn one of
+ * An office admin pressed Confirm on /admin/reactivate/<id>: turn one of
  * this clinic's paused links back on for the days it was issued with, and
  * count the renewal. Returns what happened, with a sentence for the screen.
  *
- * Takes clinicId first (rule 1): the code is looked up WITHIN this clinic,
- * so another clinic's admin, or a forged code, finds no link. `actorName`
+ * Takes clinicId first (rule 1): the link, named by its row id (never its
+ * code), is looked up WITHIN this clinic, so another clinic's admin, or a
+ * forged id, finds no link. `actorName`
  * is the admin's name from Clerk, for the clinic log; never from the browser.
  *
  * Read, decide and write in one transaction, under locks, because the
@@ -866,7 +884,7 @@ function dayWords(date: Date): string {
  * legacy link, one nobody played, one whose video is not published, or a
  * clinic that is not open: nothing is written, and the reason is returned.
  */
-export async function renewShareForClinic(clinicId: string, code: string, actorName: string, now: Date = new Date()): Promise<RenewalOutcome> {
+export async function renewShareForClinic(clinicId: string, shareId: string, actorName: string, now: Date = new Date()): Promise<RenewalOutcome> {
   return prisma.$transaction(async (tx) => {
     const access = await lockClinicAccess(tx, clinicId, now);
     if (!access || !access.open) {
@@ -877,7 +895,7 @@ export async function renewShareForClinic(clinicId: string, code: string, actorN
       };
     }
 
-    const share = await lockShareForRenewal(tx, clinicId, code);
+    const share = await lockShareForRenewal(tx, clinicId, shareId);
     if (!share) return { ok: false, reason: "no-such-link", message: "We couldn't find that link for your clinic." };
 
     const settings = await lockSettings(tx);
@@ -930,7 +948,8 @@ export async function renewShareForClinic(clinicId: string, code: string, actorN
 
 /** One paused link a patient has asked about, for the overview's "Links waiting to be reactivated". */
 export type RenewalRequestRow = {
-  code: string;
+  /** The link's row id, for the button to /admin/reactivate/<id>. Never the code. */
+  id: string;
   videoTitle: string;
   isPlaceholder: boolean;
   senderName: string | null;
@@ -963,7 +982,7 @@ export async function listRenewalRequestsForClinic(clinicId: string, limit: numb
       video: { isPublished: true },
     },
     select: {
-      code: true,
+      id: true,
       createdAt: true,
       renewalRequestedAt: true,
       senderName: true,
@@ -984,7 +1003,7 @@ export async function listRenewalRequestsForClinic(clinicId: string, limit: numb
     const state = renewalState(row, allowed, now);
     if (state.kind !== "paused" || row.renewalRequestedAt === null) continue;
     waiting.push({
-      code: row.code,
+      id: row.id,
       videoTitle: row.video.title,
       isPlaceholder: row.video.isPlaceholder,
       senderName: row.senderName,

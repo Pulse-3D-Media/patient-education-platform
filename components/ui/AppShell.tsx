@@ -35,7 +35,7 @@ import { AdminIcon, BooksIcon, CloseIcon, HomeIcon } from "./icons";
  *   - two pull-out menus that work the same way. The category menu lists
  *     Home and every category from lib/categories. The admin menu lists
  *     every section of the clinic admin area from lib/admin-nav (overview,
- *     shared links, people, branding, billing, reports). Each floats over
+ *     shared links, people, branding, billing). Each floats over
  *     the content rather than pushing it, and closes on outside click,
  *     Escape, or choosing something. Only one is open at a time.
  *
@@ -294,7 +294,6 @@ function AdminMenu({ pathname, onClose }: { pathname: string; onClose: () => voi
                   className={`${MENU_ITEM} ${isActive ? MENU_ITEM_ACTIVE : MENU_ITEM_IDLE}`}
                 >
                   {section.label}
-                  {section.coming && <span className="ml-auto text-xs uppercase tracking-wider text-ink-muted">Coming</span>}
                 </Link>
               </li>
             );

@@ -86,6 +86,32 @@ export function ReplayIcon({ className }: IconProps) {
   );
 }
 
+/** A circling arrow with "10" in it: go back ten seconds, as video players draw it. */
+export function SkipBackIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M5.5 8.5A8 8 0 1 1 4 13" />
+      <path d="M5.2 3.8v4.9h4.9" />
+      <text x="12.4" y="15.6" textAnchor="middle" fontSize="7" fontWeight="700" fill="currentColor" stroke="none" fontFamily="system-ui, sans-serif">
+        10
+      </text>
+    </svg>
+  );
+}
+
+/** The same, the other way round: go forward ten seconds. */
+export function SkipForwardIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M18.5 8.5A8 8 0 1 0 20 13" />
+      <path d="M18.8 3.8v4.9h-4.9" />
+      <text x="11.6" y="15.6" textAnchor="middle" fontSize="7" fontWeight="700" fill="currentColor" stroke="none" fontFamily="system-ui, sans-serif">
+        10
+      </text>
+    </svg>
+  );
+}
+
 export function VolumeIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">

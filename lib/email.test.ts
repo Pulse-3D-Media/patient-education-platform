@@ -5,7 +5,8 @@ import { emailIsConfigured, sendEmail } from "./email";
  * The one file that talks to the email service, with the service replaced
  * by a stand-in for fetch and made-up settings. What these prove: nothing
  * is sent without both settings; the message goes to Resend's address as a
- * POST with the key as a bearer token and the idempotency key; a refusal
+ * POST with the key as a bearer token and the idempotency key; sent
+ * separately, each recipient gets a copy of their own in one batch; a refusal
  * and an unreachable service are answered with a reason, never thrown; and
  * the key never reaches a log line.
  */
@@ -81,6 +82,45 @@ describe("sendEmail", () => {
     void _dropped;
     await sendEmail(plain, { env, fetch: send });
     expect((calls[0].init.headers as Record<string, string>)["Idempotency-Key"]).toBeUndefined();
+  });
+
+  it("sent separately, gives each recipient a copy addressed to them alone, in one batch request under the one key", async () => {
+    const { send, calls } = service(200);
+    expect(await sendEmail({ ...message, to: [" admin@example.test", "", "second@example.test"], separately: true }, { env, fetch: send })).toEqual({ sent: true });
+
+    expect(calls).toHaveLength(1);
+    const [{ url, init }] = calls;
+    expect(url).toBe("https://api.resend.com/emails/batch");
+    expect(init.method).toBe("POST");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe(`Bearer ${env.RESEND_API_KEY}`);
+    expect(headers["Idempotency-Key"]).toBe("key-1");
+    const copy = { from: env.EMAIL_FROM, subject: "A test", text: "Plain words", html: "<p>Plain words</p>" };
+    expect(JSON.parse(String(init.body))).toEqual([
+      { ...copy, to: ["admin@example.test"] },
+      { ...copy, to: ["second@example.test"] },
+    ]);
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("sent separately to more than a batch holds, sends batches of 100, each under a key of its own", async () => {
+    const { send, calls } = service(200);
+    const many = Array.from({ length: 150 }, (_, index) => `person${index}@example.test`);
+    expect(await sendEmail({ ...message, to: many, separately: true }, { env, fetch: send })).toEqual({ sent: true });
+
+    expect(calls).toHaveLength(2);
+    const bodies = calls.map((call) => JSON.parse(String(call.init.body)) as { to: string[] }[]);
+    expect(bodies.map((body) => body.length)).toEqual([100, 50]);
+    expect(bodies.flat().map((copy) => copy.to)).toEqual(many.map((address) => [address]));
+    expect(calls.map((call) => (call.init.headers as Record<string, string>)["Idempotency-Key"])).toEqual(["key-1", "key-1-1"]);
+  });
+
+  it("sent separately, answers refused on an error status and no-recipients for an empty list, like a single send", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await sendEmail({ ...message, separately: true }, { env, fetch: service(429).send })).toEqual({ sent: false, reason: "refused" });
+    const { send, calls } = service();
+    expect(await sendEmail({ ...message, to: [" "], separately: true }, { env, fetch: send })).toEqual({ sent: false, reason: "no-recipients" });
+    expect(calls).toHaveLength(0);
   });
 
   it("answers refused on an error status, logging the status code and never the key", async () => {

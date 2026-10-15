@@ -53,24 +53,49 @@ describe("the strip on the library's player", () => {
     expect(html.match(/Placeholder animation/g)).toHaveLength(1);
   });
 
-  it("lays the strip over the picture inside the video's box, not in a row above it", () => {
+  it("puts the strip right on top of the picture, as one unit with it, never over it", () => {
     const html = render();
 
-    // The video's box is measured (picture-area) and carries the video's shape, 16:9 until the file says.
+    // The space for the picture is measured (picture-area) and carries the video's shape, 16:9 until the file says.
     expect(html).toMatch(/<div class="picture-area relative min-h-0 flex-1" style="--picture-ratio:1.777/);
-    // The strip is inside that box, in the box over the picture, before the video's controls.
-    const area = html.slice(html.indexOf("picture-area"));
-    expect(area.indexOf('class="picture-fit pointer-events-none"')).toBeGreaterThan(-1);
-    expect(area.indexOf("data-video-strip")).toBeGreaterThan(area.indexOf("picture-fit"));
-    // Nothing is drawn above the video's box any more.
-    expect(html.indexOf("data-video-strip")).toBeGreaterThan(html.indexOf("picture-area"));
+    // Inside it, one unit: the strip first, then the picture with the video in it.
+    const unit = html.slice(html.indexOf('<div class="picture-unit">'));
+    expect(unit).toMatch(/^<div class="picture-unit"><div data-video-strip="" class="video-strip w-full shrink-0 select-none">/);
+    expect(unit.indexOf("data-video-strip")).toBeLessThan(unit.indexOf("<video"));
   });
 
-  it("starts the title row, with Close, under the strip, so the two never overlap", () => {
-    const html = render();
+  it("keeps Close in the strip, where it never fades, at the right end", () => {
+    const html = render({ placeholder: true });
+    const strip = html.slice(html.indexOf("data-video-strip"), html.indexOf("<video"));
 
-    expect(html).toMatch(/class="below-picture-top absolute inset-x-0 top-8 [^"]*"><div class="min-w-0"><h2[^>]*>Total Knee Replacement</);
-    expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Close the video and go back to the library"'));
+    expect(strip).toMatch(/Placeholder animation<\/span><button type="button" aria-label="Close the video and go back to the library"/);
+    expect(strip).not.toContain("opacity-0");
+  });
+
+  it("lays out the controls the way a phone's player does: back 10, play, forward 10 in the middle; time, sound and full screen along the bottom", () => {
+    const html = render();
+    const picture = html.slice(html.indexOf("<video"));
+
+    for (const label of ["Back 10 seconds", "Play", "Forward 10 seconds", "Mute", "Full screen", "Seek"]) {
+      expect(picture).toContain(`aria-label="${label}"`);
+    }
+    expect(picture.indexOf('aria-label="Back 10 seconds"')).toBeLessThan(picture.indexOf('aria-label="Play"'));
+    expect(picture.indexOf('aria-label="Play"')).toBeLessThan(picture.indexOf('aria-label="Forward 10 seconds"'));
+    expect(picture).toContain("0:00 <span");
+    // The title is small now, and fades with the controls; no volume slider and no separate "Start over".
+    expect(picture).toContain('<h2 class="truncate text-base font-semibold text-white">Total Knee Replacement</h2>');
+    expect(picture).not.toContain('aria-label="Volume"');
+    expect(picture).not.toContain('aria-label="Start over"');
+  });
+
+  it("makes every control at least 44px to tap", () => {
+    const html = render();
+    const sizes = [...html.matchAll(/<button type="button" aria-label="([^"]+)" title="[^"]+" class="([^"]+)"/g)].map(([, label, cls]) => ({ label, cls }));
+
+    expect(sizes.length).toBeGreaterThanOrEqual(5);
+    for (const { label, cls } of sizes) {
+      expect(cls, label).toMatch(/\bh-(11|12|14|16) w-(11|12|14|16)\b/);
+    }
   });
 });
 

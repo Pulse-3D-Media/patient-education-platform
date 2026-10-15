@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { ClinicMark } from "@/components/ui/ClinicMark";
+import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { ClinicMark, pictureRatio } from "@/components/ui/ClinicMark";
+import { PlayerOverlay } from "@/components/ui/PlayerOverlay";
+import { usePlayerControls } from "@/components/ui/usePlayerControls";
 import { useVideoSource } from "@/components/ui/useVideoSource";
 import { PhoneIcon, PlayIcon } from "@/components/ui/icons";
 import { DISCLAIMER } from "@/lib/education-note";
@@ -54,11 +56,15 @@ import { CallNumber } from "./CallButton";
  *
  * Before the first tap on Play, the box and Play are the only things to press
  * (the rules file: nothing to click but play, and since October 2026 the box
- * before it). After it, the browser's own
- * controls take over, because those are the controls a patient already knows
- * from every other video on their phone, and the ones their screen reader
- * and their captions setting already work with. They are never hidden or
- * replaced.
+ * before it). After it, our own Vimeo-style controls take over, the same
+ * ones the library's player uses (PlayerOverlay and usePlayerControls;
+ * decided by Evan and Van at the 2026-10-15 huddle, replacing the browser's
+ * own controls, which looked different on every phone): on a phone, back 10
+ * seconds, play or pause and forward 10 seconds in the middle; along the
+ * bottom the time, sound, full screen and a thin progress bar; all fading
+ * away while the video plays and coming back on a tap or on pause. Every
+ * control is at least 44px, labelled for a screen reader, and works from the
+ * keyboard (space, the arrows, M, F).
  *
  * The button is a dark triangle on a white circle, with "Tap to play" on a
  * white pill under it. That is deliberate: the first frame of the animation
@@ -88,24 +94,19 @@ import { CallNumber } from "./CallButton";
  * failure is sent anywhere. A video that is only slow gets a quiet "still
  * loading" note over the picture instead, so a tap never looks ignored.
  *
- * THE STRIP ON THE VIDEO. A slim black row ABOVE the picture carries the
- * clinic's logo (or name) and the doctor's name, "Dr. Jane Smith, DO"
- * (ClinicMark; option C, Evan, 2026-10-15). It is there the whole time,
- * before the first play, while playing and above the "did not load" panel,
- * and nothing of ours is drawn over the picture once the video is playing,
- * so it never covers the browser's own buttons (Safari puts some in the
- * picture's top corners). It is branding, not protection.
+ * THE CLINIC AND THE DOCTOR ON THE VIDEO (ClinicMark, inside PlayerOverlay):
+ * top left of the picture, the clinic's logo in a round frame, the video's
+ * title and the doctor's name ("Dr. Jane Smith, DO"), the way Vimeo shows a
+ * video's owner. It is there before the first play, fades with the controls
+ * while the video plays, and comes back on pause or a tap. It is branding,
+ * not protection.
  *
- * FULL SCREEN IS THE BROWSER'S OWN (Evan, 2026-10-15: our own full-screen
- * button, and the "Make the video bigger" button before it, looked like
- * workarounds; the buttons should be the ones every phone already shows).
- * The browser's full-screen button in its controls, a double-click on a
- * computer, or Android turning full screen when the phone is turned
- * sideways: all of them hand the video to the browser's own player, which
- * shows the video ALONE, without the strip, on every device. That is
- * accepted (it was always so on an iPhone). The video keeps playing
- * through the change, and coming back out leaves it where it was.
- * Picture-in-picture is left as it is (it too shows the video alone).
+ * FULL SCREEN is our own button, bottom right: the whole player goes full
+ * screen, the clinic's mark and the controls with it, wherever the browser
+ * can do that for part of a page (Android, an iPad, a computer). An iPhone
+ * cannot: there the button hands the video to the phone's own player, which
+ * shows the video alone (accepted, not fought). Picture-in-picture is left
+ * as it is (it too shows the video alone).
  *
  * WHAT IT PLAYS is a PlaybackSource made on the server (lib/playback-auth.ts)
  * and handed over by the accept route once the box is ticked: a plain file
@@ -198,6 +199,11 @@ export function WatchPlayer({
   const visitKey = useRef<string | null>(null);
   /** A grant for the link's new deadline, handed back when the first play moved it; used in place of asking the server at the next refresh. */
   const pendingGrant = useRef<PlaybackSource | null>(null);
+  /** The video's shape, width over height, once the file says; 16:9 until then. Keeps the overlay on the picture. */
+  const [ratio, setRatio] = useState(() => pictureRatio(undefined, undefined));
+  /** Nothing is playing and nothing can be: the failure panel, the link's time ran out, or a printed code that cannot hand out a link. The layout treats all three alike. */
+  const stopped = failed || ended || unavailable;
+  const controls = usePlayerControls({ video, box: frame, enabled: started && !stopped, onPlayFailure: () => fail() });
   const { reload } = useVideoSource(video, source, {
     onFailure: () => fail(),
     refresh: async () => {
@@ -330,22 +336,21 @@ export function WatchPlayer({
 
   /** Try again: fetch the file afresh and carry on from where it stopped. Inside the tap, so sound is still allowed. */
   function retry() {
-    const element = video.current;
-    if (!element) return;
+    if (!video.current) return;
     setFailed(false);
     // The hook fetches the file afresh, or a fresh signed address when the old one has run out; it starts the video too.
     void reload(resumeAt.current);
-    window.requestAnimationFrame(() => element.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => frame.current?.focus({ preventScroll: true }));
   }
 
-  /** Play was asked for: hand the patient the browser's own controls. */
+  /** Play was asked for: hand the patient our controls. */
   function onPlay() {
     setStarted(true);
     // The Play button is about to disappear. If it had the keyboard's focus, that focus would be dropped on the
-    // floor; put it on the video instead, so the next key press (space to pause, the arrows to seek) reaches the
-    // browser's controls. A tap on a phone shows no focus ring, so nothing changes for touch.
+    // floor; put it on the player instead, so the next key press (space to pause, the arrows to seek) reaches the
+    // controls. A tap on a phone shows no focus ring, so nothing changes for touch.
     if (document.activeElement === document.body || frame.current?.contains(document.activeElement)) {
-      video.current?.focus({ preventScroll: true });
+      frame.current?.focus({ preventScroll: true });
     }
   }
 
@@ -371,9 +376,10 @@ export function WatchPlayer({
     slowTimer.current = window.setTimeout(() => setSlow(true), SLOW_AFTER_MS);
   }
 
-  /** The file's size is known: after Try again, go back to where the video stopped. */
+  /** The file's size is known: note its shape for the overlay. After Try again, go back to where the video stopped. */
   function onLoadedMetadata() {
     const element = video.current;
+    if (element) setRatio(pictureRatio(element.videoWidth, element.videoHeight));
     if (element && resumeAt.current > 0) {
       element.currentTime = Math.min(resumeAt.current, element.duration || resumeAt.current);
       resumeAt.current = 0;
@@ -382,9 +388,6 @@ export function WatchPlayer({
 
   /** Play can start the video: the box is ticked and the video is on the element (a file, or the phone's own HLS, is put on in the same moment; hls.js a moment later). */
   const ready = ticked && source !== null && (attached || source.kind !== "stream");
-
-  /** Nothing is playing and nothing can be: the failure panel, or the link's time ran out. The layout treats both alike. */
-  const stopped = failed || ended || unavailable;
 
   return (
     <div>
@@ -430,147 +433,152 @@ export function WatchPlayer({
         </div>
       )}
 
-      {/* The player: one rounded card, the strip on its top edge (the clinic's logo and the doctor's name, above the picture,
-          never over it), then the video's box. */}
-      <div className="overflow-hidden rounded-[18px] bg-black shadow-[0_10px_30px_-14px_rgba(18,32,42,.4)]">
-        <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} />
+      {/* The player: one rounded card, the video's box (16:9 while there is a picture), with the clinic's mark and our
+          controls laid over the picture. It is a grid, and never shorter than what it holds (min-h-fit), so that in the
+          one case where the player sits inside it rather than over it (the failure panel, below) the box grows to fit
+          instead of squeezing or cutting off what is in it. */}
+      <div
+        className={`relative grid min-h-fit w-full rounded-[18px] shadow-[0_10px_30px_-14px_rgba(18,32,42,.4)] ${stopped ? "" : "overflow-hidden bg-black"}`}
+        style={stopped ? undefined : { paddingTop: "56.25%" }}
+      >
+        <div
+          ref={frame}
+          tabIndex={started && !stopped ? 0 : -1}
+          role="group"
+          aria-label={`${title}, video player`}
+          onKeyDown={controls.onKey}
+          onMouseMove={started ? controls.reveal : undefined}
+          onMouseLeave={controls.hide}
+          style={stopped ? undefined : ({ "--picture-ratio": ratio } as CSSProperties)}
+          className={
+            stopped
+              ? // The failure panel holds a sentence, a button and a phone link. On a phone the video's box is only
+                // about 190px tall, too short for all of that at full size, and squeezing it shrank "Try again" to
+                // 26px (measured). So here the player takes its place IN the page and is as tall as it needs to be.
+                // The text under it moves down a little; nothing is playing, so nothing is lost. Nothing is clipped
+                // here either (no overflow-hidden): if a browser ever failed to grow the box, the phone link would
+                // hang below it rather than be cut off.
+                "relative flex min-w-0 flex-col rounded-[18px] bg-[#12202a] outline-none"
+              : // "picture-area" lets the overlay find the picture inside the box (app/globals.css). This is also what goes
+                // full screen, so the clinic's mark and the controls come with it.
+                "picture-area absolute inset-0 bg-black outline-none"
+          }
+        >
+          <video
+            ref={video}
+            // Nothing to play until the box is ticked: the page's HTML has a still at most. After the tick, a plain file
+            // goes on here and the browser starts fetching at once (useVideoSource leaves it be); a stream is put on by
+            // the hook. The still stays until the first frame replaces it.
+            src={source?.kind === "file" ? source.src : undefined}
+            poster={source?.kind === "stream" ? source.poster : (poster ?? undefined)}
+            preload="auto"
+            playsInline
+            controlsList="nodownload"
+            // The element has started taking the video (for hls.js, the moment the library is attached): Play is ready.
+            onLoadStart={() => setAttached(true)}
+            onPlay={onPlay}
+            onPlaying={onPlaying}
+            onWaiting={onWaiting}
+            onCanPlay={clearSlow}
+            onLoadedMetadata={onLoadedMetadata}
+            onError={fail}
+            aria-label={title}
+            // When it has failed, the panel below says so in our words. Without this a screen reader also reads
+            // the browser's own "Unable to play media" from the video underneath, the same news twice.
+            aria-hidden={stopped || undefined}
+            className={`absolute inset-0 h-full w-full object-contain ${stopped ? "invisible" : ""}`}
+          />
 
-        {/* The video's box: 16:9 while there is a picture. It is a grid, and never shorter than what it holds (min-h-fit),
-            so that in the one case where the player sits inside it rather than over it (the failure panel, below) the box
-            grows to fit instead of squeezing or cutting off what is in it. */}
-        <div className="relative grid min-h-fit w-full" style={stopped ? undefined : { paddingTop: "56.25%" }}>
-          <div
-            ref={frame}
-            tabIndex={-1}
-            className={
-              stopped
-                ? // The failure panel holds a sentence, a button and a phone link. On a phone the video's box is only
-                  // about 190px tall, too short for all of that at full size, and squeezing it shrank "Try again" to
-                  // 26px (measured). So here the player takes its place IN the page and is as tall as it needs to be.
-                  // The text under it moves down a little; nothing is playing, so nothing is lost.
-                  "relative flex min-w-0 flex-col bg-[#12202a]"
-                : "absolute inset-0 flex flex-col bg-black"
-            }
-          >
-            <div className="relative flex min-h-0 flex-1 flex-col">
-              <video
-                ref={video}
-                // Nothing to play until the box is ticked: the page's HTML has a still at most. After the tick, a plain file
-                // goes on here and the browser starts fetching at once (useVideoSource leaves it be); a stream is put on by
-                // the hook. The still stays until the first frame replaces it.
-                src={source?.kind === "file" ? source.src : undefined}
-                poster={source?.kind === "stream" ? source.poster : (poster ?? undefined)}
-                preload="auto"
-                playsInline
-                // The browser's controls arrive with the first play, as they always have here: before it, the big
-                // Play button is the only thing on the picture, and a control bar showing through under "Tap to play"
-                // would be a second, smaller play button to aim at. Their full-screen button is left on: it is the way to
-                // go big (see the note at the top).
-                controls={started && !stopped}
-                tabIndex={started && !stopped ? 0 : -1}
-                controlsList="nodownload"
-                // The element has started taking the video (for hls.js, the moment the library is attached): Play is ready.
-                onLoadStart={() => setAttached(true)}
-                onPlay={onPlay}
-                onPlaying={onPlaying}
-                onWaiting={onWaiting}
-                onCanPlay={clearSlow}
-                onLoadedMetadata={onLoadedMetadata}
-                onError={fail}
-                aria-label={title}
-                // When it has failed, the panel below says so in our words. Without this a screen reader also reads
-                // the browser's own "Unable to play media" from the video underneath, the same news twice.
-                aria-hidden={stopped || undefined}
-                className={`absolute inset-0 h-full w-full object-contain ${stopped ? "invisible" : ""}`}
-              />
+          {/* The clinic's mark from before the first play on, and, once the video has started, our controls. */}
+          {!stopped && (
+            <PlayerOverlay
+              controls={controls}
+              title={title}
+              clinicName={clinicName}
+              logoUrl={logoUrl}
+              senderName={senderName}
+              showControls={started}
+              slow={slow}
+            />
+          )}
 
-              {/* Said only when the wait has gone on a while, so a tap on a weak signal never looks ignored. The one thing of
-                  ours over a playing picture, and only while it is stuck; it takes no tap. The element is always here (while
-                  there is a picture) so a screen reader hears the words when they arrive; the "did not load" panel announces itself. */}
-              {!stopped && (
-                <p
-                  role="status"
-                  className={
-                    slow
-                      ? "pointer-events-none absolute left-1/2 top-1/2 w-max max-w-[80%] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white/90 px-3 py-1.5 text-center text-[15px] leading-[1.35] font-medium text-[#12333f]"
-                      : "sr-only"
-                  }
-                >
-                  {slow ? "Still loading. A slow connection can take a little longer." : ""}
+          {!started && !stopped && (
+            // The keyboard focus ring is drawn just inside the edge, because the
+            // rounded card clips anything drawn outside it.
+            // Visibly not ready until the box is ticked and the video has arrived: the circle is dimmed and its line
+            // says why. Not `disabled`, so a tap still does something useful: it takes the patient to the box.
+            // On a phone the box is only about 184px tall, so the button sits low (anchored to the bottom) and a little
+            // smaller, clear of the clinic's mark in the top left; on a wider player it is in the middle, a little low.
+            <button
+              ref={playButton}
+              type="button"
+              onClick={play}
+              aria-label={`Play ${title}`}
+              aria-disabled={ready ? undefined : true}
+              aria-describedby={ready ? undefined : `${tickId}-why`}
+              className="absolute inset-0 z-20 flex flex-col items-center justify-end gap-2 pb-3 @xl:justify-center @xl:gap-4 @xl:pb-0 @xl:pt-12 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
+            >
+              <span
+                className={`flex h-16 w-16 items-center justify-center rounded-full bg-white @xl:h-20 @xl:w-20 shadow-[0_10px_34px_rgba(0,0,0,.4)] transition ${
+                  ready ? "text-[#12333f] active:scale-95" : "text-[#9aa5ac] opacity-70"
+                }`}
+              >
+                <PlayIcon className="ml-1 h-8 w-8 @xl:h-10 @xl:w-10" />
+              </span>
+              <span id={`${tickId}-why`} className="rounded-full bg-white px-4 py-1.5 text-[16px] font-semibold text-[#12333f] @xl:py-2 @xl:text-[17px] shadow-[0_4px_16px_rgba(0,0,0,.3)]">
+                {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
+              </span>
+            </button>
+          )}
+
+          {stopped && (
+            <>
+              {/* No picture while the video will not load: the clinic's mark is a row of its own above the panel. */}
+              <div className="px-3 pt-3">
+                <ClinicMark logoUrl={logoUrl} name={clinicName} title={title} senderName={senderName} />
+              </div>
+              {/* Calm, like the expired page: no red, and never the word "error". Announced to a screen reader when it appears.
+                  It is part of the page's flow (not laid over the video's box), so it is as tall as its words and buttons
+                  need, and "shrink-0" on the two controls means they keep their full 48px whatever else happens.
+                  The same panel says, in the expired page's words, that the link's time ran out while the page was open;
+                  there is no Try again then, because nothing is renewed once access has ended. */}
+              <div role="alert" className="relative flex flex-1 flex-col items-center justify-center gap-3 px-5 py-6 text-center">
+                <p className="text-[20px] leading-[1.35] font-semibold text-white">
+                  {unavailable ? "This video isn't available right now." : ended ? "This link has expired." : "The video did not load."}
                 </p>
-              )}
-
-              {!started && !stopped && (
-                // The keyboard focus ring is drawn just inside the edge, because the
-                // rounded card clips anything drawn outside it.
-                // Visibly not ready until the box is ticked and the video has arrived: the circle is dimmed and its line
-                // says why. Not `disabled`, so a tap still does something useful: it takes the patient to the box.
-                <button
-                  ref={playButton}
-                  type="button"
-                  onClick={play}
-                  aria-label={`Play ${title}`}
-                  aria-disabled={ready ? undefined : true}
-                  aria-describedby={ready ? undefined : `${tickId}-why`}
-                  className="absolute inset-0 flex flex-col items-center justify-center gap-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
-                >
-                  <span
-                    className={`flex h-20 w-20 items-center justify-center rounded-full bg-white shadow-[0_10px_34px_rgba(0,0,0,.4)] transition ${
-                      ready ? "text-[#12333f] active:scale-95" : "text-[#9aa5ac] opacity-70"
-                    }`}
+                <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">
+                  {unavailable
+                    ? `Please ask ${clinicName} about it.`
+                    : ended
+                      ? `Links stay open for a set time. ${clinicName} can send you a fresh one whenever you need it.`
+                      : "Check your connection, then try again."}
+                </p>
+                {!ended && !unavailable && (
+                  <button
+                    ref={retryButton}
+                    type="button"
+                    onClick={retry}
+                    className="mt-1 flex h-12 shrink-0 items-center rounded-full bg-white px-7 text-[17px] font-semibold text-[#12333f] transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
                   >
-                    <PlayIcon className="ml-1 h-10 w-10" />
-                  </span>
-                  <span id={`${tickId}-why`} className="rounded-full bg-white px-4 py-2 text-[17px] font-semibold text-[#12333f] shadow-[0_4px_16px_rgba(0,0,0,.3)]">
-                    {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
-                  </span>
-                </button>
-              )}
-
-              {stopped && (
-                // Calm, like the expired page: no red, and never the word "error". Announced to a screen reader when it appears.
-                // It is part of the page's flow (not laid over the video's box), so it is as tall as its words and buttons
-                // need, and "shrink-0" on the two controls means they keep their full 48px whatever else happens.
-                // The same panel says, in the expired page's words, that the link's time ran out while the page was open;
-                // there is no Try again then, because nothing is renewed once access has ended.
-                <div role="alert" className="relative flex flex-1 flex-col items-center justify-center gap-3 bg-[#12202a] px-5 py-6 text-center">
-                  <p className="text-[20px] leading-[1.35] font-semibold text-white">
-                    {unavailable ? "This video isn't available right now." : ended ? "This link has expired." : "The video did not load."}
-                  </p>
-                  <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">
-                    {unavailable
-                      ? `Please ask ${clinicName} about it.`
-                      : ended
-                        ? `Links stay open for a set time. ${clinicName} can send you a fresh one whenever you need it.`
-                        : "Check your connection, then try again."}
-                  </p>
-                  {!ended && !unavailable && (
-                    <button
-                      ref={retryButton}
-                      type="button"
-                      onClick={retry}
-                      className="mt-1 flex h-12 shrink-0 items-center rounded-full bg-white px-7 text-[17px] font-semibold text-[#12333f] transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
+                    Try again
+                  </button>
+                )}
+                {/* A tap-to-call link on a phone; on a computer, where it would do nothing useful, the number as plain words (see CallButton). */}
+                {call && (
+                  <>
+                    <a
+                      href={call.href}
+                      className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[16px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
                     >
-                      Try again
-                    </button>
-                  )}
-                  {/* A tap-to-call link on a phone; on a computer, where it would do nothing useful, the number as plain words (see CallButton). */}
-                  {call && (
-                    <>
-                      <a
-                        href={call.href}
-                        className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[16px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
-                      >
-                        <PhoneIcon className="h-5 w-5 shrink-0" />
-                        {ended || unavailable ? "Call" : "Still stuck? Call"} {call.label}
-                      </a>
-                      <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[16px] text-white" />
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+                      <PhoneIcon className="h-5 w-5 shrink-0" />
+                      {ended || unavailable ? "Call" : "Still stuck? Call"} {call.label}
+                    </a>
+                    <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[16px] text-white" />
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

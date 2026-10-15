@@ -49,6 +49,8 @@ type ClinicLogoProps = {
   fallback?: "name" | "blank";
   nameClassName?: string;
   position?: "left" | "center";
+  fit?: "contain" | "cover";
+  imageClassName?: string;
 };
 
 function LogoImage({
@@ -58,6 +60,8 @@ function LogoImage({
   fallback = "name",
   nameClassName = "",
   position = "left",
+  fit = "contain",
+  imageClassName = "",
 }: {
   /** The logo's address, or null when the clinic has none. */
   src: string | null;
@@ -70,6 +74,10 @@ function LogoImage({
   nameClassName?: string;
   /** Where the picture sits inside the box when it is narrower than the box. */
   position?: "left" | "center";
+  /** "contain" (the default) shows the whole logo; "cover" fills the box edge to edge and crops what does not fit (the players' round frame). */
+  fit?: "contain" | "cover";
+  /** Extra classes for the picture itself (a backing colour, say), which shows only once it has loaded. */
+  imageClassName?: string;
 }) {
   const img = useRef<HTMLImageElement>(null);
   const [state, setState] = useState<"waiting" | "loaded" | "failed">("waiting");
@@ -115,9 +123,9 @@ function LogoImage({
           draggable={false}
           onLoad={() => setState("loaded")}
           onError={() => setState("failed")}
-          className={`absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ${
-            position === "center" ? "object-center" : "object-left"
-          } ${state === "loaded" ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"} transition-opacity duration-200 ${
+            position === "center" || fit === "cover" ? "object-center" : "object-left"
+          } ${state === "loaded" ? "opacity-100" : "opacity-0"} ${imageClassName}`}
         />
       )}
     </span>

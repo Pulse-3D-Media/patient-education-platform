@@ -12,11 +12,11 @@ import {
   PULSE_STAFF_THEME,
   STAFF_GROUND,
   STAFF_LIGHT_GROUND,
-  VIDEO_STRIP_GROUND,
-  VIDEO_STRIP_INK,
+  VIDEO_CHIP_ALPHA,
   brandFontLabel,
   brandThemeLabel,
   contrastRatio,
+  videoChipGround,
   darkGroundVars,
   parseBrandColor,
   parseBrandFont,
@@ -128,18 +128,33 @@ describe("contrast sums", () => {
   });
 });
 
-describe("the strip on the video", () => {
-  // A slim row above the picture on the player's black (option C, Evan, 2026-10-15). Its words are small (15px to
-  // 18px), so they need the full 4.5:1, with no help from the picture under them: there is none.
-  it("keeps its light grey words well over 4.5:1 on its black", () => {
-    expect(VIDEO_STRIP_GROUND).toBe("#000000");
-    expect(VIDEO_STRIP_INK).toBe("#e3e7eb");
-    expect(contrastRatio(VIDEO_STRIP_INK, VIDEO_STRIP_GROUND)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(VIDEO_STRIP_INK, VIDEO_STRIP_GROUND)).toBeCloseTo(16.9, 0);
+describe("the chips on the video", () => {
+  // White words on a black chip at VIDEO_CHIP_ALPHA (the title and the doctor's name, Vimeo-style), over whatever the
+  // frame is. The words are 15px and up, so the floor is 4.5:1.
+  it("keeps white words at 4.5:1 or better over a white frame, the hardest case, with room to spare", () => {
+    const chip = videoChipGround("#ffffff");
+    expect(chip).toBe("#4d4d4d");
+    expect(contrastRatio("#ffffff", chip)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio("#ffffff", chip)).toBeCloseTo(8.45, 1);
   });
 
-  it("is subtle: not pure white, so the clinic's logo stays the brightest thing on the row", () => {
-    expect(contrastRatio(VIDEO_STRIP_INK, VIDEO_STRIP_GROUND)).toBeLessThan(contrastRatio("#ffffff", VIDEO_STRIP_GROUND));
+  it("keeps them over a black frame (where the chip is simply black)", () => {
+    expect(videoChipGround("#000000")).toBe("#000000");
+    expect(contrastRatio("#ffffff", videoChipGround("#000000"))).toBeCloseTo(21, 1);
+  });
+
+  it("keeps them over every grey in between, and over the brightest pure colours an animation could hold", () => {
+    for (let level = 0; level <= 255; level += 5) {
+      const grey = `#${level.toString(16).padStart(2, "0").repeat(3)}`;
+      expect(contrastRatio("#ffffff", videoChipGround(grey))).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const frame of ["#ffff00", "#00ffff", "#ff00ff", "#00ff00", "#ffffff"]) {
+      expect(contrastRatio("#ffffff", videoChipGround(frame))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("is the number the CSS uses", () => {
+    expect(VIDEO_CHIP_ALPHA).toBe(0.7);
   });
 });
 

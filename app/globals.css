@@ -196,119 +196,28 @@ body {
 
 
 /*
- * THE STRIP ON THE VIDEO (ClinicMark): the clinic's logo and the doctor's
- * name in a slim row ABOVE the picture (option C, Evan, 2026-10-15). Why it
- * looks this way is at the top of components/ui/ClinicMark.tsx; this is how.
+ * THE PICTURE INSIDE A VIDEO'S BOX, for the controls and the clinic's mark
+ * that both players lay over it (PlayerOverlay, ClinicMark). A video is
+ * drawn as large as fits and centred, so on a screen of another shape the
+ * picture does not fill its box. These work out where the picture really
+ * is, from the box's size and the video's shape (--picture-ratio, width
+ * over height, 16:9 until the file says), so the logo, the title and the
+ * controls sit on the picture itself, not on black bars:
  *
- *   .video-strip         the row: one line, --strip-h (2.75rem, 44px) tall,
- *                        on the player's black, light grey words. It is a
- *                        container, so the words inside are sized from the
- *                        row's own width (cqw: 1% of it), which is the
- *                        player's width.
- *   .video-strip-sender  the doctor's name: 15px on a phone, growing to 18px
- *                        on a wide player, one line, "..." if it is longer.
- *
- * Each size is a plain number first, for a browser that cannot measure a
- * box (older than iOS 16), and the one that grows only inside @supports
- * below (written twice in one rule, the build's minifier keeps only the
- * second, which such a browser cannot read).
- */
-:root {
-  --strip-h: 2.75rem;
-}
-
-.video-strip {
-  container-type: inline-size;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  height: var(--strip-h);
-  padding: 0 0.75rem;
-  background: #000000;
-  color: #e3e7eb;
-}
-
-.video-strip-brand {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  min-width: 0;
-  max-width: 45%;
-}
-
-/* The logo's fixed box: four times as wide as it is tall. */
-.video-strip-logo {
-  height: 22px;
-  aspect-ratio: 4 / 1;
-}
-
-/* The clinic's name, where there is no logo (or until it loads). */
-.video-strip-clinic {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.video-strip-sender {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  border-left: 1px solid rgb(255 255 255 / 0.3);
-  padding-left: 0.75rem;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-/* The right end: the placeholder chip, the library player's Close. */
-.video-strip-end {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 0.5rem;
-  margin-left: auto;
-}
-
-/* The sizes that grow with the player: the logo, the clinic's name, the doctor's name. */
-@supports (width: 1cqw) {
-  .video-strip-logo {
-    height: clamp(20px, 0.75rem + 1.2cqw, 26px);
-  }
-
-  .video-strip-clinic,
-  .video-strip-sender {
-    font-size: clamp(15px, 0.75rem + 0.6cqw, 18px);
-  }
-}
-
-/*
- * THE LIBRARY PLAYER'S PICTURE, with the strip sitting right on top of it
- * (components/ui/VideoPlayer.tsx). The player fills the screen, and a video
- * is drawn as large as fits and centred, so on a screen of another shape
- * there is black above and below the picture, or beside it. These keep the
- * strip and the picture together as one unit, as large as fits:
- *
- *   .picture-area        the space the player has for the picture.
- *                        "container-type: size" lets the rule below measure
- *                        it (cqw and cqh are 1% of its width and height).
- *   .picture-unit        the strip plus the picture, the picture's shape
- *                        (--picture-ratio, width over height, 16:9 until the
- *                        file says) with the strip's --strip-h on top, as
- *                        large as fits, centred. The controls lie over the
- *                        picture part of it.
+ *   .picture-area        the video's box. "container-type: size" lets the
+ *                        rule below measure it (cqw and cqh are 1% of its
+ *                        width and height). Only on a box whose size comes
+ *                        from outside, never from what is in it.
+ *   .picture-fit         a box over exactly the picture.
  *
  * A browser that cannot measure a box (older than iOS 16) keeps the plain
- * rule: the unit is the whole space, the strip at its top and the picture
- * centred under it. These rules are outside Tailwind's layers on purpose,
- * so where they apply they win over a utility class.
+ * rule: the picture box is the whole video box. These rules are outside
+ * Tailwind's layers on purpose, so where they apply they win over a utility
+ * class.
  */
-.picture-unit {
+.picture-fit {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 @supports (width: 1cqw) {
@@ -316,13 +225,21 @@ body {
     container-type: size;
   }
 
-  .picture-unit {
-    --unit-w: min(100cqw, (100cqh - var(--strip-h)) * var(--picture-ratio, 1.7778));
+  .picture-fit {
     inset: auto;
     left: 50%;
     top: 50%;
-    width: var(--unit-w);
-    height: calc(var(--unit-w) / var(--picture-ratio, 1.7778) + var(--strip-h));
+    width: min(100cqw, 100cqh * var(--picture-ratio, 1.7778));
+    height: min(100cqh, 100cqw / var(--picture-ratio, 1.7778));
     translate: -50% -50%;
   }
+}
+
+/*
+ * The dark chips under the video's title and the doctor's name on the
+ * picture (ClinicMark): black at VIDEO_CHIP_ALPHA (lib/branding.ts, 0.7),
+ * white words, readable over any frame.
+ */
+.video-chip {
+  background: rgb(0 0 0 / 0.7);
 }

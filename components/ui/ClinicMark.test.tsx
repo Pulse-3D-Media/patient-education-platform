@@ -2,163 +2,93 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { VIDEO_STRIP_GROUND, VIDEO_STRIP_INK } from "@/lib/branding";
+import { VIDEO_CHIP_ALPHA } from "@/lib/branding";
 import { ClinicMark, DEFAULT_PICTURE_RATIO, pictureRatio } from "./ClinicMark";
 
 /**
- * The strip on the video (ClinicMark), as the server first sends it, and the
- * CSS that lays it out (app/globals.css, .video-strip and .picture-unit). No
- * database. Since option C (Evan, 2026-10-15) it is a slim row ABOVE the
- * picture: what it holds in every case the two players ask for (a logo or
- * the clinic's name, who sent it or nobody, the placeholder chip, the
- * library's Close). That its words are readable is in lib/branding.test.ts;
- * how it looks at each width is a browser check (screenshots in the pull
- * request).
+ * The clinic and the doctor on the video (ClinicMark), as the server first
+ * sends it: since the 2026-10-15 huddle, the Vimeo-style mark at the top
+ * left of the picture (the logo in a round frame, the title, the doctor's
+ * name). No database. That it fades with the controls is PlayerOverlay's
+ * (VideoPlayer.test.tsx renders it); that the chips' words are readable is
+ * lib/branding.test.ts; how it looks is a browser check (screenshots in the
+ * pull request).
  */
 
-const LOGO = "https://example.com/summit-white.png";
-const LONG_CLINIC = "The Intermountain Center for Advanced Orthopedic, Spine and Sports Medicine Surgery of Greater Salt Lake";
-const LONG_SENDER = "Dr. Maria de los Angeles Fernandez-Castillo, DPM";
-
-/** The rules for one selector in app/globals.css, the first block that starts with it. */
+const LOGO = "https://example.com/summit-square.png";
 const CSS = readFileSync(path.join(process.cwd(), "app/globals.css"), "utf8").replace(/\r\n/g, "\n");
-function rule(selector: string): string {
-  const at = CSS.indexOf(`\n${selector} {`);
-  expect(at, `no rule for ${selector}`).toBeGreaterThan(-1);
-  return CSS.slice(at, CSS.indexOf("\n}", at));
-}
-/** An @supports (width: 1cqw) block that starts with this selector: only a browser that can measure a box reads it. */
-function supportsBlock(firstSelector: string): string {
-  const at = CSS.indexOf(`@supports (width: 1cqw) {\n  ${firstSelector} {`);
-  expect(at, `no @supports block starting with ${firstSelector}`).toBeGreaterThan(-1);
-  return CSS.slice(at, CSS.indexOf("\n}\n", at));
-}
 
-describe("what is on the strip", () => {
-  it("a logo and a sender: the logo first, then the doctor's name alone", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" senderName="Dr. Jane Smith, DO" />);
+describe("what is in the mark", () => {
+  it("the logo, cropped to fill its round frame, then the title and the doctor's name alone", () => {
+    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" title="Total Knee Replacement" senderName="Dr. Jane Smith, DO" />);
 
-    expect(html).toContain(`src="${LOGO}"`);
-    expect(html).toContain('<span aria-hidden="true" class="video-strip-sender">Dr. Jane Smith, DO</span>');
-    // Just the name, no "Sent by" (decided by Evan on 2026-10-05).
+    expect(html).toMatch(/<img[^>]*src="https:\/\/example\.com\/summit-square\.png"[^>]*class="[^"]*object-cover[^"]*object-center/);
+    expect(html).toContain("rounded-full");
+    expect(html).toMatch(/class="video-chip [^"]*">Total Knee Replacement<\/span>/);
+    expect(html).toMatch(/class="video-chip [^"]*">Dr\. Jane Smith, DO<\/span>/);
     expect(html).not.toContain("Sent by");
-    expect(html.indexOf(LOGO)).toBeLessThan(html.indexOf("Dr. Jane Smith"));
+    expect(html.indexOf(LOGO)).toBeLessThan(html.indexOf("Total Knee Replacement"));
+    expect(html.indexOf("Total Knee Replacement")).toBeLessThan(html.indexOf("Dr. Jane Smith"));
   });
 
-  it("a logo with no sender recorded: the logo only, and no name", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" senderName={null} />);
+  it("the logo gets a white backing only once it has loaded, so the initials show until then (and if it never loads)", () => {
+    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" title="Total Knee Replacement" />);
 
-    expect(html).toContain(`src="${LOGO}"`);
-    expect(html).not.toContain("video-strip-sender");
+    expect(html).toMatch(/<img[^>]*class="[^"]*opacity-0 bg-white/);
+    expect(html).toContain(">SO</span>");
   });
 
-  it("no logo: the clinic's name in its place, then the sender", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit Orthopedics" senderName="Jane Smith, PA-C" />);
+  it("no logo: the clinic's initials in the round frame", () => {
+    const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit Orthopedics" title="Total Knee Replacement" senderName="Jane Smith, PA-C" />);
 
     expect(html).not.toContain("<img");
-    expect(html).toContain('<span class="video-strip-clinic block truncate">Summit Orthopedics</span>');
+    expect(html).toContain(">SO</span>");
     expect(html).toContain(">Jane Smith, PA-C<");
   });
 
-  it("no logo and no sender: just the clinic's name, nothing at the right end", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit Orthopedics" />);
+  it("no doctor recorded: the clinic's name on the second chip", () => {
+    const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit Orthopedics" title="Total Knee Replacement" senderName={null} />);
 
-    expect(html).toContain(">Summit Orthopedics<");
-    expect(html).not.toContain("video-strip-sender");
-    expect(html).not.toContain("video-strip-end");
+    expect(html).toMatch(/class="video-chip [^"]*">Summit Orthopedics<\/span>/);
   });
 
-  it("a logo that has not loaded (or never will) has the clinic's name standing in, in a box of fixed size", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" />);
-
-    expect(html).toContain("video-strip-logo shrink-0");
-    expect(html).toMatch(/<span class="truncate video-strip-clinic">Summit Orthopedics<\/span>/);
-    expect(html).toMatch(/<img[^>]*opacity-0/);
-  });
-
-  it("a placeholder: the amber chip rides at the right end, and a screen reader hears it", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit" senderName="Dr. Jane Smith, DO" placeholder />);
-
-    expect(html).toMatch(/<span class="video-strip-end"><span class="[^"]*bg-\[#f3b94d\][^"]*">Placeholder animation<\/span><\/span><\/div>$/);
-  });
-
-  it("the library's Close at the right end, after the chip", () => {
+  it("keeps each chip to one line: a long title or name ends in ... (the page writes both in full)", () => {
     const html = renderToStaticMarkup(
-      <ClinicMark logoUrl={LOGO} name="Summit" senderName="Dr. Jane Smith, DO" placeholder action={<button type="button">Close</button>} />,
+      <ClinicMark logoUrl={null} name="Summit" title="Total Knee Replacement With a Very Long Name Indeed" senderName="Dr. Maria de los Angeles Fernandez-Castillo, DPM" />,
     );
 
-    expect(html).toMatch(/Placeholder animation<\/span><button type="button">Close<\/button><\/span><\/div>$/);
+    expect(html.match(/class="video-chip max-w-full truncate /g)).toHaveLength(2);
   });
 
-  it("long names are kept to the one line: the clinic's cut short, the doctor's ends in ... (the page writes both in full)", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name={LONG_CLINIC} senderName={LONG_SENDER} />);
+  it("is hidden from screen readers, because the page already says all of it in words", () => {
+    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit" title="Total Knee Replacement" senderName="Dr. Jane Smith, DO" />);
 
-    expect(html).toContain('<span class="video-strip-clinic block truncate">The Intermountain');
-    expect(rule(".video-strip-sender")).toContain("white-space: nowrap");
-    expect(rule(".video-strip-sender")).toContain("text-overflow: ellipsis");
-    expect(rule(".video-strip-brand")).toContain("max-width: 45%");
-  });
-});
-
-describe("how the strip sits", () => {
-  it("is a row of its own, in the page's flow, never laid over the picture and never taking taps away from it", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit" />);
-
-    expect(html).toBe('<div data-video-strip="" class="video-strip w-full shrink-0 select-none"><span aria-hidden="true" class="video-strip-brand"><span class="video-strip-clinic block truncate">Summit</span></span></div>');
-    expect(html).not.toContain("absolute");
+    expect(html).toMatch(/^<div data-video-strip="" aria-hidden="true"/);
   });
 
-  it("puts the logo on the row with no chip, box, border or shadow behind it", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit" senderName="Dr. Jane Smith, DO" />);
+  it("keeps the patient page's smallest text at 15px or more", () => {
+    const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit" title="Total Knee Replacement" senderName="Dr. Jane Smith, DO" />);
+    const sizes = [...html.matchAll(/text-\[(\d+)px\]/g)].map(([, px]) => Number(px));
 
-    expect(html).not.toMatch(/bg-white(?!\/)/);
-    expect(html).not.toContain("shadow");
-    expect(html).not.toContain("border");
-    expect(html).not.toContain("rounded");
-  });
-
-  it("hides the logo and names from screen readers (they are on the page already), keeping the chip readable", () => {
-    const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit" senderName="Dr. Jane Smith, DO" placeholder />);
-
-    expect(html).toMatch(/<span aria-hidden="true" class="video-strip-brand">.*summit-white\.png/);
-    expect(html).toContain('<span aria-hidden="true" class="video-strip-sender">');
-    expect(html).not.toMatch(/aria-hidden="true"[^>]*>Placeholder/);
+    expect(sizes.length).toBeGreaterThan(0);
+    for (const px of sizes) expect(px).toBeGreaterThanOrEqual(15);
   });
 });
 
-describe("the strip's CSS (app/globals.css)", () => {
-  it("is one slim line, a fixed --strip-h tall, on the player's black, in light grey", () => {
-    const css = rule(".video-strip");
-
-    expect(CSS).toContain(":root {\n  --strip-h: 2.75rem;\n}");
-    expect(css).toContain("height: var(--strip-h)");
-    expect(css).toContain(`background: ${VIDEO_STRIP_GROUND}`);
-    expect(css).toContain(`color: ${VIDEO_STRIP_INK}`);
-    expect(css).toContain("container-type: inline-size");
-    // Subtle: no wash over the picture, no shadow on the words.
-    expect(css).not.toContain("gradient");
-    expect(css).not.toContain("text-shadow");
+describe("the CSS it relies on (app/globals.css)", () => {
+  it("draws the chips black at the agreed darkness", () => {
+    expect(CSS).toContain(`.video-chip {\n  background: rgb(0 0 0 / ${VIDEO_CHIP_ALPHA});\n}`);
   });
 
-  it("draws the doctor's name small (Evan, 2026-10-15: the twice-as-big name was too big on a phone): 15px, growing to 18px", () => {
-    // A plain size for a browser that cannot measure a box, and the one that grows only where it can (the build's
-    // minifier keeps just the last of two sizes in one rule, so they are kept apart).
-    expect(rule(".video-strip-sender")).toContain("font-size: 15px;");
-    expect(rule(".video-strip-sender")).not.toContain("cqw");
-    expect(supportsBlock(".video-strip-logo")).toContain(".video-strip-clinic,\n  .video-strip-sender {\n    font-size: clamp(15px, 0.75rem + 0.6cqw, 18px);");
-    expect(supportsBlock(".video-strip-logo")).toContain(".video-strip-logo {\n    height: clamp(20px, 0.75rem + 1.2cqw, 26px);");
+  it("finds the picture inside the video's box, so the mark sits on the picture, not on black bars", () => {
+    expect(CSS).toContain(".picture-fit {\n  position: absolute;\n  inset: 0;\n}");
+    expect(CSS).toContain("width: min(100cqw, 100cqh * var(--picture-ratio, 1.7778));");
+    expect(CSS).toContain("height: min(100cqh, 100cqw / var(--picture-ratio, 1.7778));");
   });
 
-  it("keeps the library's strip and picture together as one unit, the strip right on top of the picture", () => {
-    const unit = supportsBlock(".picture-area");
-
-    expect(unit).toContain("--unit-w: min(100cqw, (100cqh - var(--strip-h)) * var(--picture-ratio, 1.7778));");
-    expect(unit).toContain("height: calc(var(--unit-w) / var(--picture-ratio, 1.7778) + var(--strip-h));");
-    // Without box measuring: the unit is the whole space, a column with the strip on top.
-    expect(rule(".picture-unit")).toContain("flex-direction: column");
-  });
-
-  it("no longer takes the browser's own full-screen button away (the patient player uses it)", () => {
+  it("no longer has the strip above the picture, or anything taking the browser's own full-screen button away", () => {
+    expect(CSS).not.toContain(".video-strip");
+    expect(CSS).not.toContain(".picture-unit");
     expect(CSS).not.toContain("-webkit-media-controls-fullscreen-button");
   });
 });

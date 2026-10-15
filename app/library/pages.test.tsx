@@ -67,6 +67,25 @@ async function hipForSale(sellable: boolean) {
 /** The address "Add to your plan" goes to for one category. */
 const addLink = (slug: string) => `href="/admin/billing?add=${slug}#change"`;
 
+/**
+ * The More categories list on the home page, as one entry per row, keyed by
+ * the category's name as it is drawn ("Foot &amp; Ankle", as React writes it).
+ * There is exactly one list inside the section, and the rows are its <li>s.
+ */
+function moreRows(html: string): { list: string; rows: Map<string, string> } {
+  const section = html.slice(html.indexOf("<details"));
+  const lists = section.match(/<ul[^>]*>[\s\S]*?<\/ul>/g) ?? [];
+  expect(lists).toHaveLength(1);
+  const list = lists[0] ?? "";
+  const rows = new Map<string, string>();
+  for (const row of list.match(/<li[^>]*>[\s\S]*?<\/li>/g) ?? []) {
+    const name = row.match(/<span[^>]*>([^<]+)<\/span>/)?.[1];
+    expect(name).toBeTruthy();
+    rows.set(name!, row);
+  }
+  return { list, rows };
+}
+
 /** Pretend Clerk says this person is in this organization: a member unless told they are an admin. */
 function signInAs(orgId: string, orgName: string, role: "member" | "admin" = "member") {
   vi.mocked(auth).mockResolvedValue({
@@ -204,6 +223,26 @@ describe("the library home", () => {
     expect(more).toContain(`(${locked} not on your plan)`);
   });
 
+  it("lists the locked categories one to a row, each with its padlock, its name as plain text and 'Not on your plan'", async () => {
+    signInAs(orgKnee, "Vitest library clinic (knee)");
+    const html = renderToStaticMarkup(await LibraryPage());
+    const states = await expectedStates(kneeClinic);
+    const { list, rows } = moreRows(html);
+
+    // A single column at every width: no grid that would set the rows side by side.
+    expect(list.match(/^<ul[^>]*>/)![0]).not.toMatch(/grid|flex|columns/);
+    const lockedLabels = CATEGORIES.filter((c) => states[c.value] === "locked").map((c) => c.label.replace("&", "&amp;"));
+    expect([...rows.keys()]).toEqual(lockedLabels);
+    for (const row of rows.values()) {
+      // The padlock (a drawing, hidden from screen readers), the name, and the plain words. A member's row links nowhere.
+      expect(row).toMatch(/<svg[^>]*aria-hidden="true"[\s\S]*?<rect/);
+      expect(row).toContain("Not on your plan");
+      expect(row).not.toContain("<a ");
+      // The name itself is plain text, not a link and not underlined.
+      expect(row).not.toMatch(/<span[^>]*underline[^>]*>[^<]+<\/span>/);
+    }
+  });
+
   it("opens More categories, and says so, for an open clinic with nothing on its plan", async () => {
     const orgNone = fakeOrgId();
     const clinic = await prisma.clinic.create({
@@ -230,6 +269,13 @@ describe("the library home", () => {
     expect(html).toContain(addLink("hip"));
     expect(html).toContain("Add to your plan");
     expect(html).toContain('aria-label="Add Hip to your plan"');
+    // On Hip's own row, after its name, and the only link in that row (the name is not one).
+    const hipRow = moreRows(html).rows.get("Hip");
+    expect(hipRow).toBeDefined();
+    expect(hipRow!.match(/<a /g)).toHaveLength(1);
+    expect(hipRow!.indexOf(addLink("hip"))).toBeGreaterThan(hipRow!.indexOf(">Hip<"));
+    expect(hipRow).toContain(">Add to your plan</a>");
+    expect(hipRow).not.toContain("Not on your plan");
     // A category already on the plan has no such link, and neither does one with nothing in it yet (it is not on the page at all).
     expect(html).not.toContain(addLink("knee"));
     for (const category of CATEGORIES) {
@@ -249,6 +295,7 @@ describe("the library home", () => {
     expect(html).toContain("Ask your office admin to add one of these.");
     expect(html).not.toContain("Add to your plan");
     expect(html).not.toContain("/admin/billing");
+    expect(moreRows(html).rows.get("Hip")).toContain("Not on your plan");
   });
 
   it("offers nothing for a locked category that is not for sale, to an admin or a member", async () => {
@@ -258,6 +305,9 @@ describe("the library home", () => {
     expect(admin).toContain(">Hip<");
     expect(admin).not.toContain(addLink("hip"));
     expect(admin).not.toContain("Add Hip to your plan");
+    const adminHip = moreRows(admin).rows.get("Hip");
+    expect(adminHip).toContain("Not on your plan");
+    expect(adminHip).not.toContain("<a ");
 
     signInAs(orgKnee, "Vitest library clinic (knee)");
     const member = renderToStaticMarkup(await LibraryPage());

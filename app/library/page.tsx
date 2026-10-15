@@ -102,23 +102,25 @@ export default async function LibraryPage() {
                 ? "Add one on Billing. You see what it comes to there before anything changes."
                 : "Ask your office admin to add one of these."}
           </p>
-          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {/* One category per row, at every width (decided at the 2026-10-08 huddle: side by side, the names read as a line of blue links and
+              were skimmed past). The name is plain text in the body colour; only "Add to your plan" is a link, at the end of its own row. */}
+          <ul className="max-w-2xl divide-y divide-line rounded-xl border border-line">
             {more.map(({ category, offer }) => (
-              <li key={category.value} className="flex min-h-12 items-center gap-3 rounded-xl border border-dashed border-line-strong px-4 text-ink-soft">
-                <LockIcon className="h-4 w-4 shrink-0 text-ink-muted" />
-                <span className="font-medium">{category.label}</span>
+              <li key={category.value} className="flex min-h-14 items-center gap-3 px-4">
+                <LockIcon className="h-5 w-5 shrink-0 text-ink-muted" />
+                <span className="text-lg text-ink">{category.label}</span>
                 {offer === "link" ? (
                   // Not prefetched: the library stays light, and Billing is only read when someone asks for it.
                   <Link
                     href={addToPlanHref(category.slug)}
                     prefetch={false}
                     aria-label={`Add ${category.label} to your plan`}
-                    className="ml-auto inline-flex min-h-12 shrink-0 items-center text-sm font-medium text-brand-bright underline underline-offset-2 hover:text-ink"
+                    className="-mr-2 ml-auto inline-flex min-h-12 shrink-0 items-center rounded-lg px-2 text-base font-medium text-brand-bright underline underline-offset-2 hover:text-ink"
                   >
                     Add to your plan
                   </Link>
                 ) : (
-                  <span className="ml-auto text-sm text-ink-muted">Not on your plan</span>
+                  <span className="ml-auto shrink-0 text-base text-ink-muted">Not on your plan</span>
                 )}
               </li>
             ))}

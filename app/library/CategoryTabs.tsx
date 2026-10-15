@@ -3,8 +3,8 @@ import Link from "next/link";
 import { CATEGORIES } from "@/lib/categories";
 
 /**
- * The pills across the top of every library page, centered under the
- * search box in the top bar (decided by Evan on 2026-10-15): "All" (the
+ * The pills across the top of every library page, centered under the top
+ * bar (decided by Evan on 2026-10-15): "All" (the
  * library home) and one per category on the clinic's plan, in the usual
  * order. A pill goes to that category's page, which draws the same pills
  * with its own one lit; the search results light none. Plain links, so they

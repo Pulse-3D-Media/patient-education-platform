@@ -5,8 +5,8 @@
  * 2026-10-15), top to bottom:
  *
  *   1. Category tabs: "All" and the categories on the clinic's plan,
- *      centered at the top of every library page, under the search box in
- *      the top bar (which searches the whole library, SEARCH_PATH).
+ *      centered at the top of every library page, under the top bar (whose
+ *      search box, at its right, searches the whole library, SEARCH_PATH).
  *   2. My favorites: the videos this person hearted, newest heart first,
  *      as bigger cards. With none, one quiet line (FAVORITES_EMPTY).
  *   3. Most watched: this person's own most-played videos across every

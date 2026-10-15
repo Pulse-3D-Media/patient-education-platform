@@ -18,10 +18,12 @@ import { AdminIcon, ArrowLeftIcon, BooksIcon, CloseIcon, HomeIcon, MenuIcon, Sea
  * Laid out the way YouTube does it (decided by Evan on 2026-10-15):
  *
  *   - THE TOP BAR, at every width: the menu button (three lines) and the
- *     clinic's logo at the left, a "Search" box in the middle that searches
- *     the whole library (/library/search; on a phone it is a magnifier that
- *     opens the box across the bar), and Clerk's user button (the signed-in
- *     person's avatar, with Sign out in its menu) at the right.
+ *     clinic's logo at the left, and a "Search" box at the right that
+ *     searches the whole library (/library/search; on a phone it is a
+ *     magnifier that opens the box across the bar).
+ *   - CLERK'S USER BUTTON (the signed-in person's avatar, with Sign out in
+ *     its menu) at the foot of the rail, or of the full sidebar, as it
+ *     always was. A phone has no rail, so there it rides in the top bar.
  *   - THE MENU BUTTON folds the sidebar away and brings it back, on every
  *     screen. On a wide screen (1280px and up) it switches between the full
  *     sidebar and the narrow rail, and the choice is remembered on that
@@ -190,11 +192,12 @@ export function AppShell({
       <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-ground px-3 sm:px-4">
         <MenuButton open={menu === "guide"} onClick={pressMenu} />
         {logo}
-        {/* The search box in the middle, from a small tablet up. */}
-        <div className="hidden min-w-0 flex-1 justify-center px-2 sm:flex lg:px-6">
+        {/* The search box at the right of the bar, from a small tablet up (Evan, 2026-10-15). */}
+        <div className="hidden min-w-0 flex-1 justify-end pl-4 sm:flex">
           <SearchForm pathname={pathname} />
         </div>
-        <div className="ml-auto flex items-center gap-1 sm:ml-0">
+        {/* A phone has no rail, so the magnifier and the person's avatar ride in the bar there. */}
+        <div className="ml-auto flex items-center gap-1 sm:ml-0 md:hidden">
           {/* On a phone the box would not fit beside the logo, so a magnifier opens it across the bar. */}
           <button
             type="button"
@@ -240,11 +243,19 @@ export function AppShell({
               <AdminIcon className="h-6 w-6" />
             </RailButton>
           )}
+          {/* Clerk's user button at the foot of the rail, as it always was: the signed-in person's avatar, with Sign out in its menu. The box keeps the rail lined up while Clerk loads. */}
+          <div className="mt-auto flex h-11 w-11 items-center justify-center">
+            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+          </div>
         </nav>
 
         {/* The full sidebar, on a wide screen while it is not folded: every line an icon and a label, YouTube-style. */}
         <nav aria-label="Library" className={`sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 flex-col border-r border-line bg-sunken ${folded ? "" : "xl:flex"}`}>
           <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} />
+          {/* The same avatar at the foot of the full sidebar, lined up with where it sits on the rail. */}
+          <div className="flex h-14 shrink-0 items-center border-t border-line px-[1.375rem]">
+            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+          </div>
           {brand && <PoweredBy />}
         </nav>
 

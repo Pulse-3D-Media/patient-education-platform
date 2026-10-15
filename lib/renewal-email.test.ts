@@ -19,7 +19,7 @@ import { notifyClinicOfRenewalRequest, reactivateLink, renewalRequestEmail, rene
 const env = { RESEND_API_KEY: "re_made_up_key_for_tests_only", EMAIL_FROM: "Pulse 3D <links@example.test>" };
 
 const facts: RenewalRequestFacts = {
-  code: "k7m2xq",
+  shareId: "cmshare0000000000000000001",
   videoTitle: "Total Knee <Replacement>",
   senderName: "Dr. Jane Smith",
   createdAt: new Date("2026-09-15T16:00:00.000Z"),
@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 describe("renewalRequestEmail", () => {
-  const url = reactivateLink("https://example.test", facts.code);
+  const url = reactivateLink("https://example.test", facts.shareId);
   const email = renewalRequestEmail(facts, url);
 
   it("names the procedure, the surgeon, when the link was made and how many renewals are left, in the subject and both bodies", () => {
@@ -80,7 +80,7 @@ describe("renewalRequestEmail", () => {
   });
 
   it("has one button that opens the reactivate page in the app, and says opening it turns nothing on", () => {
-    expect(url).toBe("https://example.test/admin/reactivate/k7m2xq");
+    expect(url).toBe("https://example.test/admin/reactivate/cmshare0000000000000000001");
     expect(email.text).toContain(url);
     expect(email.html).toContain(`href="${url}"`);
     expect(email.html.match(/<a /g)).toHaveLength(1);
@@ -110,34 +110,34 @@ describe("notifyClinicOfRenewalRequest", () => {
     expect(await notifyClinicOfRenewalRequest(facts, "https://example.test", { env, fetch: send, people: listPeople })).toEqual({ told: true, recipients: 2 });
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toBe("https://api.resend.com/emails/batch");
-    expect(requests[0].key).toBe(renewalRequestKey(facts.code, facts.requestedAt));
+    expect(requests[0].key).toBe(renewalRequestKey(facts.shareId, facts.requestedAt));
     // One copy per admin, and no copy names anyone but its own admin.
     expect(sent().map((email) => email.to)).toEqual([["office@example.test"], ["manager@example.test"]]);
     expect(JSON.stringify(sent())).not.toContain("surgeon@example.test");
     for (const email of sent()) {
       // The same words for each: the one button, the trusted origin.
-      expect(email.subject).toBe(renewalRequestEmail(facts, reactivateLink("https://example.test", facts.code)).subject);
-      expect(email.text).toContain("https://example.test/admin/reactivate/k7m2xq");
+      expect(email.subject).toBe(renewalRequestEmail(facts, reactivateLink("https://example.test", facts.shareId)).subject);
+      expect(email.text).toContain("https://example.test/admin/reactivate/cmshare0000000000000000001");
       expect(email.html.match(/<a /g)).toHaveLength(1);
     }
   });
 
-  it("makes the key from a fingerprint of the link and the request time, never the code written out", async () => {
-    const key = renewalRequestKey(facts.code, facts.requestedAt);
+  it("makes the key from a fingerprint of the link's id and the request time", async () => {
+    const key = renewalRequestKey(facts.shareId, facts.requestedAt);
     expect(key).toMatch(/^renewal-request-[0-9a-f]{64}$/);
-    expect(key).not.toContain(facts.code);
+    expect(key).not.toContain(facts.shareId);
     // Stable, so a resend of the same request is a repeat Resend drops.
-    expect(renewalRequestKey("k7m2xq", new Date(facts.requestedAt.getTime()))).toBe(key);
+    expect(renewalRequestKey("cmshare0000000000000000001", new Date(facts.requestedAt.getTime()))).toBe(key);
     // A different link, or the same link asked about on another day, is a new email.
-    expect(renewalRequestKey("k7m2xr", facts.requestedAt)).not.toBe(key);
-    expect(renewalRequestKey(facts.code, new Date(facts.requestedAt.getTime() + 24 * 60 * 60 * 1000))).not.toBe(key);
+    expect(renewalRequestKey("cmshare0000000000000000002", facts.requestedAt)).not.toBe(key);
+    expect(renewalRequestKey(facts.shareId, new Date(facts.requestedAt.getTime() + 24 * 60 * 60 * 1000))).not.toBe(key);
 
     // And the same request notified twice sends under the same key.
     const { send, requests } = service();
     await notifyClinicOfRenewalRequest(facts, "https://example.test", { env, fetch: send, people: listPeople });
     await notifyClinicOfRenewalRequest(facts, "https://example.test", { env, fetch: send, people: listPeople });
     expect(requests.map((request) => request.key)).toEqual([key, key]);
-    expect(JSON.stringify(requests.map((request) => request.key))).not.toContain("k7m2xq");
+    expect(JSON.stringify(requests.map((request) => request.key))).not.toContain(facts.shareId);
   });
 
   it("sends nothing when email is not set up, and does not even read the clinic's people", async () => {

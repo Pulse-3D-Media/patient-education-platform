@@ -7,12 +7,13 @@ import { fakeClerk } from "@/lib/testing/fake-clerk";
 import { reactivateLinkAction } from "./actions";
 
 /**
- * The Server Action behind Confirm on /admin/reactivate/<code>, with Clerk
+ * The Server Action behind Confirm on /admin/reactivate/<id>, with Clerk
  * replaced by the in-memory stand-in and the database real. What these
  * prove: only a signed-in office admin of an OPEN clinic can turn a link
  * back on; a member, a signed-out visitor, an admin of a clinic that has
  * not paid, and an admin of another clinic are refused with a plain
- * sentence and nothing written; a forged code finds nothing; a real press
+ * sentence and nothing written; a forged id, or the link's code in place of
+ * its id, finds nothing; a real press
  * renews the link once and logs it under the admin's name; a second press
  * is told the link is already working; and a failure on the server is
  * answered in plain words, never thrown at the page.
@@ -47,9 +48,14 @@ async function makePausedLink(clinicId: string) {
   return share.code;
 }
 
-function form(code: string) {
+/** The link's row id: what the page's form sends, never the code. */
+async function idOf(code: string) {
+  return (await prisma.share.findUniqueOrThrow({ where: { code }, select: { id: true } })).id;
+}
+
+function form(shareId: string) {
   const data = new FormData();
-  data.append("code", code);
+  data.append("shareId", shareId);
   return data;
 }
 
@@ -101,10 +107,10 @@ describe("who may press Confirm", () => {
     const code = await makePausedLink(clinicA);
 
     fakeClerk.signIn(null, null);
-    expect(await reactivateLinkAction(null, form(code))).toEqual({ ok: false, message: "Only your clinic's office admins can turn a link back on." });
+    expect(await reactivateLinkAction(null, form(await idOf(code)))).toEqual({ ok: false, message: "Only your clinic's office admins can turn a link back on." });
 
     fakeClerk.signIn(memberA, orgA);
-    expect(await reactivateLinkAction(null, form(code))).toEqual({ ok: false, message: "Only your clinic's office admins can turn a link back on." });
+    expect(await reactivateLinkAction(null, form(await idOf(code)))).toEqual({ ok: false, message: "Only your clinic's office admins can turn a link back on." });
 
     expect(vi.mocked(shares.renewShareForClinic)).not.toHaveBeenCalled();
     expect(await renewalsOf(code)).toBe(0);
@@ -121,13 +127,13 @@ describe("who may press Confirm", () => {
   it("finds no link for another clinic's admin, and writes nothing", async () => {
     const code = await makePausedLink(clinicA);
     fakeClerk.signIn(adminB, orgB);
-    expect(await reactivateLinkAction(null, form(code))).toEqual({ ok: false, message: "We couldn't find that link for your clinic." });
+    expect(await reactivateLinkAction(null, form(await idOf(code)))).toEqual({ ok: false, message: "We couldn't find that link for your clinic." });
     expect(await renewalsOf(code)).toBe(0);
   });
 
-  it("refuses a forged code before the database is asked", async () => {
+  it("refuses a forged id before the database is asked", async () => {
     fakeClerk.signIn(adminA, orgA);
-    for (const junk of ["", "K7M2XQ", "a".repeat(21), "k7m2xq; drop", "../k7m2xq"]) {
+    for (const junk of ["", "K7M2XQ", "a".repeat(41), "k7m2xq; drop", "../k7m2xq"]) {
       expect(await reactivateLinkAction(null, form(junk))).toEqual({ ok: false, message: "We couldn't find that link for your clinic." });
     }
     expect(await reactivateLinkAction(null, new FormData())).toEqual({ ok: false, message: "We couldn't find that link for your clinic." });
@@ -136,32 +142,40 @@ describe("who may press Confirm", () => {
 });
 
 describe("an admin of the clinic", () => {
+  it("finds nothing when the link's code is sent in place of its id, and writes nothing", async () => {
+    const code = await makePausedLink(clinicA);
+    fakeClerk.signIn(adminA, orgA);
+    expect(await reactivateLinkAction(null, form(code))).toEqual({ ok: false, message: "We couldn't find that link for your clinic." });
+    expect(await renewalsOf(code)).toBe(0);
+  });
+
   it("turns the link back on once, under their name in the clinic log, and a second press is told it is already working", async () => {
     const code = await makePausedLink(clinicA);
     fakeClerk.signIn(adminA, orgA);
 
-    const first = await reactivateLinkAction(null, form(code));
+    const first = await reactivateLinkAction(null, form(await idOf(code)));
     expect(first?.ok).toBe(true);
     expect(first?.message).toContain("Done. The link works again until");
     expect(await renewalsOf(code)).toBe(1);
     const note = await prisma.clinicNote.findFirst({ where: { clinicId: clinicA, body: { contains: `Link ${code}` } } });
     expect(note?.authorName).toBe("Pat Lee (clinic admin)");
 
-    const second = await reactivateLinkAction(null, form(code));
+    const second = await reactivateLinkAction(null, form(await idOf(code)));
     expect(second?.ok).toBe(false);
     expect(second?.message).toContain("already working");
     expect(await renewalsOf(code)).toBe(1);
   });
 
-  it("is answered in plain words when the server fails, with the detail logged there and never the code", async () => {
+  it("is answered in plain words when the server fails, with the detail logged there and never which link", async () => {
     const code = await makePausedLink(clinicA);
     fakeClerk.signIn(adminA, orgA);
     vi.mocked(shares.renewShareForClinic).mockRejectedValueOnce(new Error("the database went away"));
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(await reactivateLinkAction(null, form(code))).toEqual({ ok: false, message: "That could not be done just now. Nothing was changed. Try again in a moment." });
+    expect(await reactivateLinkAction(null, form(await idOf(code)))).toEqual({ ok: false, message: "That could not be done just now. Nothing was changed. Try again in a moment." });
     expect(log).toHaveBeenCalledOnce();
     expect(JSON.stringify(log.mock.calls)).not.toContain(code);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(await idOf(code));
     log.mockRestore();
   });
 });

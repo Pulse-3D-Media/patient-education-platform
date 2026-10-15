@@ -5,11 +5,11 @@ import { PRIMARY_BUTTON } from "@/components/ui/styles";
 import { reactivateLinkAction } from "./actions";
 
 /**
- * The bottom of /admin/reactivate/<code>: the Confirm form for a paused
+ * The bottom of /admin/reactivate/<id>: the Confirm form for a paused
  * link, the server's sentence after a press, or the sentence for a link
  * that cannot be turned back on.
  *
- * One hidden field (which link) and one button. The button is a POST to
+ * One hidden field (which link, by its row id, never its code) and one button. The button is a POST to
  * reactivateLinkAction, which does every check again on the server; nothing
  * on this page changes the link until that press.
  *
@@ -21,13 +21,13 @@ import { reactivateLinkAction } from "./actions";
  * second press is not even offered (the server would refuse it anyway).
  */
 export function ReactivateForm({
-  code,
+  shareId,
   paused,
   days,
   renewalsLeft,
   whyNot,
 }: {
-  code: string;
+  shareId: string;
   /** True when the link can be turned back on right now, which is the only time the button is drawn. */
   paused: boolean;
   days: number;
@@ -49,7 +49,7 @@ export function ReactivateForm({
 
   return (
     <form action={action} className="mt-5">
-      <input type="hidden" name="code" value={code} />
+      <input type="hidden" name="shareId" value={shareId} />
       <p className="text-ink-soft">
         Confirm turns this link back on for {days} {days === 1 ? "day" : "days"} from now. That uses 1 of its {renewalsLeft} remaining{" "}
         {renewalsLeft === 1 ? "renewal" : "renewals"}.

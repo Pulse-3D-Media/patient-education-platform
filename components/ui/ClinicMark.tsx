@@ -1,96 +1,63 @@
-import type { ReactNode } from "react";
+import { clinicInitials } from "./player-rules";
 import { ClinicLogo } from "./ClinicLogo";
-import { PLACEHOLDER_CHIP } from "./styles";
 
 /**
- * The strip on the video: the clinic's logo and the name of the doctor who
- * sent it ("Dr. Jane Smith, DO"), in both players (decided by Evan on
- * 2026-10-02, after Van asked for the doctor and the clinic on the video
- * itself on the September 28 call). It works like a watermark: it shows the
- * clinic stands behind the video.
+ * The clinic and the doctor on the video, the way Vimeo shows a video's
+ * owner (decided by Evan and Van at the 2026-10-15 huddle, with a Vimeo
+ * screenshot): top left of the picture, the clinic's logo in a round frame,
+ * and beside it the video's title on a dark chip with the doctor's name on a
+ * smaller chip under it ("Dr. Jane Smith, DO", Share.senderName, with no
+ * "Sent by"; the clinic's name for a link with no doctor recorded). It works
+ * like a watermark: it shows the clinic stands behind the video.
  *
- * WHERE IT SITS: A SLIM ROW ABOVE THE PICTURE, NOT ON IT (option C, chosen
- * by Evan on 2026-10-15 after trying a bigger see-through strip laid over
- * the picture on a Samsung phone and an iPad). Nothing of ours is drawn over
- * the picture any more, so it can never cover the browser's own buttons:
- * Safari draws its full-screen and picture-in-picture buttons in the
- * picture's top-left corner and its sound button top right, and the strip
- * used to lie over them. The row is part of the player: in the library's
- * full screen it comes along; in the browser's own full screen (the patient
- * player's, and the iPhone's) the browser shows the video alone, without
- * it. That is accepted (Evan, 2026-10-15).
+ * It fades away with the rest of the controls a moment after the video
+ * starts, and comes back when the video is paused, on a tap, or when the
+ * mouse moves over the player (PlayerOverlay decides; this only draws).
  *
- * HOW IT LOOKS (subtle, Evan, 2026-10-15: the twice-as-big name was "way too
- * big" on a phone):
+ *   - The round frame is filled by the logo, cropped to the circle
+ *     (Evan, 2026-10-15): a square icon version of a clinic's logo works
+ *     best. It sits on white, so a logo with a see-through background still
+ *     shows. It keeps its fixed box and loads at low priority (ClinicLogo),
+ *     so it never moves anything and never holds up the first frame. No
+ *     logo, or one that does not load: the clinic's initials on dark grey.
+ *   - The chips are black at VIDEO_CHIP_ALPHA (0.7, lib/branding.ts) with
+ *     white words, so they read over any frame, white or black.
+ *   - One line each: a long title or name ends in "..." (the patient page
+ *     writes both in full above the player).
  *
- *   - One line, a fixed 2.75rem (44px) tall, on the player's own black, so
- *     it reads as the top edge of the player. Light grey words (#e3e7eb,
- *     about 16:1 on black), 15px on a phone, growing a little with the
- *     player's width to 18px (.video-strip in app/globals.css, measured from
- *     the row's own width, so the server's HTML is already right).
- *   - The logo first, straight on the black: no chip, box, border or shadow.
- *     It keeps its fixed box and loads at low priority (ClinicLogo), so it
- *     never moves anything and never holds up the first frame. No logo, or
- *     one that does not load: the clinic's name in its place.
- *   - Then a thin rule and the doctor's name, exactly as patients see it on
- *     their links ("Dr. Jane Smith, DO", Share.senderName), with no "Sent
- *     by" in front (decided by Evan on 2026-10-05). No sender recorded: just
- *     the clinic. A name too long for the line ends in "..."; the patient
- *     page always writes it in full above the player.
- *   - At the right end: the amber "Placeholder animation" chip when the video
- *     is a sample, and `action`, one of our own controls that belongs there
- *     (the library player's Close).
- *
- * Screen readers skip the logo and the name (both are already written on
- * the page); the placeholder chip and the action are read.
+ * Screen readers skip all of it (the page already says the clinic, the
+ * doctor and the title in words).
  *
  * WHAT IT IS NOT: protection. It is drawn by the web page, not burned into
- * the file. A screenshot or a screen recording still works, and the
- * browser's own full screen and picture-in-picture show the video alone.
- *
- * WHY A DARK LOGO IS HARD TO SEE HERE. The row is black, so a logo drawn for
- * a white page can disappear on it. The Branding form says a white or light
- * version of the logo works best on the video, and its preview shows it.
+ * the file. A screenshot or a screen recording still works, and an iPhone's
+ * own full-screen player and picture-in-picture show the video alone.
  */
 export function ClinicMark({
   logoUrl,
   name,
+  title,
   senderName = null,
-  placeholder = false,
-  action = null,
 }: {
-  /** The clinic's checked logo address, or null to write its name instead. */
+  /** The clinic's checked logo address, or null for its initials. */
   logoUrl: string | null;
-  /** The clinic's name: the stand-in for the logo, and what a screen reader already has from the page. */
+  /** The clinic's name: its initials stand in for a missing logo, and it is the second line when no doctor is recorded. */
   name: string;
-  /** The name patients see ("Dr. Jane Smith, DO"), or null for a link with no sender recorded: then only the clinic. */
+  /** The video's title, on the first chip. */
+  title: string;
+  /** The name patients see ("Dr. Jane Smith, DO"), or null to show the clinic's name instead. */
   senderName?: string | null;
-  /** True for a sample animation standing in for the named procedure: the amber chip rides at the right end. */
-  placeholder?: boolean;
-  /** One of our own controls for the right end (the library player's Close). */
-  action?: ReactNode;
 }) {
   return (
-    <div data-video-strip="" className="video-strip w-full shrink-0 select-none">
-      <span aria-hidden="true" className="video-strip-brand">
-        {logoUrl ? (
-          // A fixed box, so the row looks the same before, during and after the logo loads, and if it never does.
-          <ClinicLogo src={logoUrl} name={name} boxClassName="video-strip-logo shrink-0" nameClassName="video-strip-clinic" />
-        ) : (
-          <span className="video-strip-clinic block truncate">{name}</span>
-        )}
+    <div data-video-strip="" aria-hidden="true" className="flex min-w-0 select-none items-center gap-2.5">
+      <span className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full shadow-[0_1px_6px_rgba(0,0,0,.45)] @xl:h-14 @xl:w-14">
+        {/* Initials underneath; the logo, once loaded, covers them. A logo that never loads leaves them showing. */}
+        <span className="absolute inset-0 flex items-center justify-center bg-[#26323a] text-[15px] font-bold text-white @xl:text-[18px]">{clinicInitials(name)}</span>
+        {logoUrl && <ClinicLogo src={logoUrl} name={name} fit="cover" fallback="blank" boxClassName="h-full w-full" imageClassName="bg-white" />}
       </span>
-      {senderName && (
-        <span aria-hidden="true" className="video-strip-sender">
-          {senderName}
-        </span>
-      )}
-      {(placeholder || action) && (
-        <span className="video-strip-end">
-          {placeholder && <span className={PLACEHOLDER_CHIP}>Placeholder animation</span>}
-          {action}
-        </span>
-      )}
+      <span className="flex min-w-0 flex-col items-start gap-1">
+        <span className="video-chip max-w-full truncate rounded px-2 py-px text-[16px] font-semibold leading-snug text-white @xl:py-0.5 @xl:text-[18px]">{title}</span>
+        <span className="video-chip max-w-full truncate rounded px-2 py-px text-[15px] font-medium leading-snug text-white @xl:py-0.5">{senderName ?? name}</span>
+      </span>
     </div>
   );
 }

@@ -149,15 +149,20 @@ export function contrastRatio(a: string, b: string): number {
 }
 
 /**
- * THE STRIP ON THE VIDEO (ClinicMark): a slim row above the picture, on the
- * player's own black, with the logo and the doctor's name in light grey
- * (app/globals.css, .video-strip; option C, Evan, 2026-10-15). Its words are
- * small (15px to 18px), so they need the full 4.5:1; light grey on black is
- * about 16:1. lib/branding.test.ts checks it, and checks that these are the
- * colours the CSS uses.
+ * THE CHIPS ON THE VIDEO (ClinicMark, the video's title and the doctor's
+ * name, Vimeo-style; app/globals.css, .video-chip): black at this opacity,
+ * white words. 0.7 is dark enough that the words read over the brightest
+ * possible frame: over pure white the chip comes out #4d4d4d, and white on
+ * that is 8.4:1 (the words are 15px and up, so the floor is 4.5:1); over a
+ * black frame it is black, 21:1. lib/branding.test.ts checks every grey
+ * between, and that the CSS uses this number.
  */
-export const VIDEO_STRIP_GROUND = "#000000";
-export const VIDEO_STRIP_INK = "#e3e7eb";
+export const VIDEO_CHIP_ALPHA = 0.7;
+
+/** What a chip looks like over a frame of this colour: the frame, darkened by the chip. */
+export function videoChipGround(frame: string): string {
+  return mix(frame, BLACK, VIDEO_CHIP_ALPHA);
+}
 
 /** `amount` of the way from one colour to another: 0 is `from`, 1 is `to`. */
 function mix(from: string, to: string, amount: number): string {

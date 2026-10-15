@@ -45,7 +45,8 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
  * values whatever the page around the form looks like (on /pulse the page
  * is always dark). The patient card never changes with the mode. "On the
  * video" shows the strip both players draw above the picture (ClinicMark),
- * on the player's black, so a clinic can see whether its logo reads there.
+ * on a light frame and a dark one, so a clinic can see how its logo looks in
+ * the round frame (cropped to the circle).
  * It is a preview only. The server checks every value again when the form
  * is sent, and what the browser thinks is never what gets saved.
  *
@@ -181,8 +182,8 @@ export function BrandingForm({
           <p className="mt-2 text-xs text-ink-muted">
             For your team&rsquo;s screens: the library and this admin area. It is the clinic&rsquo;s setting, the same for everyone who signs
             in. The patient page is always light, and a video always plays on black. Your logo sits straight on the banner with nothing
-            behind it, so a dark logo suits Light and a white or pale logo suits Dark. On the video, your logo sits on a slim black
-            row above the picture, so a white or light version of your logo works best there.
+            behind it, so a dark logo suits Light and a white or pale logo suits Dark. On the video, your logo sits in a small
+            round frame, cropped to the circle, so a square icon version of your logo works best there.
           </p>
         </fieldset>
 
@@ -322,13 +323,19 @@ export function BrandingForm({
           </div>
         </div>
 
-        {/* The strip on the video, as both players draw it: a slim black row above the picture, so the clinic can see how its
-            logo reads on black. Fixed colours: a video is the same in every mode. The doctor's name is an example; the frame
-            under it stands in for the picture (16:9, as wide as this card). */}
+        {/* The clinic's mark as both players draw it at the top left of the picture (ClinicMark: the logo in its round
+            frame, the title and the doctor's name), over a light frame and a dark one. Fixed colours: a video is the same in
+            every mode. The title and the doctor's name are examples. */}
         <div className="overflow-hidden rounded-2xl bg-white text-[#12202a]">
           <p className="px-5 pb-2 pt-4 text-xs font-semibold uppercase tracking-wider text-[#46555e]">On the video</p>
-          <ClinicMark key={previewLogo ?? "no-logo"} logoUrl={previewLogo} name={clinicName} senderName="Dr. Jane Smith, DO" />
-          <div className="aspect-video w-full bg-[#10181d]" />
+          {[
+            { key: "light", ground: "#eef1f4" },
+            { key: "dark", ground: "#10181d" },
+          ].map((frame) => (
+            <div key={frame.key} className="@container relative w-full p-3" style={{ backgroundColor: frame.ground }}>
+              <ClinicMark key={previewLogo ?? "no-logo"} logoUrl={previewLogo} name={clinicName} title="Total Knee Replacement" senderName="Dr. Jane Smith, DO" />
+            </div>
+          ))}
         </div>
 
         {/* data-theme gives the tokens inside this card the chosen mode's values, whatever the page around the form is. text-ink is set here, not inherited, for the same reason. */}

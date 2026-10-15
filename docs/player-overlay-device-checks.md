@@ -1,38 +1,38 @@
-# The strip on the video, full screen and the library's controls: device checks
+# The Vimeo-style players: device checks
 
-What changed (the player-overlay PR, from the 2026-10-08 huddle and Evan's choices on 2026-10-15):
+What changed (the player-overlay PR, from the 2026-10-08 and 2026-10-15 huddles):
 
-- **The strip** (the clinic's logo and the doctor's name) is a slim, subtle row **above** the picture, not over it:
-  44px tall, on the player's black, light grey words, 15px on a phone up to 18px. Nothing of ours is drawn over a
-  playing picture any more, so nothing covers the browser's own buttons.
-- **The patient player** uses the browser's own controls **including its own full-screen button**. Our "Make the
-  video bigger" button and our own full-screen view are gone. The browser's full screen shows the video **alone**,
-  without the strip, on every device (accepted).
-- **The library player** keeps its own controls, laid out like a phone's or Vimeo's player: back 10 seconds, play or
-  pause and forward 10 seconds in the middle; time, sound and full screen along the bottom with a thin progress bar;
-  the procedure's name small at the top left; all fading away while the video plays. A finger tap shows or hides the
-  controls; a mouse click plays or pauses. Close sits in the strip and never fades.
+- **Both players** (the patient's link and the surgeon's library) now use our own controls, laid out like Vimeo's,
+  from one shared implementation. On a phone or tablet: back 10 seconds, play or pause, forward 10 seconds in the
+  middle. With a mouse: play at the bottom left. Along the bottom: the time, sound, full screen and a thin progress
+  bar. Everything fades while the video plays and comes back on pause, a tap or mouse movement.
+- **The clinic and the doctor on the video**: top left of the picture, the clinic's logo cropped into a round frame
+  (or its initials), beside the video's title and the doctor's name on dark chips. It fades with the controls.
+- **Full screen** is our own button in both players: the whole player, mark and controls included, on Android, an
+  iPad and a computer. An iPhone hands the video to its own player, which shows the video alone (accepted).
 
-Why each is the way it is: `components/ui/ClinicMark.tsx`, `app/watch/[code]/WatchPlayer.tsx`,
-`components/ui/VideoPlayer.tsx` and CLAUDE.md, "Clinic branding and dependable playback". The older checks of the 32px
-band (October 5) are in `branding-verification.md`; they describe the band as it was then.
+Why each is the way it is: `components/ui/PlayerOverlay.tsx`, `components/ui/usePlayerControls.ts`,
+`components/ui/ClinicMark.tsx`, `app/watch/[code]/WatchPlayer.tsx`, `components/ui/VideoPlayer.tsx` and CLAUDE.md,
+"Clinic branding and dependable playback". The older checks of the 32px band (October 5) are in
+`branding-verification.md`; they describe the band as it was then.
 
 ## What was seen on Claude's computer (2026-10-15), and what was not
 
 Seen, in the Claude app's browser pane (Chromium), on the Neon testing branch with made-up links:
 
-- Patient page at phone (375 by 812) and computer (1280 by 900) widths, before the first play and paused: the strip
-  above the picture, the browser's own full-screen button back in its bar, no button of ours. A 48-character doctor's
-  name ends in "..." on the strip (written in full above the player).
-- The library player held sideways (812 by 375, like the Samsung screenshot), upright (375 by 812) and on a computer
-  (1280 by 800): the strip right on top of the picture, the middle buttons, the bottom bar. A finger tap hides the
-  controls, a second tap shows them, they fade by themselves after a moment while playing; a mouse click pauses;
-  forward 10 seconds moves the video 10 seconds.
+- Patient page on a phone (375 by 812, touch) before the first play (the mark top left, Play low and clear of it) and
+  paused (the middle buttons, time, sound, full screen, progress bar, nothing overlapping on the 184px-tall picture);
+  on a computer (1280 by 900, mouse) paused (play at the bottom left, nothing in the middle). The "did not load"
+  panel, with the mark above it, Try again focused and the clinic's number.
+- On the phone: the controls show on play, fade after about 2.6 seconds, a tap shows them, a second tap hides them,
+  pausing brings them back; forward 10 moves the video 10 seconds; mute works. The play start and the tick were still
+  recorded on the link.
+- The library player on a phone held sideways (740 by 360, touch, like the Samsung), on a wide screen with a mouse,
+  and with a placeholder video (the amber chip beside Close, staying when the rest fades).
 
 **Not seen, because nothing on this machine can do it:**
 
-- **Any full screen.** The browser pane and headless Edge both leave a full-screen request pending, so neither the
-  browser's own full screen on the patient page nor the library's Full screen button was seen working.
+- **Any full screen.** The browser pane and headless Edge both leave a full-screen request pending.
 - **Safari**, and **any real phone or tablet** on a real network.
 
 ## The checks (Evan, on real devices)
@@ -42,28 +42,21 @@ library signed in as someone holding a seat. For each device note the device, th
 network (cellular or clinic Wi-Fi), cold or warm start, and anything that fails.
 
 1. **iPhone, Safari** (upright, then sideways)
-   1. Patient link: the logo and doctor's name in a thin black row above the video; nothing over the picture.
-   2. Tick the box, tap Play. Tap the picture: Safari's own buttons (full screen and picture-in-picture top left,
-      sound top right) are all visible and nothing covers them.
-   3. Safari's full-screen button: the iPhone's own player, video alone (expected).
-   4. Library: open a procedure. Tap the picture: controls hide; tap again: they show. Back 10, play/pause, forward
-      10, the progress bar, sound. Full screen: the iPhone's own player, video alone (expected). Close.
+   1. Patient link: before Play, the round logo, the title and the doctor's name top left; Play below them.
+   2. Tick, tap Play. The controls show, then fade. Tap: they come back; tap again: they go. Back 10, forward 10,
+      pause, the progress bar, sound.
+   3. Full screen: the iPhone's own player, video alone (expected). Done brings you back where you were.
+   4. Library: the same, plus Close top right.
 2. **iPad, Safari** (both ways round)
-   1. As 1.1 to 1.3. Safari's own full screen shows the video alone.
-   2. Library: as 1.4, then Full screen: the whole player fills the screen **with** the strip. Close or swipe out.
+   1. As 1.1 and 1.2. Full screen: the whole player fills the screen **with** the logo, title, name and our controls.
 3. **Android phone, Chrome** (the Samsung)
-   1. Patient link: as 1.1. Play: Chrome's bar along the bottom has its own full-screen button; tap it: the video
-      alone, full screen. Turn the phone sideways while playing: does it go full screen by itself? (Fine either way
-      now; note what happens.)
-   2. Library, held sideways (compare with your earlier screenshot): the strip on top of the picture, controls
-      over the picture only, nothing cut off at the right edge. Full screen: the whole player, strip included.
-4. **Mac, Safari**: as 2.1 and 2.2, with a mouse (hover brings up Safari's own controls; click pauses in the library).
-5. **Windows, Chrome, and Windows, Edge** (each)
-   1. Patient link: the browser's own full-screen button in its bar works; double-clicking the picture also goes full
-      screen; both show the video alone. Escape leaves.
-   2. Library: clicking the picture pauses and plays; double-click and the Full screen button fill the screen with
-      the strip at the top. The keyboard: space, the arrows, M, F, Escape closes.
-6. **Readability**: on any phone, the strip's words on black, and the library's middle buttons over the white opening
-   title card of Total Knee Replacement: all easy to read?
+   1. Patient link and library, held sideways and upright: as 1.1 and 1.2, nothing cut off at the edges.
+   2. Full screen: the whole player, mark and controls included. Back leaves it.
+4. **Mac, Safari**: with a mouse, play is bottom left and nothing is in the middle; a click on the picture pauses, a
+   double-click is full screen (with the mark), moving the mouse away hides the controls while playing.
+5. **Windows, Chrome, and Windows, Edge** (each): as 4, plus the keyboard on the focused player (space, the arrows,
+   M, F; Escape closes the library's player).
+6. **Logos**: on any device, a clinic with a wide wordmark logo and one with a square icon: is the crop acceptable?
+   A clinic with no logo shows its initials.
 
 Record the results in the PR, or below this line, with the date.

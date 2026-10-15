@@ -460,14 +460,15 @@ describe("what stays the same", () => {
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Play Vitest Total Knee Replacement"');
     expect(html).not.toContain("Make the video bigger");
-    // No full-screen button of our own: the browser's own one, in its controls, is the way (Evan, 2026-10-15).
-    expect(html).not.toContain("Full screen");
-    // The video keeps playsinline, and the browser's own controls lose only "download": its full-screen button stays.
+    // Our Vimeo-style controls arrive with the first play, not before (they are not drawn at all until then).
+    expect(html).not.toContain('aria-label="Full screen"');
+    expect(html).not.toContain('aria-label="Seek"');
+    // The video keeps playsinline and never shows the browser's own controls (ours replace them, Evan, 2026-10-15).
     expect(html).toMatch(/<video[^>]*playsInline/);
+    expect(html).not.toMatch(/<video[^>]*\scontrols(?!List)/);
     expect(html).toContain('controlsList="nodownload"');
-    expect(html).not.toContain("nofullscreen");
-    // The strip is decoration: the clinic and the sender are already on the page as text.
-    expect(html).toMatch(/data-video-strip="" class="video-strip w-full shrink-0 select-none"><span aria-hidden="true"/);
+    // The clinic's mark is decoration: the clinic and the sender are already on the page as text.
+    expect(html).toMatch(/data-video-strip="" aria-hidden="true"/);
   });
 
   it("nothing internal about the clinic is in the page", async () => {
@@ -479,7 +480,7 @@ describe("what stays the same", () => {
   });
 });
 
-describe("the strip on the video", () => {
+describe("the clinic and the doctor on the video", () => {
   async function shareFrom(clinicId: string, senderName: string | null, video = videoId) {
     const share = await prisma.share.create({
       data: { code: code(), clinicId, videoId: video, expiresAt: new Date(Date.now() + 30 * 86_400_000), senderUserId: senderName ? "user_vitestsender" : null, senderName },
@@ -488,46 +489,46 @@ describe("the strip on the video", () => {
     return share.code;
   }
 
-  /** The strip's part of the page: from its own element to the video. */
+  /** The mark's part of the page: from its own element to its end. */
   function stripOf(html: string): string {
     const start = html.indexOf("data-video-strip");
     expect(start).toBeGreaterThan(-1);
     return html.slice(start, html.indexOf("</div>", start));
   }
 
-  it("is a row above the picture, from before the first play, with the logo and the surgeon's name alone", async () => {
+  it("is on the picture, top left, from before the first play: the logo, the title and the surgeon's name alone", async () => {
     const clinic = await makeClinic({ name: "Vitest Strip Orthopedics", logoUrl: "https://example.com/strip-white.png" });
     const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO"));
     const strip = stripOf(html);
 
     expect(strip).toContain('src="https://example.com/strip-white.png"');
     expect(strip).toContain(">Dr. Jane Smith, DO<");
+    expect(strip).toContain(">Vitest Total Knee Replacement<");
     expect(strip).not.toContain("Sent by");
-    // A row of its own at the top of the player's card, then the video's 16:9 box: nothing of ours over the picture
-    // (Safari draws its own buttons in the picture's top corners, and the strip used to cover them).
-    expect(html).toMatch(/<div class="overflow-hidden rounded-\[18px\] bg-black [^"]*"><div data-video-strip/);
+    // Inside the video's 16:9 box, in the box over the picture (picture-fit), after the video itself.
     expect(html).toContain("padding-top:56.25%");
-    expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf("padding-top:56.25%"));
-    expect(html).not.toContain("picture-area");
+    expect(html).toMatch(/class="picture-area absolute inset-0 bg-black outline-none"/);
+    expect(html.indexOf("<video")).toBeLessThan(html.indexOf("data-video-strip"));
+    expect(html.indexOf("picture-fit")).toBeLessThan(html.indexOf("data-video-strip"));
     // Before Play in the page's order, so it is there before the first tap.
     expect(html.indexOf("data-video-strip")).toBeLessThan(html.indexOf('aria-label="Play Vitest Total Knee Replacement"'));
   });
 
-  it("with no logo, has the clinic's name in its place", async () => {
+  it("with no logo, has the clinic's initials in the round frame", async () => {
     const clinic = await makeClinic({ name: "Vitest Nologo Orthopedics" });
     const strip = stripOf(await render(await shareFrom(clinic.id, "Jane Smith, NP")));
 
     expect(strip).not.toContain("<img");
-    expect(strip).toContain('<span class="video-strip-clinic block truncate">Vitest Nologo Orthopedics</span>');
+    expect(strip).toContain(">VN</span>");
     expect(strip).toContain(">Jane Smith, NP<");
   });
 
-  it("for a link with no sender recorded, has only the logo or the clinic's name", async () => {
+  it("for a link with no sender recorded, has the clinic's name in place of a doctor's", async () => {
     const clinic = await makeClinic({ name: "Vitest Older Strip Orthopedics" });
     const strip = stripOf(await render(await shareFrom(clinic.id, null)));
 
-    expect(strip).toContain(">Vitest Older Strip Orthopedics<");
-    expect(strip).not.toContain("video-strip-sender");
+    expect(strip).toMatch(/class="video-chip [^"]*">Vitest Older Strip Orthopedics</);
+    expect(strip).not.toContain("Dr. ");
   });
 
   it("is on a placeholder link too, under the amber bar that still says so first", async () => {

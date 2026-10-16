@@ -1,14 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type CSSProperties, type Ref } from "react";
+import type { Chapter } from "@/lib/chapters";
 import { pictureRatio } from "./ClinicMark";
 import { PlayIcon } from "./icons";
+import { jumpVideo } from "./player-element";
 import { PlayerOverlay } from "./PlayerOverlay";
 import { PRIMARY_BUTTON } from "./styles";
 import { usePlayerControls } from "./usePlayerControls";
 import { SLOW_AFTER_MS, resumePoint } from "@/lib/playback";
 import type { PlaybackSource } from "@/lib/playback-source";
 import { useVideoSource } from "./useVideoSource";
+
+/** What the watch page can ask of the player: go to a chapter's start. */
+export type PlayerHandle = { jumpTo: (seconds: number) => void };
 
 /**
  * The library's procedure player, for the surgeon in the room, on the watch
@@ -51,6 +56,13 @@ import { useVideoSource } from "./useVideoSource";
  * which checks the clinic's plan again. When the answer is that access has
  * ended (the category came off the plan while the player was open) the
  * player says so calmly and renews nothing.
+ *
+ * CHAPTERS (the watch page's, set on /pulse/videos): small marks on the
+ * progress bar and the current chapter's name beside the time, drawn by
+ * PlayerOverlay. The page lists them in its Chapters panel, hears the time
+ * through `onTimeChange` to light the current one, and jumps with the
+ * `jumpTo` this player hands it through `ref` (playing on if it was
+ * playing, staying paused if it was paused).
  */
 export function VideoPlayer({
   source,
@@ -62,6 +74,9 @@ export function VideoPlayer({
   logoUrl = null,
   senderName = null,
   onFirstPlay,
+  chapters = [],
+  onTimeChange,
+  ref,
 }: {
   /** What to play, made on the server for this clinic. */
   source: PlaybackSource;
@@ -80,6 +95,12 @@ export function VideoPlayer({
   senderName?: string | null;
   /** Called once, the first time the video actually starts playing after the page opened (to count a library play). Never again for this opening, Try again included. */
   onFirstPlay?: () => void;
+  /** The video's chapters, sorted by time: marks on the progress bar and the current one's name beside the time. Empty for none. */
+  chapters?: Chapter[];
+  /** Hears where the video is, whenever that changes (playing, or moved). */
+  onTimeChange?: (seconds: number) => void;
+  /** Hands the page jumpTo(), for the Chapters panel. */
+  ref?: Ref<PlayerHandle>;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const vid = useRef<HTMLVideoElement>(null);
@@ -128,6 +149,15 @@ export function VideoPlayer({
   });
 
   useEffect(() => () => window.clearTimeout(slowTimer.current), []);
+
+  // A tap in the Chapters panel: go to that chapter's start. Playing or paused stays as it was; nothing while the video has failed.
+  useImperativeHandle(ref, () => ({
+    jumpTo: (seconds: number) => {
+      if (!vid.current || stopped) return;
+      jumpVideo(vid.current, seconds);
+      if (started) controls.reveal();
+    },
+  }));
 
   // A file that is missing or blocked can fail before this component is listening, and the "error" event is then
   // never heard. The element remembers, so it is asked once, a frame after the player opens.
@@ -187,6 +217,8 @@ export function VideoPlayer({
             }
           }}
           onCanPlay={clearSlow}
+          onTimeUpdate={(e) => onTimeChange?.(e.currentTarget.currentTime)}
+          onSeeked={(e) => onTimeChange?.(e.currentTarget.currentTime)}
           onWaiting={() => {
             // Out of data and waiting for more. Say so only if it goes on for a while.
             window.clearTimeout(slowTimer.current);
@@ -215,6 +247,7 @@ export function VideoPlayer({
           logoUrl={logoUrl}
           senderName={senderName}
           placeholder={placeholder}
+          chapters={chapters}
           // Before the first play only the clinic's mark is drawn; the big Play button below is the one thing to press.
           showControls={started && !stopped}
           slow={slow && !stopped}

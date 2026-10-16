@@ -26,6 +26,17 @@ export function seekVideo(video: HTMLVideoElement, seconds: number): void {
   video.currentTime = Math.min(Math.max(0, seconds), end);
 }
 
+/**
+ * Go to a chapter's start, playing on if the video was playing and staying
+ * paused if it was paused (moving the time never changes that). Before the
+ * video's length is known the time is set as it is, and the browser starts
+ * there once it can; seekVideo would clamp it to 0 then.
+ */
+export function jumpVideo(video: HTMLVideoElement, seconds: number): void {
+  if (Number.isFinite(video.duration) && video.duration > 0) seekVideo(video, seconds);
+  else video.currentTime = Math.max(0, seconds);
+}
+
 /** Sound off if it was on, on if it was off. Answers whether it is now off. */
 export function flipMuted(video: HTMLVideoElement): boolean {
   video.muted = !video.muted;

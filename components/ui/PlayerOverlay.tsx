@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { currentChapterIndex, type Chapter } from "@/lib/chapters";
 import { formatDuration } from "@/lib/format";
 import { ClinicMark } from "./ClinicMark";
 import { ExitFullscreenIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, ReplayIcon, SkipBackIcon, SkipForwardIcon, VolumeIcon } from "./icons";
@@ -21,7 +22,9 @@ import type { PlayerControls } from "./usePlayerControls";
  *     Which one shows is decided by the browser (the `computer:` variant in
  *     app/globals.css: a mouse or trackpad that can hover), never by its name.
  *   - Along the bottom: the play button (mouse only), the time, sound and
- *     full screen, and a thin progress bar to drag.
+ *     full screen, and a thin progress bar to drag. When the video has
+ *     chapters (the library's watch page only), a small gap in the bar marks
+ *     where each one starts, and the current chapter's name follows the time.
  *
  * All of it fades together a moment after the video starts, and comes back
  * when the video is paused, on a tap, or when the mouse moves over the
@@ -44,6 +47,7 @@ export function PlayerOverlay({
   showControls,
   slow,
   topRight = null,
+  chapters = [],
 }: {
   controls: PlayerControls;
   title: string;
@@ -58,9 +62,14 @@ export function PlayerOverlay({
   slow: boolean;
   /** One of the player's own buttons for the top right (the library's Close). Fades with the controls. */
   topRight?: ReactNode;
+  /** The video's chapters, sorted by time. Empty for none (always, on the patient page). */
+  chapters?: Chapter[];
 }) {
   const fade = controls.showing ? "opacity-100" : "pointer-events-none opacity-0";
   const pct = controls.duration ? (controls.time / controls.duration) * 100 : 0;
+  const chapter = chapters[currentChapterIndex(chapters, controls.time)];
+  // A mark for every chapter after the first, once the length is known and only where it falls inside the video.
+  const marks = controls.duration ? chapters.filter((c) => c.startSeconds > 0 && c.startSeconds < controls.duration) : [];
   const playLabel = controls.finished ? "Play again" : controls.playing ? "Pause" : "Play";
   const playIcon = (size: string) =>
     controls.finished ? <ReplayIcon className={size} /> : controls.playing ? <PauseIcon className={size} /> : <PlayIcon className={`ml-0.5 ${size}`} />;
@@ -120,10 +129,16 @@ export function PlayerOverlay({
                 {playIcon("h-6 w-6")}
               </Control>
             </span>
-            <span className="pl-2 text-[15px] font-medium tabular-nums text-white">
+            <span className="shrink-0 pl-2 text-[15px] font-medium tabular-nums text-white">
               {formatDuration(controls.time)} <span className="text-[#c9cfd3]">/ {formatDuration(controls.duration)}</span>
             </span>
-            <span className="ml-auto flex items-center">
+            {chapter && (
+              <span data-current-chapter="" className="min-w-0 truncate pl-2 text-[15px] font-medium text-white">
+                <span aria-hidden="true" className="pr-2 text-[#c9cfd3]">·</span>
+                {chapter.title}
+              </span>
+            )}
+            <span className="ml-auto flex shrink-0 items-center">
               <Control live={controls.showing} onClick={controls.toggleMute} label={controls.muted ? "Unmute" : "Mute"} size="h-11 w-11">
                 {controls.muted ? <MuteIcon className="h-5 w-5" /> : <VolumeIcon className="h-5 w-5" />}
               </Control>
@@ -138,6 +153,15 @@ export function PlayerOverlay({
             <div className="h-1 w-full rounded-full bg-white/30">
               <div className="h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
             </div>
+            {/* Where each chapter starts: a small dark gap across the track, readable on the filled part and the empty part alike. */}
+            {marks.map((mark) => (
+              <span
+                key={mark.startSeconds}
+                data-chapter-mark=""
+                className="pointer-events-none absolute h-1.5 w-[3px] -translate-x-1/2 bg-black/80"
+                style={{ left: `${(mark.startSeconds / controls.duration) * 100}%` }}
+              />
+            ))}
             <span className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 rounded-full bg-white shadow" style={{ left: `${pct}%` }} />
             <input
               type="range"

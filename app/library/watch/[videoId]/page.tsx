@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { parseLogoUrl } from "@/lib/branding";
 import { CATEGORIES } from "@/lib/categories";
+import { readStoredChapters } from "@/lib/chapters";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
@@ -36,7 +37,8 @@ import { WatchView } from "./WatchView";
  *
  * "More in <category>" is read through the same rule in the query, and is
  * bounded (MORE_IN_CATEGORY_LIMIT). Only someone holding a seat gets Send
- * and Show QR on screen; the Send action checks the seat again.
+ * and Show QR on screen; the Send action checks the seat again. The
+ * video's chapters, when Pulse staff have set any, come with it.
  *
  * Rendered fresh on every request, because what it shows depends on who is
  * signed in (see the note on the library home page).
@@ -93,6 +95,8 @@ export default async function WatchPage({ params }: PageProps<"/library/watch/[v
           logoUrl={parseLogoUrl(clinic.logoUrl)}
           // The player shows the name patients would see on this person's links, only when they hold a seat.
           senderName={libraryStripName(seat, clinic.defaultPatientName)}
+          // Its chapters, set on /pulse/videos: the Chapters button and panel, and the marks on the progress bar. None for most videos.
+          chapters={readStoredChapters(video.chapters)}
         />
       </LibraryBrowser>
     </main>

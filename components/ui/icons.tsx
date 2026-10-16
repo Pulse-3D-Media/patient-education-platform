@@ -254,3 +254,12 @@ export function QrIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** A list with a dot at the start of each line: the "Chapters" button on the library's watch page. */
+export function ChaptersIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className={className} aria-hidden="true">
+      <path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01" strokeWidth="2.2" />
+    </svg>
+  );
+}

@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { retryBillingEvent } from "@/lib/billing-events";
 import { MAX_GRACE_DAYS, MIN_GRACE_DAYS } from "@/lib/billing-state";
+import { chaptersKey, checkChapters, parseChapterLines, readStoredChapters, type Chapter } from "@/lib/chapters";
 import { saveCategoryConfig } from "@/lib/db/category-config";
 import { readBrandingForm, readLogoField } from "@/lib/branding-form";
 import {
@@ -395,8 +396,16 @@ function isHttpsUrl(text: string) {
   }
 }
 
-/** The three boxes an upload fills in on its own, as the row has them now. Handed to videoFromForm when editing. */
-type UploadWrittenFields = Pick<VideoInput, "muxPlaybackId" | "muxAssetId" | "durationSeconds">;
+/**
+ * What videoFromForm needs of the row as it is now, when editing: the three
+ * boxes an upload fills in on its own, and the chapters (as the database
+ * holds them), which another staff member may have saved since the form
+ * was drawn.
+ */
+type RowNow = Pick<VideoInput, "muxPlaybackId" | "muxAssetId" | "durationSeconds"> & { chapters: unknown };
+
+/** The most chapter lines a form may send; more is not a form this app drew. */
+const CHAPTER_LINES_LIMIT = 100;
 
 /**
  * Read a video's fields out of the form and check them. Returns the values
@@ -410,8 +419,15 @@ type UploadWrittenFields = Pick<VideoInput, "muxPlaybackId" | "muxAssetId" | "du
  * `shown...` fields), the row's current value is kept; a value the staff
  * member typed or cleared on purpose still wins. Without this a stale form
  * would wipe what the upload wrote.
+ *
+ * The chapters work the same way: the form sends what it was showing
+ * (`shownChapters`, chaptersKey() of the row when the page was drawn), and
+ * when the lines sent say exactly that, the row's chapters as they are NOW
+ * are kept, so a form drawn before another staff member's save cannot wipe
+ * chapters it did not change. Lines that were changed, or every line
+ * removed (which clears them), win.
  */
-function videoFromForm(formData: FormData, existing: UploadWrittenFields | null = null): { input: VideoInput } | { error: string } {
+function videoFromForm(formData: FormData, existing: RowNow | null = null): { input: VideoInput } | { error: string } {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { error: "The video needs a title: the procedure name a surgeon would look for." };
   if (title.length > TITLE_LIMIT) return { error: `Keep the title under ${TITLE_LIMIT} characters.` };
@@ -469,6 +485,11 @@ function videoFromForm(formData: FormData, existing: UploadWrittenFields | null 
     }
   }
 
+  // The chapters, checked against the length the video will have once saved.
+  const chapters = chaptersFromForm(formData, input.durationSeconds, existing);
+  if ("error" in chapters) return chapters;
+  input.chapters = chapters.chapters;
+
   // A video must have something to play before it is published: a CDN
   // address or a Mux playback id. One with neither may be saved (its file is
   // on its way to Mux, or its id was just cleared) but stays unpublished.
@@ -476,6 +497,32 @@ function videoFromForm(formData: FormData, existing: UploadWrittenFields | null 
     return { error: "A video with no file cannot be published. Give it a CDN address or upload a file to Mux first, or untick Published." };
   }
   return { input };
+}
+
+/**
+ * The chapter lines of the form (one `chapterStart` and one `chapterTitle`
+ * per line, in the order they were typed), checked by the same parser the
+ * form uses (lib/chapters.ts). See videoFromForm for when the row's own
+ * chapters are kept instead. A form that has no chapter section at all (the
+ * add form, or a page drawn before chapters existed) keeps the row's.
+ */
+function chaptersFromForm(formData: FormData, durationSeconds: number | null, existing: RowNow | null): { chapters: Chapter[] } | { error: string } {
+  const starts = formData.getAll("chapterStart");
+  const titles = formData.getAll("chapterTitle");
+  if (starts.length !== titles.length || starts.length > CHAPTER_LINES_LIMIT || [...starts, ...titles].some((value) => typeof value !== "string")) {
+    return { error: "The chapters could not be read. Reload the page and type them again." };
+  }
+  const lines = starts.map((start, i) => ({ start: String(start), title: String(titles[i]) }));
+  const parsed = parseChapterLines(lines, durationSeconds);
+  if ("error" in parsed) return parsed;
+  if (!existing) return parsed;
+
+  const shown = formData.get("shownChapters");
+  if (shown === null || chaptersKey(parsed.chapters) === String(shown)) {
+    // Left as the form showed them: keep the row's chapters as they are now, still checked against the length being saved.
+    return checkChapters(readStoredChapters(existing.chapters), durationSeconds);
+  }
+  return parsed;
 }
 
 /**

@@ -68,8 +68,13 @@ const createdClinicIds: string[] = [];
 const createdVideoIds: string[] = [];
 let kneeClinic = "";
 
-/** The videos this file makes: three on Knee (one a placeholder), one unpublished on Knee, one on Hip. */
-const v = { watched: "", other: "", placeholder: "", unpublished: "", hip: "" };
+/** The videos this file makes: four on Knee (one a placeholder, one with chapters), one unpublished on Knee, one on Hip. */
+const v = { watched: "", other: "", placeholder: "", unpublished: "", hip: "", chaptered: "" };
+const KNEE_CHAPTERS = [
+  { startSeconds: 0, title: "Intro" },
+  { startSeconds: 33, title: "Preparing the knee" },
+  { startSeconds: 63, title: "The implant" },
+];
 const src = (name: string) => `https://example.com/vitest-watch-${tag}-${name}.mp4`;
 const title = (name: string) => `Vitest watch ${name} ${tag}`;
 
@@ -89,6 +94,7 @@ beforeAll(async () => {
     ["placeholder", { category: "KNEE", isPlaceholder: true }],
     ["unpublished", { category: "KNEE", isPublished: false }],
     ["hip", { category: "HIP" }],
+    ["chaptered", { category: "KNEE", durationSeconds: 110, chapters: KNEE_CHAPTERS }],
   ];
   for (const [key, data] of made) {
     const video = await prisma.video.create({ data: { title: title(key), videoUrl: src(key), isPublished: true, ...data } as never, select: { id: true } });
@@ -146,8 +152,28 @@ describe("the watch page for a video the clinic may use", () => {
     expect(html).toContain(">4:12</span>");
     // The back arrow falls back to the category when there is nothing of ours to go back to.
     expect(html).toMatch(link("/library/knee", "Back"));
-    // No Transcript or Chapters buttons: nothing that does nothing.
-    expect(html).not.toMatch(/Transcript|Chapters/);
+    // No Transcript button, and no Chapters button for a video without chapters: nothing that does nothing.
+    expect(html).not.toMatch(/Transcript|Chapters|chapters-panel/);
+  });
+
+  it("gives a video with chapters a Chapters button, with the panel closed until it is tapped", async () => {
+    signInAs(orgKnee, "Vitest watch clinic (knee)");
+    const html = await renderWatch(v.chaptered);
+    expect(html).toMatch(/<button(?=[^>]*aria-expanded="false")(?=[^>]*aria-controls="chapters-panel")[^>]*>.*?Chapters<\/button>/);
+    // The panel is drawn only once it is opened (a browser check), so its list is not in the page yet.
+    expect(html).not.toContain('id="chapters-panel"');
+    // The column the panel opens at the top of still holds More in Knee.
+    expect(moreColumn(html)).toContain("More in Knee");
+  });
+
+  it("reads a damaged chapters column as no chapters, never a broken page", async () => {
+    await prisma.video.update({ where: { id: v.chaptered }, data: { chapters: [{ startSeconds: 5, title: "No start at 0:00" }] } });
+    try {
+      signInAs(orgKnee, "Vitest watch clinic (knee)");
+      expect(await renderWatch(v.chaptered)).not.toContain("Chapters");
+    } finally {
+      await prisma.video.update({ where: { id: v.chaptered }, data: { chapters: KNEE_CHAPTERS } });
+    }
   });
 
   it("lists more in the same category: only what this clinic may use, not the one being watched", async () => {

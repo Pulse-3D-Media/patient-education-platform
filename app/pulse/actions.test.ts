@@ -603,6 +603,120 @@ describe("saveVideoAction", () => {
     expect(await saveVideoAction(null, form({ ...fields, id: "no-such-video" }))).toEqual({ error: "That video no longer exists." });
   });
 
+  describe("chapters", () => {
+    /** The knee's chapters, typed out of order. */
+    const KNEE_LINES = {
+      chapterStart: ["1:03", "0:00", "1:37", "0:33", "1:28"],
+      chapterTitle: ["The implant", "Intro", "Outro", "Preparing the knee", "The result"],
+    };
+    const KNEE = [
+      { startSeconds: 0, title: "Intro" },
+      { startSeconds: 33, title: "Preparing the knee" },
+      { startSeconds: 63, title: "The implant" },
+      { startSeconds: 88, title: "The result" },
+      { startSeconds: 97, title: "Outro" },
+    ];
+    /** What the form sends as shownChapters for the knee's chapters (chaptersKey). */
+    const KNEE_SHOWN = JSON.stringify(KNEE.map((c) => [c.startSeconds, c.title]));
+
+    /** A video of this test's own, 1:50 long, with the given chapters on the row. */
+    async function chapteredVideo(chapters: unknown = []) {
+      const video = await prisma.video.create({
+        data: { title: `Vitest chapters ${randomBytes(3).toString("hex")}`, category: "KNEE", videoUrl: fields.videoUrl, durationSeconds: 110, isPublished: true, chapters: chapters as never },
+        select: { id: true, title: true },
+      });
+      createdVideoIds.push(video.id);
+      return video;
+    }
+    /** The edit form for that video, as the page draws it. */
+    const editForm = (video: { id: string; title: string }, extra: Record<string, string | string[]>) =>
+      form({ ...fields, category: "KNEE", durationSeconds: "1:50", shownDurationSeconds: "1:50", id: video.id, title: video.title, ...extra });
+    const chaptersOf = async (id: string) => (await prisma.video.findUniqueOrThrow({ where: { id }, select: { chapters: true } })).chapters;
+
+    it("refuses a user who is not Pulse staff with not-found, and leaves the chapters alone", async () => {
+      const video = await chapteredVideo(KNEE);
+      signInAs("user_clinic_admin", { kind: "staff" });
+      await expect(saveVideoAction(null, editForm(video, { chapterStart: "0:00", chapterTitle: "Hijacked", shownChapters: KNEE_SHOWN }))).rejects.toMatchObject({
+        digest: expect.stringContaining("404"),
+      });
+      expect(await chaptersOf(video.id)).toEqual(KNEE);
+    });
+
+    it("saves lines typed in any order sorted by time, and clears them when every line is removed", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const video = await chapteredVideo();
+      expect(await saveVideoAction(null, editForm(video, { ...KNEE_LINES, shownChapters: "[]" }))).toMatchObject({ ok: expect.any(String) });
+      expect(await chaptersOf(video.id)).toEqual(KNEE);
+
+      // A line left completely empty is ignored.
+      expect(await saveVideoAction(null, editForm(video, { chapterStart: [...KNEE_LINES.chapterStart, ""], chapterTitle: [...KNEE_LINES.chapterTitle, " "], shownChapters: KNEE_SHOWN }))).toMatchObject({ ok: expect.any(String) });
+      expect(await chaptersOf(video.id)).toEqual(KNEE);
+
+      expect(await saveVideoAction(null, editForm(video, { shownChapters: KNEE_SHOWN }))).toMatchObject({ ok: expect.any(String) });
+      expect(await chaptersOf(video.id)).toEqual([]);
+    });
+
+    it("refuses what the rules refuse, in a plain sentence, and writes nothing", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const video = await chapteredVideo(KNEE);
+      const refusals: [Record<string, string | string[]>, RegExp][] = [
+        [{ chapterStart: ["0:10", "0:33"], chapterTitle: ["Intro", "Next"] }, /first chapter has to start at 0:00/],
+        [{ chapterStart: ["0:00", "0:33", "0:33"], chapterTitle: ["A", "B", "C"] }, /Two chapters start at 0:33/],
+        [{ chapterStart: ["0:00", "1:50"], chapterTitle: ["A", "B"] }, /starts after the video ends \(1:50\)/],
+        [{ chapterStart: "0:00", chapterTitle: "x".repeat(41) }, /to 40 characters/],
+        [{ chapterStart: "0:00", chapterTitle: "Two\nlines" }, /on one line/],
+        [{ chapterStart: Array.from({ length: 21 }, (_, i) => `0:${String(i).padStart(2, "0")}`), chapterTitle: Array.from({ length: 21 }, (_, i) => `C${i}`) }, /at most 20 chapters/],
+        [{ chapterStart: ["0:00", "soon"], chapterTitle: ["A", "B"] }, /is not a time/],
+        [{ chapterStart: ["0:00", "0:33"], chapterTitle: ["A"] }, /could not be read/],
+      ];
+      for (const [lines, sentence] of refusals) {
+        expect(await saveVideoAction(null, editForm(video, { ...lines, shownChapters: KNEE_SHOWN, title: "Vitest renamed by a refused save" }))).toEqual({ error: expect.stringMatching(sentence) });
+      }
+      expect(await prisma.video.findUniqueOrThrow({ where: { id: video.id }, select: { title: true, chapters: true } })).toEqual({ title: video.title, chapters: KNEE });
+    });
+
+    it("a form drawn before someone else's save does not wipe chapters it did not change", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const video = await chapteredVideo();
+
+      // Two staff members open the page while it has no chapters. The first adds the knee's chapters.
+      expect(await saveVideoAction(null, editForm(video, { ...KNEE_LINES, shownChapters: "[]" }))).toMatchObject({ ok: expect.any(String) });
+
+      // The second, from the page drawn before, fixes a note and leaves the (empty) chapters as they were shown: the first's stay.
+      expect(await saveVideoAction(null, editForm(video, { notes: "Fixed a typo", shownChapters: "[]" }))).toMatchObject({ ok: expect.any(String) });
+      expect(await prisma.video.findUniqueOrThrow({ where: { id: video.id }, select: { notes: true, chapters: true } })).toEqual({ notes: "Fixed a typo", chapters: KNEE });
+
+      // The same with chapters on both sides: shown as the knee's, someone renames one meanwhile, the stale form sends the knee's unchanged.
+      const renamed = KNEE.map((c) => (c.startSeconds === 97 ? { ...c, title: "Recovery" } : c));
+      await prisma.video.update({ where: { id: video.id }, data: { chapters: renamed } });
+      expect(await saveVideoAction(null, editForm(video, { ...KNEE_LINES, shownChapters: KNEE_SHOWN }))).toMatchObject({ ok: expect.any(String) });
+      expect(await chaptersOf(video.id)).toEqual(renamed);
+
+      // A form that DID change the chapters wins, as a change should.
+      expect(await saveVideoAction(null, editForm(video, { chapterStart: ["0:00", "1:00"], chapterTitle: ["Start", "Middle"], shownChapters: KNEE_SHOWN }))).toMatchObject({ ok: expect.any(String) });
+      expect(await chaptersOf(video.id)).toEqual([
+        { startSeconds: 0, title: "Start" },
+        { startSeconds: 60, title: "Middle" },
+      ]);
+    });
+
+    it("keeps the chapters when the form has no chapter section at all (a page drawn before chapters existed)", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const video = await chapteredVideo(KNEE);
+      expect(await saveVideoAction(null, editForm(video, { notes: "Old page" }))).toMatchObject({ ok: expect.any(String) });
+      expect(await chaptersOf(video.id)).toEqual(KNEE);
+    });
+
+    it("refuses a shorter length that would cut off chapters it keeps", async () => {
+      signInAs("user_staff", { pulseStaff: true });
+      const video = await chapteredVideo(KNEE);
+      expect(await saveVideoAction(null, editForm(video, { ...KNEE_LINES, shownChapters: KNEE_SHOWN, durationSeconds: "1:30" }))).toEqual({
+        error: expect.stringMatching(/chapter at 1:37 starts after the video ends \(1:30\)/),
+      });
+      expect(await prisma.video.findUniqueOrThrow({ where: { id: video.id }, select: { durationSeconds: true } })).toEqual({ durationSeconds: 110 });
+    });
+  });
+
   describe("moving a video to Mux", () => {
     const playbackId = `Vitest${randomBytes(6).toString("hex")}`;
     const asked = () => vi.mocked(checkPlaybackId);

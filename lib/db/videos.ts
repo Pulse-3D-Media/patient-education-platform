@@ -1,6 +1,7 @@
 import type { Category } from "@prisma/client";
 import type { ClinicAccess, PublishedCounts } from "../access";
 import { CATEGORIES } from "../categories";
+import type { Chapter } from "../chapters";
 import { prisma } from "./client";
 
 /**
@@ -284,6 +285,8 @@ export type VideoInput = {
   muxPlaybackId: string | null;
   /** The Mux asset the id belongs to, as a note for staff. */
   muxAssetId: string | null;
+  /** The video's chapters for the library watch page, checked by lib/chapters.ts and sorted by time. Left out, the row's chapters are not touched; empty clears them. */
+  chapters?: Chapter[];
 };
 
 /** Add a video to the catalogue. Returns the new row. */

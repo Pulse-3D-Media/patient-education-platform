@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
-import { formatDuration } from "@/lib/format";
+import { chaptersKey, chaptersToLines, parseChapterLines, type Chapter } from "@/lib/chapters";
+import { formatDuration, parseDuration } from "@/lib/format";
 import { ACCEPTED_UPLOAD_TYPES } from "@/lib/mux-upload";
 import { saveVideoAction } from "../actions";
+import { ChaptersEditor, type EditorLine } from "./ChaptersEditor";
 import { Outcome, SaveButton, useKeptForm } from "../FormBits";
 import { describePhase, refuseFile, useMuxUpload } from "./useMuxUpload";
 
@@ -26,6 +28,8 @@ export type VideoValues = {
   /** The signed Mux playback id once the video has moved to Mux, and the asset it belongs to. Null while it plays from the CDN. */
   muxPlaybackId: string | null;
   muxAssetId: string | null;
+  /** The video's chapters as saved, sorted by time (read through readStoredChapters()). */
+  chapters: Chapter[];
   /** Share links already pointing at this video. */
   shareCount: number;
 };
@@ -56,11 +60,26 @@ export const CLEAR_ONLY_SOURCE_CONFIRM =
  * its page (MuxUploader).
  *
  * A refused or failed save leaves every box as typed (useKeptForm), so a
- * long address or a note is never typed twice.
+ * long address or a note is never typed twice. The chapter lines too: they
+ * live in this form's state, are checked before the form is sent with the
+ * same rules the server uses (lib/chapters.ts), and are put in time order
+ * once the server confirms a save.
  */
 export function VideoForm({ video, uploadsConfigured = false }: { video?: VideoValues; uploadsConfigured?: boolean }) {
   const router = useRouter();
-  const { state, pending, form } = useKeptForm(saveVideoAction);
+  const [chapterLines, setChapterLines] = useState<EditorLine[]>(() => chaptersToLines(video?.chapters ?? []).map((line, i) => ({ ...line, id: i + 1 })));
+  // What the chapters were when this form was drawn, and after that what this form last saved. Sent with the form, so a
+  // save that leaves them as they were keeps the row's chapters as they are by then (someone else may have saved new ones).
+  const [shownChapters, setShownChapters] = useState(() => chaptersKey(video?.chapters ?? []));
+  /** The chapters in the form being sent right now, checked; they become what the form shows once the save is confirmed. */
+  const sentChapters = useRef<string | null>(null);
+  const [chapterProblem, setChapterProblem] = useState<string | null>(null);
+  // Once a save is confirmed: what was sent is now what the form shows, and the lines are put the way they were saved,
+  // in order of time, without empty lines. A refused or failed save changes neither.
+  const { state, pending, form } = useKeptForm(saveVideoAction, () => {
+    if (sentChapters.current !== null) setShownChapters(sentChapters.current);
+    setChapterLines((lines) => lines.filter((line) => line.start.trim() || line.title.trim()).sort((a, b) => (parseDuration(a.start) ?? 0) - (parseDuration(b.start) ?? 0)));
+  });
   const { phase, busy, upload } = useMuxUpload();
   const [file, setFile] = useState<File | null>(null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
@@ -85,6 +104,17 @@ export function VideoForm({ video, uploadsConfigured = false }: { video?: VideoV
 
   function confirmBeforeSend(event: FormEvent<HTMLFormElement>) {
     const elements = event.currentTarget.elements;
+    // The chapters first, with the server's own rules and the length as typed: nothing to confirm if they would be refused.
+    if (video) {
+      const lengthBox = elements.namedItem("durationSeconds") as HTMLInputElement | null;
+      const checked = parseChapterLines(chapterLines, parseDuration(lengthBox?.value ?? "") ?? null);
+      setChapterProblem("error" in checked ? checked.error : null);
+      if ("error" in checked) {
+        event.preventDefault();
+        return;
+      }
+      sentChapters.current = chaptersKey(checked.chapters);
+    }
     const placeholderBox = elements.namedItem("isPlaceholder") as HTMLInputElement | null;
     if (video?.isPlaceholder && placeholderBox && !placeholderBox.checked && !window.confirm(REPLACE_PLACEHOLDER_CONFIRM)) {
       event.preventDefault();
@@ -160,6 +190,7 @@ export function VideoForm({ video, uploadsConfigured = false }: { video?: VideoV
         {video && <input type="hidden" name="shownMuxPlaybackId" value={video.muxPlaybackId ?? ""} />}
         {video && <input type="hidden" name="shownMuxAssetId" value={video.muxAssetId ?? ""} />}
         {video && <input type="hidden" name="shownDurationSeconds" value={video.durationSeconds == null ? "" : formatDuration(video.durationSeconds)} />}
+        {video && <input type="hidden" name="shownChapters" value={shownChapters} />}
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="md:col-span-2">
@@ -283,6 +314,8 @@ export function VideoForm({ video, uploadsConfigured = false }: { video?: VideoV
               className={TEXTAREA}
             />
           </div>
+
+          {video && <ChaptersEditor lines={chapterLines} onChange={setChapterLines} problem={chapterProblem} />}
         </div>
 
         {video && video.shareCount > 0 && (

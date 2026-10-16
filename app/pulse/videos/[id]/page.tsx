@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { CATEGORIES } from "@/lib/categories";
+import { readStoredChapters } from "@/lib/chapters";
 import { getVideoForPulse } from "@/lib/db/videos";
 import { muxUploadsAreConfigured } from "@/lib/mux";
 import { parseUploadState } from "@/lib/mux-upload";
@@ -87,6 +88,7 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
               notes: video.notes,
               muxPlaybackId: video.muxPlaybackId,
               muxAssetId: video.muxAssetId,
+              chapters: readStoredChapters(video.chapters),
               shareCount: video._count.shares,
             }}
           />

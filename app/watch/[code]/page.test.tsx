@@ -471,6 +471,29 @@ describe("what stays the same", () => {
     expect(html).toMatch(/data-video-strip="" aria-hidden="true"/);
   });
 
+  it("a video's chapters are never on the patient page (they are for the library only)", async () => {
+    const clinic = await makeClinic({});
+    const chaptered = await prisma.video.create({
+      data: {
+        title: "Vitest Total Knee Replacement",
+        category: "KNEE",
+        videoUrl: "https://example.com/vitest.mp4",
+        durationSeconds: 110,
+        isPublished: true,
+        chapters: [
+          { startSeconds: 0, title: "Vitest chapter intro" },
+          { startSeconds: 33, title: "Vitest chapter knee" },
+        ],
+      },
+      select: { id: true },
+    });
+    createdVideoIds.push(chaptered.id);
+    const html = await render(await makeShare(clinic.id, chaptered.id));
+
+    expect(html).not.toContain("Vitest chapter");
+    expect(html).not.toMatch(/Chapters|data-chapter-mark|data-current-chapter/);
+  });
+
   it("nothing internal about the clinic is in the page", async () => {
     const clinic = await makeClinic({ noticeText: "INTERNAL-NOTICE", statusReason: "INTERNAL-REASON", notes: "INTERNAL-NOTES" });
     const html = await render(await makeShare(clinic.id, videoId));

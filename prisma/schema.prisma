@@ -32,6 +32,7 @@ model Video {
   muxAssetId      String? // the Mux asset the playback id belongs to, so staff can find it in the Mux dashboard. A note for staff; nothing plays from it
   muxUploadId     String?         @unique // an upload to Mux that is in flight for this video (Mux's direct upload id), so the webhook and "Check with Mux" can find the row. Cleared when the asset is ready, cancelled or failed. The video keeps playing what it had the whole time
   muxUploadState  String? // where that upload stands, in a word checked by parseUploadState() in lib/mux-upload.ts: "waiting" (address handed out, file not yet at Mux), "preparing" (Mux has the file), "failed" (the last upload did not finish; the row was left as it was). Empty means no upload in flight and nothing to report
+  chapters        Json            @default("[]") // the video's chapters, for the library watch page only: a list of { startSeconds, title }, sorted by time, the first at 0. Edited by Pulse staff on /pulse/videos, checked by parseChapterLines() in lib/chapters.ts and read back through readStoredChapters(). Empty means none. Never shown on the patient page
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   shares          Share[]

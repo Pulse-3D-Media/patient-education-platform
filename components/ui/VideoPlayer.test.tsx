@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import type { Chapter } from "@/lib/chapters";
 import { libraryStripName } from "@/lib/sender-name";
 import { PlayerOverlay } from "./PlayerOverlay";
 import type { PlayerControls } from "./usePlayerControls";
@@ -25,7 +26,7 @@ function render(props: Partial<Parameters<typeof VideoPlayer>[0]> = {}): string 
 }
 
 /** The overlay as it is once the video is playing and the controls are up. */
-function renderPlaying(overrides: Partial<PlayerControls> = {}): string {
+function renderPlaying(overrides: Partial<PlayerControls> = {}, chapters: Chapter[] = []): string {
   const noop = () => {};
   const controls = {
     playing: true,
@@ -47,7 +48,7 @@ function renderPlaying(overrides: Partial<PlayerControls> = {}): string {
     ...overrides,
   } as PlayerControls;
   return renderToStaticMarkup(
-    <PlayerOverlay controls={controls} title="Total Knee Replacement" clinicName="Summit Orthopedics" logoUrl={null} senderName={null} showControls slow={false} />,
+    <PlayerOverlay controls={controls} title="Total Knee Replacement" clinicName="Summit Orthopedics" logoUrl={null} senderName={null} showControls slow={false} chapters={chapters} />,
   );
 }
 
@@ -201,6 +202,37 @@ describe("what the player is handed", () => {
     const html = render({ source: { kind: "unavailable" } });
     expect(html).not.toMatch(/<video[^>]*\ssrc=/);
     expect(html).not.toContain("did not load");
+  });
+});
+
+describe("chapters on the progress bar (the library's watch page)", () => {
+  const KNEE: Chapter[] = [
+    { startSeconds: 0, title: "Intro" },
+    { startSeconds: 33, title: "Preparing the knee" },
+    { startSeconds: 63, title: "The implant" },
+    { startSeconds: 88, title: "The result" },
+    { startSeconds: 97, title: "Outro" },
+  ];
+  const marks = (html: string) => [...html.matchAll(/data-chapter-mark=""[^>]*style="left:([\d.]+)%"/g)].map(([, left]) => Math.round(Number(left)));
+
+  it("marks where each chapter after the first starts, and names the one playing beside the time", () => {
+    const html = renderPlaying({ time: 70, duration: 110 }, KNEE);
+    expect(marks(html)).toEqual([30, 57, 80, 88]);
+    expect(html).toMatch(/data-current-chapter=""[^>]*>.*The implant<\/span>/);
+    expect(renderPlaying({ time: 0, duration: 110 }, KNEE)).toMatch(/data-current-chapter=""[^>]*>.*Intro<\/span>/);
+    expect(renderPlaying({ time: 105, duration: 110 }, KNEE)).toMatch(/data-current-chapter=""[^>]*>.*Outro<\/span>/);
+  });
+
+  it("marks nothing before the length is known, and nothing past the end", () => {
+    expect(marks(renderPlaying({ time: 0, duration: 0 }, KNEE))).toEqual([]);
+    // A 1:30 video: 0:33, 1:03 and 1:28 are marked, 1:37 is past the end.
+    expect(marks(renderPlaying({ time: 0, duration: 90 }, KNEE))).toEqual([37, 70, 98]);
+  });
+
+  it("draws no marks and no chapter name for a video without chapters", () => {
+    const html = renderPlaying({ time: 70, duration: 110 });
+    expect(html).not.toContain("data-chapter-mark");
+    expect(html).not.toContain("data-current-chapter");
   });
 });
 

@@ -1,24 +1,22 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { VideoPlayer } from "@/components/ui/VideoPlayer";
-import { useModalFocus } from "@/components/ui/useModalFocus";
-import { refreshPlaybackAction, sendShareAction, type SendResult } from "./[category]/actions";
+import { sendShareAction, type SendResult } from "./[category]/actions";
 import { SendPanel } from "./[category]/SendPanel";
-import { recordLibraryPlayAction, setFavoriteAction, type FavoriteResult } from "./actions";
+import { setFavoriteAction, type FavoriteResult } from "./actions";
 import type { LibraryItem } from "./library-item";
+import { ShowQrPanel } from "./watch/[videoId]/ShowQrPanel";
 
 /**
- * What every library page with cards shares: the full-screen player, the
- * Send panel, and the person's hearts. The library home (its rows) and a
- * category's page (its grid) both put their cards inside one of these, so a
- * card anywhere on the page plays, sends and hearts the same way, and a
- * heart tapped in one row shows at once on the same video in every other row.
+ * What every library page with cards shares: the Send panel, the "Show QR
+ * on screen" panel, and the person's hearts. The library home (its rows), a
+ * category's page (its grid), the search results and the watch page all put
+ * their cards inside one of these, so a card anywhere sends and hearts the
+ * same way, and a heart tapped in one place shows at once on the same video
+ * everywhere else on the page.
  *
- * PLAYING starts inside the tap that opened the player (browsers allow sound
- * only then). The first time the video actually starts playing after the
- * player opened, one library play is counted for this person
- * (recordLibraryPlayAction); nothing is ever shown about it.
+ * PLAYING is not here any more: tapping a card's picture opens the video's
+ * watch page (/library/watch/<id>), where the player is.
  *
  * THE HEART changes on screen at once, and the server is told what the
  * person now wants ("a favorite" or "not a favorite", never "flip it"). Taps
@@ -29,8 +27,10 @@ import type { LibraryItem } from "./library-item";
  * seconds. "My favorites" on the home page follows the hearts: a new heart
  * puts the video at the front of the row, a heart taken away takes it out.
  *
- * SENDING is only offered to someone holding a seat (`canSend`), and the
- * Send action checks the seat again on the server.
+ * SENDING, and showing a QR code on the screen, are only offered to someone
+ * holding a seat (`canSend`). Both make a patient link the same way, with
+ * the Send action, which checks the seat again on the server; the QR panel
+ * only shows the code large, for a patient to scan in the room.
  */
 
 type Library = {
@@ -40,23 +40,23 @@ type Library = {
   toggleFavorite: (item: LibraryItem) => void;
   /** The person's favorites in the order "My favorites" shows them. */
   favorites: LibraryItem[];
-  /** Open the player on this video. */
-  play: (item: LibraryItem) => void;
   /** Open the Send panel for this video; null for someone without a seat. */
   send: ((item: LibraryItem) => void) | null;
+  /** Make a link for this video and show its QR code large on the screen; null for someone without a seat. */
+  showQr: ((item: LibraryItem) => void) | null;
 };
 
 const LibraryContext = createContext<Library | null>(null);
 
-/** The shared library, for a card or a row inside a LibraryBrowser. */
+/** The shared library, for a card, a row or the watch page inside a LibraryBrowser. */
 export function useLibrary(): Library {
   const library = useContext(LibraryContext);
   if (!library) throw new Error("useLibrary() is only for cards inside a LibraryBrowser.");
   return library;
 }
 
-/** The Send panel's state: which video, and the server's answer once it arrives. */
-type Sending = { video: LibraryItem; result: SendResult | null };
+/** The open panel: which video, which panel, and the server's answer once it arrives. */
+type Sending = { video: LibraryItem; panel: "send" | "qr"; result: SendResult | null };
 
 /** How long the "could not be saved" sentence stays up. */
 const NOTICE_MS = 6000;
@@ -66,22 +66,14 @@ export function LibraryBrowser({
   favorites: initialFavorites = [],
   heartedIds = [],
   canSend,
-  clinicName,
-  logoUrl,
-  senderName,
 }: {
   children: ReactNode;
   /** "My favorites" as the server read it, most recently hearted first. Only the home page shows the row. */
   favorites?: LibraryItem[];
   /** Other videos on this page the person has hearted (beyond `favorites`), so their hearts start filled. */
   heartedIds?: string[];
-  /** True for someone holding a seat: their cards get the Send button. */
+  /** True for someone holding a seat: they get Send (and, on the watch page, Show QR on screen). */
   canSend: boolean;
-  /** The clinic's name and checked logo address, for the player's mark. */
-  clinicName: string;
-  logoUrl: string | null;
-  /** The signed-in person's name as patients see it, for the player, when they hold a seat. */
-  senderName: string | null;
 }) {
   const [favorites, setFavorites] = useState<LibraryItem[]>(initialFavorites);
   const [hearted, setHearted] = useState<Set<string>>(() => new Set([...initialFavorites.map((item) => item.id), ...heartedIds]));
@@ -89,16 +81,13 @@ export function LibraryBrowser({
   // still reads what the first one did (two quick taps on a filled heart end filled, as they should).
   const heartedNow = useRef<Set<string> | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [playing, setPlaying] = useState<LibraryItem | null>(null);
   const [sending, setSending] = useState<Sending | null>(null);
-  const playerDialog = useRef<HTMLDivElement>(null);
-  useModalFocus(playerDialog, playing !== null);
 
   // Per video: the request still on its way (so the next one waits for it) and what the person wanted last.
   const queue = useRef(new Map<string, Promise<void>>());
   const wanted = useRef(new Map<string, boolean>());
   const noticeTimer = useRef<number | undefined>(undefined);
-  // Counts Send taps. A server answer is only shown if it belongs to the latest tap.
+  // Counts Send and Show QR taps. A server answer is only shown if it belongs to the latest tap.
   const sendCount = useRef(0);
 
   useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
@@ -145,43 +134,42 @@ export function LibraryBrowser({
     queue.current.set(item.id, after);
   }
 
-  /** Open the Send panel for a video and ask the server for its link. */
-  function send(video: LibraryItem) {
+  /** Open a panel for a video ("send", or "qr" for the code on the screen) and ask the server for its link. */
+  function makeLink(video: LibraryItem, panel: "send" | "qr") {
     const thisTap = ++sendCount.current;
-    setSending({ video, result: null });
+    setSending({ video, panel, result: null });
     sendShareAction(video.id)
       // It may be that a link WAS made and only the answer was lost, so the words do not claim otherwise; an unused link simply expires.
       .catch((): SendResult => ({ ok: false, error: "We could not reach the server. Check the connection, then try again." }))
       .then((result) => {
-        if (sendCount.current === thisTap) setSending({ video, result });
+        if (sendCount.current === thisTap) setSending({ video, panel, result });
       });
   }
 
-  function closeSend() {
-    sendCount.current++;
+  function closePanel() {
+    sendCount.current++; // a late server answer is ignored
     setSending(null);
   }
 
-  // Escape closes whichever overlay is open. The Close buttons do the same for touch.
-  const overlayOpen = playing !== null || sending !== null;
+  // Escape closes whichever panel is open. Their Close and Done buttons do the same for touch.
+  const panelOpen = sending !== null;
   useEffect(() => {
-    if (!overlayOpen) return;
+    if (!panelOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      setPlaying(null);
-      sendCount.current++; // same as closeSend(): a late server answer is ignored
+      sendCount.current++; // same as closePanel(): a late server answer is ignored
       setSending(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [overlayOpen]);
+  }, [panelOpen]);
 
   const library: Library = {
     isFavorite: (id) => hearted.has(id),
     toggleFavorite,
     favorites,
-    play: setPlaying,
-    send: canSend ? send : null,
+    send: canSend ? (video) => makeLink(video, "send") : null,
+    showQr: canSend ? (video) => makeLink(video, "qr") : null,
   };
 
   return (
@@ -193,47 +181,25 @@ export function LibraryBrowser({
         {notice && <p className="rounded-xl border border-line bg-overlay px-4 py-3 text-base text-ink shadow-panel">{notice}</p>}
       </div>
 
-      {playing && (
-        <div
-          ref={playerDialog}
-          tabIndex={-1}
-          data-theme="dark"
-          className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-black text-ink pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`${playing.title}, from ${clinicName}`}
-        >
-          <VideoPlayer
-            key={playing.id}
-            source={playing.source}
-            // Before a signed address runs out, the player asks the server for a fresh one; the clinic's plan is checked again then.
-            refresh={async () => {
-              const answer = await refreshPlaybackAction(playing.id);
-              return answer.ok ? answer.source : answer.reason === "ended" ? null : { kind: "unavailable" };
-            }}
-            title={playing.title}
-            placeholder={playing.isPlaceholder}
-            // The still chosen on /pulse; for a stream, the signed still from the video itself.
-            poster={playing.posterUrl ?? (playing.source.kind === "stream" ? playing.source.poster : undefined)}
-            clinicName={clinicName}
-            logoUrl={logoUrl}
-            senderName={senderName}
-            onClose={() => setPlaying(null)}
-            favorite={{ on: hearted.has(playing.id), onToggle: () => toggleFavorite(playing) }}
-            // One library play per opening. Nobody waits for the answer, and a play that could not be counted is simply not counted.
-            onFirstPlay={() => void recordLibraryPlayAction(playing.id).catch(() => undefined)}
-          />
-        </div>
-      )}
-
-      {sending && (
+      {sending?.panel === "send" && (
         <SendPanel
           key={sending.video.id}
           title={sending.video.title}
           placeholder={sending.video.isPlaceholder}
           result={sending.result}
-          onRetry={() => send(sending.video)}
-          onClose={closeSend}
+          onRetry={() => makeLink(sending.video, "send")}
+          onClose={closePanel}
+        />
+      )}
+
+      {sending?.panel === "qr" && (
+        <ShowQrPanel
+          key={sending.video.id}
+          title={sending.video.title}
+          placeholder={sending.video.isPlaceholder}
+          result={sending.result}
+          onRetry={() => makeLink(sending.video, "qr")}
+          onClose={closePanel}
         />
       )}
     </LibraryContext.Provider>

@@ -10,6 +10,16 @@
  */
 @custom-variant computer (@media (hover: hover) and (pointer: fine));
 
+/*
+ * `side-by-side:` is a screen wide enough AND held sideways: a tablet in
+ * landscape, or a computer. The library's watch page puts its "More in"
+ * list beside the video there, and under it on a phone or a tablet held
+ * upright (decided by Evan on 2026-10-15). Width alone would put a large
+ * tablet held upright side by side too; orientation alone would put a phone
+ * held sideways. Also a media query, so the browser decides.
+ */
+@custom-variant side-by-side (@media (min-width: 64rem) and (orientation: landscape));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   CATEGORY_ROW_LIMIT,
   FAVORITES_EMPTY,
+  MORE_IN_CATEGORY_LIMIT,
   MOST_WATCHED_LIMIT,
   MOST_WATCHED_MIN,
   SEARCH_MAX_LENGTH,
   SEARCH_PATH,
+  VIDEO_ID_MAX_LENGTH,
+  WATCH_PATH,
   readSearchQuery,
+  readWatchVideoId,
   showMostWatched,
+  watchPageHref,
 } from "./library-rows";
 
 /** The library home's row rules, with plain values. */
@@ -44,5 +49,24 @@ describe("reading a search from the address", () => {
     expect(readSearchQuery("   ")).toBeNull();
     expect(readSearchQuery(undefined)).toBeNull();
     expect(readSearchQuery(["knee", "hip"])).toBeNull();
+  });
+});
+
+describe("the watch page's address", () => {
+  it("is /library/watch/<id>, and carries nothing but the id", () => {
+    expect(WATCH_PATH).toBe("/library/watch");
+    expect(watchPageHref("cmtne63om0000hvi8fnm0su5v")).toBe("/library/watch/cmtne63om0000hvi8fnm0su5v");
+    expect(watchPageHref("a/b?c")).toBe("/library/watch/a%2Fb%3Fc");
+  });
+
+  it("reads a video id of the right shape, and nothing else", () => {
+    expect(readWatchVideoId("cmtne63om0000hvi8fnm0su5v")).toBe("cmtne63om0000hvi8fnm0su5v");
+    expect(readWatchVideoId("a".repeat(VIDEO_ID_MAX_LENGTH))).toHaveLength(VIDEO_ID_MAX_LENGTH);
+    expect(readWatchVideoId("a".repeat(VIDEO_ID_MAX_LENGTH + 1))).toBeNull();
+    for (const junk of ["", "../admin", "id with spaces", "id%27", "<script>", undefined]) expect(readWatchVideoId(junk)).toBeNull();
+  });
+
+  it("bounds the More in list", () => {
+    expect(MORE_IN_CATEGORY_LIMIT).toBe(30);
   });
 });

@@ -8,11 +8,13 @@ import {
   countPublishedVideosByKind,
   createVideo,
   getVideoForPlayback,
+  getUsableVideo,
   getVideoForPulse,
   listPublishedVideos,
   listPublishedVideosByCategory,
   listUsableVideos,
   listUsableVideosInCategory,
+  listMoreInCategory,
   listVideosForPulse,
   updateVideo,
   type VideoInput,
@@ -229,6 +231,57 @@ describe("what one clinic may use", () => {
     const order = ["SPINE", "KNEE", "HIP"];
     const positions = videos.map((v) => order.indexOf(v.category));
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+});
+
+describe("the library's watch page", () => {
+  it("finds one video only when this clinic may use it, by the same rule as the lists", async () => {
+    const knee = await makeVideo({ category: "KNEE", isPlaceholder: false });
+    const kneePlaceholder = await makeVideo({ category: "KNEE", isPlaceholder: true });
+    const hip = await makeVideo({ category: "HIP", isPlaceholder: false });
+    const unpublished = await makeVideo({ category: "KNEE", isPublished: false });
+
+    const kneeClinic = await accessOf(await makeClinic({ categories: ["KNEE"] }));
+    expect((await getUsableVideo(kneeClinic, knee.id))?.id).toBe(knee.id);
+    expect((await getUsableVideo(kneeClinic, kneePlaceholder.id))?.id).toBe(kneePlaceholder.id);
+    // Off the plan, unpublished, unknown: nothing, the same for each.
+    expect(await getUsableVideo(kneeClinic, hip.id)).toBeNull();
+    expect(await getUsableVideo(kneeClinic, unpublished.id)).toBeNull();
+    expect(await getUsableVideo(kneeClinic, "not-a-real-video-id")).toBeNull();
+
+    // A clinic not shown placeholders, and one that is not open.
+    const finishedOnly = await accessOf(await makeClinic({ categories: ["KNEE"], showPlaceholders: false }));
+    expect(await getUsableVideo(finishedOnly, kneePlaceholder.id)).toBeNull();
+    expect((await getUsableVideo(finishedOnly, knee.id))?.id).toBe(knee.id);
+    const paused = await accessOf(await makeClinic({ categories: ["KNEE"], status: "PAUSED" }));
+    expect(await getUsableVideo(paused, knee.id)).toBeNull();
+  });
+
+  it("lists more in the same category, without the one being watched, by the access rule and the limit", async () => {
+    const watched = await makeVideo({ category: "KNEE", isPlaceholder: false });
+    const other = await makeVideo({ category: "KNEE", isPlaceholder: false });
+    const placeholder = await makeVideo({ category: "KNEE", isPlaceholder: true });
+    const unpublished = await makeVideo({ category: "KNEE", isPublished: false });
+    const hip = await makeVideo({ category: "HIP", isPlaceholder: false });
+    const ids = (videos: { id: string }[]) => videos.map((v) => v.id);
+
+    const clinic = await accessOf(await makeClinic({ categories: ["KNEE", "HIP"] }));
+    const more = ids(await listMoreInCategory(clinic, "KNEE", watched.id, 500));
+    expect(more).toContain(other.id);
+    expect(more).toContain(placeholder.id);
+    expect(more).not.toContain(watched.id);
+    expect(more).not.toContain(unpublished.id);
+    expect(more).not.toContain(hip.id);
+
+    // Newest first: of the two made here, the later one comes first.
+    expect(more.filter((id) => id === other.id || id === placeholder.id)).toEqual([placeholder.id, other.id]);
+
+    expect(await listMoreInCategory(clinic, "KNEE", watched.id, 1)).toHaveLength(1);
+    const finishedOnly = await accessOf(await makeClinic({ categories: ["KNEE"], showPlaceholders: false }));
+    expect(ids(await listMoreInCategory(finishedOnly, "KNEE", watched.id, 500))).not.toContain(placeholder.id);
+    // A category off the plan, and a clinic that is not open: nothing.
+    expect(await listMoreInCategory(await accessOf(await makeClinic({ categories: ["HIP"] })), "KNEE", watched.id, 500)).toEqual([]);
+    expect(await listMoreInCategory(await accessOf(await makeClinic({ status: "PAUSED" })), "KNEE", watched.id, 500)).toEqual([]);
   });
 });
 

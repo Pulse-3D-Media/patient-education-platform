@@ -4,6 +4,7 @@ import { ClinicShell } from "@/components/ui/ClinicShell";
 import { StaffClerkProvider } from "@/components/ui/StaffClerkProvider";
 import { staffTheme } from "@/lib/branding";
 import { getClinicForShell } from "@/lib/clinic";
+import { RememberLibraryPages } from "./watch/[videoId]/BackLink";
 
 /**
  * Every library page sits inside the shared shell: thin top banner, icon
@@ -41,6 +42,8 @@ export default async function LibraryLayout({ children }: LayoutProps<"/library"
   const accent = staffTheme(clinic?.branding.color ?? null, clinic?.branding.theme);
   return (
     <StaffClerkProvider accent={accent.accent} onAccent={accent.onAccent} theme={clinic?.branding.theme ?? "dark"} fontFamily={brandFontFamily(clinic?.branding.font ?? "inter")}>
+      {/* Counts the library pages shown in this tab, so the watch page's back arrow knows whether there is one to go back to. Draws nothing. */}
+      <RememberLibraryPages />
       {clinic ? (
         <ClinicShell clinic={clinic} showAdmin={clinic.isAdmin}>
           {children}

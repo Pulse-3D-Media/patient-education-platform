@@ -64,3 +64,29 @@ export function readSearchQuery(value: string | string[] | undefined): string | 
   const query = value.replace(/\s+/g, " ").trim().slice(0, SEARCH_MAX_LENGTH).trim();
   return query.length > 0 ? query : null;
 }
+
+/**
+ * The watch page, YouTube-style (decided by Evan on 2026-10-15): tapping a
+ * card anywhere in the library opens /library/watch/<videoId>, with the
+ * video PAUSED until the surgeon taps Play (they may open it while still
+ * talking to the patient). Its address carries the video's id and nothing
+ * else; the server decides whether this clinic may use it.
+ */
+export const WATCH_PATH = "/library/watch";
+
+/** The watch page's address for one video. */
+export function watchPageHref(videoId: string): string {
+  return `${WATCH_PATH}/${encodeURIComponent(videoId)}`;
+}
+
+/** The longest video id the watch page will look up. Ids are cuids (25 characters); anything far longer is junk. */
+export const VIDEO_ID_MAX_LENGTH = 64;
+
+/** A video id from the watch page's address, checked for shape only: letters, digits, "_" and "-". Null for anything else. */
+export function readWatchVideoId(value: string | undefined): string | null {
+  if (typeof value !== "string") return null;
+  return value.length > 0 && value.length <= VIDEO_ID_MAX_LENGTH && /^[A-Za-z0-9_-]+$/.test(value) ? value : null;
+}
+
+/** The most videos in the watch page's "More in <category>" list. A bound, not a promise. */
+export const MORE_IN_CATEGORY_LIMIT = 30;

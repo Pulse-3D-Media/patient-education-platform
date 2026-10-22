@@ -284,7 +284,10 @@ describe("/admin/billing: a clinic that already has a subscription", () => {
     expect(html).toContain("Knee, Hip");
     expect(html).toContain("Accepted by Jane Smith");
     expect(html).toContain("Renews on November 1, 2026");
-    expect(html).not.toContain("Estimate");
+    // No estimate card for the plan in force: the card above has the real amounts. (The change form's running total
+    // is labelled an estimate, but that is about a change, not the plan being paid for.)
+    expect(html).not.toContain('id="estimate-heading"');
+    expect(html).not.toContain("What it comes to");
     expect(html).not.toContain("Continue to payment");
     expect(html).toContain("Change your plan");
   });
@@ -553,6 +556,50 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
   });
 });
 
+describe("/admin/billing: the running total, kept in view and labelled an estimate", () => {
+  const runningTotal = (html: string) => {
+    const start = html.indexOf("data-running-total");
+    expect(start).toBeGreaterThan(-1);
+    // Up to the box that follows it, which says what the plan includes.
+    const end = html.indexOf('comes to"', start);
+    expect(end).toBeGreaterThan(start);
+    return html.slice(start, end);
+  };
+
+  it("the first-plan picker: the total and the price per seat, pinned to the bottom of the screen, as an estimate until Stripe's page", async () => {
+    signInAs(await makeClinic({ categories: ["KNEE", "HIP"], surgeonSeats: 3 }), "admin");
+    const html = await renderBilling();
+    const bar = runningTotal(html);
+
+    expect(html).toMatch(/data-running-total=""[^>]*class="sticky bottom-0/);
+    expect(bar).toContain("Estimate");
+    expect(bar).toContain("Total");
+    // Two categories at $89 a seat, three seats.
+    expect(bar).toContain("$267.00");
+    expect(bar).toContain("$89.00 per surgeon seat per month, times 3 seats.");
+    expect(bar).toContain("until you pay on Stripe’s page");
+  });
+
+  it("the change form: the new total beside what the plan comes to now, as an estimate until the change is reviewed", async () => {
+    signInAs(await makeClinic({ status: "ACTIVE", categories: ["KNEE", "HIP"], surgeonSeats: 3, billing: { status: "ACTIVE", plan: "current" } }), "admin");
+    const bar = runningTotal(await renderBilling({ add: "shoulder" }));
+
+    expect(bar).toContain("Estimate");
+    expect(bar).toContain("New total");
+    expect(bar).toContain("$327.00");
+    expect(bar).toContain("$109.00 per surgeon seat per month, times 3 seats.");
+    expect(bar).toContain("until you review the change");
+    expect(bar).toContain("Your plan now: $267.00 per month.");
+  });
+
+  it("with nothing picked, or more seats than a card plan covers, it says so instead of an amount", async () => {
+    signInAs(await makeClinic({ categories: [], surgeonSeats: 0 }), "admin");
+    const bar = runningTotal(await renderBilling());
+    expect(bar).toContain("Pick at least one category and one surgeon seat to see the total.");
+    expect(showsAnAmount(bar)).toBe(false);
+  });
+});
+
 describe("/admin/billing: arriving from the library's \"Add to your plan\" link (?add=<category>)", () => {
   const paying = (more: ClinicSetup = {}) => makeClinic({ status: "ACTIVE", categories: ["KNEE", "HIP"], surgeonSeats: 3, billing: { status: "ACTIVE", plan: "current" }, ...more });
   const ticked = (html: string, category: Category) => new RegExp(`<input[^>]*checked=""[^>]*value="${category}"|<input[^>]*value="${category}"[^>]*checked=""`).test(html);
@@ -639,6 +686,83 @@ describe("/admin/billing: arriving from the library's \"Add to your plan\" link 
     expect(ticked(html, "KNEE")).toBe(true);
     expect(ticked(html, "HIP")).toBe(false);
     expect(html).not.toContain("Review change");
+  });
+
+  // Prompt H (2026-10-08 huddle): arriving from the link, the form shows the plan the clinic has plus the one category
+  // chosen, and nothing else. The paid plan (Knee and Hip, made by makeClinic) and the clinic's own list, which the
+  // library opens and Pulse staff can edit by hand, are two records; these clinics have them disagree.
+
+  it("the paid plan and the library disagree (Hip paid for, turned off by staff): Shoulder from the link is the only extra tick, and the page says why Hip is ticked", async () => {
+    signInAs(await paying({ categories: ["KNEE"] }), "admin");
+    const html = await renderBilling({ add: "shoulder" });
+
+    expect(html).toContain("Shoulder is ticked below because you chose it in the library.");
+    expect(ticked(html, "SHOULDER")).toBe(true);
+    expect(ticked(html, "KNEE")).toBe(true);
+    // Hip is part of what is paid for, so the form starts with it, and says so beside its box and above the form.
+    expect(ticked(html, "HIP")).toBe(true);
+    expect(html).toContain("Paid for, off in your library");
+    expect(html).toContain("Your plan pays for Hip, but it is turned off in your library right now. Pulse 3D set that by hand");
+    expect(html).toContain("untick one to stop paying for it from your next renewal");
+    for (const other of ["SPINE", "COMPLEX_SPINE", "FOOT_ANKLE"] as const) expect(ticked(html, other)).toBe(false);
+    // Measured against the paid plan, adding Shoulder only adds: it still starts now, at three categories' price.
+    expect(html).toContain("This only adds to your plan");
+    expect(html).toContain("$327.00");
+  });
+
+  it("the link asks for a category that is paid for but turned off: nothing extra is ticked, and the page says there is nothing to add", async () => {
+    signInAs(await paying({ categories: ["KNEE"] }), "admin");
+    const html = await renderBilling({ add: "hip" });
+
+    expect(html).not.toContain("is ticked below because you chose it");
+    expect(html).toContain("Hip is already part of the plan you pay for, so there is nothing to add here, and it stays ticked below.");
+    // Said once: the general sentence about what Pulse turned off leaves Hip out, since the line above already covers it.
+    expect(html).not.toContain("Your plan pays for Hip");
+    expect(html).toContain("Get in touch with Pulse 3D to turn it back on.");
+    expect(ticked(html, "KNEE")).toBe(true);
+    expect(ticked(html, "HIP")).toBe(true);
+    for (const other of ["SPINE", "COMPLEX_SPINE", "SHOULDER", "FOOT_ANKLE"] as const) expect(ticked(html, other)).toBe(false);
+    expect(html).toContain("This is the plan you have now.");
+  });
+
+  it("the library has a category that is not paid for (granted by staff): it is not ticked, and the page says a change would take it off unless it is ticked", async () => {
+    signInAs(await paying({ categories: ["KNEE", "HIP", "SHOULDER"] }), "admin");
+    const html = await renderBilling({ add: "orthopedic-spine" });
+
+    expect(ticked(html, "SPINE")).toBe(true);
+    expect(ticked(html, "KNEE")).toBe(true);
+    expect(ticked(html, "HIP")).toBe(true);
+    expect(ticked(html, "SHOULDER")).toBe(false);
+    expect(html).toContain("In your library, not paid for");
+    expect(html).toContain("Your library also has Shoulder, which Pulse 3D added outside what you pay for.");
+    expect(html).not.toContain("Paid for, off in your library");
+  });
+
+  it("when the two agree, the page says nothing about them", async () => {
+    signInAs(await paying(), "admin");
+    const html = await renderBilling({ add: "shoulder" });
+    expect(html).not.toContain("Paid for, off in your library");
+    expect(html).not.toContain("In your library, not paid for");
+    expect(html).not.toContain("turned off in your library");
+  });
+
+  it("the first-plan picker with a checkout started and not paid: the link opens on the plan on file plus the category, not on the unpaid picks", async () => {
+    // Plan on file: Knee, two seats. The unpaid checkout (makeClinic's plan): Knee and Hip, three seats.
+    const orgId = await makeClinic({ status: "ACTIVE", staffAccess: "OPEN", categories: ["KNEE"], surgeonSeats: 2, billing: { status: "NONE", plan: "pending" } });
+    signInAs(orgId, "admin");
+    let html = await renderBilling({ add: "shoulder" });
+
+    expect(html).toContain("Continue to payment");
+    expect(html).toContain("Shoulder is ticked below because you chose it in the library.");
+    expect(ticked(html, "KNEE")).toBe(true);
+    expect(ticked(html, "SHOULDER")).toBe(true);
+    expect(ticked(html, "HIP")).toBe(false);
+    expect(html).toMatch(/name="seats"[^>]*value="2"|value="2"[^>]*name="seats"/);
+
+    // Without the link, the picker still reopens on what was picked last time, as before.
+    html = await renderBilling();
+    expect(ticked(html, "HIP")).toBe(true);
+    expect(html).toMatch(/name="seats"[^>]*value="3"|value="3"[^>]*name="seats"/);
   });
 
   it("a member who follows the address sees none of it", async () => {

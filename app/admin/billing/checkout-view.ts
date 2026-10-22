@@ -59,6 +59,12 @@ export type CheckoutOffer =
       options: CategoryOption[];
       /** What the picker opens with: the plan the admin accepted last if they came back, else the plan on file. */
       initial: { categories: Category[]; seats: number; interval: BillingInterval };
+      /**
+       * The plan on file alone (the clinic's own categories and seats, monthly), ignoring any checkout that was started
+       * and not paid. What the picker opens with when the admin came from the library's "Add to your plan" link, so
+       * nothing but the plan they have and the one category they chose starts ticked.
+       */
+      onFile: { categories: Category[]; seats: number; interval: BillingInterval };
     };
 
 /** Changing a plan that is being paid for: the form's numbers, or the reason there is no form. */
@@ -71,8 +77,12 @@ export type ChangeOffer =
       /** The prices on offer now, when they are a different version. Null when the clinic is already on them. Moving to them is the owner's choice, never automatic. */
       latest: { versionId: string; version: number; config: PricingConfig } | null;
       options: CategoryOption[];
-      /** What the clinic has now: the form opens on it, and its categories can be kept even if they are no longer for sale. */
-      current: { picked: Category[]; included: Category[]; seats: number; interval: BillingInterval };
+      /**
+       * The plan the clinic pays for now: the form opens on it, and its categories can be kept even if they are no longer
+       * for sale. `library` is what the library opens (Clinic.categories), which only differs from `included` when Pulse
+       * staff edited it by hand (planLibraryGap in lib/plan-change.ts); the page says so when it does.
+       */
+      current: { picked: Category[]; included: Category[]; seats: number; interval: BillingInterval; totalCents: number; library: Category[] };
     };
 
 export type CheckoutView = {
@@ -129,7 +139,7 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
     if (eligibility.reason === "managed-by-pulse") return { ...base, offer: { kind: "managed" } };
     return { ...base, offer: { kind: "contact", reason: eligibility.reason } };
   }
-  if (live) return { ...base, offer: { kind: "subscribed", change: await changeOffer(clinicId, clinic, open) } };
+  if (live) return { ...base, offer: { kind: "subscribed", change: await changeOffer(clinicId, clinic, open, planOnFile.categories) } };
   // A first payment still under way: no picker, because checkout would refuse a new plan until it settles or Stripe drops it.
   if (facts.status === "INCOMPLETE") return { ...base, offer: { kind: "first-payment" } };
   if (!open) return { ...base, offer: { kind: "closed", message: CHECKOUT_CLOSED_MESSAGE } };
@@ -150,9 +160,10 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
   const options = CATEGORIES.map((category) => ({ value: category.value, label: category.label, availability: availability[category.value] }));
   const canBuy = (category: Category) => availability[category] === "sellable";
   const clinicMax = pricing.config.seats.clinicMax;
-  const from = waiting
-    ? { categories: waiting.picked, seats: waiting.seats, interval: waiting.interval }
-    : { categories: planOnFile.categories, seats: planOnFile.surgeonSeats, interval: "MONTH" as BillingInterval };
+  const onFile = { categories: planOnFile.categories, seats: planOnFile.surgeonSeats, interval: "MONTH" as BillingInterval };
+  const from = waiting ? { categories: waiting.picked, seats: waiting.seats, interval: waiting.interval } : onFile;
+  // Only what can be bought, and never more seats than a card plan covers.
+  const usable = (plan: typeof from) => ({ categories: plan.categories.filter(canBuy), seats: Math.min(Math.max(plan.seats, 1), clinicMax), interval: plan.interval });
 
   return {
     ...base,
@@ -161,11 +172,8 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
       versionId: pricing.source.version.id,
       config: { ...pricing.config, foundingDiscountBp: 0 },
       options,
-      initial: {
-        categories: from.categories.filter(canBuy),
-        seats: Math.min(Math.max(from.seats, 1), clinicMax),
-        interval: from.interval,
-      },
+      initial: usable(from),
+      onFile: usable(onFile),
     },
   };
 }
@@ -176,7 +184,12 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
  * the plan cannot be changed here right now (the same rule the server
  * applies again when the button is pressed, planChangeBlock).
  */
-async function changeOffer(clinicId: string, clinic: NonNullable<Awaited<ReturnType<typeof getCheckoutFacts>>>, open: boolean): Promise<ChangeOffer> {
+async function changeOffer(
+  clinicId: string,
+  clinic: NonNullable<Awaited<ReturnType<typeof getCheckoutFacts>>>,
+  open: boolean,
+  library: Category[],
+): Promise<ChangeOffer> {
   const { facts, currentPlan } = clinic;
   const block = planChangeBlock({
     eligibility: selfServeEligibility(clinic),
@@ -211,6 +224,13 @@ async function changeOffer(clinicId: string, clinic: NonNullable<Awaited<ReturnT
     own: { versionId: own.id, version: own.version, config: withoutFounding(own.config) },
     latest,
     options: CATEGORIES.map((category) => ({ value: category.value, label: category.label, availability: availability[category.value] })),
-    current: { picked: currentPlan.categories, included: currentPlan.entitledCategories, seats: currentPlan.surgeonSeats, interval: currentPlan.interval },
+    current: {
+      picked: currentPlan.categories,
+      included: currentPlan.entitledCategories,
+      seats: currentPlan.surgeonSeats,
+      interval: currentPlan.interval,
+      totalCents: currentPlan.totalCents,
+      library,
+    },
   };
 }

@@ -5,9 +5,10 @@ import { ClinicShell } from "@/components/ui/ClinicShell";
 import { PRIMARY_BUTTON } from "@/components/ui/styles";
 import { ADD_ANCHOR, ADD_PARAM, readSuggestedCategory } from "@/lib/add-to-plan";
 import { PULSE_CONTACT_URL } from "@/lib/brand";
-import { CATEGORIES } from "@/lib/categories";
+import { CATEGORIES, categoryFromSlug } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen, type ClinicOpenFacts } from "@/lib/clinic-status";
+import { planLibraryGap } from "@/lib/plan-change";
 import { formatCents } from "@/lib/pricing";
 import { AdminFrame } from "../AdminFrame";
 import { getBillingView } from "./billing";
@@ -37,6 +38,14 @@ import { PlanPicker } from "./PlanPicker";
  * any suggestion where there is no form to tick it in (a managed clinic, a
  * hospital, card payment not open). Ticking a box charges nothing and grants
  * nothing; the price and the change are worked out by the server as always.
+ * The form then shows the plan the clinic has plus that one category, and
+ * NOTHING ELSE ticked (Van, 2026-10-08: anything more feels like being
+ * talked into more than you came for). For the change form "the plan the
+ * clinic has" is the plan it pays for; the first-plan picker, which
+ * otherwise reopens on a checkout that was started and not paid, starts
+ * from the plan on file instead. Where the plan paid for and the library
+ * disagree (Pulse staff edited the library by hand), the page says so above
+ * the form (planLibraryGap in lib/plan-change.ts).
  *
  * ANY OFFICE ADMIN MAY CHANGE BILLING, the account owner included (decided by Evan
  * on 2026-10-05). This is an admin page, so everyone who sees it sees the
@@ -93,12 +102,15 @@ export default async function BillingPage(props: BillingPageProps = {}) {
   // Can a missed payment be settled from this page? Only where Stripe's pages can be opened.
   const canRepair = Boolean(checkout?.portal);
   // The category the library's "Add to your plan" link asked for, if there is a form here it can be ticked in.
+  // The picker measures it against the plan on file, which is what it opens on when there is a suggestion.
   const suggested =
     offer.kind === "picker"
-      ? readSuggestedCategory(params[ADD_PARAM], offer.options, offer.initial.categories)
+      ? readSuggestedCategory(params[ADD_PARAM], offer.options, offer.onFile.categories)
       : offer.kind === "subscribed" && !managed && offer.change.kind === "changer"
         ? readSuggestedCategory(params[ADD_PARAM], offer.change.options, offer.change.current.included)
         : null;
+  // The category in the address, read only to say something about it when it cannot be ticked because it is already paid for.
+  const asked = typeof params[ADD_PARAM] === "string" ? (categoryFromSlug(params[ADD_PARAM])?.value ?? null) : null;
 
   return (
     <AdminFrame clinic={clinic} title="Billing" intro="Your plan, and what it comes to.">
@@ -232,7 +244,7 @@ export default async function BillingPage(props: BillingPageProps = {}) {
       {/* Where the library's "Add to your plan" link lands: the picker, the change form, or the words that stand in for them. */}
       {/* The scroll margin keeps the card's heading clear of the banner across the top (64px tall). */}
       <div id={ADD_ANCHOR} className="scroll-mt-20">
-        <OfferSection offer={offer} managed={managed} suggested={suggested} />
+        <OfferSection offer={offer} managed={managed} suggested={suggested} asked={asked} />
       </div>
 
       {checkout?.portal && (
@@ -310,7 +322,7 @@ function WaitingChanges({ view }: { view: CheckoutView }) {
 }
 
 /** The last card on the page: the plan picker, the form for changing a plan, or why there is neither. */
-function OfferSection({ offer, managed, suggested }: { offer: CheckoutOffer; managed: boolean; suggested: Category | null }) {
+function OfferSection({ offer, managed, suggested, asked }: { offer: CheckoutOffer; managed: boolean; suggested: Category | null; asked: Category | null }) {
   // Said once, above the form, so the extra tick is not a surprise.
   const suggestedLabel = CATEGORIES.find((category) => category.value === suggested)?.label;
   if (offer.kind === "picker") {
@@ -327,7 +339,7 @@ function OfferSection({ offer, managed, suggested }: { offer: CheckoutOffer; man
           versionId={offer.versionId}
           config={offer.config}
           options={offer.options}
-          initial={suggested ? { ...offer.initial, categories: [...offer.initial.categories, suggested] } : offer.initial}
+          initial={suggested ? { ...offer.onFile, categories: [...offer.onFile.categories, suggested] } : offer.initial}
         />
       </section>
     );
@@ -369,6 +381,14 @@ function OfferSection({ offer, managed, suggested }: { offer: CheckoutOffer; man
   }
 
   if (offer.kind === "subscribed" && !managed && offer.change.kind === "changer") {
+    const { current } = offer.change;
+    const gap = planLibraryGap(current.included, current.library);
+    // The link asked for a category that is already paid for and turned off: said once, in its own sentence, and left
+    // out of the general one below so it is not said twice.
+    const askedLabel = asked && gap.offInLibrary.includes(asked) ? CATEGORIES.find((category) => category.value === asked)?.label : undefined;
+    const off = askedLabel ? gap.offInLibrary.filter((category) => category !== asked) : gap.offInLibrary;
+    const offWords = wordList(labelsOf(off));
+    const extraWords = wordList(labelsOf(gap.extraInLibrary));
     return (
       <section aria-labelledby="change-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="change-heading" className="text-lg font-semibold">
@@ -382,6 +402,30 @@ function OfferSection({ offer, managed, suggested }: { offer: CheckoutOffer; man
           <p className="mt-2 text-ink">
             {suggestedLabel} is ticked below because you chose it in the library. Nothing changes, and nothing is charged, until you review and confirm.
           </p>
+        )}
+        {askedLabel && (
+          <p className="mt-2 text-ink">
+            {askedLabel} is already part of the plan you pay for, so there is nothing to add here, and it stays ticked below. It is turned off in your library right
+            now because Pulse 3D turned it off. Get in touch with Pulse 3D to turn it back on.
+          </p>
+        )}
+        {(offWords || extraWords) && (
+          <div className="mt-3 rounded-xl border border-warn/40 bg-warn/10 px-4 py-3 text-[15px] text-ink-soft">
+            {offWords && (
+              <p>
+                Your plan pays for {offWords}, but {off.length === 1 ? "it is" : "they are"} turned off in your library right now. Pulse 3D set that by hand, so get in
+                touch with Pulse 3D about it. {off.length === 1 ? "It is" : "They are"} ticked below because the form starts from what you pay for:
+                untick one to stop paying for it from your next renewal.
+              </p>
+            )}
+            {extraWords && (
+              <p className={offWords ? "mt-2" : undefined}>
+                Your library also has {extraWords}, which Pulse 3D added outside what you pay for. Once a change made here starts, your library is set to exactly what the
+                changed plan includes, so tick {gap.extraInLibrary.length === 1 ? "it" : "them"} to keep {gap.extraInLibrary.length === 1 ? "it" : "them"} (and pay for{" "}
+                {gap.extraInLibrary.length === 1 ? "it" : "them"}), or get in touch with Pulse 3D first.
+              </p>
+            )}
+          </div>
         )}
         <PlanChanger offer={offer.change} suggested={suggested} />
       </section>
@@ -409,6 +453,17 @@ function OfferSection({ offer, managed, suggested }: { offer: CheckoutOffer; man
 }
 
 const DATE_WORDS = { dateStyle: "long", timeZone: "America/Denver" } as const;
+
+/** Category names in screen order. */
+function labelsOf(categories: Category[]): string[] {
+  return CATEGORIES.filter((category) => categories.includes(category.value)).map((category) => category.label);
+}
+
+/** "Hip", "Hip and Spine", "Hip, Knee and Spine"; empty for none. */
+function wordList(words: string[]): string {
+  if (words.length <= 1) return words[0] ?? "";
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
 
 /** The plan the clinic is paying for, with the amounts it accepted. These are real amounts, not an estimate. */
 function SubscriptionCard({ plan, status, renewsAt, endsAt }: { plan: PlanFacts; status: string; renewsAt: Date | null; endsAt: Date | null }) {

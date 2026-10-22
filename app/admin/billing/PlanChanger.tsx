@@ -7,11 +7,11 @@ import { PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { PULSE_CONTACT_URL } from "@/lib/brand";
 import { CATEGORIES } from "@/lib/categories";
 import { engineInterval } from "@/lib/checkout-rules";
-import { classifyPlanChange, RENEWAL_REASON_WORDS } from "@/lib/plan-change";
+import { classifyPlanChange, planLibraryGap, RENEWAL_REASON_WORDS } from "@/lib/plan-change";
 import { formatCents, quote, type Quote } from "@/lib/pricing";
 import { confirmPlanChangeAction, reviewPlanChangeAction, type ChangeReview } from "./actions";
 import type { ChangeOffer } from "./checkout-view";
-import { canPick, CategoryChoices, IntervalChoices, SeatsField, TestModeNote } from "./PlanFields";
+import { canPick, CategoryChoices, IntervalChoices, RunningTotal, SeatsField, TestModeNote } from "./PlanFields";
 
 /**
  * Changing a plan that is being paid for, on /admin/billing. For any
@@ -31,8 +31,16 @@ import { canPick, CategoryChoices, IntervalChoices, SeatsField, TestModeNote } f
  * what is charged is what the server and Stripe work out, never a number
  * this form sent.
  *
- * The form opens on the plan the clinic has, plus one extra tick when the
- * admin came from the library's "Add to your plan" link (`suggested`).
+ * The form opens on the plan the clinic PAYS FOR, plus one extra tick when
+ * the admin came from the library's "Add to your plan" link (`suggested`),
+ * and nothing else. Where that differs from what the library opens (Pulse
+ * staff edited the library by hand; planLibraryGap in lib/plan-change.ts),
+ * the categories concerned say so beside their box, and the page says so
+ * above the form.
+ *
+ * The total is kept in view while picking (RunningTotal, pinned to the
+ * bottom of the screen and labelled an estimate), next to what the plan
+ * comes to now.
  *
  * The picks are ordinary React state, so a refusal, a lost connection or a
  * changed total leaves everything as it was picked.
@@ -127,11 +135,18 @@ export function PlanChanger({ offer, suggested = null }: { offer: Changer; sugge
 
   const labels = (categories: Category[]) => CATEGORIES.filter((category) => categories.includes(category.value)).map((category) => category.label);
 
+  // Where the paid plan and the library disagree, the box says which way.
+  const gap = planLibraryGap(current.included, current.library);
+  const notes: Partial<Record<Category, string>> = {};
+  for (const category of gap.offInLibrary) notes[category] = "Paid for, off in your library";
+  for (const category of gap.extraInLibrary) notes[category] = "In your library, not paid for";
+  const per = current.interval === "YEAR" ? "year" : "month";
+
   return (
     <form ref={form} onSubmit={(event) => event.preventDefault()} className="mt-4 flex flex-col gap-6">
       <TestModeNote>A change that starts now is charged to the test card on file.</TestModeNote>
 
-      <CategoryChoices config={config} options={offer.options} picked={picked} onToggle={toggle} alreadyHas={current.included} />
+      <CategoryChoices config={config} options={offer.options} picked={picked} onToggle={toggle} alreadyHas={current.included} notes={notes} />
 
       <SeatsField
         id="change-seats"
@@ -155,7 +170,16 @@ export function PlanChanger({ offer, suggested = null }: { offer: Changer; sugge
         </label>
       )}
 
-      <section aria-live="polite" aria-label="What the changed plan comes to" className="rounded-xl border border-line bg-sunken p-5">
+      <RunningTotal
+        heading="New total"
+        amounts={amounts}
+        tooManySeats={tooManySeats}
+        clinicMax={clinicMax}
+        until="until you review the change"
+        before={`Your plan now: ${formatCents(current.totalCents)} per ${per}.`}
+      />
+
+      <section aria-label="What the changed plan comes to" className="rounded-xl border border-line bg-sunken p-5">
         {tooManySeats ? (
           <p className="text-[15px] text-ink-soft">
             More than {clinicMax} surgeon seats is set up by Pulse 3D by agreement, so there is no card payment for it here.{" "}
@@ -168,13 +192,8 @@ export function PlanChanger({ offer, suggested = null }: { offer: Changer; sugge
           <p className="text-[15px] text-ink-soft">Choose at least one category and one surgeon seat to see what it comes to.</p>
         ) : (
           <>
-            <p className="text-sm text-ink-muted">The changed plan, in US dollars</p>
-            <p className="mt-1 text-3xl font-semibold text-brand-bright">
-              {formatCents(amounts.totalCents)} <span className="text-base font-medium text-ink-soft">per {amounts.interval}</span>
-            </p>
-            <p className="mt-2 text-[15px] text-ink-soft">
-              {formatCents(amounts.perSeatCents)} per surgeon seat per {amounts.interval}, times {amounts.seats} {amounts.seats === 1 ? "seat" : "seats"}.
-              {chosen.fullLibrary ? " Includes the full library: every category." : ` Includes ${labels(chosen.entitledCategories).join(", ")}.`}
+            <p className="text-[15px] text-ink-soft">
+              {chosen.fullLibrary ? "The changed plan includes the full library: every category." : `The changed plan includes ${labels(chosen.entitledCategories).join(", ")}.`}
             </p>
             <p className="mt-2 text-[15px] text-ink-soft">
               {kind?.timing === "same"

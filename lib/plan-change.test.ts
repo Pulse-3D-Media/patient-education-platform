@@ -6,6 +6,7 @@ import {
   classifyPlanChange,
   invoicePaymentAllowed,
   planChangeBlock,
+  planLibraryGap,
   readChangeConfirm,
   readChangeRequest,
   reviewMomentIsUsable,
@@ -175,5 +176,24 @@ describe("Stripe's own pages: when the Billing page offers them, which the serve
     for (const status of ["NONE", "INCOMPLETE", "CANCELED"] as const) {
       expect(invoicePaymentAllowed({ status, pendingPlanId: "plan_first_checkout" })).toBe(false);
     }
+  });
+});
+
+describe("planLibraryGap: the plan paid for against what the library opens", () => {
+  it("finds nothing when they agree, in any order", () => {
+    expect(planLibraryGap(["KNEE", "HIP"], ["HIP", "KNEE"])).toEqual({ offInLibrary: [], extraInLibrary: [] });
+  });
+
+  it("names a paid category Pulse staff turned off in the library", () => {
+    expect(planLibraryGap(["KNEE", "HIP", "SPINE"], ["KNEE"])).toEqual({ offInLibrary: ["HIP", "SPINE"], extraInLibrary: [] });
+  });
+
+  it("names a category open in the library that is not paid for", () => {
+    expect(planLibraryGap(["KNEE"], ["KNEE", "SHOULDER"])).toEqual({ offInLibrary: [], extraInLibrary: ["SHOULDER"] });
+  });
+
+  it("names both at once", () => {
+    const paid: Category[] = ["KNEE", "HIP"];
+    expect(planLibraryGap(paid, ["KNEE", "SHOULDER"])).toEqual({ offInLibrary: ["HIP"], extraInLibrary: ["SHOULDER"] });
   });
 });

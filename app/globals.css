@@ -253,3 +253,24 @@ body {
 .video-chip {
   background: rgb(0 0 0 / 0.7);
 }
+
+/*
+ * The running total on the Billing page's plan forms (RunningTotal in
+ * app/admin/billing/PlanFields.tsx): a soft flash of the brand colour behind
+ * the number each time it changes, so the change is seen. Left out for
+ * anyone whose computer asks for less motion.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .running-total {
+    animation: running-total-flash 0.8s ease-out;
+  }
+}
+
+@keyframes running-total-flash {
+  from {
+    background-color: color-mix(in srgb, var(--brand-accent) 40%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}

@@ -88,6 +88,37 @@ export const RENEWAL_REASON_WORDS: Record<RenewalReason, string> = {
 
 export const SAME_PLAN_MESSAGE = "That is the plan you already have, so there is nothing to change.";
 
+/**
+ * Where the plan a clinic PAYS FOR and the categories its LIBRARY opens
+ * disagree.
+ *
+ * They are two records. The paid plan (the accepted BillingPlan in force) is
+ * what Stripe charges for, and every change is priced and sorted against it.
+ * The library opens the categories on the clinic's row (Clinic.categories).
+ * Billing copies the paid plan onto the row whenever a plan starts or
+ * changes, so normally they are the same; they only drift apart when Pulse
+ * staff edit the row by hand on the clinic's /pulse Plan form (turning a
+ * paid category off, or granting one that is not paid for).
+ *
+ * The change form on /admin/billing starts from the PAID plan (decided in
+ * the billing-picks PR, 2026-10-19): that is what a change is measured
+ * against, and starting from the row instead would make a plain "add one
+ * category" look like it also took the turned-off ones away, which waits
+ * for the renewal and stops paying for them. When the two disagree the page
+ * says so in plain words, using this.
+ *
+ *   offInLibrary    paid for, but not open in the library right now
+ *   extraInLibrary  open in the library, but not part of what is paid for
+ */
+export type PlanLibraryGap = { offInLibrary: Category[]; extraInLibrary: Category[] };
+
+export function planLibraryGap(paidFor: Category[], library: Category[]): PlanLibraryGap {
+  return {
+    offInLibrary: paidFor.filter((category) => !library.includes(category)),
+    extraInLibrary: library.filter((category) => !paidFor.includes(category)),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // May this clinic's plan be changed here right now?
 // ---------------------------------------------------------------------------

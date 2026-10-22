@@ -9,7 +9,7 @@ import { engineInterval } from "@/lib/checkout-rules";
 import { formatCents, quote, type PricingConfig, type Quote } from "@/lib/pricing";
 import { startCheckoutAction } from "./actions";
 import type { CategoryOption } from "./checkout-view";
-import { CategoryChoices, IntervalChoices, SeatsField } from "./PlanFields";
+import { CategoryChoices, IntervalChoices, RunningTotal, SeatsField } from "./PlanFields";
 
 /**
  * The plan picker on /admin/billing: categories, surgeon seats, monthly or
@@ -23,6 +23,10 @@ import { CategoryChoices, IntervalChoices, SeatsField } from "./PlanFields";
  * works the price out again from its own numbers. The form also says which
  * total was on screen, and if the server's differs, nothing is made and the
  * new total is shown for the admin to accept.
+ *
+ * The total is kept in view while picking (RunningTotal, pinned to the
+ * bottom of the screen and labelled an estimate); the box under it says
+ * what the plan includes and how it is charged.
  *
  * The picks are ordinary React state, so when the action comes back with a
  * message (a refusal, a lost connection, a changed total) everything that
@@ -92,7 +96,9 @@ export function PlanPicker({
 
       <IntervalChoices config={config} chosen={every} onChoose={setEvery} monthlyCents={monthly?.amounts?.totalCents ?? null} yearlyCents={yearly?.amounts?.totalCents ?? null} />
 
-      <section aria-live="polite" aria-label="What this plan comes to" className="rounded-xl border border-line bg-sunken p-5">
+      <RunningTotal heading="Total" amounts={amounts} tooManySeats={tooManySeats} clinicMax={clinicMax} until="until you pay on Stripe’s page" />
+
+      <section aria-label="What this plan comes to" className="rounded-xl border border-line bg-sunken p-5">
         {tooManySeats ? (
           <p className="text-[15px] text-ink-soft">
             More than {clinicMax} surgeon seats is set up by Pulse 3D by agreement, so there is no card payment for it here.{" "}
@@ -105,15 +111,12 @@ export function PlanPicker({
           <p className="text-[15px] text-ink-soft">Choose at least one category and one surgeon seat to see what it comes to.</p>
         ) : (
           <>
-            <p className="text-sm text-ink-muted">Total, in US dollars</p>
-            <p className="mt-1 text-3xl font-semibold text-brand-bright">
-              {formatCents(amounts.totalCents)} <span className="text-base font-medium text-ink-soft">per {amounts.interval}</span>
-            </p>
-            <p className="mt-2 text-[15px] text-ink-soft">
-              {formatCents(amounts.perSeatCents)} per surgeon seat per {amounts.interval}, times {amounts.seats} {amounts.seats === 1 ? "seat" : "seats"}.
-              {amounts.monthlyEquivalentCents !== null && ` That works out to ${formatCents(amounts.monthlyEquivalentCents)} a month.`}
-            </p>
-            <p className="mt-2 text-[15px] text-ink-soft">
+            {amounts.monthlyEquivalentCents !== null && (
+              <p className="text-[15px] text-ink-soft">
+                {formatCents(amounts.totalCents)} a year works out to {formatCents(amounts.monthlyEquivalentCents)} a month.
+              </p>
+            )}
+            <p className={`${amounts.monthlyEquivalentCents !== null ? "mt-2 " : ""}text-[15px] text-ink-soft`}>
               {current.fullLibrary
                 ? "Includes the full library: every category."
                 : `Includes ${current.entitledCategories.length === 1 ? "the category" : `the ${current.entitledCategories.length} categories`} you picked.`}

@@ -25,7 +25,7 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
  * places that edit branding, so they cannot look or behave differently:
  *
  *   - the clinic's own admin, on /admin/branding (no logo address box: a
- *     clinic's logo is the one it uploads to its Clerk organization);
+ *     clinic's logo is the one it uploads on the same page, above this form);
  *   - Pulse staff, on a clinic's Branding tab on /pulse (with the logo
  *     address box, and the clinic's id in a hidden field, which the staff
  *     action looks up before using).
@@ -140,7 +140,7 @@ export function BrandingForm({
             />
             <p id="brand-logo-help" className="mt-1 text-xs text-ink-muted">
               A full https:// address to a PNG, JPG, SVG or WebP you have looked at. Patients&rsquo; phones load it straight from there. A logo
-              the clinic uploads to its own Clerk organization replaces this one on their next sign-in.
+              the clinic uploads on its own Branding page replaces this one.
             </p>
             {logoIsBad && <p className="mt-1 text-sm text-warn">That is not a full https:// address yet.</p>}
           </div>

@@ -1,19 +1,33 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { DISCLAIMER } from "@/lib/education-note";
 import * as shares from "@/lib/db/shares";
 import { addDays } from "@/lib/expiry";
+import type { PlaybackSource } from "@/lib/playback-source";
 import * as renewalEmail from "@/lib/renewal-email";
-import { recordPlay, refreshPlayback, requestReactivation } from "./actions";
+import type { PlaybackRefresh } from "../patient-calls";
+import * as askRoute from "./ask/route";
+import * as playRoute from "./play/route";
+import * as refreshRoute from "./refresh/route";
 
 /**
- * The Server Actions behind the patient page, against the real test
- * database. What these prove for the play count: a real link's play is
- * counted and its first play moves the deadline; anything odd sent to it
- * is ignored without a database call; a code nobody has is answered with
- * recorded: false; and a failure on the server is logged there and
+ * The three POST routes behind the patient page (play, refresh, ask),
+ * against the real test database. They were Server Actions until Prompt O;
+ * every test the actions had is kept here, called through the routes.
+ *
+ * What these prove for the play count: a real link's play is counted and its
+ * first play moves the deadline, once; anything that is not a code is refused
+ * without a database call; a code nobody has is answered with recorded:
+ * false; and a failure on the server is logged there by its kind and
  * answered with recorded: false, never thrown at the patient's page.
+ *
+ * For the refresh: a working, ticked link gets a fresh address bounded by
+ * its deadline; a link that is over, taken down, never ticked, unknown or
+ * made up gets "ended"; Mux not configured or a server failure is
+ * "unavailable", never the CDN file.
  *
  * And for "ask my clinic": the request is recorded on the link before the
  * clinic is told, the office is told with the address built from a trusted
@@ -22,19 +36,38 @@ import { recordPlay, refreshPlayback, requestReactivation } from "./actions";
  * database, and a server failure is answered calmly and logged without the
  * code. The email itself is a stand-in here (lib/renewal-email.test.ts
  * covers its words and its recipients), so no Clerk and no email service.
+ *
+ * And for every answer: never cached, never indexed, POST only, and no
+ * Server Action left anywhere a patient can reach (the last describe block).
  */
 
-// The real module, with one function that a test can make fail on purpose.
+// The real module, with the functions a test can make fail on purpose.
 vi.mock("@/lib/db/shares", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/shares")>();
-  return { ...actual, recordSharePlay: vi.fn(actual.recordSharePlay), requestShareRenewal: vi.fn(actual.requestShareRenewal) };
+  return {
+    ...actual,
+    recordSharePlay: vi.fn(actual.recordSharePlay),
+    requestShareRenewal: vi.fn(actual.requestShareRenewal),
+    getShareByCode: vi.fn(actual.getShareByCode),
+  };
 });
 
 // Telling the clinic reads Clerk and an email service; here it is a stand-in that says it was told.
 vi.mock("@/lib/renewal-email", () => ({ notifyClinicOfRenewalRequest: vi.fn(async () => ({ told: true, recipients: 1 })) }));
 
-// The request's host, from which the email's address is picked.
-vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
+/** POST to one of the three routes, as the browser does, with the request's host the email's address is picked from. */
+async function call(route: { POST: (request: Request, context: never) => Promise<Response> }, what: string, code: string) {
+  const request = new Request(`http://localhost:3000/watch/${encodeURIComponent(code)}/${what}`, { method: "POST", headers: { host: "localhost:3000" } });
+  const response = await route.POST(request, { params: Promise.resolve({ code }) } as never);
+  // Every answer, good or bad, is one no browser, CDN or search engine may keep.
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  expect(response.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+  return { status: response.status, body: (await response.json()) as unknown };
+}
+
+const recordPlay = async (code: string) => (await call(playRoute, "play", code)).body as { recorded: boolean; playback?: PlaybackSource };
+const refreshPlayback = async (code: string) => (await call(refreshRoute, "refresh", code)).body as PlaybackRefresh;
+const requestReactivation = async (code: string) => (await call(askRoute, "ask", code)).body as { asked: boolean };
 
 const createdClinicIds: string[] = [];
 const createdVideoIds: string[] = [];
@@ -60,6 +93,9 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vi.mocked(renewalEmail.notifyClinicOfRenewalRequest).mockClear();
+  vi.mocked(shares.recordSharePlay).mockClear();
+  vi.mocked(shares.requestShareRenewal).mockClear();
+  vi.mocked(shares.getShareByCode).mockClear();
 });
 
 afterEach(() => {
@@ -73,11 +109,11 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("recordPlay", () => {
+describe("POST /watch/<code>/play", () => {
   it("counts a real link's play, and the first one moves the deadline", async () => {
     const before = await prisma.share.findUniqueOrThrow({ where: { code }, select: { expiresAt: true } });
 
-    expect(await recordPlay(code)).toEqual({ recorded: true });
+    expect(await call(playRoute, "play", code)).toEqual({ status: 200, body: { recorded: true } });
     const after = await prisma.share.findUniqueOrThrow({ where: { code }, select: { expiresAt: true, firstPlayedAt: true, viewCount: true } });
     expect(after.viewCount).toBe(1);
     expect(after.firstPlayedAt).not.toBeNull();
@@ -89,23 +125,33 @@ describe("recordPlay", () => {
     expect(again.expiresAt.getTime()).toBe(after.expiresAt.getTime());
   });
 
-  it("ignores anything that is not a share code, without asking the database", async () => {
-    expect(await recordPlay("")).toEqual({ recorded: false });
-    expect(await recordPlay("x".repeat(21))).toEqual({ recorded: false });
-    expect(await recordPlay(42 as unknown as string)).toEqual({ recorded: false });
+  it("moves the deadline once when three first plays arrive at the same moment", async () => {
+    const fresh = (await shares.createShare(clinicId, videoId)).code;
+    const answers = await Promise.all([recordPlay(fresh), recordPlay(fresh), recordPlay(fresh)]);
+    expect(answers).toEqual([{ recorded: true }, { recorded: true }, { recorded: true }]);
+    const row = await prisma.share.findUniqueOrThrow({ where: { code: fresh }, select: { viewCount: true, firstPlayedAt: true, expiresAt: true } });
+    expect(row.viewCount).toBe(3);
+    // The deadline is the first play's moment plus the link's ten days, whichever play won.
+    expect(row.expiresAt.getTime()).toBe(addDays(row.firstPlayedAt!, 10).getTime());
+  });
+
+  it("refuses anything that is not a share code with a 400, without asking the database", async () => {
+    expect(await call(playRoute, "play", "")).toEqual({ status: 400, body: { recorded: false } });
+    expect(await call(playRoute, "play", "x".repeat(21))).toEqual({ status: 400, body: { recorded: false } });
+    expect(await call(playRoute, "play", "abc'--")).toEqual({ status: 400, body: { recorded: false } });
     expect(vi.mocked(shares.recordSharePlay)).not.toHaveBeenCalled();
   });
 
   it("answers recorded: false for a code nobody has", async () => {
-    expect(await recordPlay("nope00")).toEqual({ recorded: false });
+    expect(await call(playRoute, "play", "nope00")).toEqual({ status: 200, body: { recorded: false } });
   });
 
-  it("answers recorded: false when the server fails, and logs the kind of error there instead of throwing it at the page", async () => {
+  it("answers recorded: false with a 500 when the server fails, and logs the kind of error there instead of throwing it at the page", async () => {
     // A failure whose message holds the link's code, the way a database error can.
     vi.mocked(shares.recordSharePlay).mockRejectedValueOnce(new Error(`the database went away looking up ${code}`));
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(await recordPlay(code)).toEqual({ recorded: false });
+    expect(await call(playRoute, "play", code)).toEqual({ status: 500, body: { recorded: false } });
     expect(log).toHaveBeenCalledOnce();
     // Only words go to the log: what happened and the kind of error. Never
     // the error object, whose message and stack would print the code.
@@ -170,7 +216,7 @@ describe("a link whose video streams from Mux", () => {
     expect(await recordPlay(cdn.code)).toEqual({ recorded: true });
   });
 
-  it("refreshPlayback hands a working link a fresh address bounded by its deadline, and nothing to a link that is over, taken down, unknown or made up", async () => {
+  it("refresh hands a working link a fresh address bounded by its deadline, and nothing to a link that is over, taken down, unknown or made up", async () => {
     const share = await tickedMuxLink();
     const answer = await refreshPlayback(share.code);
     expect(answer.ok).toBe(true);
@@ -191,29 +237,30 @@ describe("a link whose video streams from Mux", () => {
       await prisma.video.update({ where: { id: muxVideoId }, data: { isPublished: true } });
     }
 
-    expect(await refreshPlayback("nope00")).toEqual({ ok: false, reason: "ended" });
-    expect(await refreshPlayback("")).toEqual({ ok: false, reason: "ended" });
-    expect(await refreshPlayback("x".repeat(21))).toEqual({ ok: false, reason: "ended" });
+    expect(await call(refreshRoute, "refresh", "nope00")).toEqual({ status: 200, body: { ok: false, reason: "ended" } });
+    expect(await call(refreshRoute, "refresh", "")).toEqual({ status: 400, body: { ok: false, reason: "ended" } });
+    expect(await call(refreshRoute, "refresh", "x".repeat(21))).toEqual({ status: 400, body: { ok: false, reason: "ended" } });
   });
 
-  it("refreshPlayback answers unavailable, not the CDN file and not an exception, when Mux is not configured or the server fails", async () => {
+  it("refresh answers unavailable, not the CDN file and not an exception, when Mux is not configured or the server fails", async () => {
     const share = await tickedMuxLink();
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
     delete process.env.MUX_SIGNING_KEY_ID;
     try {
-      expect(await refreshPlayback(share.code)).toEqual({ ok: false, reason: "unavailable" });
+      expect(await call(refreshRoute, "refresh", share.code)).toEqual({ status: 200, body: { ok: false, reason: "unavailable" } });
     } finally {
       Object.assign(process.env, MUX_ENV);
     }
 
-    vi.spyOn(shares, "getShareByCode").mockRejectedValueOnce(new Error(`the database went away looking up ${share.code}`));
-    expect(await refreshPlayback(share.code)).toEqual({ ok: false, reason: "unavailable" });
+    vi.mocked(shares.getShareByCode).mockRejectedValueOnce(new Error(`the database went away looking up ${share.code}`));
+    expect(await call(refreshRoute, "refresh", share.code)).toEqual({ status: 500, body: { ok: false, reason: "unavailable" } });
+    expect(log).toHaveBeenCalledWith("Could not refresh a share link's playback.", "Error");
     expect(log.mock.calls.flat().every((part) => typeof part === "string" && !part.includes(share.code))).toBe(true);
   });
 });
 
-describe("requestReactivation", () => {
+describe("POST /watch/<code>/ask", () => {
   /** A link made and played 20 days ago with ten days after the first play, so it paused 10 days ago. */
   async function pausedLink() {
     const madeAt = addDays(new Date(), -20);
@@ -224,10 +271,11 @@ describe("requestReactivation", () => {
 
   it("records the request on the link first, then tells the clinic with the address built from a trusted origin", async () => {
     const paused = await pausedLink();
-    expect(await requestReactivation(paused)).toEqual({ asked: true });
+    expect(await call(askRoute, "ask", paused)).toEqual({ status: 200, body: { asked: true } });
 
-    const row = await prisma.share.findUniqueOrThrow({ where: { code: paused }, select: { renewalRequestedAt: true } });
+    const row = await prisma.share.findUniqueOrThrow({ where: { code: paused }, select: { renewalRequestedAt: true, renewalRequests: true } });
     expect(row.renewalRequestedAt).not.toBeNull();
+    expect(row.renewalRequests).toBe(1);
 
     const told = vi.mocked(renewalEmail.notifyClinicOfRenewalRequest);
     expect(told).toHaveBeenCalledOnce();
@@ -247,8 +295,18 @@ describe("requestReactivation", () => {
     const first = await prisma.share.findUniqueOrThrow({ where: { code: paused }, select: { renewalRequestedAt: true } });
 
     expect(await requestReactivation(paused)).toEqual({ asked: true });
-    const second = await prisma.share.findUniqueOrThrow({ where: { code: paused }, select: { renewalRequestedAt: true } });
+    const second = await prisma.share.findUniqueOrThrow({ where: { code: paused }, select: { renewalRequestedAt: true, renewalRequests: true } });
     expect(second.renewalRequestedAt!.getTime()).toBe(first.renewalRequestedAt!.getTime());
+    expect(second.renewalRequests).toBe(1);
+    expect(vi.mocked(renewalEmail.notifyClinicOfRenewalRequest)).toHaveBeenCalledOnce();
+  });
+
+  it("five taps at once record one request and tell the clinic once", async () => {
+    const paused = await pausedLink();
+    const answers = await Promise.all(Array.from({ length: 5 }, () => requestReactivation(paused)));
+    expect(answers).toEqual(Array.from({ length: 5 }, () => ({ asked: true })));
+    const row = await prisma.share.findUniqueOrThrow({ where: { code: paused }, select: { renewalRequests: true } });
+    expect(row.renewalRequests).toBe(1);
     expect(vi.mocked(renewalEmail.notifyClinicOfRenewalRequest)).toHaveBeenCalledOnce();
   });
 
@@ -265,25 +323,69 @@ describe("requestReactivation", () => {
 
   it("refuses a link that is not paused, and a code nobody has, telling the clinic nothing", async () => {
     // `code` is the working link from the play tests above.
-    expect(await requestReactivation(code)).toEqual({ asked: false });
+    expect(await call(askRoute, "ask", code)).toEqual({ status: 200, body: { asked: false } });
     expect(await requestReactivation("nope00")).toEqual({ asked: false });
     expect(vi.mocked(renewalEmail.notifyClinicOfRenewalRequest)).not.toHaveBeenCalled();
   });
 
-  it("ignores anything that is not a share code, without asking the database", async () => {
-    expect(await requestReactivation("")).toEqual({ asked: false });
-    expect(await requestReactivation("x".repeat(21))).toEqual({ asked: false });
-    expect(await requestReactivation({ code } as unknown as string)).toEqual({ asked: false });
+  it("refuses anything that is not a share code with a 400, without asking the database", async () => {
+    expect(await call(askRoute, "ask", "")).toEqual({ status: 400, body: { asked: false } });
+    expect(await call(askRoute, "ask", "x".repeat(21))).toEqual({ status: 400, body: { asked: false } });
+    expect(await call(askRoute, "ask", "a/b")).toEqual({ status: 400, body: { asked: false } });
     expect(vi.mocked(shares.requestShareRenewal)).not.toHaveBeenCalled();
   });
 
-  it("answers asked: false when the server fails, logging the kind of error and never the code", async () => {
+  it("answers asked: false with a 500 when the server fails, logging the kind of error and never the code", async () => {
     const paused = await pausedLink();
     vi.mocked(shares.requestShareRenewal).mockRejectedValueOnce(new Error(`the database went away ${paused}`));
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(await requestReactivation(paused)).toEqual({ asked: false });
+    expect(await call(askRoute, "ask", paused)).toEqual({ status: 500, body: { asked: false } });
     expect(log).toHaveBeenCalledOnce();
+    expect(log).toHaveBeenCalledWith("Could not record a request to turn a link back on.", "Error");
     expect(log.mock.calls[0].every((part) => typeof part === "string" && !part.includes(paused))).toBe(true);
+  });
+});
+
+describe("only at rate-limited addresses", () => {
+  const root = join(process.cwd(), "app");
+
+  /** Every .ts and .tsx file under a folder, tests left out. */
+  function sourceFiles(dir: string): string[] {
+    return readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) return sourceFiles(path);
+      return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
+    });
+  }
+
+  /** True when the file is a Server Action module, or holds an inline action. */
+  const holdsServerAction = (text: string) => /(["'])use server\1/.test(text);
+
+  it("no Server Action is left on the patient's pages: Next.js would run one at any address, outside /watch and /q", () => {
+    const files = [...sourceFiles(join(root, "watch")), ...sourceFiles(join(root, "q"))];
+    expect(files.length).toBeGreaterThan(5);
+    const offenders = files.filter((file) => holdsServerAction(readFileSync(file, "utf8")));
+    expect(offenders).toEqual([]);
+  });
+
+  it("the check above would catch an action module and an inline action", () => {
+    expect(holdsServerAction(`"use server";\nexport async function recordPlay() {}`)).toBe(true);
+    expect(holdsServerAction(`async function go() {\n  'use server';\n}`)).toBe(true);
+    expect(holdsServerAction(`import { recordPlay } from "../patient-calls";`)).toBe(false);
+  });
+
+  it("the player and the paused page call the routes, never an actions module", () => {
+    for (const file of ["WatchPlayer.tsx", "AskClinic.tsx"]) {
+      const text = readFileSync(join(root, "watch", "[code]", file), "utf8");
+      expect(text).toContain(`from "../patient-calls"`);
+      expect(text).not.toMatch(/from "\.\/actions"/);
+    }
+  });
+
+  it("each route answers POST only, so a link preview, a crawler or a HEAD request reaches none of them", () => {
+    for (const route of [playRoute, refreshRoute, askRoute]) {
+      expect(Object.keys(route).sort()).toEqual(["POST"]);
+    }
   });
 });

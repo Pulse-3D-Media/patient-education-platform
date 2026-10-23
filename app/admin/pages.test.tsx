@@ -711,6 +711,57 @@ describe("a paused link a patient has asked about", () => {
     expect(legacyHtml).not.toContain("Confirm: turn this link back on");
   });
 
+  // Decided by Evan on 2026-10-08: a paused link the plan no longer allows is not turned back on.
+  it("off the plan: marked on the overview, and its page says why with no Confirm, and offers Add to your plan when the category is for sale", async () => {
+    const knee = await prisma.video.create({
+      data: { title: `Vitest pages knee video ${randomBytes(4).toString("hex")}`, category: "KNEE", videoUrl: "https://example.com/vitest.mp4", isPublished: true },
+      select: { id: true, title: true },
+    });
+    createdVideoIds.push(knee.id);
+    const { id, code } = await makeAskedAbout({ videoId: knee.id }); // the Hip clinic has only Hip on its plan
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+
+    const overview = await render(AdminOverviewPage, "/admin");
+    const start = overview.indexOf(knee.title);
+    const row = overview.slice(start, overview.indexOf("</li>", start));
+    expect(row).toContain("Not on your plan");
+    expect(row).toContain(`href="/admin/reactivate/${id}"`);
+    expect(row).toContain("See why");
+    expect(row).not.toContain("Turn it back on");
+
+    const html = await render(reactivate(id), `/admin/reactivate/${id}`);
+    expect(html).toContain("This video is no longer on your plan, so this link can&#x27;t be turned back on.");
+    expect(html).not.toContain("Confirm: turn this link back on");
+    expect(afterTopBar(html).match(/<form/g)).toBeNull();
+    expect(html).not.toContain(code);
+    // The shared testing database decides whether Knee is for sale; the page has to agree with it.
+    const config = await prisma.categoryConfig.findUnique({ where: { category: "KNEE" } });
+    if (config?.sellable === false) {
+      expect(html).not.toContain("Add to your plan");
+    } else {
+      expect(html).toContain('href="/admin/billing?add=knee#change"');
+      expect(html).toContain("Add to your plan");
+    }
+  });
+
+  it("a placeholder the clinic is no longer shown: marked on the overview, and its page says why with no Confirm", async () => {
+    const hipClinic = createdClinicIds[3];
+    const { id } = await makeAskedAbout(); // the Hip video is a placeholder
+    await prisma.clinic.update({ where: { id: hipClinic }, data: { showPlaceholders: false } });
+    try {
+      signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+      const overview = await render(AdminOverviewPage, "/admin");
+      expect(overview).toContain("Placeholder hidden for your clinic");
+
+      const html = await render(reactivate(id), `/admin/reactivate/${id}`);
+      expect(html).toContain("your clinic is set to use finished animations only, so this link can&#x27;t be turned back on.");
+      expect(html).not.toContain("Confirm: turn this link back on");
+      expect(html).not.toContain("Add to your plan");
+    } finally {
+      await prisma.clinic.update({ where: { id: hipClinic }, data: { showPlaceholders: true } });
+    }
+  });
+
   it("is not found at an address with the link's code in it, the way addresses were before (none was ever emailed)", async () => {
     const { code } = await makeAskedAbout();
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)");

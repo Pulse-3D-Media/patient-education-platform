@@ -142,6 +142,9 @@ export type LockedShareRow = {
   renewalRequestedAt: Date | null;
   videoTitle: string;
   videoIsPublished: boolean;
+  /** The video's category and placeholder mark, so the plan can be asked (planBlockFor in lib/access.ts). */
+  videoCategory: Category;
+  videoIsPlaceholder: boolean;
 };
 
 /**
@@ -152,9 +155,11 @@ export type LockedShareRow = {
  * clinic's link finds nothing, and so does an id nobody has.
  *
  * "FOR NO KEY UPDATE" is the lock an ordinary UPDATE takes, on the Share
- * row only (the video row is joined for its title and published flag, but
- * not locked: an unpublish that lands a moment later stops the link like
- * any other, as issued links always follow the video). A second
+ * row. The video row is joined for its title, published flag, category and
+ * placeholder mark, and held FOR SHARE, the lock createShare() takes on it
+ * (lockVideoFacts): the reactivation asks the plan about that category and
+ * mark, so a change to them (or an unpublish) that arrives now waits for
+ * the reactivation to commit, and one that landed first is seen here. A second
  * reactivation of the same link, from another admin or a double click,
  * waits here until the first has committed, then reads the link already
  * turned back on and does nothing. In this file with the other locking
@@ -163,11 +168,13 @@ export type LockedShareRow = {
 export async function lockShareForRenewal(tx: Prisma.TransactionClient, clinicId: string, shareId: string): Promise<LockedShareRow | null> {
   const rows = await tx.$queryRaw<LockedShareRow[]>`
     SELECT s."id", s."code", s."expiryPolicy"::text AS "expiryPolicy", s."expiresAt", s."firstPlayedAt", s."daysAfterFirstPlay",
-           s."renewalsUsed", s."renewalRequestedAt", v."title" AS "videoTitle", v."isPublished" AS "videoIsPublished"
+           s."renewalsUsed", s."renewalRequestedAt", v."title" AS "videoTitle", v."isPublished" AS "videoIsPublished",
+           v."category"::text AS "videoCategory", v."isPlaceholder" AS "videoIsPlaceholder"
     FROM "Share" s
     JOIN "Video" v ON v."id" = s."videoId"
     WHERE s."id" = ${shareId} AND s."clinicId" = ${clinicId}
-    FOR NO KEY UPDATE OF s`;
+    FOR NO KEY UPDATE OF s
+    FOR SHARE OF v`;
   return rows[0] ?? null;
 }
 

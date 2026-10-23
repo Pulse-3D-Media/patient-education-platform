@@ -161,7 +161,17 @@ export async function checkPlaybackId(playbackId: string, options: { env?: MuxEn
   }
 
   const plain = `${MUX_STREAM_ORIGIN}/${playbackId}.m3u8`;
-  const signed = signedPlaylistUrl(playbackId, new Date((options.now ?? new Date()).getTime() + 5 * 60_000), env);
+  // Signing can still fail with both settings present (a key that is not a
+  // usable private key). That is "not configured", answered in words, never
+  // an exception: this check also runs inside the Mux webhook, where a throw
+  // would make Mux send the same notification again and again.
+  let signed: string;
+  try {
+    signed = signedPlaylistUrl(playbackId, new Date((options.now ?? new Date()).getTime() + 5 * 60_000), env);
+  } catch (error) {
+    console.error("Mux: the signing key could not sign a token", error instanceof Error ? error.name : "unknown error");
+    return { ok: false, reason: "not-configured", message: "The Mux signing key on this deployment could not sign a token, so the playback id cannot be checked or used. Check the signing key." };
+  }
   try {
     const unsigned = await ask(plain, { method: "GET", signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) });
     if (unsigned.ok) {
@@ -427,12 +437,15 @@ export function verifyMuxWebhook(rawBody: string, signatureHeader: string | null
     const [key, value] = piece.trim().split("=", 2);
     if (key && value) parts.set(key, [...(parts.get(key) ?? []), value]);
   }
-  const timestamp = Number(parts.get("t")?.[0]);
+  // The signed input uses the timestamp exactly as it came in the header,
+  // never a number read back out of it ("0123" and "123" are different text).
+  const rawTimestamp = parts.get("t")?.[0] ?? "";
   const signatures = parts.get("v1") ?? [];
-  if (!Number.isFinite(timestamp) || signatures.length === 0) throw new MuxSignatureError("Unable to read the signature header.");
+  if (!/^\d{1,15}$/.test(rawTimestamp) || signatures.length === 0) throw new MuxSignatureError("Unable to read the signature header.");
+  const timestamp = Number(rawTimestamp);
   if (Math.abs(now.getTime() / 1000 - timestamp) > WEBHOOK_TOLERANCE_SECONDS) throw new MuxSignatureError("The notification is too old.");
 
-  const expected = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest();
+  const expected = createHmac("sha256", secret).update(`${rawTimestamp}.${rawBody}`).digest();
   const matches = signatures.some((given) => {
     const bytes = /^[0-9a-f]+$/i.test(given) ? Buffer.from(given, "hex") : Buffer.alloc(0);
     return bytes.length === expected.length && timingSafeEqual(bytes, expected);

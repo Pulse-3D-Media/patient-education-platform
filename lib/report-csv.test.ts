@@ -10,14 +10,14 @@ const lines = (csv: string) => csv.replace(/^﻿/, "").trimEnd().split("\r\n");
 describe("the report files", () => {
   it("have the table's columns, the rate as a whole percent, and an empty rate (not 0) when nothing was made", () => {
     expect(lines(categoriesCsv([{ category: "FOOT_ANKLE", ...counts }, { category: "HIP", ...none }]))).toEqual([
-      "Category,Links made,Played,Played rate (%),Play starts,Renewal requests,Renewals",
-      "Foot & Ankle,3,2,67,5,1,0",
-      "Hip,0,0,,0,0,0",
+      '"Category","Links made","Played","Played rate (%)","Play starts","Renewal requests","Renewals"',
+      '"Foot & Ankle",3,2,67,5,1,0',
+      '"Hip",0,0,,0,0,0',
     ]);
   });
 
   it("mark placeholders and give the category's label", () => {
-    expect(lines(proceduresCsv([{ videoId: "v1", title: "Total Knee", category: "KNEE", isPlaceholder: true, ...counts }]))[1]).toBe("Total Knee,Knee,Yes,3,2,67,5,1,0");
+    expect(lines(proceduresCsv([{ videoId: "v1", title: "Total Knee", category: "KNEE", isPlaceholder: true, ...counts }]))[1]).toBe('"Total Knee","Knee","Yes",3,2,67,5,1,0');
   });
 
   it("give each clinic's status in words and make a formula-looking name harmless", () => {
@@ -33,8 +33,8 @@ describe("the report files", () => {
       ...counts,
     };
     const [heading, line] = lines(clinicsCsv([row]));
-    expect(heading).toBe("Clinic,Status,Managed by Pulse,Categories on plan,Seats in use,Seats on plan,Links made,Played,Played rate (%),Play starts,Renewal requests,Renewals");
-    expect(line).toBe("'=cmd|' /C calc'!A0,Past due,Yes,2,1,3,3,2,67,5,1,0");
+    expect(heading).toBe('"Clinic","Status","Managed by Pulse","Categories on plan","Seats in use","Seats on plan","Links made","Played","Played rate (%)","Play starts","Renewal requests","Renewals"');
+    expect(line).toBe(`"'=cmd|' /C calc'!A0","Past due","Yes",2,1,3,3,2,67,5,1,0`);
   });
 
   it("name surgeons as patients saw them and never write a Clerk id", () => {
@@ -43,7 +43,7 @@ describe("the report files", () => {
       { userId: "user_noname", name: null, ...none },
       { userId: null, name: null, ...none },
     ]);
-    expect(lines(csv).slice(1)).toEqual(['"Dr. Jane Smith, DO",3,2,67,5,1,0', "Name not recorded,0,0,,0,0,0", "No surgeon recorded (older links),0,0,,0,0,0"]);
+    expect(lines(csv).slice(1)).toEqual(['"Dr. Jane Smith, DO",3,2,67,5,1,0', '"Name not recorded",0,0,,0,0,0', '"No surgeon recorded (older links)",0,0,,0,0,0']);
     expect(csv).not.toContain("user_");
   });
 });

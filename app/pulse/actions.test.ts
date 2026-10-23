@@ -10,6 +10,7 @@ import { MAX_LINK_DAYS } from "@/lib/expiry";
 import { MuxApiError, checkPlaybackId } from "@/lib/mux";
 import { cancelUpload, checkUpload, dismissFailure, startUpload } from "@/lib/mux-uploads";
 import { NOTE_MAX_LENGTH } from "@/lib/note-form";
+import { MAX_VIDEO_SECONDS } from "@/lib/video";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
   activatePricingVersionAction,
@@ -322,6 +323,19 @@ describe("setManagedAction and saveDetailsAction", () => {
     }
     expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId } })).viewDaysOverride).toBe(MAX_LINK_DAYS);
   });
+
+  it("refuses a clinic name over 120 characters without saving or asking Clerk, and takes exactly 120", async () => {
+    const clinicId = await makeClinic();
+    signInAs("user_staff", { pulseStaff: true });
+    const before = (await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId } })).name;
+    const details = (name: string) => form({ clinicId, name, phone: "", logoUrl: "", noticeText: "", viewDaysOverride: "" });
+
+    expect(await saveDetailsAction(null, details("N".repeat(121)))).toEqual({ error: "Keep the clinic's name under 120 characters." });
+    expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId } })).name).toBe(before);
+
+    expect(await saveDetailsAction(null, details("N".repeat(120)))).toEqual({ ok: "Details saved." });
+    expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId } })).name).toBe("N".repeat(120));
+  });
 });
 
 describe("saveDetailsAction and the clinic's branding", () => {
@@ -601,6 +615,21 @@ describe("saveVideoAction", () => {
     expect(await saveVideoAction(null, form({ ...fields, durationSeconds: "4:70" }))).toMatchObject({ error: expect.any(String) });
     expect(await saveVideoAction(null, form({ ...fields, category: "ELBOW" }))).toMatchObject({ error: expect.any(String) });
     expect(await saveVideoAction(null, form({ ...fields, id: "no-such-video" }))).toEqual({ error: "That video no longer exists." });
+  });
+
+  it("refuses a length over four hours (a typo like 41200 for 4:12), with nothing written, and takes exactly four hours", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    const typo = { ...fields, isPublished: "", title: `Vitest too long ${randomBytes(3).toString("hex")}` };
+    expect(await saveVideoAction(null, form({ ...typo, durationSeconds: "41200" }))).toEqual({
+      error: "That length is over 4 hours. Type it as minutes and seconds, like 4:12, or leave it empty.",
+    });
+    expect(await saveVideoAction(null, form({ ...typo, durationSeconds: "4:00:01" }))).toMatchObject({ error: expect.stringContaining("over 4 hours") });
+    expect(await prisma.video.count({ where: { title: typo.title } })).toBe(0);
+    // Exactly four hours is accepted (a new video ends in a redirect to its page).
+    await expect(saveVideoAction(null, form({ ...typo, durationSeconds: "4:00:00" }))).rejects.toMatchObject({ digest: expect.stringContaining("NEXT_REDIRECT") });
+    const saved = await prisma.video.findFirst({ where: { title: typo.title }, select: { id: true, durationSeconds: true } });
+    if (saved) createdVideoIds.push(saved.id);
+    expect(saved?.durationSeconds).toBe(MAX_VIDEO_SECONDS);
   });
 
   describe("chapters", () => {

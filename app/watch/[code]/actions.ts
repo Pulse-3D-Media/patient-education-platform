@@ -45,9 +45,14 @@ export async function recordPlay(code: string): Promise<{ recorded: boolean; pla
   try {
     const result = await recordSharePlay(clean);
     if (!result.recorded || !result.firstPlay) return { recorded: result.recorded };
+    // Read the link again and judge it as refreshPlayback does: the play was
+    // recorded a moment ago, but the video may have been unpublished (or the
+    // link run out) since, and then no fresh grant is handed out.
+    const now = new Date();
     const share = await getShareByCode(clean);
-    if (!share || !usesProtectedPlayback(share.video) || !share.disclaimerFirstAcceptedAt) return { recorded: true };
-    return { recorded: true, playback: playbackForShare(share, new Date()) };
+    if (!share || isExpired(share, now) || !share.video.isPublished) return { recorded: true };
+    if (!usesProtectedPlayback(share.video) || !share.disclaimerFirstAcceptedAt) return { recorded: true };
+    return { recorded: true, playback: playbackForShare(share, now) };
   } catch (error) {
     // The kind of failure goes to the server log, never to the patient's
     // screen, and never the error itself: its message could hold the code.

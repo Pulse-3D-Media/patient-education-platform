@@ -17,6 +17,14 @@ import type { Video } from "@prisma/client";
  * Mux playback id has nothing to play, and cannot be published.
  */
 
+/**
+ * The longest length a video may be given on /pulse/videos: four hours. Our
+ * animations run minutes; a bigger number is a typo (41200 typed for 4:12),
+ * and it would otherwise stretch every signed address for that video (see
+ * MAX_TOKEN_LIFETIME_MS in lib/playback-source.ts, which caps it anyway).
+ */
+export const MAX_VIDEO_SECONDS = 4 * 60 * 60;
+
 /** The fields that say where a video lives. */
 export type VideoSourceFacts = Pick<Video, "videoUrl" | "muxPlaybackId">;
 

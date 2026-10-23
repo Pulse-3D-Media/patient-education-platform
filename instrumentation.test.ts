@@ -91,7 +91,7 @@ describe("onRequestError", () => {
     const message = vi.mocked(sendEmail).mock.calls[0][0];
     expect(message.to).toEqual(["evan@example.test", "van@example.test"]);
     expect(message.subject).toBe("Pulse 3D app: an error on production (/watch/[code])");
-    expect(message.idempotencyKey).toMatch(/^error-alert-1234567890-\d+$/);
+    expect(message.idempotencyKey).toMatch(/^error-alert-1234567890-[\w-]+-\d+$/);
     expect(message.text).toContain("commit abcdef1");
     expect(message.text).not.toContain(SHARE_CODE);
     expect(message.text).not.toContain(CONNECTION_STRING);
@@ -100,7 +100,7 @@ describe("onRequestError", () => {
     // A different error is a different message.
     await onRequestError(failure("9876543210"), request, context);
     expect(sendEmail).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(sendEmail).mock.calls[1][0].idempotencyKey).toMatch(/^error-alert-9876543210-\d+$/);
+    expect(vi.mocked(sendEmail).mock.calls[1][0].idempotencyKey).toMatch(/^error-alert-9876543210-[\w-]+-\d+$/);
 
     // The first error again once its window has passed: a new message, a new key.
     vi.setSystemTime(new Date(NOW.getTime() + ALERT_WINDOW_MS));

@@ -167,6 +167,17 @@ describe("verifyMuxWebhook", () => {
     expect(() => verifyMuxWebhook(respaced, sign(BODY), SECRET, NOW)).toThrow(MuxSignatureError);
   });
 
+  it("checks the signature over the timestamp exactly as written in the header, never a number read back out of it", () => {
+    const t = Math.floor(NOW.getTime() / 1000);
+    const over = (text: string) => createHmac("sha256", SECRET).update(`${text}.${BODY}`).digest("hex");
+    // Signed over "0<t>": the header says the same, so it is accepted.
+    expect(verifyMuxWebhook(BODY, `t=0${t},v1=${over(`0${t}`)}`, SECRET, NOW)).toEqual(JSON.parse(BODY));
+    // A signature over "<t>" does not stand for a header that says "0<t>", nor "<t>.0" or "<t>e0".
+    for (const written of [`0${t}`, `${t}.0`, `${t}e0`, ` ${t}`]) {
+      expect(() => verifyMuxWebhook(BODY, `t=${written},v1=${over(String(t))}`, SECRET, NOW), written).toThrow(MuxSignatureError);
+    }
+  });
+
   it("refuses a notification older than the tolerance, as a replay, and takes one just inside it", () => {
     const old = new Date(NOW.getTime() - (WEBHOOK_TOLERANCE_SECONDS + 1) * 1000);
     expect(() => verifyMuxWebhook(BODY, sign(BODY, { at: old }), SECRET, NOW)).toThrow(/too old/);

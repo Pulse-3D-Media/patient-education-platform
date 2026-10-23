@@ -14,6 +14,7 @@ import { getActivePricing } from "./db/pricing";
 import { categoryLabel, formatCents, quote } from "./pricing";
 import { PULSE_CONTACT_WORDS } from "./brand";
 import type { CheckoutGateway, FetchSubscription } from "./stripe";
+import { STRIPE_CHECKOUT_PREFIX } from "./stripe-pages";
 
 /**
  * Self-serve checkout: everything between "an admin pressed Continue to
@@ -84,8 +85,6 @@ export type CheckoutDeps = {
 };
 
 export const CHECKOUT_CLOSED_MESSAGE = "Choosing a plan here is not open yet. Until it is, Pulse 3D sets clinics up by hand.";
-
-const STRIPE_CHECKOUT_PREFIX = "https://checkout.stripe.com/";
 
 export async function startCheckout(args: {
   clinicId: string;

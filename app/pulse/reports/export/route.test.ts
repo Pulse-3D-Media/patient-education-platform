@@ -95,7 +95,7 @@ describe("a download", () => {
     expect(response.headers.get("Content-Disposition")).toBe(`attachment; filename="pulse-report-${TOKEN}-ortho-surgeons-2025-03-01-to-2025-03-31.csv"`);
     const text = await response.text();
     expect(text.replace(/^﻿/, "").trimEnd().split("\r\n")).toEqual([
-      "Surgeon,Links made,Played,Played rate (%),Play starts,Renewal requests,Renewals",
+      '"Surgeon","Links made","Played","Played rate (%)","Play starts","Renewal requests","Renewals"',
       '"Dr. Jane Smith, DO",3,2,67,3,0,0',
     ]);
     expect(text).not.toContain(SURGEON);
@@ -105,10 +105,10 @@ describe("a download", () => {
   it("is one clinic's procedures, or the whole platform's clinics with this clinic on it", async () => {
     fakeClerk.signIn(STAFF, null);
     const procedures = await (await get(`table=procedures&clinic=${clinicId}&${MARCH}`)).text();
-    expect(procedures).toContain(`${TOKEN} Knee,Knee,No,3,2,67,3,0,0`);
+    expect(procedures).toContain(`"${TOKEN} Knee","Knee","No",3,2,67,3,0,0`);
 
     const clinics = await (await get(`table=clinics&${MARCH}`)).text();
-    expect(clinics).toContain(`"${TOKEN}, ""Ortho""",Active,No,0,0,2,3,2,67,3,0,0`);
+    expect(clinics).toContain(`"${TOKEN}, ""Ortho""","Active","No",0,0,2,3,2,67,3,0,0`);
     const categories = await get(`table=categories&days=90`);
     expect(categories.status).toBe(200);
     expect(categories.headers.get("Content-Disposition")).toMatch(/filename="pulse-report-categories-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv"/);

@@ -89,14 +89,19 @@ export const ALERT_WINDOW_MS = 10 * 60_000;
 
 /**
  * The key that makes repeated alerts for one error harmless: the same for
- * the same digest within the same ten-minute window. Resend keeps the
- * first message sent under a key and answers a repeat with it (see
- * lib/email.ts), so every server sending the same key in that window
- * results in one email.
+ * the same error, at the same route and of the same kind, within the same
+ * ten-minute window. Resend keeps the first message sent under a key and
+ * answers a repeat with it (see lib/email.ts), so every server sending the
+ * same key in that window results in one email.
+ *
+ * The route and the kind are part of the key because an error with no
+ * digest falls back to its class name ("Error", "TypeError"), and without
+ * them one plain Error on the patient page would hide a different one in
+ * Billing for the whole window.
  */
 export function alertKey(report: ErrorReport, now: Date): string {
   const bucket = Math.floor(now.getTime() / ALERT_WINDOW_MS);
-  const what = (report.digest ?? report.errorName).replace(/[^\w-]/g, "_");
+  const what = `${report.digest ?? report.errorName}-${report.route}-${report.kind}`.replace(/[^\w-]/g, "_").slice(0, 200);
   return `error-alert-${what}-${bucket}`;
 }
 

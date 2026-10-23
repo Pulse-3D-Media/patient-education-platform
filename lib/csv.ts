@@ -4,8 +4,11 @@
  * (app/pulse/reports/export/route.ts).
  *
  * Three things a plain join(",") would get wrong:
- *   - A cell with a comma, a quote or a line break is wrapped in quotes,
- *     with any quote inside doubled ("Smith, Jane" stays one cell).
+ *   - Every text cell is wrapped in quotes, with any quote inside doubled
+ *     ("Smith, Jane" stays one cell). Not only cells with a comma: a
+ *     spreadsheet set to a language that separates with semicolons would
+ *     otherwise split "Smith; Jane" in two. Numbers and empty cells are
+ *     left bare, so a number stays a number.
  *   - A cell that starts with = + - @ (or a tab or carriage return) is a
  *     formula to Excel and Google Sheets, so a clinic named "=HYPERLINK(...)"
  *     could run something when the file is opened. Such a cell gets a ' in
@@ -24,7 +27,7 @@ export function csvCell(value: CsvCell): string {
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
   let text = value;
   if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 /** A whole file: a heading row, then the rows. */

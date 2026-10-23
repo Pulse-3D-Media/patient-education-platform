@@ -12,3 +12,20 @@ export const STRIPE_INVOICE_PREFIX = "https://invoice.stripe.com/";
 
 /** Stripe's billing page: card, invoices, cancelling. */
 export const STRIPE_PORTAL_PREFIX = "https://billing.stripe.com/";
+
+/** Stripe's payment page for a first plan (Stripe Checkout). */
+export const STRIPE_CHECKOUT_PREFIX = "https://checkout.stripe.com/";
+
+/**
+ * Where the plan picker may send the browser after the server answers.
+ * Either one of our own pages (a path with a single leading "/", such as
+ * the return page; never "//", which a browser reads as another site), or
+ * Stripe's payment page. Anything else is null and the browser stays put:
+ * the server already checks the address, and this is the browser checking
+ * again, as BillingButtons.tsx does for Stripe's other two pages.
+ */
+export function checkoutDestination(address: string): { kind: "here"; path: string } | { kind: "stripe"; url: string } | null {
+  if (address.startsWith("/") && !address.startsWith("//") && !address.startsWith("/\\")) return { kind: "here", path: address };
+  if (address.startsWith(STRIPE_CHECKOUT_PREFIX)) return { kind: "stripe", url: address };
+  return null;
+}

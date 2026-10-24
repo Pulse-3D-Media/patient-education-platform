@@ -744,7 +744,8 @@ export async function updateClinicDetails(clinicId: string, details: ClinicDetai
  *
  * `logoUrl` is optional on purpose. Pulse staff can set a logo address;
  * the clinic's own admin cannot (their logo is the one they upload to
- * their Clerk organization), so the admin's save leaves it out and the
+ * their Clerk organization from /admin/branding, recorded with
+ * recordUploadedLogo below), so the admin's save leaves it out and the
  * stored logo is not touched. There is one logo column and no second store:
  * a logo uploaded in Clerk is copied over it on the clinic's next sign-in
  * (upsertClinicForClerkOrg above), and a Pulse-set one stays only while the
@@ -803,6 +804,60 @@ export async function updateClinicBranding(clinicId: string, branding: ClinicBra
         changeWords("phone", formatUsPhone(before.phone) || null, formatUsPhone(branding.phone) || null),
       ].filter((part): part is string => part !== null);
       return parts.length > 0 ? `Branding changed: ${parts.join("; ")}.` : null;
+    },
+    changedBy,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The clinic's name and logo, changed by its own office admin on
+// /admin/branding. Both live on the clinic's Clerk organization, and the
+// action changes Clerk first; these then copy the new value onto our row and
+// log it in the same transaction, so the log says who did it. (Without them
+// the next signed-in request would copy the change over anyway, through
+// upsertClinicForClerkOrg above, but with no log entry.)
+// ---------------------------------------------------------------------------
+
+/**
+ * The Clerk organization this clinic signs in with, read from its own row,
+ * or null if it has none (a clinic made by hand before its organization).
+ */
+export async function getClerkOrgIdForClinic(clinicId: string): Promise<string | null> {
+  const clinic = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { clerkOrgId: true } });
+  return clinic?.clerkOrgId ?? null;
+}
+
+/**
+ * Copy a new clinic name onto the row and log it, as "Details changed: name
+ * changed from ... to ...", the same words a rename on /pulse writes. A name
+ * that is already the stored one writes nothing.
+ */
+export async function recordClinicName(clinicId: string, name: string, changedBy: string) {
+  return changeClinicWithLog(
+    clinicId,
+    { name },
+    (before) => {
+      const part = changeWords("name", quoted(before.name), quoted(name));
+      return part ? `Details changed: ${part}.` : null;
+    },
+    changedBy,
+  );
+}
+
+/**
+ * Copy the address of a logo just uploaded to Clerk onto the row and log
+ * it. The address itself is long and says nothing to a reader, so the entry
+ * says only that a new logo was uploaded (and that it replaced one, or the
+ * one Pulse 3D had set). An address that is already the stored one writes
+ * nothing.
+ */
+export async function recordUploadedLogo(clinicId: string, logoUrl: string, changedBy: string) {
+  return changeClinicWithLog(
+    clinicId,
+    { logoUrl },
+    (before) => {
+      if (before.logoUrl === logoUrl) return null;
+      return before.logoUrl ? "Branding changed: a new logo was uploaded, replacing the old one." : "Branding changed: a logo was uploaded.";
     },
     changedBy,
   );

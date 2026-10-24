@@ -39,7 +39,8 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("@clerk/nextjs", () => ({
   UserButton: () => <span data-testid="user-button" />,
   SignOutButton: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  OrganizationProfile: Object.assign(() => <span />, { Page: () => null }),
+  // If anything drew Clerk's organization panel again, this mark would show in the page.
+  OrganizationProfile: Object.assign(() => <span data-clerk-panel />, { Page: () => null }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -382,15 +383,19 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).not.toContain("managed by Pulse 3D");
   });
 
-  it("gets the Branding page: where the logo is changed, the colour, font and phone form, and no box to type a logo address", async () => {
+  it("gets the Branding page: the name and logo forms, the colour, font and phone form, and no box to type a logo address", async () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(BrandingPage, "/admin/branding");
 
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/branding"/);
-    // The logo is explained, not uploaded here: it lives on the Clerk organization.
+    // The name and the logo are changed here, on our own forms: the clinic's name in its box, and a file box for pictures only.
     expect(html).toContain("No logo yet");
-    expect(html).toContain("General, then Update profile");
-    expect(html).toContain('href="/admin/people"');
+    expect(html).toContain('name="name" value="Vitest pages clinic (active)"');
+    expect(html).toContain("Save name");
+    expect(html).toMatch(/<input[^>]*name="logo"[^>]*type="file"|<input[^>]*type="file"[^>]*name="logo"/);
+    expect(html).toContain('accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"');
+    expect(html).toContain("Upload logo");
+    expect(html).not.toContain("Update profile");
     // The form: one colour, the six fonts, the phone.
     expect(html).toContain('name="brandColor"');
     expect(html.match(/name="brandFont"/g)).toHaveLength(6);
@@ -586,6 +591,10 @@ describe("who a link is from, on People and on the pamphlet", () => {
       expect(html).toContain("Jane Smith, PA-C");
       expect(html).toContain("Dr. Vi Test");
       expect(html).toContain("Change the name patients see for Jane Smith");
+      // Clerk's organization panel is gone: its Members tab went around our seats and its General tab could delete the clinic.
+      expect(html).not.toContain("Clinic name and logo");
+      expect(html).not.toContain("clerk-heading");
+      expect(html).not.toContain("data-clerk-panel");
       expect(html).not.toContain("Change the name patients see for Olive Owner");
     } finally {
       quiet.mockRestore();

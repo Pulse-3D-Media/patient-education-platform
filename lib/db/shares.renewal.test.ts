@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, DAY_MS, renewalState } from "../expiry";
 import { prisma } from "./client";
 import { getSettings } from "./settings";
-import { createShare, listRenewalRequestsForClinic, recordSharePlay, renewShareForClinic, requestShareRenewal } from "./shares";
+import { createShare, listRenewalRequestsForClinic, recordSharePlay, renewShareForClinic, requestShareRenewal, ShareRefusedError } from "./shares";
 
 /**
  * Pausing and reactivation against the real test database.
@@ -319,6 +319,68 @@ describe("the clinic turning a link back on", () => {
   });
 });
 
+// Decided by Evan on 2026-10-08 (audit lead 5): turning a paused link back on gives the patient new
+// time, so it follows the plan like making a link does. createShare is the control in each case: the
+// sibling writer refuses the same video in the same state, so the two cannot disagree.
+describe("the clinic turning a link back on follows the plan", () => {
+  it("refuses a link whose category has left the clinic's plan, writing nothing, and turns it back on once the category is back", { timeout: 30_000 }, async () => {
+    const c = await makeClinic();
+    const v = await makeVideo();
+    const code = await makePlayed(c, v);
+    await prisma.clinic.update({ where: { id: c }, data: { categories: [] } });
+
+    const before = await read(code);
+    const notesBefore = (await notesFor(c)).length;
+    const outcome = await renewShareForClinic(c, await idOf(code), "Pat Lee", addDays(T, 11));
+    expect(outcome).toMatchObject({ ok: false, reason: "not-on-plan" });
+    expect(outcome.message).toBe("This video is no longer on your plan, so this link can't be turned back on.");
+    expect(await read(code)).toEqual(before);
+    expect((await notesFor(c)).length).toBe(notesBefore);
+
+    // The control: making a new link for the same video is refused too.
+    await expect(createShare(c, v, { now: addDays(T, 11) })).rejects.toThrow(ShareRefusedError);
+
+    // The link itself was never touched, so it can be turned back on once the category is on the plan again.
+    await prisma.clinic.update({ where: { id: c }, data: { categories: ["KNEE"] } });
+    expect(await renewShareForClinic(c, await idOf(code), "Pat Lee", addDays(T, 11))).toMatchObject({ ok: true, renewalsUsed: 1 });
+  });
+
+  it("refuses a placeholder link once the clinic is set to finished animations only, writing nothing", { timeout: 30_000 }, async () => {
+    const c = await makeClinic();
+    const v = await makeVideo(); // a published Knee placeholder; Knee stays on the plan
+    const code = await makePlayed(c, v);
+    await prisma.clinic.update({ where: { id: c }, data: { showPlaceholders: false } });
+
+    const before = await read(code);
+    const outcome = await renewShareForClinic(c, await idOf(code), "Pat Lee", addDays(T, 11));
+    expect(outcome).toMatchObject({ ok: false, reason: "placeholder-hidden" });
+    expect(outcome.message).toContain("can't be turned back on");
+    expect(await read(code)).toEqual(before);
+
+    await expect(createShare(c, v, { now: addDays(T, 11) })).rejects.toThrow(ShareRefusedError);
+  });
+
+  it("still turns back on a finished animation for a clinic that hides placeholders", { timeout: 30_000 }, async () => {
+    const c = await makeClinic({ showPlaceholders: false });
+    const real = await prisma.video.create({
+      data: { title: `Vitest renewal real video ${tag()}`, category: "KNEE", videoUrl: "https://example.com/vitest.mp4", isPublished: true, isPlaceholder: false },
+      select: { id: true },
+    });
+    createdVideoIds.push(real.id);
+    const code = await makePlayed(c, real.id);
+    expect(await renewShareForClinic(c, await idOf(code), "Pat Lee", addDays(T, 11))).toMatchObject({ ok: true, renewalsUsed: 1 });
+  });
+
+  it("leaves a link that is still working alone: it runs to its own deadline after the category leaves the plan", async () => {
+    const c = await makeClinic();
+    const v = await makeVideo();
+    const code = await makePlayed(c, v);
+    await prisma.clinic.update({ where: { id: c }, data: { categories: [] } });
+    expect(await recordSharePlay(code, addDays(T, 9))).toEqual({ recorded: true, firstPlay: false });
+    expect((await read(code)).expiresAt).toEqual(addDays(T, 10));
+  });
+});
+
 describe("a legacy link", () => {
   it("behaves exactly as before: its fixed date is final, plays after it are not counted, and it is never paused", async () => {
     const code = await makeLegacy(clinic, video, addDays(T, -1));
@@ -377,5 +439,19 @@ describe("the overview's waiting list", () => {
 
     await prisma.share.update({ where: { code }, data: { renewalsUsed: max } });
     expect(await listRenewalRequestsForClinic(mine, 10, paused)).toHaveLength(0);
+  });
+
+  it("marks, rather than offers, a link the plan no longer allows: off the plan, or a placeholder the clinic is not shown", { timeout: 30_000 }, async () => {
+    const mine = await makeClinic();
+    const code = await makePlayed(mine, video);
+    const paused = addDays(T, 11);
+    expect((await requestShareRenewal(code, paused)).kind).toBe("requested");
+    expect(await listRenewalRequestsForClinic(mine, 10, paused)).toMatchObject([{ planBlock: null, category: "KNEE" }]);
+
+    await prisma.clinic.update({ where: { id: mine }, data: { showPlaceholders: false } });
+    expect(await listRenewalRequestsForClinic(mine, 10, paused)).toMatchObject([{ planBlock: "placeholder-hidden" }]);
+
+    await prisma.clinic.update({ where: { id: mine }, data: { categories: [], showPlaceholders: true } });
+    expect(await listRenewalRequestsForClinic(mine, 10, paused)).toMatchObject([{ planBlock: "not-on-plan", category: "KNEE" }]);
   });
 });

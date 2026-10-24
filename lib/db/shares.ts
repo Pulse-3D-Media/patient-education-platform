@@ -1,6 +1,6 @@
-import { Prisma } from "@prisma/client";
+import { type Category, Prisma } from "@prisma/client";
 import { createHash, randomInt } from "crypto";
-import { accessRefusalMessage, decideVideoAccess, type AccessDecision, type AccessReason } from "../access";
+import { accessRefusalMessage, decideVideoAccess, planBlockFor, planBlockMessage, type AccessDecision, type AccessReason, type PlanBlock } from "../access";
 import {
   addDays,
   canClaimFirstPlay,
@@ -17,7 +17,7 @@ import {
 } from "../expiry";
 import { isClerkUserId } from "../seats";
 import { effectiveSenderName } from "../sender-name";
-import { lockClinicAccess, lockQrCodeForIssue, lockSenderSeat, lockShareForRenewal, lockVideoFacts } from "./access";
+import { getClinicAccess, lockClinicAccess, lockQrCodeForIssue, lockSenderSeat, lockShareForRenewal, lockVideoFacts } from "./access";
 import { prisma } from "./client";
 import { getSettings, lockSettings } from "./settings";
 
@@ -698,7 +698,7 @@ export async function acceptShareDisclaimer(
 export async function getShareByIdForClinic(clinicId: string, shareId: string) {
   return prisma.share.findFirst({
     where: { id: shareId, clinicId },
-    include: { video: { select: { title: true, isPlaceholder: true, isPublished: true } }, clinic: { select: { name: true } } },
+    include: { video: { select: { title: true, isPlaceholder: true, isPublished: true, category: true } }, clinic: { select: { name: true } } },
   });
 }
 
@@ -847,7 +847,7 @@ export async function requestShareRenewal(code: string, now: Date = new Date()):
 /** What renewShareForClinic() did, or why it did nothing. Every message is a plain sentence for the admin's screen. */
 export type RenewalOutcome =
   | { ok: true; expiresAt: Date; renewalsUsed: number; renewalsLeft: number; message: string }
-  | { ok: false; reason: "no-such-link" | "clinic-closed" | "working" | "unpublished" | "finished"; message: string };
+  | { ok: false; reason: "no-such-link" | "clinic-closed" | "working" | "unpublished" | "finished" | PlanBlock; message: string };
 
 /** "Oct 6, 2026", in Utah time like the rest of the admin area, for the log entry and the message. */
 function dayWords(date: Date): string {
@@ -881,7 +881,10 @@ function dayWords(date: Date): string {
  * by one, the patient's request is cleared (so the link is not listed as
  * waiting again the moment it next pauses), and one entry goes in the
  * clinic log, in the same transaction. A working link, a finished one, a
- * legacy link, one nobody played, one whose video is not published, or a
+ * legacy link, one nobody played, one whose video is not published, a
+ * video the clinic's plan no longer allows (its category is off the plan, or
+ * it is a placeholder the clinic is not shown: decided by Evan on
+ * 2026-10-08), or a
  * clinic that is not open: nothing is written, and the reason is returned.
  */
 export async function renewShareForClinic(clinicId: string, shareId: string, actorName: string, now: Date = new Date()): Promise<RenewalOutcome> {
@@ -912,6 +915,9 @@ export async function renewShareForClinic(clinicId: string, shareId: string, act
         message: "The video behind this link is not available right now, so the link cannot be turned back on. Ask Pulse 3D about the video.",
       };
     }
+    // The plan, read under the clinic's and the video's locks: the same rule createShare() asks.
+    const block = planBlockFor(access, { category: share.videoCategory, isPublished: share.videoIsPublished, isPlaceholder: share.videoIsPlaceholder });
+    if (block) return { ok: false, reason: block, message: planBlockMessage(block) };
 
     const expiresAt = expiryAfterRenewal({ daysAfterFirstPlay: state.daysPerRenewal }, now);
     const renewalsUsed = share.renewalsUsed + 1;
@@ -958,6 +964,10 @@ export type RenewalRequestRow = {
   requestedAt: Date;
   renewalsLeft: number;
   daysPerRenewal: number;
+  /** The video's category, for the "Add to your plan" link when the plan stops this link. */
+  category: Category;
+  /** Null when the link can be turned back on; otherwise which part of the plan stops it (planBlockFor). The overview marks such a link rather than offering it. */
+  planBlock: PlanBlock | null;
 };
 
 /**
@@ -966,10 +976,13 @@ export type RenewalRequestRow = {
  * finds a request when no email reached them (no email service set up, or
  * an email missed). A link drops off the moment it is turned back on
  * (the request is cleared then) or can no longer be (finished). Bounded:
- * at most `limit` rows are read.
+ * at most `limit` rows are read. A link the plan no longer allows (its
+ * category off the plan, or a placeholder the clinic is not shown) stays on
+ * the list, marked with planBlock, so the admin can see why it cannot be
+ * turned back on and what would change that.
  */
 export async function listRenewalRequestsForClinic(clinicId: string, limit: number, now: Date = new Date()): Promise<RenewalRequestRow[]> {
-  const settings = await getSettings();
+  const [settings, access] = await Promise.all([getSettings(), getClinicAccess(clinicId)]);
   const allowed = renewalsAllowed(settings);
   const rows = await prisma.share.findMany({
     where: {
@@ -991,7 +1004,7 @@ export async function listRenewalRequestsForClinic(clinicId: string, limit: numb
       firstPlayedAt: true,
       daysAfterFirstPlay: true,
       renewalsUsed: true,
-      video: { select: { title: true, isPlaceholder: true } },
+      video: { select: { title: true, isPlaceholder: true, category: true } },
     },
     orderBy: { renewalRequestedAt: "desc" },
     take: Math.max(1, Math.min(limit, 20)),
@@ -1011,6 +1024,11 @@ export async function listRenewalRequestsForClinic(clinicId: string, limit: numb
       requestedAt: row.renewalRequestedAt,
       renewalsLeft: state.renewalsLeft,
       daysPerRenewal: state.daysPerRenewal,
+      category: row.video.category,
+      // No clinic row reads as nothing on the plan: the reactivation itself would refuse.
+      planBlock: access
+        ? planBlockFor(access, { category: row.video.category, isPublished: true, isPlaceholder: row.video.isPlaceholder })
+        : "not-on-plan",
     });
   }
   return waiting;

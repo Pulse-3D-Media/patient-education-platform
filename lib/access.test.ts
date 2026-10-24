@@ -5,6 +5,8 @@ import {
   categoryState,
   decideVideoAccess,
   inLibraryOrder,
+  planBlockFor,
+  planBlockMessage,
   visibleCount,
   type AccessReason,
   type ClinicAccess,
@@ -162,5 +164,31 @@ describe("visibleCount", () => {
     expect(visibleCount(access(), { real: 2, placeholder: 3 })).toBe(5);
     expect(visibleCount(access({ showPlaceholders: false }), { real: 2, placeholder: 3 })).toBe(2);
     expect(visibleCount(access(), undefined)).toBe(0);
+  });
+});
+
+describe("planBlockFor, for turning a paused link back on", () => {
+  it("names the part of the plan that stops it, and agrees with decideVideoAccess", () => {
+    expect(planBlockFor(access(), video())).toBeNull();
+    expect(planBlockFor(access({ categories: ["HIP"] }), video())).toBe("not-on-plan");
+    expect(planBlockFor(access({ categories: [] }), video())).toBe("not-on-plan");
+    expect(planBlockFor(access({ showPlaceholders: false }), video({ isPlaceholder: true }))).toBe("placeholder-hidden");
+    expect(planBlockFor(access({ showPlaceholders: false }), video())).toBeNull();
+    // Off the plan wins over the placeholder setting, in decideVideoAccess's order.
+    expect(planBlockFor(access({ categories: [], showPlaceholders: false }), video({ isPlaceholder: true }))).toBe("not-on-plan");
+    for (const block of ["not-on-plan", "placeholder-hidden"] as const) {
+      expect(decideVideoAccess(access(block === "not-on-plan" ? { categories: [] } : { showPlaceholders: false }), video({ isPlaceholder: true }))).toEqual({ allowed: false, reason: block });
+    }
+  });
+
+  it("leaves the clinic being closed and the video unpublished to their own refusals", () => {
+    expect(planBlockFor(access({ open: false }), video())).toBeNull();
+    expect(planBlockFor(access(), video({ isPublished: false }))).toBeNull();
+  });
+
+  it("says why in one plain sentence", () => {
+    expect(planBlockMessage("not-on-plan")).toBe("This video is no longer on your plan, so this link can't be turned back on.");
+    expect(planBlockMessage("placeholder-hidden")).toContain("finished animations only");
+    for (const block of ["not-on-plan", "placeholder-hidden"] as const) expect(planBlockMessage(block)).not.toMatch(/—|error|invalid/i);
   });
 });

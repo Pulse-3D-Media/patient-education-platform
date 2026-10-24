@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import { OrganizationProfile } from "@clerk/nextjs";
 import Link from "next/link";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
@@ -31,7 +30,12 @@ import { AdminSwitch, InviteForm, OwnerHandoff, PatientNameEditor, RemoveButton,
  *   3. Invite someone (holds a seat until accepted), and the open invitations
  *      with Revoke.
  *   4. For the owner: hand the account to another admin.
- *   5. Clerk's own organization panel, for the clinic's name and logo.
+ *
+ * Clerk's own organization panel is NOT on this page (taken off in October
+ * 2026): its Members tab invited, removed and changed roles around our seat
+ * holds, owner protections and clinic log, and its General tab could offer
+ * to delete the organization. The clinic's name and logo are changed on
+ * Branding, on our own screen.
  *
  * Every button asks a Server Action (actions.ts), which checks on the server
  * who is asking and goes through lib/seat-changes.ts. Opening this page also
@@ -136,7 +140,7 @@ export default async function PeoplePage() {
           )}
           {board.ownerNotAdmin && (
             <p className={`${NOTICE} text-warn`}>
-              The account owner&apos;s admin was switched off in the organization panel. The owner should always have admin: switch it back on below.
+              The account owner&apos;s admin was switched off outside this page. The owner should always have admin: switch it back on below.
             </p>
           )}
           {summary.overBy > 0 && (
@@ -257,21 +261,6 @@ export default async function PeoplePage() {
           <OwnerHandoff admins={otherAdmins} />
         </section>
       )}
-
-      <section aria-labelledby="clerk-heading" className="mt-12">
-        <h2 id="clerk-heading" className="text-lg font-semibold">
-          Clinic name and logo
-        </h2>
-        <p className="mt-1 mb-4 max-w-2xl text-ink-soft">
-          Change your clinic&apos;s name or logo under General. Invite, remove and admin changes belong in the sections above: those look after your seats
-          and the account owner, and this panel does not.
-        </p>
-        {/* Hash routing keeps the panel on this one page. General first, since it is what this panel is here for. */}
-        <OrganizationProfile routing="hash">
-          <OrganizationProfile.Page label="general" />
-          <OrganizationProfile.Page label="members" />
-        </OrganizationProfile>
-      </section>
     </AdminFrame>
   );
 }

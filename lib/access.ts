@@ -117,6 +117,34 @@ export function accessRefusalMessage(reason: AccessReason): string {
 }
 
 /**
+ * The two parts of the plan that stop a paused patient link being turned
+ * back on (decided by Evan on 2026-10-08): its video's category is no longer
+ * on the clinic's plan, or it is a placeholder and the clinic is set to
+ * finished animations only. Turning a link back on gives the patient new
+ * time, so it follows the plan like making a new link does. A clinic that is
+ * not open, and an unpublished video, have their own refusals and sentences
+ * on the reactivation path, so they are not one of these.
+ */
+export type PlanBlock = "not-on-plan" | "placeholder-hidden";
+
+/** Which of the two (if either) stops this clinic turning back on a link to this video. Asks decideVideoAccess, so it can never disagree with making a link. */
+export function planBlockFor(access: ClinicAccess, video: VideoFacts): PlanBlock | null {
+  const decision = decideVideoAccess({ ...access, open: true }, video);
+  if (decision.allowed) return null;
+  return decision.reason === "not-on-plan" || decision.reason === "placeholder-hidden" ? decision.reason : null;
+}
+
+/** The sentence an office admin reads when the plan stops a link being turned back on. */
+export function planBlockMessage(block: PlanBlock): string {
+  switch (block) {
+    case "not-on-plan":
+      return "This video is no longer on your plan, so this link can't be turned back on.";
+    case "placeholder-hidden":
+      return "This is a placeholder animation, and your clinic is set to use finished animations only, so this link can't be turned back on.";
+  }
+}
+
+/**
  * How many published videos a category holds, split by kind. Both numbers
  * are needed to tell the states apart: a category can hold placeholders a
  * clinic is not shown, which is not the same as holding nothing.

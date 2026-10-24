@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
-import { PLACEHOLDER_BADGE, PRIMARY_BUTTON } from "@/components/ui/styles";
+import { PLACEHOLDER_BADGE, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { ADMIN_SECTIONS } from "@/lib/admin-nav";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -139,9 +139,19 @@ export default async function AdminOverviewPage() {
                     {formatDate(request.requestedAt)} &middot; {request.renewalsLeft} {request.renewalsLeft === 1 ? "renewal" : "renewals"} left
                   </p>
                 </div>
-                <Link href={`/admin/reactivate/${request.id}`} className={PRIMARY_BUTTON}>
-                  Turn it back on
-                </Link>
+                {request.planBlock ? (
+                  // The plan no longer allows this video, so the link is marked, not offered. The page behind it says why and what would change that.
+                  <div className="flex flex-col gap-1 sm:items-end">
+                    <p className="text-sm text-warn">{request.planBlock === "not-on-plan" ? "Not on your plan" : "Placeholder hidden for your clinic"}</p>
+                    <Link href={`/admin/reactivate/${request.id}`} className={SECONDARY_BUTTON}>
+                      See why
+                    </Link>
+                  </div>
+                ) : (
+                  <Link href={`/admin/reactivate/${request.id}`} className={PRIMARY_BUTTON}>
+                    Turn it back on
+                  </Link>
+                )}
               </li>
             ))}
           </ul>

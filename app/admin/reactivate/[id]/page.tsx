@@ -4,8 +4,13 @@ import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
+import { planBlockFor, planBlockMessage } from "@/lib/access";
+import { addToPlanHref, addToPlanOffer } from "@/lib/add-to-plan";
+import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
+import { getClinicAccess } from "@/lib/db/access";
+import { getCategoryConfigs } from "@/lib/db/category-config";
 import { getSettings } from "@/lib/db/settings";
 import { getShareByIdForClinic } from "@/lib/db/shares";
 import { finishedLinkMessage, renewalState } from "@/lib/expiry";
@@ -40,6 +45,12 @@ import { ReactivateForm } from "./ReactivateForm";
  * play starts, and where it stands (paused with so many renewals left,
  * working until a date, or finished and why). The rule is renewalState()
  * in lib/expiry.ts, the same one the patient page and the write use.
+ *
+ * A paused link whose video the clinic's plan no longer allows (its category
+ * is off the plan, or it is a placeholder the clinic is not shown) is not
+ * turned back on (decided by Evan on 2026-10-08): the page says so in the
+ * write's own sentence (planBlockMessage), draws no Confirm, and, when the
+ * category is for sale, offers the library's "Add to your plan" link.
  */
 export const dynamic = "force-dynamic";
 
@@ -70,9 +81,23 @@ export default async function ReactivatePage({ params }: PageProps<"/admin/react
   if (!share) notFound();
 
   const now = new Date();
-  const settings = await getSettings();
+  const [settings, access] = await Promise.all([getSettings(), getClinicAccess(clinic.id)]);
   const state = renewalState(share, settings.maxRenewals, now);
-  const canReactivate = state.kind === "paused" && share.video.isPublished;
+  // The plan, asked with the same rule the write asks (decided by Evan on 2026-10-08): a paused link to a
+  // video the plan no longer allows is not turned back on. No clinic row reads as nothing on the plan.
+  const block =
+    state.kind === "paused" && share.video.isPublished
+      ? access
+        ? planBlockFor(access, share.video)
+        : "not-on-plan"
+      : null;
+  const canReactivate = state.kind === "paused" && share.video.isPublished && block === null;
+  // Off the plan, and the category is for sale: the library's "Add to your plan" link to Billing. Everyone here is an admin.
+  const category = CATEGORIES.find((entry) => entry.value === share.video.category);
+  const addLink =
+    block === "not-on-plan" && category && addToPlanOffer(true, (await getCategoryConfigs())[category.value]) === "link"
+      ? addToPlanHref(category.slug)
+      : null;
 
   // One sentence on where the link stands, in the same words the write would use to refuse.
   const standing =
@@ -82,7 +107,9 @@ export default async function ReactivatePage({ params }: PageProps<"/admin/react
         ? finishedLinkMessage(state.reason, share.renewalsUsed)
         : !share.video.isPublished
           ? "Paused, and the video behind it is not available right now, so it cannot be turned back on. Ask Pulse 3D about the video."
-          : `Paused since ${formatDate(share.expiresAt)}. It can be turned back on ${state.renewalsLeft} more ${state.renewalsLeft === 1 ? "time" : "times"}, ${state.daysPerRenewal} ${state.daysPerRenewal === 1 ? "day" : "days"} each time.`;
+          : block
+            ? `Paused. ${planBlockMessage(block)}`
+            : `Paused since ${formatDate(share.expiresAt)}. It can be turned back on ${state.renewalsLeft} more ${state.renewalsLeft === 1 ? "time" : "times"}, ${state.daysPerRenewal} ${state.daysPerRenewal === 1 ? "day" : "days"} each time.`;
 
   return (
     <AdminFrame clinic={clinic} title="Turn a link back on" intro="A patient link that has paused can be turned back on here. Nothing changes until you press Confirm.">
@@ -110,11 +137,24 @@ export default async function ReactivatePage({ params }: PageProps<"/admin/react
           paused={canReactivate}
           days={state.kind === "paused" ? state.daysPerRenewal : 0}
           renewalsLeft={state.kind === "paused" ? state.renewalsLeft : 0}
-          whyNot={state.kind === "working" ? "There is nothing to turn back on." : "A new link is made on the Shared links page."}
+          whyNot={
+            state.kind === "working"
+              ? "There is nothing to turn back on."
+              : addLink
+                ? "Once the category is on your plan again, this link can be turned back on here."
+                : block === "not-on-plan"
+                  ? "This category is not for sale right now. A new link to another procedure is made on the Shared links page."
+                  : "A new link is made on the Shared links page."
+          }
         />
       </section>
 
       <div className="mt-6 flex flex-wrap gap-3">
+        {addLink && (
+          <Link href={addLink} className={SECONDARY_BUTTON}>
+            Add to your plan
+          </Link>
+        )}
         <Link href="/admin" className={SECONDARY_BUTTON}>
           Back to the overview
         </Link>

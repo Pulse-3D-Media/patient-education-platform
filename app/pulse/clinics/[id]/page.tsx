@@ -193,7 +193,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
   const branding = (
     <Section
       title="Branding"
-      blurb="The clinic's logo, brand colour, font and office phone, as they show on its admin screens, in its library and on every patient page it sends. The clinic's own admin can change the colour, font and phone too, from their Branding page; whoever saves last wins, and every change is logged in Notes with who made it. The logo is the one exception: the clinic sets its own by uploading it to its Clerk organization, and the address typed here is used only while it has not."
+      blurb="The clinic's logo, brand colour, font and office phone, as they show on its admin screens, in its library and on every patient page it sends. The clinic's own admin can change the colour, font and phone too, from their Branding page; whoever saves last wins, and every change is logged in Notes with who made it. The logo is the one exception: the clinic sets its own by uploading it on its Branding page (it is stored on the clinic's Clerk organization), and the address typed here is used only until it does."
     >
       <BrandingForm
         action={saveBrandingAction}

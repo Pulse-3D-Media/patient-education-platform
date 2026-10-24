@@ -75,7 +75,8 @@ async function makePaused() {
 async function readPlain(tx: Prisma.TransactionClient, clinicId: string, shareId: string) {
   const rows = await tx.$queryRaw<access.LockedShareRow[]>`
     SELECT s."id", s."code", s."expiryPolicy"::text AS "expiryPolicy", s."expiresAt", s."firstPlayedAt", s."daysAfterFirstPlay",
-           s."renewalsUsed", s."renewalRequestedAt", v."title" AS "videoTitle", v."isPublished" AS "videoIsPublished"
+           s."renewalsUsed", s."renewalRequestedAt", v."title" AS "videoTitle", v."isPublished" AS "videoIsPublished",
+           v."category"::text AS "videoCategory", v."isPlaceholder" AS "videoIsPlaceholder"
     FROM "Share" s
     JOIN "Video" v ON v."id" = s."videoId"
     WHERE s."id" = ${shareId} AND s."clinicId" = ${clinicId}`;
@@ -139,5 +140,89 @@ describe("two reactivations of the same link at once", () => {
     const row = await prisma.share.findUniqueOrThrow({ where: { code } });
     expect(row.renewalsUsed).toBe(2);
     expect(await prisma.clinicNote.count({ where: { clinicId: clinic, body: { contains: `Link ${code}` } } })).toBe(2);
+  });
+});
+
+/**
+ * The plan check (decided by Evan on 2026-10-08) reads the video's category
+ * and placeholder mark, and the clinic's plan, under locks, like
+ * createShare(). Here a change that would make the plan refuse the link is
+ * started AFTER the reactivation has read and BEFORE it writes. With the
+ * locks the change waits until the link is turned back on (and then applies
+ * to every later reactivation); it can never land in between and leave a
+ * link turned back on under a plan that already refused it. The control,
+ * with the plain read, shows the video change getting through in the gap.
+ */
+describe("a change the plan check depends on, arriving while a link is turned back on", () => {
+  /** A clinic set to finished animations only, a finished Knee animation, and a link to it that has paused. */
+  async function makeFinishedPaused() {
+    const row = await prisma.clinic.create({
+      data: { name: `Vitest renewal plan race ${randomBytes(4).toString("hex")}`, status: "ACTIVE", categories: ["KNEE"], viewDaysOverride: 10, showPlaceholders: false },
+      select: { id: true },
+    });
+    createdClinicIds.push(row.id);
+    const made = await prisma.video.create({
+      data: { title: "Vitest renewal plan race video", category: "KNEE", videoUrl: "https://example.com/vitest.mp4", isPublished: true, isPlaceholder: false },
+      select: { id: true },
+    });
+    createdVideoIds.push(made.id);
+    const share = await createShare(row.id, made.id, { now: T });
+    expect(await recordSharePlay(share.code, T)).toEqual({ recorded: true, firstPlay: true });
+    return { clinicId: row.id, videoId: made.id, shareId: share.id };
+  }
+
+  /** Turn the link back on while `change` starts in the gap. Says whether the change had finished when the reactivation went on to write. */
+  async function renewWhileChanging(clinicId: string, shareId: string, change: () => Promise<unknown>, read = real.lockShareForRenewal) {
+    let changeFinishedDuringWait = false;
+    let changing: Promise<unknown> = Promise.resolve();
+    vi.mocked(access.lockShareForRenewal).mockImplementationOnce(async (tx, id, wanted) => {
+      const row = await read(tx, id, wanted);
+      let done = false;
+      changing = change().then(() => {
+        done = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, WAIT_MS));
+      changeFinishedDuringWait = done;
+      return row;
+    });
+    const outcome = await renewShareForClinic(clinicId, shareId, "First admin", addDays(T, 11));
+    await changing;
+    return { outcome, changeFinishedDuringWait };
+  }
+
+  it("the video being marked a placeholder waits for the reactivation, and the next one is refused", { timeout: 20_000 }, async () => {
+    const { clinicId, videoId, shareId } = await makeFinishedPaused();
+    const { outcome, changeFinishedDuringWait } = await renewWhileChanging(clinicId, shareId, () =>
+      prisma.video.update({ where: { id: videoId }, data: { isPlaceholder: true } }),
+    );
+    expect(changeFinishedDuringWait).toBe(false);
+    expect(outcome).toMatchObject({ ok: true, renewalsUsed: 1 });
+
+    // Once it has paused again, the change that landed is seen.
+    expect(await renewShareForClinic(clinicId, shareId, "First admin", addDays(T, 22))).toMatchObject({ ok: false, reason: "placeholder-hidden" });
+  });
+
+  it("the category leaving the plan waits for the reactivation (the clinic's lock)", { timeout: 20_000 }, async () => {
+    const { clinicId, shareId } = await makeFinishedPaused();
+    const { outcome, changeFinishedDuringWait } = await renewWhileChanging(clinicId, shareId, () =>
+      prisma.clinic.update({ where: { id: clinicId }, data: { categories: [] } }),
+    );
+    expect(changeFinishedDuringWait).toBe(false);
+    expect(outcome).toMatchObject({ ok: true, renewalsUsed: 1 });
+    expect(await renewShareForClinic(clinicId, shareId, "First admin", addDays(T, 22))).toMatchObject({ ok: false, reason: "not-on-plan" });
+  });
+
+  it("control: with a plain read and no video lock, the placeholder mark lands in the gap and the link is turned back on anyway", { timeout: 20_000 }, async () => {
+    const { clinicId, videoId, shareId } = await makeFinishedPaused();
+    const { outcome, changeFinishedDuringWait } = await renewWhileChanging(
+      clinicId,
+      shareId,
+      () => prisma.video.update({ where: { id: videoId }, data: { isPlaceholder: true } }),
+      readPlain,
+    );
+    expect(changeFinishedDuringWait).toBe(true);
+    // Turned back on for a video that, by the time it was written, the clinic was no longer shown.
+    expect(outcome.ok).toBe(true);
+    expect((await prisma.video.findUniqueOrThrow({ where: { id: videoId } })).isPlaceholder).toBe(true);
   });
 });

@@ -11,7 +11,7 @@ import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback
 import type { PlaybackSource } from "@/lib/playback-source";
 import { issueLink, newVisitKey } from "@/app/q/[code]/issue-link";
 import { acceptDisclaimer } from "../accept-disclaimer";
-import { recordPlay, refreshPlayback } from "./actions";
+import { recordPlay, refreshPlayback } from "../patient-calls";
 import { CallNumber } from "./CallButton";
 
 /**
@@ -360,7 +360,7 @@ export function WatchPlayer({
     if (counted.current) return;
     counted.current = true;
     // Recorded in the background, one attempt. If it does not get through,
-    // the video still plays; the play is just not counted (see actions.ts).
+    // the video still plays; the play is just not counted (see app/watch/[code]/play/route.ts).
     ensureCode()
       .then((linkCode) => (linkCode ? recordPlay(linkCode) : { recorded: false, playback: undefined }))
       .then((answer) => {

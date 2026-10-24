@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { requestReactivation } from "./actions";
+import { requestReactivation } from "../patient-calls";
 import { CallButton } from "./CallButton";
 
 /**

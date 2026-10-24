@@ -300,7 +300,8 @@ export async function saveDetailsAction(_previous: FormState, formData: FormData
  * too (app/admin/branding); both saves go through updateClinicBranding, so
  * both are logged and the last one wins. Only this one can set a logo
  * address, because a Pulse-set logo is an address Pulse staff have looked at
- * and approved; a clinic's own logo is the one it uploads to Clerk.
+ * and approved; a clinic's own logo is the one its admin uploads on the
+ * clinic's Branding page, which goes to its Clerk organization.
  */
 export async function saveBrandingAction(_previous: FormState, formData: FormData): Promise<FormState> {
   const staff = await requirePulseStaff();

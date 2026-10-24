@@ -108,8 +108,19 @@ describe("alertKey", () => {
 
   it("falls back to the error's name when there is no digest, and holds only safe characters", () => {
     const named = describeRequestError("boom", request, context, vercel, NOW);
-    expect(alertKey(named, NOW)).toMatch(/^error-alert-string-\d+$/);
+    expect(alertKey(named, NOW)).toMatch(/^error-alert-string-_watch__code_-page-\d+$/);
     expect(alertKey(report, NOW)).toMatch(/^[\w-]+$/);
+  });
+
+  it("keeps two errors with no digest and the same class name apart when they happen at different routes or of different kinds", () => {
+    const plain = () => new Error("no digest here");
+    const onWatch = describeRequestError(plain(), request, context, vercel, NOW);
+    const onBilling = describeRequestError(plain(), request, { routePath: "/admin/billing", routeType: "render" }, vercel, NOW);
+    const asAction = describeRequestError(plain(), request, { routePath: "/watch/[code]", routeType: "action" }, vercel, NOW);
+    expect(onWatch.digest).toBeNull();
+    expect(new Set([alertKey(onWatch, NOW), alertKey(onBilling, NOW), alertKey(asAction, NOW)]).size).toBe(3);
+    // The same error at the same place is still one key.
+    expect(alertKey(describeRequestError(plain(), request, context, vercel, NOW), NOW)).toBe(alertKey(onWatch, NOW));
   });
 });
 

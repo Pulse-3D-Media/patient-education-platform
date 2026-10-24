@@ -35,7 +35,7 @@ import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 import { setOwnerByStaff } from "@/lib/seat-changes";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
-import { hasPlayableSource } from "@/lib/video";
+import { MAX_VIDEO_SECONDS, hasPlayableSource } from "@/lib/video";
 
 /**
  * Server Actions for the Pulse 3D master dashboard.
@@ -69,6 +69,9 @@ const ALL_CATEGORIES = Object.values(Category);
 
 /** The longest a notice or reason may be. Keeps the admin banner one line or two. */
 const SHORT_TEXT_LIMIT = 300;
+
+/** The longest a clinic's name may be. It goes on every staff screen, the patient page and the video's mark. */
+const CLINIC_NAME_LIMIT = 120;
 
 /** The clinic id from a form, checked to exist. Null means the form was tampered with or the clinic is gone. */
 async function clinicFromForm(formData: FormData) {
@@ -252,6 +255,7 @@ export async function saveDetailsAction(_previous: FormState, formData: FormData
 
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { error: "The clinic needs a name." };
+  if (name.length > CLINIC_NAME_LIMIT) return { error: `Keep the clinic's name under ${CLINIC_NAME_LIMIT} characters.` };
 
   const notice = String(formData.get("noticeText") ?? "").trim();
   if (notice.length > SHORT_TEXT_LIMIT) return { error: `Keep the notice under ${SHORT_TEXT_LIMIT} characters.` };
@@ -442,6 +446,9 @@ function videoFromForm(formData: FormData, existing: RowNow | null = null): { in
 
   const durationSeconds = parseDuration(String(formData.get("durationSeconds") ?? ""));
   if (durationSeconds === undefined) return { error: "Type the length as minutes and seconds, like 4:12, or leave it empty." };
+  if (durationSeconds !== null && durationSeconds > MAX_VIDEO_SECONDS) {
+    return { error: `That length is over ${MAX_VIDEO_SECONDS / 3600} hours. Type it as minutes and seconds, like 4:12, or leave it empty.` };
+  }
 
   const posterText = String(formData.get("posterUrl") ?? "").trim();
   if (posterText && !isHttpsUrl(posterText)) return { error: "The poster address must be a full https:// address, or empty." };

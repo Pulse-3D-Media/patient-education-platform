@@ -54,6 +54,15 @@ export type PlaybackSource =
  */
 export const TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 
+/**
+ * The longest a token is ever stretched to cover a video: three hours.
+ * Without it a mistyped length (41200 seconds for "4:12") would make every
+ * address for that video live eleven hours, and the library and a printed
+ * code's page have no link deadline to cut it shorter. A video longer than
+ * this simply gets a refresh part-way, like any other.
+ */
+export const MAX_TOKEN_LIFETIME_MS = 3 * 60 * 60 * 1000;
+
 /** The player asks for a fresh grant this long before the token runs out, so a slow answer still arrives in time. */
 export const REFRESH_LEAD_MS = 90 * 1000;
 
@@ -73,11 +82,12 @@ export const MIN_REFRESH_DELAY_MS = 15 * 1000;
  *               deadline still wins: a token never outlives the link.
  *
  * So: the usual lifetime, stretched to cover the video if the video is
- * longer, and cut to the link's deadline if that comes first. A link whose
- * deadline has passed gets nothing.
+ * longer (but never past MAX_TOKEN_LIFETIME_MS), and cut to the link's
+ * deadline if that comes first. A link whose deadline has passed gets
+ * nothing.
  */
 export function tokenExpiry(now: Date, windowEnd: Date | null, videoMs: number | null = null): Date | null {
-  const length = videoMs !== null && Number.isFinite(videoMs) && videoMs > 0 ? videoMs : 0;
+  const length = videoMs !== null && Number.isFinite(videoMs) && videoMs > 0 ? Math.min(videoMs, MAX_TOKEN_LIFETIME_MS) : 0;
   let expires = now.getTime() + Math.max(TOKEN_LIFETIME_MS, length);
   if (windowEnd !== null) {
     if (windowEnd.getTime() <= now.getTime()) return null;

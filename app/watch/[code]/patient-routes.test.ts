@@ -216,6 +216,37 @@ describe("a link whose video streams from Mux", () => {
     expect(await recordPlay(cdn.code)).toEqual({ recorded: true });
   });
 
+  it("hands out no grant with a first play when the video is taken down, or the link runs out, between the play and the grant", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/db/shares")>("@/lib/db/shares");
+
+    // Unpublished in the moment after the play was recorded: the play counts, no address comes back.
+    const share = await tickedMuxLink();
+    vi.mocked(shares.recordSharePlay).mockImplementationOnce(async (code) => {
+      const result = await actual.recordSharePlay(code);
+      await prisma.video.update({ where: { id: muxVideoId }, data: { isPublished: false } });
+      return result;
+    });
+    try {
+      expect(await recordPlay(share.code)).toEqual({ recorded: true });
+    } finally {
+      await prisma.video.update({ where: { id: muxVideoId }, data: { isPublished: true } });
+    }
+    expect(await prisma.share.findUniqueOrThrow({ where: { code: share.code }, select: { viewCount: true } })).toEqual({ viewCount: 1 });
+
+    // The link's deadline passed in that moment: the same.
+    const other = await tickedMuxLink();
+    vi.mocked(shares.recordSharePlay).mockImplementationOnce(async (code) => {
+      const result = await actual.recordSharePlay(code);
+      await prisma.share.update({ where: { code }, data: { expiresAt: new Date(Date.now() - 1000) } });
+      return result;
+    });
+    expect(await recordPlay(other.code)).toEqual({ recorded: true });
+
+    // The control: with nothing changed in between, the first play does hand back a grant.
+    const control = await tickedMuxLink();
+    expect((await recordPlay(control.code)).playback?.kind).toBe("stream");
+  });
+
   it("refresh hands a working link a fresh address bounded by its deadline, and nothing to a link that is over, taken down, unknown or made up", async () => {
     const share = await tickedMuxLink();
     const answer = await refreshPlayback(share.code);

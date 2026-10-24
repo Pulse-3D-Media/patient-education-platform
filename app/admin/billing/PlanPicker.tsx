@@ -7,6 +7,7 @@ import { PRIMARY_BUTTON } from "@/components/ui/styles";
 import { PULSE_CONTACT_URL } from "@/lib/brand";
 import { engineInterval } from "@/lib/checkout-rules";
 import { formatCents, quote, type PricingConfig, type Quote } from "@/lib/pricing";
+import { checkoutDestination } from "@/lib/stripe-pages";
 import { startCheckoutAction } from "./actions";
 import type { CategoryOption } from "./checkout-view";
 import { CategoryChoices, IntervalChoices, RunningTotal, SeatsField } from "./PlanFields";
@@ -66,11 +67,13 @@ export function PlanPicker({
   const amounts = current?.amounts ?? null;
 
   // The server answered with Stripe's address (or, for an attempt that was
-  // already paid, the return page). Go there.
+  // already paid, the return page). Go there, but only if it really is one
+  // of those two (checkoutDestination); anything else is ignored.
   useEffect(() => {
     if (!state?.redirectTo) return;
-    if (state.redirectTo.startsWith("/")) router.push(state.redirectTo);
-    else window.location.assign(state.redirectTo);
+    const destination = checkoutDestination(state.redirectTo);
+    if (destination?.kind === "here") router.push(destination.path);
+    else if (destination?.kind === "stripe") window.location.assign(destination.url);
   }, [state, router]);
 
   const toggle = (category: Category) =>

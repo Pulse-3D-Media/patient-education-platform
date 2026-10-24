@@ -1,6 +1,7 @@
 import { SignUp } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import { LOGO_URL } from "@/lib/brand";
+import { signInHandoffHref } from "@/lib/invitation-handoff";
 
 /**
  * The sign-up page, at /sign-up, built from Clerk's prebuilt component. The
@@ -26,12 +27,8 @@ export default async function SignUpPage({ searchParams }: PageProps<"/sign-up/[
   const params = await searchParams;
   const status = typeof params.__clerk_status === "string" ? params.__clerk_status : null;
   if (status === "complete") redirect("/onboarding");
-  if (status === "sign_in") {
-    // The ticket and status travel with them unchanged; nothing else is added.
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(params)) if (typeof value === "string") query.set(key, value);
-    redirect(`/sign-in?${query.toString()}`);
-  }
+  // The ticket and status travel with them unchanged; nothing else does (lib/invitation-handoff.ts).
+  if (status === "sign_in") redirect(signInHandoffHref(params));
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-[#e4ebf3] px-4 py-10">

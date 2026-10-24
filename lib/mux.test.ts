@@ -149,6 +149,18 @@ describe("checkPlaybackId", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("answers 'not configured' in words, without asking Mux or throwing, when the key is set but cannot sign", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { ask, calls } = mux(403, 200);
+    const unusable: MuxEnv = { MUX_SIGNING_KEY_ID: "testkey0001", MUX_SIGNING_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nnot a key\n-----END PRIVATE KEY-----" };
+    expect(muxIsConfigured(unusable)).toBe(true);
+    expect(await checkPlaybackId(ID, { env: unusable, fetch: ask })).toMatchObject({ ok: false, reason: "not-configured", message: expect.stringContaining("signing key") });
+    expect(calls).toHaveLength(0);
+    const line = log.mock.calls.map((call) => call.map(String).join(" ")).join("\n");
+    expect(line).not.toContain("not a key");
+    expect(line).not.toContain(ID);
+  });
+
   it("answers calmly when Mux cannot be reached, logging the kind of failure only", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const ask = vi.fn(async () => {

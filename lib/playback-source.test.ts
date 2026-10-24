@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_TOKEN_LIFETIME_MS,
   MIN_REFRESH_DELAY_MS,
   REFRESH_LEAD_MS,
   TOKEN_LIFETIME_MS,
@@ -46,6 +47,17 @@ describe("tokenExpiry", () => {
     expect(tokenExpiry(NOW, null, minutes(3))).toEqual(at(TOKEN_LIFETIME_MS));
     expect(tokenExpiry(NOW, null, Number.NaN)).toEqual(at(TOKEN_LIFETIME_MS));
     expect(tokenExpiry(NOW, null, -5)).toEqual(at(TOKEN_LIFETIME_MS));
+  });
+
+  it("never stretches past three hours, however long the video says it is (a typo like 41200 seconds)", () => {
+    const elevenHours = minutes(60 * 11);
+    expect(tokenExpiry(NOW, null, elevenHours)).toEqual(at(MAX_TOKEN_LIFETIME_MS));
+    expect(tokenExpiry(NOW, null, MAX_TOKEN_LIFETIME_MS + 1)).toEqual(at(MAX_TOKEN_LIFETIME_MS));
+    expect(tokenExpiry(NOW, null, MAX_TOKEN_LIFETIME_MS)).toEqual(at(MAX_TOKEN_LIFETIME_MS));
+    expect(MAX_TOKEN_LIFETIME_MS).toBe(minutes(180));
+    // A link a week away still gets at most three hours; a closer deadline still wins.
+    expect(tokenExpiry(NOW, at(minutes(60 * 24 * 7)), elevenHours)).toEqual(at(MAX_TOKEN_LIFETIME_MS));
+    expect(tokenExpiry(NOW, at(minutes(30)), elevenHours)).toEqual(at(minutes(30)));
   });
 });
 

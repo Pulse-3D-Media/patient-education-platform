@@ -1,5 +1,6 @@
 import { getShareByCode, recordSharePlay } from "@/lib/db/shares";
 import { errorKind } from "@/lib/error-kind";
+import { isExpired } from "@/lib/expiry";
 import { playbackForShare } from "@/lib/playback-auth";
 import type { PlaybackSource } from "@/lib/playback-source";
 import { isShareCodeShape } from "@/lib/share-link";
@@ -47,9 +48,14 @@ export async function POST(_request: Request, { params }: RouteContext<"/watch/[
   try {
     const result = await recordSharePlay(code);
     if (!result.recorded || !result.firstPlay) return answer({ recorded: result.recorded }, 200);
+    // Read the link again and judge it as the refresh route does: the play was
+    // recorded a moment ago, but the video may have been unpublished (or the
+    // link run out) since, and then no fresh grant is handed out.
+    const now = new Date();
     const share = await getShareByCode(code);
-    if (!share || !usesProtectedPlayback(share.video) || !share.disclaimerFirstAcceptedAt) return answer({ recorded: true }, 200);
-    return answer({ recorded: true, playback: playbackForShare(share, new Date()) }, 200);
+    if (!share || isExpired(share, now) || !share.video.isPublished) return answer({ recorded: true }, 200);
+    if (!usesProtectedPlayback(share.video) || !share.disclaimerFirstAcceptedAt) return answer({ recorded: true }, 200);
+    return answer({ recorded: true, playback: playbackForShare(share, now) }, 200);
   } catch (error) {
     // The kind of failure goes to the server log, never the error itself: its message could hold the code.
     console.error("Could not record a play start on a share link.", errorKind(error));

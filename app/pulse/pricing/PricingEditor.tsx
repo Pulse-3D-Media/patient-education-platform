@@ -4,7 +4,7 @@ import type { Category } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { useActionState, useState, useTransition } from "react";
 import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
-import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
+import { DEFAULT_CATEGORY_LIST, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import {
   CATEGORY_COUNT,
   CATEGORY_VALUES,
@@ -148,11 +148,15 @@ export function PricingEditor({
   versions,
   availability,
   source,
+  categories = DEFAULT_CATEGORY_LIST,
 }: {
   versions: EditorVersion[];
   availability: Record<Category, CategoryAvailability>;
   source: EstimateSource;
+  /** Every category with its current name, in list order (getCategoryList() on the server). */
+  categories?: { value: Category; label: string }[];
 }) {
+  const names = Object.fromEntries(categories.map((category) => [category.value, category.label])) as Partial<Record<Category, string>>;
   const router = useRouter();
 
   // The editor opens on the active version's numbers, or the built-in
@@ -188,7 +192,7 @@ export function PricingEditor({
 
   const seats = /^\d+$/.test(calc.seats.trim()) ? Number(calc.seats.trim()) : Number.NaN;
   const result = parsed.config
-    ? quote(parsed.config, { seats, categories: calc.categories, interval: calc.interval, founding: calc.founding, practiceType: calc.practiceType, sellable })
+    ? quote(parsed.config, { seats, categories: calc.categories, interval: calc.interval, founding: calc.founding, practiceType: calc.practiceType, sellable, labels: names })
     : null;
 
   /** Change one field of the draft, and forget what the server said about the last save. */
@@ -267,6 +271,7 @@ export function PricingEditor({
                           founding: false,
                           practiceType: "clinic",
                           sellable: CATEGORY_VALUES,
+                          labels: names,
                         })
                       : null;
                     return (
@@ -471,7 +476,7 @@ export function PricingEditor({
             <div>
               <span className={LABEL}>Categories</span>
               <div className="flex flex-wrap gap-2">
-                {CATEGORIES.map((category) => {
+                {categories.map((category) => {
                   const forSale = availability[category.value] === "sellable";
                   const label = availabilityLabel(availability[category.value]);
                   return (
@@ -518,7 +523,7 @@ export function PricingEditor({
             ) : !result || !result.ok ? (
               <p className="text-sm text-[#f3b94d]">{result?.ok === false ? result.error : "Choose a category."}</p>
             ) : (
-              <QuoteView quote={result.quote} />
+              <QuoteView quote={result.quote} names={names} />
             )}
           </div>
         </aside>
@@ -715,7 +720,7 @@ function FieldNote({ message }: { message: string | undefined }) {
 }
 
 /** The quote, laid out like a receipt. */
-function QuoteView({ quote: q }: { quote: NonNullable<ReturnType<typeof quote> extends infer R ? (R extends { ok: true; quote: infer Q } ? Q : never) : never> }) {
+function QuoteView({ quote: q, names }: { names: Partial<Record<Category, string>>; quote: NonNullable<ReturnType<typeof quote> extends infer R ? (R extends { ok: true; quote: infer Q } ? Q : never) : never> }) {
   const per = q.amounts?.interval === "year" ? "year" : "month";
   return (
     <div className="flex flex-col gap-3">
@@ -760,7 +765,7 @@ function QuoteView({ quote: q }: { quote: NonNullable<ReturnType<typeof quote> e
             <p className="text-sm text-[#667085]">The founding offer saves {formatCents(q.amounts.savingsCents)}.</p>
           )}
           <p className="text-sm text-[#bfbfbf]">
-            Includes: {q.entitledCategories.map((category) => CATEGORIES.find((c) => c.value === category)?.label ?? category).join(", ")}.
+            Includes: {q.entitledCategories.map((category) => names[category] ?? category).join(", ")}.
           </p>
         </>
       ) : null}

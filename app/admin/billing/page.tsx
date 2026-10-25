@@ -5,7 +5,8 @@ import { ClinicShell } from "@/components/ui/ClinicShell";
 import { PRIMARY_BUTTON } from "@/components/ui/styles";
 import { ADD_ANCHOR, ADD_PARAM, readSuggestedCategory } from "@/lib/add-to-plan";
 import { PULSE_CONTACT_URL } from "@/lib/brand";
-import { CATEGORIES, categoryFromSlug } from "@/lib/categories";
+import { findCategoryBySlug, labelOf, labelsInOrder, type CategoryDetails } from "@/lib/categories";
+import { getCategoryList } from "@/lib/db/category-config";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen, type ClinicOpenFacts } from "@/lib/clinic-status";
 import { planLibraryGap } from "@/lib/plan-change";
@@ -87,14 +88,14 @@ export default async function BillingPage(props: BillingPageProps = {}) {
   // Deliberately no clinicIsOpen() check here: see the note above.
   const view = await getBillingView(clinic.id);
   const checkout = view ? await getCheckoutView(clinic.id, view.plan) : null;
+  // Each category's current name (Pulse staff can rename one): plans already bought say the new name too.
+  const list = await getCategoryList();
   const offer: CheckoutOffer = checkout?.offer ?? { kind: "closed", message: "Your clinic could not be found. Try again in a moment." };
   const params = props.searchParams ? await props.searchParams : {};
   const cameBackWithoutPaying = params.checkout === "cancelled";
   const cameBackFromStripe = params.from === "stripe";
 
-  const labels = view
-    ? CATEGORIES.filter((category) => view.plan.categories.includes(category.value)).map((category) => category.label)
-    : [];
+  const labels = view ? labelsInOrder(list, view.plan.categories) : [];
   const managed = view?.plan.managedByPulse ?? false;
   const subscription = checkout?.subscription ?? null;
   const canPayHere = offer.kind === "picker";
@@ -105,12 +106,12 @@ export default async function BillingPage(props: BillingPageProps = {}) {
   // The picker measures it against the plan on file, which is what it opens on when there is a suggestion.
   const suggested =
     offer.kind === "picker"
-      ? readSuggestedCategory(params[ADD_PARAM], offer.options, offer.onFile.categories)
+      ? readSuggestedCategory(params[ADD_PARAM], offer.options, offer.onFile.categories, list)
       : offer.kind === "subscribed" && !managed && offer.change.kind === "changer"
-        ? readSuggestedCategory(params[ADD_PARAM], offer.change.options, offer.change.current.included)
+        ? readSuggestedCategory(params[ADD_PARAM], offer.change.options, offer.change.current.included, list)
         : null;
   // The category in the address, read only to say something about it when it cannot be ticked because it is already paid for.
-  const asked = typeof params[ADD_PARAM] === "string" ? (categoryFromSlug(params[ADD_PARAM])?.value ?? null) : null;
+  const asked = typeof params[ADD_PARAM] === "string" ? (findCategoryBySlug(list, params[ADD_PARAM])?.category.value ?? null) : null;
 
   return (
     <AdminFrame clinic={clinic} title="Billing" intro="Your plan, and what it comes to.">
@@ -153,9 +154,9 @@ export default async function BillingPage(props: BillingPageProps = {}) {
         </p>
       )}
 
-      {subscription && <SubscriptionCard plan={subscription.plan} status={checkout?.billingStatus ?? "NONE"} renewsAt={subscription.currentPeriodEnd} endsAt={subscription.cancelAt} />}
+      {subscription && <SubscriptionCard list={list} plan={subscription.plan} status={checkout?.billingStatus ?? "NONE"} renewsAt={subscription.currentPeriodEnd} endsAt={subscription.cancelAt} />}
 
-      {checkout && <WaitingChanges view={checkout} />}
+      {checkout && <WaitingChanges list={list} view={checkout} />}
 
       <section aria-labelledby="plan-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="plan-heading" className="text-lg font-semibold">
@@ -244,7 +245,7 @@ export default async function BillingPage(props: BillingPageProps = {}) {
       {/* Where the library's "Add to your plan" link lands: the picker, the change form, or the words that stand in for them. */}
       {/* The scroll margin keeps the card's heading clear of the banner across the top (64px tall). */}
       <div id={ADD_ANCHOR} className="scroll-mt-20">
-        <OfferSection offer={offer} managed={managed} suggested={suggested} asked={asked} />
+        <OfferSection list={list} offer={offer} managed={managed} suggested={suggested} asked={asked} />
       </div>
 
       {checkout?.portal && (
@@ -272,11 +273,11 @@ export default async function BillingPage(props: BillingPageProps = {}) {
  * next renewal, or an upgrade whose payment has not gone through. Neither
  * is in force, and the words say so.
  */
-function WaitingChanges({ view }: { view: CheckoutView }) {
+function WaitingChanges({ list, view }: { list: CategoryDetails[]; view: CheckoutView }) {
   const { scheduled, unpaidChange } = view;
   if (!scheduled && !unpaidChange) return null;
   const words = (plan: PlanFacts) => {
-    const included = CATEGORIES.filter((category) => plan.included.includes(category.value)).map((category) => category.label);
+    const included = labelsInOrder(list, plan.included);
     return `${included.join(", ")}; ${plan.seats} ${plan.seats === 1 ? "surgeon seat" : "surgeon seats"}; ${formatCents(plan.totalCents)} per ${plan.interval === "YEAR" ? "year" : "month"}`;
   };
   return (
@@ -322,9 +323,21 @@ function WaitingChanges({ view }: { view: CheckoutView }) {
 }
 
 /** The last card on the page: the plan picker, the form for changing a plan, or why there is neither. */
-function OfferSection({ offer, managed, suggested, asked }: { offer: CheckoutOffer; managed: boolean; suggested: Category | null; asked: Category | null }) {
+function OfferSection({
+  list,
+  offer,
+  managed,
+  suggested,
+  asked,
+}: {
+  list: CategoryDetails[];
+  offer: CheckoutOffer;
+  managed: boolean;
+  suggested: Category | null;
+  asked: Category | null;
+}) {
   // Said once, above the form, so the extra tick is not a surprise.
-  const suggestedLabel = CATEGORIES.find((category) => category.value === suggested)?.label;
+  const suggestedLabel = suggested ? labelOf(list, suggested) : undefined;
   if (offer.kind === "picker") {
     return (
       <section aria-labelledby="choose-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
@@ -385,10 +398,10 @@ function OfferSection({ offer, managed, suggested, asked }: { offer: CheckoutOff
     const gap = planLibraryGap(current.included, current.library);
     // The link asked for a category that is already paid for and turned off: said once, in its own sentence, and left
     // out of the general one below so it is not said twice.
-    const askedLabel = asked && gap.offInLibrary.includes(asked) ? CATEGORIES.find((category) => category.value === asked)?.label : undefined;
+    const askedLabel = asked && gap.offInLibrary.includes(asked) ? labelOf(list, asked) : undefined;
     const off = askedLabel ? gap.offInLibrary.filter((category) => category !== asked) : gap.offInLibrary;
-    const offWords = wordList(labelsOf(off));
-    const extraWords = wordList(labelsOf(gap.extraInLibrary));
+    const offWords = wordList(labelsInOrder(list, off));
+    const extraWords = wordList(labelsInOrder(list, gap.extraInLibrary));
     return (
       <section aria-labelledby="change-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
         <h2 id="change-heading" className="text-lg font-semibold">
@@ -454,11 +467,6 @@ function OfferSection({ offer, managed, suggested, asked }: { offer: CheckoutOff
 
 const DATE_WORDS = { dateStyle: "long", timeZone: "America/Denver" } as const;
 
-/** Category names in screen order. */
-function labelsOf(categories: Category[]): string[] {
-  return CATEGORIES.filter((category) => categories.includes(category.value)).map((category) => category.label);
-}
-
 /** "Hip", "Hip and Spine", "Hip, Knee and Spine"; empty for none. */
 function wordList(words: string[]): string {
   if (words.length <= 1) return words[0] ?? "";
@@ -466,9 +474,21 @@ function wordList(words: string[]): string {
 }
 
 /** The plan the clinic is paying for, with the amounts it accepted. These are real amounts, not an estimate. */
-function SubscriptionCard({ plan, status, renewsAt, endsAt }: { plan: PlanFacts; status: string; renewsAt: Date | null; endsAt: Date | null }) {
+function SubscriptionCard({
+  list,
+  plan,
+  status,
+  renewsAt,
+  endsAt,
+}: {
+  list: CategoryDetails[];
+  plan: PlanFacts;
+  status: string;
+  renewsAt: Date | null;
+  endsAt: Date | null;
+}) {
   const per = plan.interval === "YEAR" ? "year" : "month";
-  const included = CATEGORIES.filter((category) => plan.included.includes(category.value)).map((category) => category.label);
+  const included = labelsInOrder(list, plan.included);
   const ended = status === "CANCELED";
   return (
     <section aria-labelledby="subscription-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">

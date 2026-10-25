@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { labelOf } from "@/lib/categories";
+import { getCategoryList } from "@/lib/db/category-config";
 import { getClinicReport, REPORT_PROCEDURE_LIMIT, REPORT_SURGEON_LIMIT } from "@/lib/db/reports";
 import { requirePulseStaff } from "@/lib/pulse";
 import { readReportRange, reportHref, seatSourceOf, SEAT_SOURCE_WORDS } from "@/lib/reports";
 import { Section, StatusBadge } from "../../../ui";
-import { categoryLabel, count, CountsTable, CountTiles, CsvLink, Definitions, Empty, ProcedureTable, RangeControls } from "../../ReportBits";
+import { count, CountsTable, CountTiles, CsvLink, Definitions, Empty, ProcedureTable, RangeControls } from "../../ReportBits";
 
 /**
  * One clinic's report, at /pulse/reports/clinics/<id>: what it has right
@@ -25,7 +27,7 @@ export default async function PulseClinicReportPage({ params, searchParams }: Pa
   const { range, problem } = readReportRange(await searchParams, now);
   const window = { since: range.since, until: range.until };
 
-  const report = await getClinicReport(id, window, now);
+  const [report, list] = await Promise.all([getClinicReport(id, window, now), getCategoryList()]);
   if (!report) notFound();
   const { clinic } = report;
 
@@ -55,7 +57,7 @@ export default async function PulseClinicReportPage({ params, searchParams }: Pa
           <dl className="grid gap-4 text-[15px] sm:grid-cols-3">
             <div>
               <dt className="text-[#667085]">Categories on the plan</dt>
-              <dd className="mt-0.5 text-white">{clinic.categories.length === 0 ? "None yet" : clinic.categories.map(categoryLabel).join(", ")}</dd>
+              <dd className="mt-0.5 text-white">{clinic.categories.length === 0 ? "None yet" : clinic.categories.map((category) => labelOf(list, category)).join(", ")}</dd>
             </div>
             <div>
               <dt className="text-[#667085]">Seats</dt>
@@ -104,7 +106,7 @@ export default async function PulseClinicReportPage({ params, searchParams }: Pa
 
         <Section title="By procedure">
           <CsvLink href={csvHref("procedures")} />
-          <ProcedureTable rows={report.procedures} capped={report.proceduresCapped} limit={REPORT_PROCEDURE_LIMIT} />
+          <ProcedureTable rows={report.procedures} capped={report.proceduresCapped} limit={REPORT_PROCEDURE_LIMIT} list={list} />
         </Section>
 
         <Section title="What the numbers mean">

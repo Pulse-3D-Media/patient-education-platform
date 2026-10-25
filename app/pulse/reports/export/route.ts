@@ -1,4 +1,5 @@
 import { getClinicNameForReport, listCategoryReportRows, listClinicReportRows, listProcedureReportRows, listSurgeonReportRows, REPORT_EXPORT_LIMIT } from "@/lib/db/reports";
+import { getCategoryList } from "@/lib/db/category-config";
 import { errorKind } from "@/lib/error-kind";
 import { isPulseStaff } from "@/lib/pulse";
 import { categoriesCsv, clinicsCsv, exportFileName, proceduresCsv, readExportTable, surgeonsCsv } from "@/lib/report-csv";
@@ -63,9 +64,9 @@ export async function GET(request: Request) {
 
   try {
     let body: string;
-    if (table === "categories") body = categoriesCsv(await listCategoryReportRows(window));
+    if (table === "categories") body = categoriesCsv(await listCategoryReportRows(window), await getCategoryList());
     else if (table === "clinics") body = clinicsCsv((await listClinicReportRows(window, 1, REPORT_EXPORT_LIMIT)).rows);
-    else if (table === "procedures") body = proceduresCsv((await listProcedureReportRows(clinicId, window, REPORT_EXPORT_LIMIT)).rows);
+    else if (table === "procedures") body = proceduresCsv((await listProcedureReportRows(clinicId, window, REPORT_EXPORT_LIMIT)).rows, await getCategoryList());
     else body = surgeonsCsv((await listSurgeonReportRows(clinicId as string, window, REPORT_EXPORT_LIMIT)).rows);
 
     return new Response(body, {

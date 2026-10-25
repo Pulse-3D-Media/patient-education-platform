@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
-import { CATEGORIES } from "@/lib/categories";
+import { labelOf } from "@/lib/categories";
+import { getCategoryList } from "@/lib/db/category-config";
 import { readStoredChapters } from "@/lib/chapters";
 import { getVideoForPulse } from "@/lib/db/videos";
 import { muxUploadsAreConfigured } from "@/lib/mux";
@@ -29,7 +30,8 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
 
   // The add form sends the staff member here with ?added=1 once the row exists.
   const justAdded = (await searchParams).added === "1";
-  const category = CATEGORIES.find((c) => c.value === video.category)?.label ?? video.category;
+  const list = await getCategoryList();
+  const category = labelOf(list, video.category);
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -76,6 +78,7 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
 
         <div className="rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
           <VideoForm
+            categories={list.map((c) => ({ value: c.value, label: c.label }))}
             video={{
               id: video.id,
               title: video.title,

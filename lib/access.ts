@@ -1,5 +1,5 @@
 import type { Category, ClinicStatus } from "@prisma/client";
-import { CATEGORIES } from "./categories";
+import { CATEGORY_DEFAULTS } from "./categories";
 import { clinicIsOpen } from "./clinic-status";
 
 /**
@@ -64,7 +64,7 @@ export type AccessDecision = { allowed: true } | { allowed: false; reason: Acces
 /** The categories in the order the library shows them, each once. Values that are not ours are dropped. */
 export function inLibraryOrder(categories: Category[]): Category[] {
   const wanted = new Set(categories);
-  return CATEGORIES.filter((c) => wanted.has(c.value)).map((c) => c.value);
+  return CATEGORY_DEFAULTS.filter((c) => wanted.has(c.value)).map((c) => c.value);
 }
 
 /** Turn the fields of a clinic row into a ClinicAccess. Pure, so lib/db/access.ts and the tests share it. */

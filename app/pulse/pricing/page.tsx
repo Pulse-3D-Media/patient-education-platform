@@ -1,4 +1,4 @@
-import { getCategoryAvailability } from "@/lib/db/category-config";
+import { getCategoryAvailability, getCategoryList } from "@/lib/db/category-config";
 import { PricingError, getActivePricing, listPricingVersions } from "@/lib/db/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 import { formatDateTime } from "../ui";
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export default async function PulsePricingPage() {
   await requirePulseStaff();
 
-  const [versions, availability] = await Promise.all([listPricingVersions(), getCategoryAvailability()]);
+  const [versions, availability, list] = await Promise.all([listPricingVersions(), getCategoryAvailability(), getCategoryList()]);
 
   // Which prices a quote made right now would use, with the active config
   // itself so the editor opens on it even when the active version is older
@@ -63,7 +63,12 @@ export default async function PulsePricingPage() {
           </p>
         </header>
         <div className="mt-8">
-          <PricingEditor versions={rows} availability={availability} source={source} />
+          <PricingEditor
+            versions={rows}
+            availability={availability}
+            source={source}
+            categories={list.map((category) => ({ value: category.value, label: category.label }))}
+          />
         </div>
       </div>
     </main>

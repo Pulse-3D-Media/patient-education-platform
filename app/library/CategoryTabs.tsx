@@ -1,6 +1,6 @@
 import type { Category } from "@prisma/client";
 import Link from "next/link";
-import { CATEGORIES } from "@/lib/categories";
+import type { CategoryDetails } from "@/lib/categories";
 
 /**
  * The pills across the top of every library page, centered under the top
@@ -12,11 +12,12 @@ import { CATEGORIES } from "@/lib/categories";
  * sideways from the first one rather than wrapping or being cut off.
  *
  * Categories that are not on the plan have no pill: they are under "More
- * categories" on the home page.
+ * categories" on the home page. `list` is the category list from the server
+ * (getCategoryList()), for each category's current name, address and place.
  */
-export function CategoryTabs({ categories, current }: { categories: Category[]; current: string }) {
+export function CategoryTabs({ list, categories, current }: { list: CategoryDetails[]; categories: Category[]; current: string }) {
   const tabs = [{ href: "/library", label: "All", key: "all" }].concat(
-    CATEGORIES.filter((c) => categories.includes(c.value)).map((c) => ({ href: `/library/${c.slug}`, label: c.label, key: c.slug })),
+    list.filter((c) => categories.includes(c.value)).map((c) => ({ href: `/library/${c.slug}`, label: c.label, key: c.slug })),
   );
 
   return (

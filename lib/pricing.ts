@@ -1,5 +1,5 @@
 import type { Category } from "@prisma/client";
-import { CATEGORIES } from "./categories";
+import { CATEGORY_DEFAULTS } from "./categories";
 
 /**
  * The pricing engine: what a clinic pays, worked out from a saved set of
@@ -53,7 +53,7 @@ import { CATEGORIES } from "./categories";
 // ---------------------------------------------------------------------------
 
 /** The six categories, in the order the library shows them. */
-export const CATEGORY_VALUES: Category[] = CATEGORIES.map((c) => c.value);
+export const CATEGORY_VALUES: Category[] = CATEGORY_DEFAULTS.map((c) => c.value);
 
 /** How many categories there are. The ladder has one price per count. */
 export const CATEGORY_COUNT = CATEGORY_VALUES.length;
@@ -97,6 +97,8 @@ export type QuoteInput = {
   practiceType: PracticeType;
   /** The categories that may be bought right now (listSellableCategories() in lib/db/category-config.ts). */
   sellable: Category[];
+  /** The categories' current names, for the receipt line and messages. Left out, the starting names. Never changes an amount. */
+  labels?: Partial<Record<Category, string>>;
 };
 
 /** One line of the receipt: a per-seat amount for the interval, in cents. Every line is exact. */
@@ -323,9 +325,13 @@ function inLibraryOrder(categories: Category[]): Category[] {
   return CATEGORY_VALUES.filter((category) => wanted.has(category));
 }
 
-/** The label a category shows on a receipt: "Knee", "Foot & Ankle". */
-export function categoryLabel(category: Category): string {
-  return CATEGORIES.find((c) => c.value === category)?.label ?? category;
+/**
+ * The label a category shows on a receipt: "Knee", "Foot & Ankle". `labels` is the current names
+ * (labelsOf(getCategoryList()) in lib/categories.ts), since Pulse staff can rename a category; without them,
+ * the starting names.
+ */
+export function categoryLabel(category: Category, labels?: Partial<Record<Category, string>>): string {
+  return labels?.[category] ?? CATEGORY_DEFAULTS.find((c) => c.value === category)?.label ?? category;
 }
 
 /** "1 category" or "3 categories". */
@@ -379,7 +385,7 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
   }
   const notForSale = selected.filter((category) => !input.sellable.includes(category));
   if (notForSale.length > 0) {
-    return { ok: false, error: `Not for sale right now: ${notForSale.map(categoryLabel).join(", ")}.` };
+    return { ok: false, error: `Not for sale right now: ${notForSale.map((category) => categoryLabel(category, input.labels)).join(", ")}.` };
   }
 
   const band = bandFor(config, input.seats, input.practiceType);
@@ -428,7 +434,7 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
     {
       label: fullLibrary
         ? `Full library (${countWords(chargedCount)})`
-        : `${countWords(chargedCount)}: ${selected.map(categoryLabel).join(", ")}`,
+        : `${countWords(chargedCount)}: ${selected.map((category) => categoryLabel(category, input.labels)).join(", ")}`,
       cents: ladderCents * months,
     },
   ];

@@ -6,11 +6,10 @@ import { ClinicShell } from "@/components/ui/ClinicShell";
 import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { planBlockFor, planBlockMessage } from "@/lib/access";
 import { addToPlanHref, addToPlanOffer } from "@/lib/add-to-plan";
-import { CATEGORIES } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
-import { getCategoryConfigs } from "@/lib/db/category-config";
+import { getCategoryList } from "@/lib/db/category-config";
 import { getSettings } from "@/lib/db/settings";
 import { getShareByIdForClinic } from "@/lib/db/shares";
 import { finishedLinkMessage, renewalState } from "@/lib/expiry";
@@ -93,9 +92,9 @@ export default async function ReactivatePage({ params }: PageProps<"/admin/react
       : null;
   const canReactivate = state.kind === "paused" && share.video.isPublished && block === null;
   // Off the plan, and the category is for sale: the library's "Add to your plan" link to Billing. Everyone here is an admin.
-  const category = CATEGORIES.find((entry) => entry.value === share.video.category);
+  const category = (await getCategoryList()).find((entry) => entry.value === share.video.category);
   const addLink =
-    block === "not-on-plan" && category && addToPlanOffer(true, (await getCategoryConfigs())[category.value]) === "link"
+    block === "not-on-plan" && category && addToPlanOffer(true, category) === "link"
       ? addToPlanHref(category.slug)
       : null;
 

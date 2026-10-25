@@ -4,6 +4,7 @@ import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
+import { getCategoryList } from "@/lib/db/category-config";
 import { listFavoriteIdsAmong } from "@/lib/db/personal-videos";
 import { getSeatFor } from "@/lib/db/seats";
 import { searchUsableVideos } from "@/lib/db/videos";
@@ -40,14 +41,18 @@ export default async function SearchPage({ searchParams }: PageProps<"/library/s
   if (!access || !access.open) return <ClinicClosed status={access?.status ?? clinic.status} clinicName={clinic.name} billingLink={clinic.isAdmin} />;
 
   const { userId } = await auth();
-  const [videos, seat] = await Promise.all([searchUsableVideos(access, query, SEARCH_LIMIT), userId ? getSeatFor(clinic.id, userId) : null]);
+  const [videos, seat, list] = await Promise.all([
+    searchUsableVideos(access, query, SEARCH_LIMIT),
+    userId ? getSeatFor(clinic.id, userId) : null,
+    getCategoryList(),
+  ]);
   const heartedIds = userId ? await listFavoriteIdsAmong(clinic.id, userId, videos.map((video) => video.id)) : [];
   const items = toLibraryItems(videos);
 
   return (
     <main className="py-6">
       <h1 className="sr-only">Search: {query}</h1>
-      <CategoryTabs categories={access.categories} current="search" />
+      <CategoryTabs list={list} categories={access.categories} current="search" />
 
       <div className="px-5 sm:px-8">
         {items.length > 0 ? (

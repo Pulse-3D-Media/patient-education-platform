@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { INPUT, PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
-import { CATEGORIES } from "@/lib/categories";
+import { labelOf, type CategoryDetails } from "@/lib/categories";
 import type { ProcedureReportRow } from "@/lib/db/reports";
 import {
   EARLIEST_REPORT_DATE,
@@ -210,13 +210,19 @@ export function CountsTable({ firstHeading, rows }: { firstHeading: string; rows
   );
 }
 
-/** The category's label, "Knee", "Foot & Ankle". */
-export function categoryLabel(category: string) {
-  return CATEGORIES.find((entry) => entry.value === category)?.label ?? category;
-}
-
 /** The procedures with links in the period, with the placeholder mark where it applies, and a line when the list was cut. */
-export function ProcedureTable({ rows, capped, limit }: { rows: ProcedureReportRow[]; capped: boolean; limit: number }) {
+export function ProcedureTable({
+  rows,
+  capped,
+  limit,
+  list,
+}: {
+  rows: ProcedureReportRow[];
+  capped: boolean;
+  limit: number;
+  /** The category list (getCategoryList()), for each category's current name. */
+  list: CategoryDetails[];
+}) {
   if (rows.length === 0) return <Empty>No links were made in this period.</Empty>;
   return (
     <>
@@ -227,7 +233,7 @@ export function ProcedureTable({ rows, capped, limit }: { rows: ProcedureReportR
           label: (
             <span>
               {row.title}
-              <span className="ml-2 text-sm text-[#667085]">{categoryLabel(row.category)}</span>
+              <span className="ml-2 text-sm text-[#667085]">{labelOf(list, row.category)}</span>
               {row.isPlaceholder && <span className={`ml-2 ${PLACEHOLDER_BADGE}`}>Placeholder</span>}
             </span>
           ),

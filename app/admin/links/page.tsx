@@ -1,9 +1,9 @@
-import type { Category } from "@prisma/client";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { getBaseUrl } from "@/lib/base-url";
-import { CATEGORIES } from "@/lib/categories";
+import { labelOf } from "@/lib/categories";
+import { getCategoryList } from "@/lib/db/category-config";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { ShareTermsError, type ShareTerms } from "@/lib/expiry";
@@ -84,12 +84,13 @@ export default async function LinksPage() {
   // createShare() applies when a link is made (lib/access.ts), so a row and
   // its button can never disagree.
   const access = await getClinicAccess(clinic.id);
-  const [videos, baseUrl, terms, senders, printed] = await Promise.all([
+  const [videos, baseUrl, terms, senders, printed, list] = await Promise.all([
     access ? listUsableVideos(access) : [],
     getBaseUrl(),
     readShareTerms(clinic.id),
     readSenders(clinic.id),
     listLiveQrCodesForClinic(clinic.id),
+    getCategoryList(),
   ]);
 
   // What the page says when there is nothing to list.
@@ -102,7 +103,7 @@ export default async function LinksPage() {
     id: video.id,
     title: video.title,
     category: video.category,
-    categoryLabel: categoryLabel(video.category),
+    categoryLabel: labelOf(list, video.category),
     durationText: video.durationSeconds == null ? null : formatDuration(video.durationSeconds),
     isPlaceholder: video.isPlaceholder,
   }));
@@ -135,6 +136,7 @@ export default async function LinksPage() {
         emptyProceduresText={emptyProceduresText}
         linksCanBeMade={terms !== null}
         senders={senders}
+        categories={list.map((category) => ({ value: category.value, label: category.label }))}
       />
       <PrintedCodes
         total={printed.total}
@@ -185,7 +187,3 @@ async function readSenders(clinicId: string): Promise<Sender[] | null> {
   }
 }
 
-/** "KNEE" becomes "Knee". */
-function categoryLabel(value: Category) {
-  return CATEGORIES.find((c) => c.value === value)?.label ?? value;
-}

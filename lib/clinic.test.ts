@@ -117,10 +117,13 @@ describe("getCurrentClinic when Clerk answers", () => {
       brandFont: null,
       brandTheme: null,
       ownerClerkUserId: "user_vitest",
+      categories: ["KNEE"],
     } as never);
 
     const clinic = await getCurrentClinic();
     expect(clinic).toMatchObject({ id: "clinic_vitest", name: "Vitest Clinic", status: "ACTIVE", isOwner: true, isAdmin: true });
+    // The navigation gets the plan's categories with their names and addresses from the category list.
+    expect(clinic?.planCategories).toEqual([{ value: "KNEE", label: expect.any(String), slug: expect.any(String) }]);
     expect(upsertClinicForClerkOrg).toHaveBeenCalledWith("org_vitest", { name: "Vitest Clinic", logoUrl: null, creatorClerkUserId: "user_vitest" });
     expect(getClinicByClerkOrgId).not.toHaveBeenCalled();
     // The timer the limit set is cleared once Clerk has answered.

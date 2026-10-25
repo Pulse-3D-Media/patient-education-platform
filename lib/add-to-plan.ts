@@ -1,5 +1,5 @@
 import type { Category } from "@prisma/client";
-import { CATEGORIES, type CategoryAvailability, type CategoryConfig } from "./categories";
+import { DEFAULT_CATEGORY_LIST, findCategoryBySlug, type CategoryAvailability, type CategoryConfig, type CategoryDetails } from "./categories";
 
 /**
  * "Add to your plan": the one small link from a category the clinic does not
@@ -44,7 +44,8 @@ export function addToPlanOffer(isAdmin: boolean, config: CategoryConfig | undefi
  * The category the Billing page should open with an extra tick on, or null.
  *
  * `raw` is whatever came in the address, so it is untrusted: anything that
- * is not exactly one known category's slug is ignored. So is a category that
+ * is not exactly one known category's slug (its current one, or an earlier
+ * one from `list`, so an old link still works) is ignored. So is a category that
  * cannot be bought right now, and one the clinic already has (there is
  * nothing to add). Ticking the box is all this ever leads to.
  */
@@ -52,9 +53,10 @@ export function readSuggestedCategory(
   raw: unknown,
   options: { value: Category; availability: CategoryAvailability }[],
   alreadyHas: Category[],
+  list: CategoryDetails[] = DEFAULT_CATEGORY_LIST,
 ): Category | null {
   if (typeof raw !== "string") return null;
-  const category = CATEGORIES.find((entry) => entry.slug === raw);
+  const category = findCategoryBySlug(list, raw)?.category;
   if (!category) return null;
   if (alreadyHas.includes(category.value)) return null;
   const option = options.find((entry) => entry.value === category.value);

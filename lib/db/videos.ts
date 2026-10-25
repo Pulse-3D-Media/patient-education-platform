@@ -1,6 +1,7 @@
 import type { Category } from "@prisma/client";
 import type { ClinicAccess, PublishedCounts } from "../access";
-import { CATEGORIES } from "../categories";
+import type { CategoryDetails } from "../categories";
+import { getCategoryList } from "./category-config";
 import type { Chapter } from "../chapters";
 import { prisma } from "./client";
 
@@ -159,7 +160,7 @@ export async function searchUsableVideos(access: ClinicAccess, query: string, li
     orderBy: [{ title: "asc" }, { id: "asc" }],
     take: limit,
   });
-  return sortByLibraryOrder(videos);
+  return sortByLibraryOrder(videos, await getCategoryList());
 }
 
 /**
@@ -174,7 +175,7 @@ export async function listUsableVideos(access: ClinicAccess) {
     where: usableClause(access),
     orderBy: { title: "asc" },
   });
-  return sortByLibraryOrder(videos);
+  return sortByLibraryOrder(videos, await getCategoryList());
 }
 
 /**
@@ -203,18 +204,19 @@ export async function listPublishedVideos() {
     where: { isPublished: true },
     orderBy: { title: "asc" },
   });
-  return sortByLibraryOrder(videos);
+  return sortByLibraryOrder(videos, await getCategoryList());
 }
 
 /**
- * Sort videos by category in the on-screen order, keeping the order they
+ * Sort videos by category in the on-screen order (the place Pulse staff gave
+ * each category on /pulse/videos), keeping the order they
  * arrived in within a category (the sort is stable). Done here rather than
  * in the database because Postgres keeps enum values in the order they
  * were added, so Complex Spine would land after Foot & Ankle instead of
  * next to Orthopedic Spine.
  */
-function sortByLibraryOrder<T extends { category: Category }>(videos: T[]): T[] {
-  const position = new Map(CATEGORIES.map((c, index) => [c.value, index]));
+function sortByLibraryOrder<T extends { category: Category }>(videos: T[], list: CategoryDetails[]): T[] {
+  const position = new Map(list.map((c, index) => [c.value, index]));
   return videos.sort((a, b) => (position.get(a.category) ?? 99) - (position.get(b.category) ?? 99));
 }
 
@@ -259,7 +261,7 @@ export async function listVideosForPulse(filter: PulseVideoFilter = {}) {
     include: { _count: { select: { shares: true } } },
     orderBy: { title: "asc" },
   });
-  return sortByLibraryOrder(videos);
+  return sortByLibraryOrder(videos, await getCategoryList());
 }
 
 /** One video with every field, plus how many share links point at it, or null for an unknown id. */

@@ -13,7 +13,8 @@ import {
   type AcceptedPlanInput,
   type CheckoutFacts,
 } from "./db/billing";
-import { listSellableCategories } from "./db/category-config";
+import { labelsOf } from "./categories";
+import { getCategoryList, listSellableCategories } from "./db/category-config";
 import { getActivePricing, getPricingVersion } from "./db/pricing";
 import {
   PLAN_CHANGES_CLOSED_MESSAGE,
@@ -182,6 +183,7 @@ async function prepare(clinicId: string, request: ChangeRequest, deps: PlanChang
     // A hospital was refused above; what gets this far is a clinic, including one Pulse staff never marked.
     practiceType: "clinic",
     sellable,
+    labels: labelsOf(await getCategoryList()),
   });
   if (!result.ok) return refused(result.error);
   const amounts = result.quote.amounts;

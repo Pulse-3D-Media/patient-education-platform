@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { ClinicStatus } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CATEGORIES } from "../categories";
+import { CATEGORY_DEFAULTS as CATEGORIES } from "../categories";
 import { clinicIsOpen } from "../clinic-status";
 import { isValidRenewalCount } from "../expiry";
 import { seatSourceOf } from "../reports";

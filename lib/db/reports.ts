@@ -1,9 +1,9 @@
 import { Prisma, type Category, type ClinicStatus, ClinicStatus as ClinicStatuses } from "@prisma/client";
-import { CATEGORIES } from "../categories";
 import { clinicIsOpen } from "../clinic-status";
 import { isValidRenewalCount, MAX_LINK_DAYS, MIN_LINK_DAYS } from "../expiry";
 import { clampPage } from "../paging";
 import { NO_LINKS, type LinkCounts, type SeatSource } from "../reports";
+import { getCategoryList } from "./category-config";
 import { prisma } from "./client";
 import { getSettings } from "./settings";
 
@@ -153,7 +153,7 @@ export async function listCategoryReportRows(window: ReportWindow): Promise<Cate
     WHERE ${madeIn(window)}
     GROUP BY v."category"`;
   const byCategory = new Map(rows.map((row) => [row.category, countsOf(row)]));
-  return CATEGORIES.map(({ value }) => ({ category: value, ...(byCategory.get(value) ?? NO_LINKS) }));
+  return (await getCategoryList()).map(({ value }) => ({ category: value, ...(byCategory.get(value) ?? NO_LINKS) }));
 }
 
 /** One clinic in the report's clinic table. */

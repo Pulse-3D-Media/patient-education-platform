@@ -2,11 +2,11 @@ import { auth } from "@clerk/nextjs/server";
 import { notFound } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { parseLogoUrl } from "@/lib/branding";
-import { CATEGORIES } from "@/lib/categories";
 import { readStoredChapters } from "@/lib/chapters";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
+import { getCategoryList } from "@/lib/db/category-config";
 import { listFavoriteIdsAmong } from "@/lib/db/personal-videos";
 import { getSeatFor } from "@/lib/db/seats";
 import { getUsableVideo, listMoreInCategory } from "@/lib/db/videos";
@@ -60,15 +60,16 @@ export default async function WatchPage({ params }: PageProps<"/library/watch/[v
   // The person, from Clerk's session (never the browser). requireClinicPage() has just made sure there is one.
   const { userId } = await auth();
   const now = new Date();
-  const [video, source, seat] = await Promise.all([
+  const [video, source, seat, list] = await Promise.all([
     getUsableVideo(access, videoId),
     playbackForLibraryVideo(clinic.id, videoId, now),
     userId ? getSeatFor(clinic.id, userId) : null,
+    getCategoryList(),
   ]);
   if (!video || !source) notFound();
 
   // Every video's category is in the list; a missing one (a category added to the schema but not to lib/categories) is not found too.
-  const category = CATEGORIES.find((c) => c.value === video.category);
+  const category = list.find((c) => c.value === video.category);
   if (!category) notFound();
 
   const [more, heartedIds] = await Promise.all([

@@ -1079,3 +1079,53 @@ describe("savePricingVersionAction and activatePricingVersionAction", () => {
     expect(await activatePricingVersionAction(null, form({ versionId: "no-such-version" }))).toMatchObject({ error: expect.stringContaining("no-such-version") });
   });
 });
+
+describe("saveCategoryConfigAction, the details boxes", () => {
+  const FIELDS = { sellable: true, comingSoonText: true, label: true, slug: true, imageUrl: true, sortOrder: true, formerSlugs: true } as const;
+  const details = (changes: Record<string, string>) =>
+    form({ category: "SHOULDER", sellable: "on", comingSoonText: "", label: "", slug: "", imageUrl: "", sortOrder: "", ...changes });
+
+  it("refuses a non-staff user before anything is written", async () => {
+    signInAs("user_clinic_admin", {});
+    const before = await prisma.categoryConfig.findUnique({ where: { category: "SHOULDER" }, select: FIELDS });
+    await expect(saveCategoryConfigAction(null, details({ label: "Shoulder and Arm", slug: "shoulder-arm" }))).rejects.toMatchObject({
+      digest: expect.stringContaining("404"),
+    });
+    expect(await prisma.categoryConfig.findUnique({ where: { category: "SHOULDER" }, select: FIELDS })).toEqual(before);
+  });
+
+  it("saves a new name and address for staff, refuses bad boxes in words, and goes back to the defaults when emptied", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    await saveCategoryConfigAction(null, details({})); // makes sure the row exists
+    const before = await prisma.categoryConfig.findUnique({ where: { category: "SHOULDER" }, select: FIELDS });
+
+    try {
+      expect(await saveCategoryConfigAction(null, details({ label: "Shoulder and Arm", slug: "vitest-shoulder-arm", sortOrder: "45" }))).toEqual({
+        ok: "Saved. This category is for sale.",
+      });
+      expect(await prisma.categoryConfig.findUnique({ where: { category: "SHOULDER" }, select: FIELDS })).toMatchObject({
+        label: "Shoulder and Arm",
+        slug: "vitest-shoulder-arm",
+        sortOrder: 45,
+      });
+
+      const now = await prisma.categoryConfig.findUnique({ where: { category: "SHOULDER" }, select: FIELDS });
+      const bads: Record<string, string>[] = [{ slug: "Shoulder Arm" }, { slug: "knee" }, { slug: "search" }, { imageUrl: "http://example.com/a.jpg" }, { sortOrder: "0" }, { label: "x".repeat(41) }];
+      for (const bad of bads) {
+        expect(await saveCategoryConfigAction(null, details({ label: "Changed", ...bad }))).toEqual({ error: expect.any(String) });
+      }
+      // Nothing a refused save carried was written.
+      expect(await prisma.categoryConfig.findUnique({ where: { category: "SHOULDER" }, select: FIELDS })).toEqual(now);
+
+      expect(await saveCategoryConfigAction(null, details({}))).toEqual({ ok: "Saved. This category is for sale." });
+      expect(await prisma.categoryConfig.findUnique({ where: { category: "SHOULDER" }, select: FIELDS })).toMatchObject({
+        label: null,
+        slug: null,
+        sortOrder: null,
+        formerSlugs: ["vitest-shoulder-arm"],
+      });
+    } finally {
+      if (before) await prisma.categoryConfig.update({ where: { category: "SHOULDER" }, data: before });
+    }
+  });
+});

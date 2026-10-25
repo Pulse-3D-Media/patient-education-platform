@@ -1,7 +1,8 @@
 import { Prisma, type Category, type ClinicStatus, type PracticeType, type StaffAccess } from "@prisma/client";
 import { PRACTICE_TYPE_WORDS, STAFF_ACCESS_WORDS, effectiveAccess, hasLiveSubscription } from "../billing-state";
 import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, brandFontLabel, brandThemeLabel, parseBrandFont, parseBrandTheme } from "../branding";
-import { CATEGORIES } from "../categories";
+import { labelsInOrder, type CategoryDetails } from "../categories";
+import { getCategoryList } from "./category-config";
 import { clinicIsOpen } from "../clinic-status";
 import { clampPage } from "../paging";
 import { formatUsPhone } from "../phone";
@@ -490,9 +491,9 @@ export async function setClinicPracticeType(clinicId: string, practiceType: Prac
   );
 }
 
-/** "Knee, Hip" as a person reads it, in the order the library shows them; "none" for an empty plan. */
-function categoryWords(categories: Category[]) {
-  const labels = CATEGORIES.filter((category) => categories.includes(category.value)).map((category) => category.label);
+/** "Knee, Hip" as a person reads it, with the names as they are when the entry is written, in the list's order; "none" for an empty plan. */
+function categoryWords(list: CategoryDetails[], categories: Category[]) {
+  const labels = labelsInOrder(list, categories);
   return labels.length > 0 ? labels.join(", ") : "none";
 }
 
@@ -536,6 +537,7 @@ export async function setClinicPlan(
   options: { allowFewerSeatsThanInUse?: boolean } = {},
 ) {
   const wanted = Array.from(new Set(categories));
+  const list = await getCategoryList();
   let over: string | null = null;
   return changeClinicWithLog(
     clinicId,
@@ -553,7 +555,7 @@ export async function setClinicPlan(
     (before) => {
       const parts: string[] = [];
       if (!sameCategories(before.categories, wanted)) {
-        parts.push(`categories set to ${categoryWords(wanted)} (was ${categoryWords(before.categories)})`);
+        parts.push(`categories set to ${categoryWords(list, wanted)} (was ${categoryWords(list, before.categories)})`);
       }
       if (before.surgeonSeats !== surgeonSeats) {
         parts.push(`surgeon seats set to ${surgeonSeats} (was ${before.surgeonSeats})`);

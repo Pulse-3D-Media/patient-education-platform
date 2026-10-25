@@ -4,11 +4,11 @@ import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { ChevronRightIcon, LockIcon } from "@/components/ui/icons";
 import { categoryState } from "@/lib/access";
 import { addToPlanHref, addToPlanOffer } from "@/lib/add-to-plan";
-import { CATEGORIES, comingSoonSentence } from "@/lib/categories";
+import { comingSoonSentence } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
-import { getCategoryConfigs } from "@/lib/db/category-config";
+import { getCategoryConfigs, getCategoryList } from "@/lib/db/category-config";
 import { listFavoriteIdsAmong, listFavoriteVideos, listMostWatchedVideos } from "@/lib/db/personal-videos";
 import { getSeatFor } from "@/lib/db/seats";
 import { countPublishedVideosByKind, listUsableVideosInCategory } from "@/lib/db/videos";
@@ -74,7 +74,9 @@ export default async function LibraryPage() {
   // The person, from Clerk's session (never the browser). requireClinicPage() has just made sure there is one.
   const { userId } = await auth();
   const person = userId ?? "";
-  const mine = CATEGORIES.filter((category) => access.categories.includes(category.value));
+  // Each category's current name, address and place (Pulse staff can change them on /pulse/videos).
+  const list = await getCategoryList();
+  const mine = list.filter((category) => access.categories.includes(category.value));
 
   const [counts, configs, seat, favorites, mostPlayed, rows] = await Promise.all([
     countPublishedVideosByKind(),
@@ -95,7 +97,7 @@ export default async function LibraryPage() {
 
   // The categories with something in them that are not on the plan, each with what can be done about it: a link to
   // Billing for an office admin, "ask your admin" for a member, nothing when it is not for sale.
-  const more = CATEGORIES.filter((category) => categoryState(access, category.value, counts[category.value]) === "locked").map((category) => ({
+  const more = list.filter((category) => categoryState(access, category.value, counts[category.value]) === "locked").map((category) => ({
     category,
     offer: addToPlanOffer(clinic.isAdmin, configs[category.value]),
   }));
@@ -109,7 +111,7 @@ export default async function LibraryPage() {
 
       {mine.length > 0 && (
         <>
-          <CategoryTabs categories={access.categories} current="all" />
+          <CategoryTabs list={list} categories={access.categories} current="all" />
 
           <LibraryBrowser
             favorites={toLibraryItems(favorites, now)}

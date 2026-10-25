@@ -51,6 +51,8 @@ export function PlanPicker({
   const [every, setEvery] = useState<BillingInterval>(initial.interval);
 
   const sellable = useMemo(() => options.filter((option) => option.availability === "sellable").map((option) => option.value), [options]);
+  // The categories' current names, from the server, for the receipt line.
+  const names = useMemo(() => Object.fromEntries(options.map((option) => [option.value, option.label])), [options]);
   const seats = /^\d{1,5}$/.test(seatsText.trim()) ? Number(seatsText.trim()) : 0;
   const clinicMax = config.seats.clinicMax;
   const tooManySeats = seats > clinicMax;
@@ -58,7 +60,7 @@ export function PlanPicker({
   // Both intervals are quoted so each choice can show its own total.
   const quoteFor = (which: BillingInterval): Quote | null => {
     if (picked.length === 0 || seats < 1) return null;
-    const result = quote(config, { seats, categories: picked, interval: engineInterval(which), founding: false, practiceType: "clinic", sellable });
+    const result = quote(config, { seats, categories: picked, interval: engineInterval(which), founding: false, practiceType: "clinic", sellable, labels: names });
     return result.ok ? result.quote : null;
   };
   const monthly = quoteFor("MONTH");

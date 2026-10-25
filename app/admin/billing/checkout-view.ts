@@ -1,9 +1,9 @@
 import type { BillingInterval, BillingStatus, Category } from "@prisma/client";
 import { selfServeEligibility } from "@/lib/billing-state";
-import { CATEGORIES, type CategoryAvailability } from "@/lib/categories";
+import type { CategoryAvailability, CategoryDetails } from "@/lib/categories";
 import { CHECKOUT_CLOSED_MESSAGE } from "@/lib/checkout";
 import { getCheckoutFacts } from "@/lib/db/billing";
-import { getCategoryAvailability } from "@/lib/db/category-config";
+import { getCategoryAvailability, getCategoryList } from "@/lib/db/category-config";
 import { getActivePricing, getPricingVersion } from "@/lib/db/pricing";
 import { billingPortalAllowed, planChangeBlock } from "@/lib/plan-change";
 import type { PricingConfig } from "@/lib/pricing";
@@ -148,8 +148,9 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
   // sentence; the detail goes to the server log, never to the page.
   let pricing;
   let availability;
+  let list;
   try {
-    [pricing, availability] = await Promise.all([getActivePricing(), getCategoryAvailability()]);
+    [pricing, availability, list] = await Promise.all([getActivePricing(), getCategoryAvailability(), getCategoryList()]);
   } catch (error) {
     console.error(`Checkout view for clinic ${clinicId}: ${error instanceof Error ? error.name : "Error"}`);
     return { ...base, offer: { kind: "closed", message: "Plans cannot be shown right now. Try again in a moment." } };
@@ -157,7 +158,7 @@ export async function getCheckoutView(clinicId: string, planOnFile: { categories
   // The built-in default prices are an estimate nobody approved. Checkout needs a saved, active version.
   if (pricing.source.kind !== "version") return { ...base, offer: { kind: "closed", message: CHECKOUT_CLOSED_MESSAGE } };
 
-  const options = CATEGORIES.map((category) => ({ value: category.value, label: category.label, availability: availability[category.value] }));
+  const options = optionsFrom(list, availability);
   const canBuy = (category: Category) => availability[category] === "sellable";
   const clinicMax = pricing.config.seats.clinicMax;
   const onFile = { categories: planOnFile.categories, seats: planOnFile.surgeonSeats, interval: "MONTH" as BillingInterval };
@@ -204,8 +205,14 @@ async function changeOffer(
   let own;
   let active;
   let availability;
+  let list;
   try {
-    [own, active, availability] = await Promise.all([getPricingVersion(currentPlan.pricingVersionId), getActivePricing(), getCategoryAvailability()]);
+    [own, active, availability, list] = await Promise.all([
+      getPricingVersion(currentPlan.pricingVersionId),
+      getActivePricing(),
+      getCategoryAvailability(),
+      getCategoryList(),
+    ]);
   } catch (error) {
     console.error(`Plan change view for clinic ${clinicId}: ${error instanceof Error ? error.name : "Error"}`);
     return { kind: "blocked", message: "Plans cannot be shown right now. Try again in a moment." };
@@ -223,7 +230,7 @@ async function changeOffer(
     kind: "changer",
     own: { versionId: own.id, version: own.version, config: withoutFounding(own.config) },
     latest,
-    options: CATEGORIES.map((category) => ({ value: category.value, label: category.label, availability: availability[category.value] })),
+    options: optionsFrom(list, availability),
     current: {
       picked: currentPlan.categories,
       included: currentPlan.entitledCategories,
@@ -233,4 +240,9 @@ async function changeOffer(
       library,
     },
   };
+}
+
+/** The category boxes the plan forms draw: each category's current name, in list order, and whether it can be bought now. */
+function optionsFrom(list: CategoryDetails[], availability: Record<Category, CategoryAvailability>): CategoryOption[] {
+  return list.map((category) => ({ value: category.value, label: category.label, availability: availability[category.value] }));
 }

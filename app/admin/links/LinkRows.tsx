@@ -6,7 +6,6 @@ import type { Category } from "@prisma/client";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CloseIcon, SearchIcon } from "@/components/ui/icons";
 import { INPUT, PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
-import { CATEGORIES } from "@/lib/categories";
 import type { Sender } from "@/lib/sender-name";
 import { qrFileName, watchLink } from "@/lib/share-link";
 import { createLinkAction, createQrCodeAction } from "./actions";
@@ -65,6 +64,7 @@ export function LinkRows({
   emptyProceduresText,
   linksCanBeMade,
   senders,
+  categories,
 }: {
   procedures: ProcedureItem[];
   baseUrl: string;
@@ -74,6 +74,8 @@ export function LinkRows({
   linksCanBeMade: boolean;
   /** Everyone holding a seat, or null when the clinic's people could not be read just now. */
   senders: Sender[] | null;
+  /** The category pills, with each category's current name, in list order (getCategoryList() on the server). */
+  categories: { value: Category; label: string }[];
 }) {
   const [filter, setFilter] = useState<Filter>("ALL");
   const [query, setQuery] = useState("");
@@ -130,7 +132,7 @@ export function LinkRows({
           <Pill active={filter === "ALL"} onClick={() => setFilter("ALL")}>
             All
           </Pill>
-          {CATEGORIES.map((c) => (
+          {categories.map((c) => (
             <Pill key={c.value} active={filter === c.value} onClick={() => setFilter(c.value)}>
               {c.label}
             </Pill>

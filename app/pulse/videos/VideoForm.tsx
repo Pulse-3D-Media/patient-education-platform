@@ -4,7 +4,7 @@ import type { Category } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
-import { CATEGORIES } from "@/lib/categories";
+import { DEFAULT_CATEGORY_LIST } from "@/lib/categories";
 import { chaptersKey, chaptersToLines, parseChapterLines, type Chapter } from "@/lib/chapters";
 import { formatDuration, parseDuration } from "@/lib/format";
 import { ACCEPTED_UPLOAD_TYPES } from "@/lib/mux-upload";
@@ -65,7 +65,16 @@ export const CLEAR_ONLY_SOURCE_CONFIRM =
  * same rules the server uses (lib/chapters.ts), and are put in time order
  * once the server confirms a save.
  */
-export function VideoForm({ video, uploadsConfigured = false }: { video?: VideoValues; uploadsConfigured?: boolean }) {
+export function VideoForm({
+  video,
+  uploadsConfigured = false,
+  categories = DEFAULT_CATEGORY_LIST,
+}: {
+  video?: VideoValues;
+  uploadsConfigured?: boolean;
+  /** The category choices with their current names, in list order (getCategoryList() on the server). */
+  categories?: { value: Category; label: string }[];
+}) {
   const router = useRouter();
   const [chapterLines, setChapterLines] = useState<EditorLine[]>(() => chaptersToLines(video?.chapters ?? []).map((line, i) => ({ ...line, id: i + 1 })));
   // What the chapters were when this form was drawn, and after that what this form last saved. Sent with the form, so a
@@ -209,7 +218,7 @@ export function VideoForm({ video, uploadsConfigured = false }: { video?: VideoV
               <option value="" disabled>
                 Choose a category
               </option>
-              {CATEGORIES.map((c) => (
+              {categories.map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.label}
                 </option>

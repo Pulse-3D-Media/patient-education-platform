@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getCategoryList } from "@/lib/db/category-config";
 import { muxUploadsAreConfigured } from "@/lib/mux";
 import { requirePulseStaff } from "@/lib/pulse";
 import { VideoForm } from "../VideoForm";
@@ -8,6 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function NewVideoPage() {
   await requirePulseStaff();
+  const list = await getCategoryList();
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -27,7 +29,7 @@ export default async function NewVideoPage() {
           </p>
         </header>
         <div className="rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">
-          <VideoForm uploadsConfigured={muxUploadsAreConfigured()} />
+          <VideoForm uploadsConfigured={muxUploadsAreConfigured()} categories={list.map((c) => ({ value: c.value, label: c.label }))} />
         </div>
       </div>
     </main>

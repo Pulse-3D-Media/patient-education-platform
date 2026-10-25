@@ -1,8 +1,8 @@
 import { Category } from "@prisma/client";
 import Link from "next/link";
 import { INPUT, PLACEHOLDER_BADGE, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
-import { CATEGORIES } from "@/lib/categories";
-import { getCategoryConfigs } from "@/lib/db/category-config";
+import { labelOf } from "@/lib/categories";
+import { getCategoryList } from "@/lib/db/category-config";
 import { countPublishedVideosByCategory, listVideosForPulse, type PulseVideoFilter } from "@/lib/db/videos";
 import { formatDuration } from "@/lib/format";
 import { requirePulseStaff } from "@/lib/pulse";
@@ -20,8 +20,9 @@ import { CategoryConfigForm } from "./CategoryConfigForm";
  * keeps the row, so links and QR codes already sent keep working.
  *
  * Below the table, the Categories panel: each category with how many
- * videos are published in it, whether it is for sale, and the sentence the
- * library shows while it has nothing published.
+ * videos are published in it, its name, web address, tile picture and place
+ * in the list, whether it is for sale, and the sentence the library shows
+ * while it has nothing published.
  *
  * Staff only. Rendered fresh on every request.
  */
@@ -46,9 +47,9 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
   const status = STATUS_CHOICES.find((choice) => choice.value === statusParam)?.value;
   const filtering = Boolean(category) || Boolean(status);
 
-  const [videos, configs, published] = await Promise.all([
+  const [videos, categories, published] = await Promise.all([
     listVideosForPulse({ category, status }),
-    getCategoryConfigs(),
+    getCategoryList(),
     countPublishedVideosByCategory(),
   ]);
 
@@ -75,7 +76,7 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
             </label>
             <select id="category" name="category" defaultValue={category ?? ""} className={`${INPUT} w-52`}>
               <option value="">Any category</option>
-              {CATEGORIES.map((c) => (
+              {categories.map((c) => (
                 <option key={c.value} value={c.value}>
                   {c.label}
                 </option>
@@ -137,7 +138,7 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
                         {video.title}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-[#bfbfbf]">{categoryLabel(video.category)}</td>
+                    <td className="px-4 py-3 text-[#bfbfbf]">{labelOf(categories, video.category)}</td>
                     <td className="px-4 py-3">
                       {video.isPlaceholder ? (
                         <span className={PLACEHOLDER_BADGE}>Placeholder</span>
@@ -176,17 +177,13 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
           <h2 className="text-xl font-semibold">Categories</h2>
           <p className="mt-1 max-w-2xl text-[#bfbfbf]">
             A category is offered for sale only while its switch is on. Until it has a published video, the library shows a
-            &ldquo;Coming soon&rdquo; tile with the sentence here, or a standard one if this is left empty.
+            &ldquo;Coming soon&rdquo; tile with the sentence here, or a standard one if this is left empty. A new name shows
+            everywhere at once, on plans already bought too. A new web address keeps the old one working.
           </p>
           <ul className="mt-4 flex flex-col gap-3">
-            {CATEGORIES.map((c) => (
+            {categories.map((c) => (
               <li key={c.value} className="rounded-2xl border border-white/10 bg-[#0d1113] p-5">
-                <CategoryConfigForm
-                  category={c.value}
-                  label={c.label}
-                  publishedCount={published[c.value] ?? 0}
-                  config={configs[c.value]}
-                />
+                <CategoryConfigForm category={c} publishedCount={published[c.value] ?? 0} />
               </li>
             ))}
           </ul>
@@ -196,7 +193,3 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
   );
 }
 
-/** "KNEE" becomes "Knee". */
-function categoryLabel(value: Category) {
-  return CATEGORIES.find((c) => c.value === value)?.label ?? value;
-}

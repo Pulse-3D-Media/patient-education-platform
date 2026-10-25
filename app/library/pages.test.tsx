@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { categoryState, type CategoryState } from "@/lib/access";
-import { CATEGORIES } from "@/lib/categories";
+import { CATEGORY_DEFAULTS as CATEGORIES } from "@/lib/categories";
 import { getClinicAccess } from "@/lib/db/access";
 import { getCategoryConfigs } from "@/lib/db/category-config";
 import { prisma } from "@/lib/db/client";

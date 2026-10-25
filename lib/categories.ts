@@ -1,14 +1,24 @@
 import type { Category } from "@prisma/client";
+import { parseLogoUrl } from "./branding";
 
 /**
- * The library categories, in the order they appear on screen.
+ * The library categories AS THEY START: each one's default label, slug and
+ * tile image, in the default order.
  *
- * The database stores them as enum values (KNEE, FOOT_ANKLE). This file maps
- * each one to the label a surgeon reads ("Knee", "Foot & Ankle"), the slug in
- * the URL (/library/knee, /library/foot-ankle) and a tile image.
+ * The database stores a category as an enum value (KNEE, FOOT_ANKLE). This
+ * file maps each one to the label a surgeon reads ("Knee", "Foot & Ankle"),
+ * the slug in the URL (/library/knee, /library/foot-ankle) and a tile image.
  *
- * Adding a category is one entry here plus the enum value in the schema. The
- * navigation, tiles and pages all render from this list.
+ * Pulse staff can change the label, the slug, the image and the order on
+ * /pulse/videos (the Categories panel). Those changes live in the
+ * CategoryConfig table, and an empty column there means the value here. So
+ * no screen reads this list directly: pages ask the server for the full list
+ * (getCategoryList() in lib/db/category-config.ts), which is this list with
+ * the table's changes laid over it, and hand it to the browser as props.
+ * What still reads this list directly is the fixed set of enum values and
+ * their fixed order, which is how plans are stored (lib/pricing.ts,
+ * lib/access.ts). Adding a category is one entry here plus the enum value in
+ * the schema.
  *
  * Tile images are stills already published on pulse3dmedia.com, served from
  * its CDN. Nothing here is unreleased. Every address was checked to return
@@ -21,7 +31,10 @@ export const CATEGORY_GROUP = "Orthopedic Surgery";
 
 const CDN = "https://cdn.prod.website-files.com/69092ab4b2ae593d551bb95f/";
 
-export const CATEGORIES: { value: Category; label: string; slug: string; image: string }[] = [
+/** One category's starting details. */
+export type CategoryDefault = { value: Category; label: string; slug: string; image: string };
+
+export const CATEGORY_DEFAULTS: CategoryDefault[] = [
   {
     // The enum value stayed SPINE when the label became "Orthopedic Spine",
     // so no migration was needed. Nothing outside this app links to the old
@@ -109,7 +122,228 @@ export function comingSoonSentence(config: CategoryConfig | undefined) {
   return text ? text : DEFAULT_COMING_SOON;
 }
 
-/** Look a category up by its URL slug. Returns undefined for an unknown slug. */
-export function categoryFromSlug(slug: string) {
-  return CATEGORIES.find((c) => c.slug === slug);
+// ---------------------------------------------------------------------------
+// The full list: the defaults above with the CategoryConfig table laid over
+// them. Built on the server (getCategoryList() in lib/db/category-config.ts)
+// and handed to the browser as props. Everything below is pure.
+// ---------------------------------------------------------------------------
+
+/** One category as every screen shows it: the current label, slug, image and place, and its sale settings. */
+export type CategoryDetails = CategoryDefault & {
+  /** Place in the list, smallest first. */
+  order: number;
+  /** False takes the category off the price list. It still shows in the library. */
+  sellable: boolean;
+  /** The sentence on the library's "Coming soon" tile. Null means the default sentence. */
+  comingSoonText: string | null;
+  /** Earlier slugs that redirect to the current one (the default slug always does too). */
+  formerSlugs: string[];
+};
+
+/** What one CategoryConfig row holds, as lib/db/category-config.ts reads it. Empty means the default. */
+export type CategoryRow = {
+  category: Category;
+  sellable: boolean;
+  comingSoonText: string | null;
+  label: string | null;
+  slug: string | null;
+  imageUrl: string | null;
+  sortOrder: number | null;
+  formerSlugs: string[];
+};
+
+/** A category's default place: 10, 20, 30, so a new place can be typed between two. */
+export function defaultOrder(category: Category): number {
+  const index = CATEGORY_DEFAULTS.findIndex((entry) => entry.value === category);
+  return (index < 0 ? CATEGORY_DEFAULTS.length : index + 1) * 10;
+}
+
+/**
+ * The full list from the table's rows: every category in CATEGORY_DEFAULTS,
+ * each detail the row's when it has one and the default when not, sorted by
+ * place (ties keep the default order). A category with no row is exactly as
+ * it starts: for sale, the default sentence.
+ */
+export function categoryListFromRows(rows: CategoryRow[]): CategoryDetails[] {
+  const byCategory = new Map(rows.map((row) => [row.category, row]));
+  const list = CATEGORY_DEFAULTS.map((entry, index) => {
+    const row = byCategory.get(entry.value);
+    const details: CategoryDetails = {
+      value: entry.value,
+      label: row?.label?.trim() || entry.label,
+      slug: row?.slug || entry.slug,
+      image: row?.imageUrl || entry.image,
+      order: row?.sortOrder ?? defaultOrder(entry.value),
+      sellable: row?.sellable ?? true,
+      comingSoonText: row?.comingSoonText ?? null,
+      formerSlugs: row?.formerSlugs ?? [],
+    };
+    return { details, index };
+  });
+  list.sort((a, b) => a.details.order - b.details.order || a.index - b.index);
+  return list.map((entry) => entry.details);
+}
+
+/** The label a category shows now ("Knee"). Falls back to the default label, then the value, so it never shows nothing. */
+export function labelOf(list: CategoryDetails[], category: Category | string): string {
+  return (
+    list.find((entry) => entry.value === category)?.label ??
+    CATEGORY_DEFAULTS.find((entry) => entry.value === category)?.label ??
+    String(category)
+  );
+}
+
+/** Every category's current label, keyed by category, for the pieces that only need names (the pricing engine's receipt line). */
+export function labelsOf(list: CategoryDetails[]): Record<Category, string> {
+  const labels = {} as Record<Category, string>;
+  for (const entry of CATEGORY_DEFAULTS) labels[entry.value] = labelOf(list, entry.value);
+  return labels;
+}
+
+/** The given categories in the list's order, each once. Values not in the list are dropped. */
+export function inListOrder(list: CategoryDetails[], categories: readonly Category[]): Category[] {
+  const wanted = new Set(categories);
+  return list.filter((entry) => wanted.has(entry.value)).map((entry) => entry.value);
+}
+
+/** The given categories' current labels, in the list's order. */
+export function labelsInOrder(list: CategoryDetails[], categories: readonly Category[]): string[] {
+  return list.filter((entry) => categories.includes(entry.value)).map((entry) => entry.label);
+}
+
+/**
+ * Look a category up by a slug in an address. `current` is true when the
+ * slug is its address now, false when it is an earlier one (its default
+ * slug, or one in formerSlugs), which the page answers with a redirect so no
+ * bookmark breaks. Current slugs are looked at first. Undefined for a slug
+ * no category has ever had.
+ */
+export function findCategoryBySlug(list: CategoryDetails[], slug: string): { category: CategoryDetails; current: boolean } | undefined {
+  const now = list.find((entry) => entry.slug === slug);
+  if (now) return { category: now, current: true };
+  const before = list.find((entry) => entry.formerSlugs.includes(slug) || defaultSlugOf(entry.value) === slug);
+  return before ? { category: before, current: false } : undefined;
+}
+
+function defaultSlugOf(category: Category) {
+  return CATEGORY_DEFAULTS.find((entry) => entry.value === category)?.slug;
+}
+
+// ---------------------------------------------------------------------------
+// The details form on /pulse/videos, checked the same way in the browser and
+// on the server.
+// ---------------------------------------------------------------------------
+
+/** The longest a category's label may be. */
+export const CATEGORY_LABEL_MAX = 40;
+/** The longest a category's slug may be. */
+export const CATEGORY_SLUG_MAX = 40;
+/** The furthest place a category may be put. */
+export const CATEGORY_ORDER_MAX = 9999;
+/**
+ * Slugs that are already pages of their own under /library, so a category
+ * given one could never be reached. Refused.
+ */
+export const RESERVED_SLUGS = ["search", "watch"];
+
+/** A slug: lowercase letters and digits in groups joined by single hyphens ("foot-ankle"). */
+const SLUG_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** What the details form may change, checked. Null means "the default". */
+export type CategoryDetailsInput = {
+  label: string | null;
+  slug: string | null;
+  imageUrl: string | null;
+  sortOrder: number | null;
+};
+
+/**
+ * Check the details form's four boxes for one category. An empty box, or a
+ * box holding exactly the default, means the default and is stored as empty.
+ * Refuses, in one plain sentence, a label that is too long or more than one
+ * line, a slug of the wrong shape or one that is a page of its own, an image
+ * address that is not https (the same rule as a clinic's logo), and a place
+ * that is not a whole number from 1 to 9999.
+ */
+export function readCategoryDetails(
+  category: Category,
+  raw: { label: unknown; slug: unknown; imageUrl: unknown; sortOrder: unknown },
+): { ok: true; details: CategoryDetailsInput } | { ok: false; error: string } {
+  const start = CATEGORY_DEFAULTS.find((entry) => entry.value === category);
+  if (!start) return { ok: false, error: "That is not one of our categories." };
+
+  const labelRaw = typeof raw.label === "string" ? raw.label : "";
+  if (/[\r\n\t]/.test(labelRaw.trim())) return { ok: false, error: "Keep the name on one line." };
+  const labelText = labelRaw.trim();
+  if (labelText.length > CATEGORY_LABEL_MAX) return { ok: false, error: `Keep the name to ${CATEGORY_LABEL_MAX} characters.` };
+
+  const slugText = typeof raw.slug === "string" ? raw.slug.trim() : "";
+  if (slugText) {
+    if (slugText.length > CATEGORY_SLUG_MAX) return { ok: false, error: `Keep the web address to ${CATEGORY_SLUG_MAX} characters.` };
+    if (!SLUG_SHAPE.test(slugText)) {
+      return { ok: false, error: "The web address can only use lowercase letters, numbers and single hyphens, like foot-ankle." };
+    }
+    if (RESERVED_SLUGS.includes(slugText)) return { ok: false, error: `"${slugText}" is already a page of its own. Choose another web address.` };
+  }
+
+  const imageText = typeof raw.imageUrl === "string" ? raw.imageUrl.trim() : "";
+  const image = imageText ? parseLogoUrl(imageText) : null;
+  if (imageText && !image) return { ok: false, error: "The tile picture must be a full address starting with https://." };
+
+  const orderText = typeof raw.sortOrder === "string" ? raw.sortOrder.trim() : "";
+  let sortOrder: number | null = null;
+  if (orderText) {
+    const n = Number(orderText);
+    if (!/^\d+$/.test(orderText) || !Number.isInteger(n) || n < 1 || n > CATEGORY_ORDER_MAX) {
+      return { ok: false, error: `The place in the list must be a whole number from 1 to ${CATEGORY_ORDER_MAX}.` };
+    }
+    sortOrder = n === defaultOrder(category) ? null : n;
+  }
+
+  return {
+    ok: true,
+    details: {
+      label: labelText && labelText !== start.label ? labelText : null,
+      slug: slugText && slugText !== start.slug ? slugText : null,
+      imageUrl: image && image !== start.image ? image : null,
+      sortOrder,
+    },
+  };
+}
+
+/**
+ * The list as it starts, with no changes from the table: for pure code and
+ * tests that are handed no list.
+ */
+export const DEFAULT_CATEGORY_LIST: CategoryDetails[] = categoryListFromRows([]);
+
+/**
+ * Which addresses belong to OTHER categories and so cannot be taken: each
+ * one's current slug, its default slug and its earlier ones. An address,
+ * once a category has had it, stays that category's, so an old bookmark
+ * never opens a different category.
+ */
+export function takenSlugs(list: CategoryDetails[], category: Category): Set<string> {
+  const taken = new Set<string>();
+  for (const entry of list) {
+    if (entry.value === category) continue;
+    taken.add(entry.slug);
+    const start = defaultSlugOf(entry.value);
+    if (start) taken.add(start);
+    for (const slug of entry.formerSlugs) taken.add(slug);
+  }
+  return taken;
+}
+
+/**
+ * The earlier slugs to keep after a slug change: the old ones, plus the slug
+ * being left (unless it is the default, which always redirects anyway), minus
+ * the new one (a category may go back to an address it had).
+ */
+export function formerSlugsAfter(category: Category, before: { slug: string; formerSlugs: string[] }, newSlug: string): string[] {
+  const start = defaultSlugOf(category);
+  const kept = new Set(before.formerSlugs);
+  if (before.slug !== newSlug && before.slug !== start) kept.add(before.slug);
+  kept.delete(newSlug);
+  return [...kept];
 }

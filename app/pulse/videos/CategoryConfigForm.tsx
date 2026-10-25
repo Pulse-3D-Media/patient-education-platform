@@ -1,39 +1,44 @@
 "use client";
 
-import type { Category } from "@prisma/client";
 import { INPUT } from "@/components/ui/styles";
-import { DEFAULT_COMING_SOON, type CategoryConfig } from "@/lib/categories";
+import {
+  CATEGORY_DEFAULTS,
+  CATEGORY_LABEL_MAX,
+  CATEGORY_ORDER_MAX,
+  CATEGORY_SLUG_MAX,
+  DEFAULT_COMING_SOON,
+  defaultOrder,
+  type CategoryDetails,
+} from "@/lib/categories";
 import { saveCategoryConfigAction } from "../actions";
 import { Outcome, SaveButton, useKeptForm } from "../FormBits";
 
 /**
  * One row of the Categories panel on /pulse/videos: the category's name,
- * how many videos are published in it, the "for sale" switch and the
- * optional coming-soon sentence. Each row is its own small form, saving
- * through saveCategoryConfigAction, so one category can be changed
- * without touching the others. A refused or failed save leaves the switch
- * and the sentence as typed (useKeptForm).
+ * how many videos are published in it, its details (the name people read,
+ * the web address, the tile picture and its place in the list), the "for
+ * sale" switch and the optional coming-soon sentence. Each row is its own
+ * small form, saving through saveCategoryConfigAction, so one category can
+ * be changed without touching the others. A refused or failed save leaves
+ * every box as typed (useKeptForm).
+ *
+ * Each detail box starts empty when the category uses its default, with the
+ * default shown faintly, and empty again means "go back to the default".
+ * The server checks everything again (readCategoryDetails() and, for the web
+ * address, every other category's addresses).
  */
-export function CategoryConfigForm({
-  category,
-  label,
-  publishedCount,
-  config,
-}: {
-  category: Category;
-  label: string;
-  publishedCount: number;
-  config: CategoryConfig;
-}) {
+export function CategoryConfigForm({ category, publishedCount }: { category: CategoryDetails; publishedCount: number }) {
   const { state, pending, form } = useKeptForm(saveCategoryConfigAction);
-  const textId = `coming-${category}`;
+  const start = CATEGORY_DEFAULTS.find((entry) => entry.value === category.value);
+  const id = (name: string) => `${name}-${category.value}`;
+  const own = (value: string | number, fallback: string | number | undefined) => (value === fallback ? "" : String(value));
 
   return (
     <form {...form} className="flex flex-col gap-4">
-      <input type="hidden" name="category" value={category} />
+      <input type="hidden" name="category" value={category.value} />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold">{label}</h3>
+          <h3 className="text-lg font-semibold">{category.label}</h3>
           <p className="text-sm text-[#bfbfbf]">
             {publishedCount === 0
               ? "Nothing published yet. The library shows this category as coming soon."
@@ -41,18 +46,80 @@ export function CategoryConfigForm({
           </p>
         </div>
         <label className="flex h-12 cursor-pointer items-center gap-3 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15">
-          <input type="checkbox" name="sellable" defaultChecked={config.sellable} className="h-5 w-5 accent-[#2a829b]" />
+          <input type="checkbox" name="sellable" defaultChecked={category.sellable} className="h-5 w-5 accent-[#2a829b]" />
           <span className="text-[15px] font-medium">For sale</span>
         </label>
       </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor={id("label")} className="mb-1 block text-sm font-medium text-[#bfbfbf]">
+            Name
+          </label>
+          <input
+            id={id("label")}
+            name="label"
+            defaultValue={own(category.label, start?.label)}
+            placeholder={start?.label}
+            maxLength={CATEGORY_LABEL_MAX}
+            className={INPUT}
+          />
+          <p className="mt-1 text-xs text-[#667085]">What surgeons, office staff and plans read. Empty means {start?.label}.</p>
+        </div>
+        <div>
+          <label htmlFor={id("slug")} className="mb-1 block text-sm font-medium text-[#bfbfbf]">
+            Web address
+          </label>
+          <input
+            id={id("slug")}
+            name="slug"
+            defaultValue={own(category.slug, start?.slug)}
+            placeholder={start?.slug}
+            maxLength={CATEGORY_SLUG_MAX}
+            className={INPUT}
+          />
+          <p className="mt-1 text-xs text-[#667085]">
+            /library/{category.slug}. Lowercase letters, numbers and hyphens. Every earlier address keeps working.
+          </p>
+        </div>
+        <div>
+          <label htmlFor={id("imageUrl")} className="mb-1 block text-sm font-medium text-[#bfbfbf]">
+            Tile picture
+          </label>
+          <input
+            id={id("imageUrl")}
+            name="imageUrl"
+            type="url"
+            defaultValue={own(category.image, start?.image)}
+            placeholder="https://"
+            className={INPUT}
+          />
+          <p className="mt-1 text-xs text-[#667085]">A full https:// address. Empty means the standard picture.</p>
+        </div>
+        <div>
+          <label htmlFor={id("sortOrder")} className="mb-1 block text-sm font-medium text-[#bfbfbf]">
+            Place in the list
+          </label>
+          <input
+            id={id("sortOrder")}
+            name="sortOrder"
+            inputMode="numeric"
+            defaultValue={own(category.order, defaultOrder(category.value))}
+            placeholder={String(defaultOrder(category.value))}
+            className={INPUT}
+          />
+          <p className="mt-1 text-xs text-[#667085]">
+            Smallest first, 1 to {CATEGORY_ORDER_MAX}. The standard places are 10, 20, 30, so 15 goes between the first two.
+          </p>
+        </div>
+      </div>
       <div>
-        <label htmlFor={textId} className="mb-1 block text-sm font-medium text-[#bfbfbf]">
+        <label htmlFor={id("coming")} className="mb-1 block text-sm font-medium text-[#bfbfbf]">
           Coming-soon sentence
         </label>
         <input
-          id={textId}
+          id={id("coming")}
           name="comingSoonText"
-          defaultValue={config.comingSoonText ?? ""}
+          defaultValue={category.comingSoonText ?? ""}
           placeholder={DEFAULT_COMING_SOON}
           className={INPUT}
         />

@@ -4,7 +4,7 @@ import type { Category, PracticeType, StaffAccess } from "@prisma/client";
 import { unstable_rethrow } from "next/navigation";
 import { useActionState, useState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
-import { CATEGORIES, availabilityLabel, type CategoryAvailability } from "@/lib/categories";
+import { availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
 import { NOTE_MAX_LENGTH, saveNoteDraft, type NoteOutcome } from "@/lib/note-form";
 import { addNoteAction, saveDetailsAction, setManagedAction, setOwnerAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
@@ -128,6 +128,7 @@ export function PlanForm({
   surgeonSeats,
   seatsInUse,
   availability,
+  list,
 }: {
   clinicId: string;
   categories: Category[];
@@ -136,6 +137,8 @@ export function PlanForm({
   seatsInUse: number;
   /** Which categories can be bought right now. The others get a small label; they can still be ticked. */
   availability: Record<Category, CategoryAvailability>;
+  /** Every category with its current name, in list order (getCategoryList() on the server). */
+  list: { value: Category; label: string }[];
 }) {
   const { state, pending, form } = useKeptForm(setPlanAction);
   // What is typed is kept here, not in the page, so a save that is refused
@@ -151,7 +154,7 @@ export function PlanForm({
       <fieldset>
         <legend className={LABEL}>Categories on the plan</legend>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {CATEGORIES.map((category) => {
+          {list.map((category) => {
             const label = availabilityLabel(availability[category.value]);
             return (
               <label

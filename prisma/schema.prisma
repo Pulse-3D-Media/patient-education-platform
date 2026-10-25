@@ -42,15 +42,22 @@ model Video {
   @@index([category])
 }
 
-/// One row per library category: whether it is offered for sale, and the
-/// sentence the library shows while it has nothing published. Rows are made
-/// on first read with the defaults (getCategoryConfigs() in
+/// One row per library category: whether it is offered for sale, the
+/// sentence the library shows while it has nothing published, and the details
+/// a person sees (name, web address, tile picture, place in the list). Rows
+/// are made on first read with the defaults (getCategoryList() in
 /// lib/db/category-config.ts), so a category with no row behaves like one
-/// that was never touched: for sale, default sentence.
+/// that was never touched. An empty detail means today's value from
+/// lib/categories.ts (CATEGORY_DEFAULTS).
 model CategoryConfig {
   category       Category @id
   sellable       Boolean  @default(true) // false takes the category off the price list; it still shows in the library
   comingSoonText String? // shown on the library's "Coming soon" tile while the category has no published video
+  label          String? // the name people read ("Knee"); empty means the default name
+  slug           String?  @unique // the web address (/library/<slug>); empty means the default. Checked unique against every category's address, defaults included
+  imageUrl       String? // the tile picture, https only; empty means the default picture
+  sortOrder      Int? // place in the list, smallest first; empty means the default place
+  formerSlugs    String[] @default([]) // earlier addresses that redirect to the current one, so no bookmark breaks. Only ever added to
 }
 
 /// Where a clinic stands with us. Only ACTIVE clinics can use the library

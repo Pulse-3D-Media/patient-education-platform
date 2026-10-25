@@ -2,7 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { CATEGORIES } from "@/lib/categories";
+import { CATEGORY_DEFAULTS as CATEGORIES } from "@/lib/categories";
 import { prisma } from "@/lib/db/client";
 import { setFavorite } from "@/lib/db/personal-videos";
 import { watchPageHref } from "@/lib/library-rows";

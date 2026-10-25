@@ -1,13 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
 import { categoryState } from "@/lib/access";
 import { addToPlanOffer } from "@/lib/add-to-plan";
-import { categoryFromSlug } from "@/lib/categories";
+import { findCategoryBySlug } from "@/lib/categories";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getClinicAccess } from "@/lib/db/access";
-import { getCategoryConfigs } from "@/lib/db/category-config";
+import { getCategoryConfigs, getCategoryList } from "@/lib/db/category-config";
 import { listFavoriteIdsAmong } from "@/lib/db/personal-videos";
 import { getSeatFor } from "@/lib/db/seats";
 import { countPublishedVideosByKind, listUsableVideosInCategory } from "@/lib/db/videos";
@@ -48,8 +48,13 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   if (!clinicIsOpen(clinic)) return <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink={clinic.isAdmin} />;
 
   const { category: slug } = await params;
-  const category = categoryFromSlug(slug);
-  if (!category) notFound();
+  // The address can be the category's address now, or one it had before Pulse staff changed it on
+  // /pulse/videos: an old one is sent on to the new one, so no bookmark breaks.
+  const list = await getCategoryList();
+  const found = findCategoryBySlug(list, slug);
+  if (!found) notFound();
+  if (!found.current) redirect(`/library/${found.category.slug}`);
+  const category = found.category;
 
   const access = await getClinicAccess(clinic.id);
   if (!access || !access.open) return <ClinicClosed status={access?.status ?? clinic.status} clinicName={clinic.name} billingLink={clinic.isAdmin} />;
@@ -81,7 +86,7 @@ export default async function CategoryPage({ params }: PageProps<"/library/[cate
   return (
     <main className="py-6">
       {/* The pills first, as on every library page; the lit one says which category this is. */}
-      <CategoryTabs categories={access.categories} current={category.slug} />
+      <CategoryTabs list={list} categories={access.categories} current={category.slug} />
       <h1 className="mb-5 px-5 text-2xl font-semibold sm:px-8 sm:text-3xl">{category.label}</h1>
 
       <div className="px-5 sm:px-8">

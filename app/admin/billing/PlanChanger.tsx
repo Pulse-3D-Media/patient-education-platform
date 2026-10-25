@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 import { PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { PULSE_CONTACT_URL } from "@/lib/brand";
-import { CATEGORIES } from "@/lib/categories";
 import { engineInterval } from "@/lib/checkout-rules";
 import { classifyPlanChange, planLibraryGap, RENEWAL_REASON_WORDS } from "@/lib/plan-change";
 import { formatCents, quote, type Quote } from "@/lib/pricing";
@@ -72,13 +71,15 @@ export function PlanChanger({ offer, suggested = null }: { offer: Changer; sugge
   const { config } = prices;
   // What may be ticked: anything for sale, and anything already on the plan.
   const sellable = useMemo(() => offer.options.filter((option) => canPick(option, current.included)).map((option) => option.value), [offer.options, current.included]);
+  // The categories' current names, from the server, for the receipt line.
+  const names = useMemo(() => Object.fromEntries(offer.options.map((option) => [option.value, option.label])), [offer.options]);
   const seats = /^\d{1,5}$/.test(seatsText.trim()) ? Number(seatsText.trim()) : 0;
   const clinicMax = config.seats.clinicMax;
   const tooManySeats = seats > clinicMax;
 
   const quoteFor = (which: BillingInterval): Quote | null => {
     if (picked.length === 0 || seats < 1) return null;
-    const result = quote(config, { seats, categories: picked, interval: engineInterval(which), founding: false, practiceType: "clinic", sellable });
+    const result = quote(config, { seats, categories: picked, interval: engineInterval(which), founding: false, practiceType: "clinic", sellable, labels: names });
     return result.ok ? result.quote : null;
   };
   const monthly = quoteFor("MONTH");
@@ -133,7 +134,7 @@ export function PlanChanger({ offer, suggested = null }: { offer: Changer; sugge
       router.refresh();
     });
 
-  const labels = (categories: Category[]) => CATEGORIES.filter((category) => categories.includes(category.value)).map((category) => category.label);
+  const labels = (categories: Category[]) => offer.options.filter((option) => categories.includes(option.value)).map((option) => option.label);
 
   // Where the paid plan and the library disagree, the box says which way.
   const gap = planLibraryGap(current.included, current.library);

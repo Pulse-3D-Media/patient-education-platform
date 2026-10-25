@@ -7,7 +7,8 @@ import { redirect } from "next/navigation";
 import { retryBillingEvent } from "@/lib/billing-events";
 import { MAX_GRACE_DAYS, MIN_GRACE_DAYS } from "@/lib/billing-state";
 import { chaptersKey, checkChapters, parseChapterLines, readStoredChapters, type Chapter } from "@/lib/chapters";
-import { saveCategoryConfig } from "@/lib/db/category-config";
+import { readCategoryDetails } from "@/lib/categories";
+import { CategoryDetailsError, saveCategoryConfig } from "@/lib/db/category-config";
 import { readBrandingForm, readLogoField } from "@/lib/branding-form";
 import {
   PlanSeatsRefusedError,
@@ -688,7 +689,14 @@ export async function dismissUploadFailureAction(videoId: unknown): Promise<Form
   return { ok: "Dismissed." };
 }
 
-/** Save one category's "for sale" switch and its coming-soon sentence. */
+/**
+ * Save one category's row from the Categories panel: its "for sale" switch,
+ * its coming-soon sentence, and its details (the name people read, the web
+ * address, the tile picture and the place in the list). An empty detail box
+ * means the default. A form with no detail boxes (an older page) leaves the
+ * details as they are. A new web address keeps the old one working: the
+ * library page redirects it.
+ */
 export async function saveCategoryConfigAction(_previous: FormState, formData: FormData): Promise<FormState> {
   await requirePulseStaff();
 
@@ -698,11 +706,27 @@ export async function saveCategoryConfigAction(_previous: FormState, formData: F
   const text = String(formData.get("comingSoonText") ?? "").trim();
   if (text.length > SHORT_TEXT_LIMIT) return { error: `Keep the sentence under ${SHORT_TEXT_LIMIT} characters.` };
 
-  const saved = await saveCategoryConfig(category, {
-    sellable: formData.get("sellable") === "on",
-    comingSoonText: text || null,
-  });
-  refreshCatalogue();
+  let details;
+  if (["label", "slug", "imageUrl", "sortOrder"].some((name) => formData.has(name))) {
+    const read = readCategoryDetails(category, {
+      label: formData.get("label"),
+      slug: formData.get("slug"),
+      imageUrl: formData.get("imageUrl"),
+      sortOrder: formData.get("sortOrder"),
+    });
+    if (!read.ok) return { error: read.error };
+    details = read.details;
+  }
+
+  let saved;
+  try {
+    saved = await saveCategoryConfig(category, { sellable: formData.get("sellable") === "on", comingSoonText: text || null }, details);
+  } catch (error) {
+    if (error instanceof CategoryDetailsError) return { error: error.message };
+    throw error;
+  }
+  // A category's name and address show on nearly every page, so everything is drawn again.
+  revalidatePath("/", "layout");
   return { ok: saved.sellable ? "Saved. This category is for sale." : "Saved. This category is not for sale." };
 }
 

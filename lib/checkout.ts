@@ -9,7 +9,8 @@ import {
   type AcceptedPlanInput,
   type PurchaseAttempt,
 } from "./db/billing";
-import { listSellableCategories } from "./db/category-config";
+import { labelsOf } from "./categories";
+import { getCategoryList, listSellableCategories } from "./db/category-config";
 import { getActivePricing } from "./db/pricing";
 import { categoryLabel, formatCents, quote } from "./pricing";
 import { PULSE_CONTACT_WORDS } from "./brand";
@@ -124,7 +125,8 @@ export async function startCheckout(args: {
   const pricing = await getActivePricing();
   if (pricing.source.kind !== "version") return { kind: "refused", message: CHECKOUT_CLOSED_MESSAGE };
   const version = pricing.source.version;
-  const sellable = await listSellableCategories();
+  const [sellable, list] = await Promise.all([listSellableCategories(), getCategoryList()]);
+  const labels = labelsOf(list);
   const result = quote(pricing.config, {
     seats: selection.seats,
     categories: selection.categories,
@@ -136,6 +138,7 @@ export async function startCheckout(args: {
     // this far is a clinic, including one Pulse staff never marked (UNKNOWN).
     practiceType: "clinic",
     sellable,
+    labels,
   });
   if (!result.ok) return { kind: "refused", message: result.error };
   const amounts = result.quote.amounts;
@@ -182,9 +185,14 @@ export async function startCheckout(args: {
     acceptedById: actor.id,
     acceptedByName: actor.name,
   };
+  // What Stripe shows on the subscription and its invoices. It uses the categories' STARTING names on
+  // purpose, not the names Pulse staff may have given them: Stripe keeps the description it is given
+  // first, and refuses a repeated request (the same idempotency key, step 6) whose words differ, so a
+  // rename between a first try and a retry would otherwise make the retry fail. Our own screens show
+  // the current names.
   const description = result.quote.fullLibrary
     ? `Full library, ${seatWords(selection.seats)}`
-    : `${result.quote.selectedCategories.map(categoryLabel).join(", ")}; ${seatWords(selection.seats)}`;
+    : `${result.quote.selectedCategories.map((category) => categoryLabel(category)).join(", ")}; ${seatWords(selection.seats)}`;
 
   let attempt: PurchaseAttempt;
   try {

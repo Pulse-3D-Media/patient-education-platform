@@ -1,11 +1,13 @@
 import { ClinicStatus } from "@prisma/client";
 import Link from "next/link";
+import { labelOf } from "@/lib/categories";
+import { getCategoryList } from "@/lib/db/category-config";
 import { getPlatformReport, listClinicReportRows, REPORT_CLINICS_PAGE_SIZE, REPORT_PROCEDURE_LIMIT } from "@/lib/db/reports";
 import { pageInfo, readPage } from "@/lib/paging";
 import { requirePulseStaff } from "@/lib/pulse";
 import { readReportRange, reportHref, SEAT_SOURCE_WORDS } from "@/lib/reports";
 import { Pager, Section, StatusBadge, statusLabel } from "../ui";
-import { categoryLabel, count, CountCells, CountHeadings, CountsTable, CountTiles, CsvLink, Definitions, Empty, ProcedureTable, RangeControls, ReportTable } from "./ReportBits";
+import { count, CountCells, CountHeadings, CountsTable, CountTiles, CsvLink, Definitions, Empty, ProcedureTable, RangeControls, ReportTable } from "./ReportBits";
 
 /**
  * Reports, at /pulse/reports: how the platform's links are used, in totals.
@@ -37,7 +39,7 @@ export default async function PulseReportsPage({ searchParams }: PageProps<"/pul
   const { range, problem } = readReportRange(params, now);
   const window = { since: range.since, until: range.until };
 
-  const [report, clinics] = await Promise.all([getPlatformReport(window, now), listClinicReportRows(window, readPage(params.page))]);
+  const [report, clinics, list] = await Promise.all([getPlatformReport(window, now), listClinicReportRows(window, readPage(params.page)), getCategoryList()]);
   const info = pageInfo(clinics.page, clinics.total, REPORT_CLINICS_PAGE_SIZE);
 
   /** The Download CSV address of one table, for the range on screen. */
@@ -112,12 +114,12 @@ export default async function PulseReportsPage({ searchParams }: PageProps<"/pul
 
         <Section title="By category">
           <CsvLink href={csvHref("categories")} />
-          <CountsTable firstHeading="Category" rows={report.categories.map((row) => ({ key: row.category, label: categoryLabel(row.category), counts: row }))} />
+          <CountsTable firstHeading="Category" rows={report.categories.map((row) => ({ key: row.category, label: labelOf(list, row.category), counts: row }))} />
         </Section>
 
         <Section title="By procedure">
           <CsvLink href={csvHref("procedures")} />
-          <ProcedureTable rows={report.procedures} capped={report.proceduresCapped} limit={REPORT_PROCEDURE_LIMIT} />
+          <ProcedureTable rows={report.procedures} capped={report.proceduresCapped} limit={REPORT_PROCEDURE_LIMIT} list={list} />
         </Section>
 
         <Section title="By clinic" blurb="Every clinic, the ones that made the most links in this period first. Open one for its surgeons and procedures.">

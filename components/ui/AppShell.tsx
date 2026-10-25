@@ -6,7 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ADMIN_SECTIONS, activeAdminSection } from "@/lib/admin-nav";
-import { CATEGORIES, CATEGORY_GROUP } from "@/lib/categories";
+import { CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_URL } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
 import { ClinicLogo } from "./ClinicLogo";
@@ -93,8 +93,8 @@ export type ShellBrand = {
 /** Which pull-out is showing, if any: the full sidebar slid over the page, the categories, or the admin sections. */
 type Menu = "guide" | "library" | "admin" | null;
 
-/** A category as the navigation lists it. */
-type NavCategory = (typeof CATEGORIES)[number];
+/** A category as the navigation lists it: its current name and address, from the server (getCategoryList()). */
+export type NavCategory = { value: Category; label: string; slug: string };
 
 /** Where this device remembers that the wide sidebar was folded. Only a convenience: losing it unfolds the sidebar. */
 const FOLD_KEY = "p3-sidebar";
@@ -111,8 +111,8 @@ export function AppShell({
   children: ReactNode;
   showAdmin?: boolean;
   brand?: ShellBrand;
-  /** The categories on the clinic's plan, for the navigation. Left out, every category is listed. */
-  categories?: Category[];
+  /** The categories on the clinic's plan, for the navigation, in list order with their current names. Left out, none is listed. */
+  categories?: NavCategory[];
 }) {
   const [menu, setMenu] = useState<Menu>(null);
   /** The wide sidebar folded down to the rail. Starts unfolded; the device's saved choice is read once the page is awake. */
@@ -168,7 +168,7 @@ export function AppShell({
 
   const onAdmin = pathname.startsWith("/admin");
   const onHome = pathname === "/library";
-  const listed = categories ? CATEGORIES.filter((c) => categories.includes(c.value)) : CATEGORIES;
+  const listed = categories ?? [];
 
   const logo = brand ? (
     <Link

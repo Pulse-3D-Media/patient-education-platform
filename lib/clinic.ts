@@ -8,7 +8,9 @@ import { getClinicByClerkOrgId, upsertClinicForClerkOrg } from "./db/clinics";
 import { ADMIN_ROLE, isClinicAdmin } from "./roles";
 import { defaultSenderName } from "./sender-name";
 import type { Category, ClinicStatus, PracticeType } from "@prisma/client";
-import { inLibraryOrder } from "./access";
+import { DEFAULT_CATEGORY_LIST } from "./categories";
+import { getCategoryList } from "./db/category-config";
+import { errorKind } from "./error-kind";
 
 /**
  * Which clinic is using the app right now, and who in it.
@@ -50,10 +52,11 @@ export type CurrentClinic = {
    */
   defaultPatientName: string | null;
   /**
-   * The categories on the clinic's plan, in library order, for the sidebar and the drawer (navigation only, so a
-   * courtesy: what a page may show is always decided from getClinicAccess() and the access rule).
+   * The categories on the clinic's plan, in list order with their current names and addresses (Pulse staff can
+   * change them on /pulse/videos), for the sidebar and the drawer (navigation only, so a courtesy: what a page may
+   * show is always decided from getClinicAccess() and the access rule).
    */
-  planCategories: Category[];
+  planCategories: { value: Category; label: string; slug: string }[];
 };
 
 /**
@@ -119,6 +122,12 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     creatorClerkUserId: creatorOf(organization, userId, isAdmin),
   });
 
+  // The names for the navigation. If they cannot be read, the starting names stand in: the shell must still be drawn.
+  const list = await getCategoryList().catch((error: unknown) => {
+    console.error("Category list for the shell could not be read", errorKind(error));
+    return DEFAULT_CATEGORY_LIST;
+  });
+
   return {
     id: clinic.id,
     name: clinic.name,
@@ -134,7 +143,9 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     isOwner: clinic.ownerClerkUserId === userId,
     isAdmin,
     defaultPatientName: defaultSenderName(membership.publicUserData?.firstName, membership.publicUserData?.lastName),
-    planCategories: inLibraryOrder(clinic.categories),
+    planCategories: list
+      .filter((category) => clinic.categories.includes(category.value))
+      .map((category) => ({ value: category.value, label: category.label, slug: category.slug })),
   };
 });
 

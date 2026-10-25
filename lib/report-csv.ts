@@ -1,5 +1,5 @@
 import type { CategoryReportRow, ClinicReportRow, ProcedureReportRow, SurgeonReportRow } from "./db/reports";
-import { CATEGORIES } from "./categories";
+import { DEFAULT_CATEGORY_LIST, labelOf, type CategoryDetails } from "./categories";
 import { toCsv, type CsvCell } from "./csv";
 import type { LinkCounts } from "./reports";
 
@@ -31,18 +31,15 @@ function countCells(counts: LinkCounts): CsvCell[] {
 /** The status as the dashboard's badge says it. */
 const STATUS_WORDS: Record<ClinicReportRow["status"], string> = { PENDING: "Pending", ACTIVE: "Active", PAUSED: "Paused", PAST_DUE: "Past due", CANCELED: "Canceled" };
 
-function categoryLabel(category: string) {
-  return CATEGORIES.find((entry) => entry.value === category)?.label ?? category;
+/** `list` is the current category list (getCategoryList()), so a file says each category's name as it is now. */
+export function categoriesCsv(rows: CategoryReportRow[], list: CategoryDetails[] = DEFAULT_CATEGORY_LIST): string {
+  return toCsv(["Category", ...COUNT_HEADINGS], rows.map((row) => [labelOf(list, row.category), ...countCells(row)]));
 }
 
-export function categoriesCsv(rows: CategoryReportRow[]): string {
-  return toCsv(["Category", ...COUNT_HEADINGS], rows.map((row) => [categoryLabel(row.category), ...countCells(row)]));
-}
-
-export function proceduresCsv(rows: ProcedureReportRow[]): string {
+export function proceduresCsv(rows: ProcedureReportRow[], list: CategoryDetails[] = DEFAULT_CATEGORY_LIST): string {
   return toCsv(
     ["Procedure", "Category", "Placeholder", ...COUNT_HEADINGS],
-    rows.map((row) => [row.title, categoryLabel(row.category), row.isPlaceholder ? "Yes" : "No", ...countCells(row)]),
+    rows.map((row) => [row.title, labelOf(list, row.category), row.isPlaceholder ? "Yes" : "No", ...countCells(row)]),
   );
 }
 

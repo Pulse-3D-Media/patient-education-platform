@@ -6,9 +6,9 @@ import { BrandingForm } from "@/components/ui/BrandingForm";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { BILLING_STATUS_WORDS, STAFF_ACCESS_WORDS, hasLiveSubscription } from "@/lib/billing-state";
 import { parseLogoUrl, readBranding } from "@/lib/branding";
-import { CATEGORIES } from "@/lib/categories";
+import { labelOf, type CategoryDetails } from "@/lib/categories";
 import { getClinicBilling } from "@/lib/db/billing";
-import { getCategoryAvailability } from "@/lib/db/category-config";
+import { getCategoryAvailability, getCategoryList } from "@/lib/db/category-config";
 import { getClinicForPulse } from "@/lib/db/clinics";
 import { NOTES_PAGE_SIZE, countNotesForClinic, listNotesForClinic } from "@/lib/db/notes";
 import { listQrCodesForPulse, type PulseQrCodeRow } from "@/lib/db/qr-codes";
@@ -69,7 +69,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
   // First, because it may add an entry to the log that is read just below. Null when Clerk cannot be read.
   const board = clinic.clerkOrgId ? await checkSeats(clinic.id).catch(() => null) : null;
 
-  const [settings, shares, shareCount, noteCount, availability, billing, storedSeats, printed] = await Promise.all([
+  const [settings, shares, shareCount, noteCount, availability, billing, storedSeats, printed, list] = await Promise.all([
     getSettings(),
     listRecentSharesForClinic(clinic.id, RECENT_LINK_LIMIT),
     countSharesForClinic(clinic.id),
@@ -78,6 +78,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
     getClinicBilling(clinic.id),
     getSeatSummary(clinic.id),
     listQrCodesForPulse(clinic.id),
+    getCategoryList(),
   ]);
   // One page of the log, never the whole of it. A typed-in page number past the end lands on the last page.
   const notesInfo = pageInfo(readPage((await searchParams).notes), noteCount, NOTES_PAGE_SIZE);
@@ -129,15 +130,15 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
             {billing.cancelAt && <Fact label="Cancellation scheduled for">{formatDateTime(billing.cancelAt)}</Fact>}
             {billing.paymentFailedAt && <Fact label="Payment failure first recorded">{formatDateTime(billing.paymentFailedAt)}</Fact>}
             {billing.graceEndsAt && <Fact label="Grace period ends">{formatDateTime(billing.graceEndsAt)}</Fact>}
-            <Fact label="Plan in force">{planWords(billing.currentPlan)}</Fact>
+            <Fact label="Plan in force">{planWords(list, billing.currentPlan)}</Fact>
             {billing.pendingPlan && (
               <Fact label={billing.status === "ACTIVE" || billing.status === "PAST_DUE" ? "Plan change waiting for its payment" : "Plan waiting for a first payment"}>
-                {planWords(billing.pendingPlan)}
+                {planWords(list, billing.pendingPlan)}
               </Fact>
             )}
             {billing.scheduledPlan && (
               <Fact label={`Plan change scheduled for ${billing.scheduledChangeAt ? formatDateTime(billing.scheduledChangeAt) : "the next renewal"}`}>
-                {planWords(billing.scheduledPlan)}
+                {planWords(list, billing.scheduledPlan)}
               </Fact>
             )}
             <Fact label="Last checked against Stripe">{billing.lastReconciledAt ? formatDateTime(billing.lastReconciledAt) : "Never"}</Fact>
@@ -167,7 +168,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
       title="Plan"
       blurb="Which categories the clinic can use and how many surgeon seats it pays for. A category marked Not for sale or Coming soon can still be ticked (an enterprise or comped clinic may get one early); the label makes it a choice, not an accident. Once billing exists, self-serve clinics set this themselves and it becomes read-only here unless the clinic is managed by Pulse."
     >
-      <PlanForm clinicId={clinic.id} categories={clinic.categories} surgeonSeats={clinic.surgeonSeats} seatsInUse={seats.inUse} availability={availability} />
+      <PlanForm clinicId={clinic.id} categories={clinic.categories} surgeonSeats={clinic.surgeonSeats} seatsInUse={seats.inUse} availability={availability} list={list.map((category) => ({ value: category.value, label: category.label }))} />
     </Section>
   );
 
@@ -316,7 +317,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
                           {share.qrCodeId && <span className="rounded-md bg-white/10 px-2 py-0.5 text-[12px] text-[#bfbfbf]">From a printed code</span>}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-[#bfbfbf]">{categoryLabel(share.video.category)}</td>
+                      <td className="px-3 py-2 text-[#bfbfbf]">{labelOf(list, share.video.category)}</td>
                       <td className={`px-3 py-2 ${expired ? "text-[#667085]" : "text-[#bfbfbf]"}`}>{expires}</td>
                       <td className="px-3 py-2 text-right text-[#bfbfbf]">{share.viewCount}</td>
                       <td className="px-3 py-2 text-[#bfbfbf]">
@@ -465,11 +466,6 @@ function PeopleTable({ people }: { people: SeatedPerson[] }) {
   );
 }
 
-/** "KNEE" becomes "Knee". */
-function categoryLabel(value: string) {
-  return CATEGORIES.find((c) => c.value === value)?.label ?? value;
-}
-
 /** One labelled fact in the Card billing section. */
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -481,9 +477,9 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /** One accepted plan in a line: what, how many seats, how much, who accepted it. */
-function planWords(plan: NonNullable<Awaited<ReturnType<typeof getClinicBilling>>>["currentPlan"]) {
+function planWords(list: CategoryDetails[], plan: NonNullable<Awaited<ReturnType<typeof getClinicBilling>>>["currentPlan"]) {
   if (!plan) return "None";
-  const categories = plan.entitledCategories.map(categoryLabel).join(", ");
+  const categories = plan.entitledCategories.map((category) => labelOf(list, category)).join(", ");
   const seats = `${plan.surgeonSeats} ${plan.surgeonSeats === 1 ? "seat" : "seats"}`;
   const per = plan.interval === "YEAR" ? "year" : "month";
   return `${categories}; ${seats}; ${formatCents(plan.totalCents)} a ${per}; prices version ${plan.pricingVersion.version}; accepted by ${plan.acceptedByName} on ${formatDate(plan.createdAt)}`;

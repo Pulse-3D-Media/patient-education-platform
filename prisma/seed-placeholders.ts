@@ -33,7 +33,7 @@
  * Safe to run more than once: a video that already exists (same title and
  * category) is left alone and reported, never duplicated and never changed.
  */
-import type { Category } from "@prisma/client";
+import type { Category } from "../lib/categories";
 import { prisma } from "../lib/db/client";
 import { errorKind } from "../lib/error-kind";
 import { preflight } from "./preflight";

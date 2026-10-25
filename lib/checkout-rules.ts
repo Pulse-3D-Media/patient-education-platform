@@ -1,4 +1,5 @@
-import type { BillingInterval, Category } from "@prisma/client";
+import type { BillingInterval } from "@prisma/client";
+import type { Category } from "./categories";
 import { CATEGORY_VALUES, MAX_QUOTE_SEATS, type Interval } from "./pricing";
 
 /**

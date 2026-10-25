@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import Link from "next/link";
 import type { CategoryDetails } from "@/lib/categories";
 

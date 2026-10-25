@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { getClinicPlan, type ClinicPlan } from "@/lib/db/clinics";
 import { getPricingForClinic } from "@/lib/db/pricing";
 import { getSeatSummary } from "@/lib/db/seats";

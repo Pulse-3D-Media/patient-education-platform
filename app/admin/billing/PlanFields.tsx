@@ -1,6 +1,7 @@
 "use client";
 
-import type { BillingInterval, Category } from "@prisma/client";
+import type { BillingInterval } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { INPUT, LABEL } from "@/components/ui/styles";
 import { availabilityLabel } from "@/lib/categories";
 import { formatCents, type PricingConfig, type QuoteAmounts } from "@/lib/pricing";

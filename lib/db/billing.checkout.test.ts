@@ -179,6 +179,15 @@ describe("acceptPlanForCheckout", () => {
     expect(await countPlans(clinicId)).toBe(0);
   });
 
+  it("refuses a plan naming a category that is not one of ours (categories are text since K2)", async () => {
+    const clinicId = await makeClinic("made-up category");
+    await expect(acceptPlanForCheckout(clinicId, planInput({ categories: ["ELBOW"], entitledCategories: ["ELBOW"] }))).rejects.toThrow("not one of ours");
+    await expect(acceptPlanForCheckout(clinicId, planInput({ entitledCategories: [...planInput().entitledCategories, "knee"] }))).rejects.toBeInstanceOf(
+      BillingRefusedError,
+    );
+    expect(await countPlans(clinicId)).toBe(0);
+  });
+
   it("refuses a plan with fewer surgeon seats than people hold right now, and says what to do", async () => {
     // A clinic Pulse opened by hand with five seats, three of them in use, now choosing a plan by card.
     const clinicId = await makeClinic("fewer seats");

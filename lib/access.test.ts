@@ -63,6 +63,10 @@ describe("inLibraryOrder", () => {
     expect(inLibraryOrder(["FOOT_ANKLE", "KNEE", "COMPLEX_SPINE", "KNEE"])).toEqual(["COMPLEX_SPINE", "KNEE", "FOOT_ANKLE"]);
     expect(inLibraryOrder([])).toEqual([]);
   });
+
+  it("keeps a category added later (not one of the starting six) after them, never dropping it", () => {
+    expect(inLibraryOrder(["WRIST", "KNEE", "ELBOW", "WRIST"])).toEqual(["KNEE", "ELBOW", "WRIST"]);
+  });
 });
 
 describe("decideVideoAccess", () => {

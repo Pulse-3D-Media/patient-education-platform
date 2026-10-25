@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "./categories";
 import { selfServeEligibility } from "./billing-state";
 import { PULSE_CONTACT_WORDS } from "./brand";
 import { engineInterval, samePlanShape } from "./checkout-rules";

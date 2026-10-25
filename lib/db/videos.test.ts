@@ -303,8 +303,8 @@ describe("countPublishedVideosByKind", () => {
 
     // Every number is a real count of published rows.
     for (const [category, counts] of Object.entries(after)) {
-      expect(counts.real).toBe(await prisma.video.count({ where: { category: category as never, isPublished: true, isPlaceholder: false } }));
-      expect(counts.placeholder).toBe(await prisma.video.count({ where: { category: category as never, isPublished: true, isPlaceholder: true } }));
+      expect(counts?.real).toBe(await prisma.video.count({ where: { category: category as never, isPublished: true, isPlaceholder: false } }));
+      expect(counts?.placeholder).toBe(await prisma.video.count({ where: { category: category as never, isPublished: true, isPlaceholder: true } }));
     }
     expect([finished.id, placeholder.id]).toHaveLength(2);
   });

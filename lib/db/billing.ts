@@ -1,4 +1,5 @@
-import { Prisma, type BillingEventStatus, type BillingInterval, type Category, type ClinicStatus } from "@prisma/client";
+import { Prisma, type BillingEventStatus, type BillingInterval, type ClinicStatus } from "@prisma/client";
+import type { Category } from "../categories";
 import {
   FIRST_PAYMENT_UNDER_WAY,
   NO_BILLING,
@@ -172,6 +173,18 @@ function checkPlan(input: AcceptedPlanInput) {
 }
 
 /**
+ * Every category on a plan must be one that exists, a CategoryConfig row.
+ * Since K2 a category is text, so the database would store any word; the
+ * pricing engine has already refused anything it does not sell, and this is
+ * the writer's own check, so no accepted plan can ever name a made-up one.
+ */
+async function checkPlanCategories(input: AcceptedPlanInput) {
+  const known = new Set((await prisma.categoryConfig.findMany({ select: { category: true } })).map((row) => row.category));
+  const unknown = [...input.categories, ...input.entitledCategories].filter((category) => !known.has(category));
+  if (unknown.length > 0) throw new BillingRefusedError("A category on the plan is not one of ours.");
+}
+
+/**
  * A plan may not be accepted with fewer surgeon seats than people hold right
  * now (a clinic Pulse opened by hand can have surgeons seated before it ever
  * pays by card). This is the "when it is scheduled" half of the rule in
@@ -202,6 +215,7 @@ async function refuseFewerSeatsThanInUse(tx: Prisma.TransactionClient, clinicId:
  */
 export async function recordAcceptedPlan(clinicId: string, input: AcceptedPlanInput) {
   checkPlan(input);
+  await checkPlanCategories(input);
   return prisma.$transaction(async (tx) => {
     const clinic = await readClinicLocked(tx, clinicId, { id: true });
     if (!clinic) throw new BillingRefusedError("That clinic no longer exists.");
@@ -304,6 +318,7 @@ export async function acceptPlanForCheckout(
   options: { now?: Date; forceNew?: boolean } = {},
 ): Promise<PurchaseAttempt> {
   checkPlan(input);
+  await checkPlanCategories(input);
   return prisma.$transaction(async (tx) => {
     const clinic = await readClinicLocked(tx, clinicId, { id: true, practiceType: true, managedByPulse: true, staffAccess: true });
     // The clock is read AFTER the lock is held, so it is later than anything an earlier request wrote while this one waited.
@@ -378,6 +393,7 @@ export async function acceptPlanForChange(
   options: { basePlanId: string; timing: ChangeTiming },
 ): Promise<{ planId: string }> {
   checkPlan(input);
+  await checkPlanCategories(input);
   return prisma.$transaction(async (tx) => {
     const clinic = await readClinicLocked(tx, clinicId, { id: true, practiceType: true, managedByPulse: true, staffAccess: true });
     if (!clinic) throw new BillingRefusedError("That clinic no longer exists.");
@@ -723,7 +739,13 @@ export async function reconcileSubscription(args: {
           select: { clinicId: true, entitledCategories: true, surgeonSeats: true, pricingVersionId: true },
         });
         if (!plan || plan.clinicId !== clinicId) throw new Error("Billing: the accepted plan does not belong to this clinic.");
-        clinicData.categories = plan.entitledCategories;
+        // Every accepted plan was checked when it was written (checkPlanCategories). Should one ever name a
+        // category that is not in CategoryConfig (a row written around the app), the payment is still honoured
+        // for every real category, and the log says what was left out so a person can look.
+        const known = new Set((await tx.categoryConfig.findMany({ select: { category: true } })).map((row) => row.category));
+        const leftOut = plan.entitledCategories.filter((category) => !known.has(category));
+        if (leftOut.length > 0) entries.push(`Needs a look: the plan names ${leftOut.join(", ")}, which is not one of our categories, so it was left out.`);
+        clinicData.categories = plan.entitledCategories.filter((category) => known.has(category));
         clinicData.surgeonSeats = plan.surgeonSeats;
         clinicData.pricingVersionId = plan.pricingVersionId;
         entries.push(

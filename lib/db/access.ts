@@ -1,4 +1,5 @@
-import type { Category, ClinicStatus, Prisma, PrismaClient } from "@prisma/client";
+import type { ClinicStatus, Prisma, PrismaClient } from "@prisma/client";
+import type { Category } from "../categories";
 import { accessFromClinic, decideVideoAccess, type AccessDecision, type ClinicAccess, type VideoFacts } from "../access";
 import { prisma } from "./client";
 

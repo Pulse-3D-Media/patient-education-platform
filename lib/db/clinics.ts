@@ -1,4 +1,5 @@
-import { Prisma, type Category, type ClinicStatus, type PracticeType, type StaffAccess } from "@prisma/client";
+import { Prisma, type ClinicStatus, type PracticeType, type StaffAccess } from "@prisma/client";
+import type { Category } from "../categories";
 import { PRACTICE_TYPE_WORDS, STAFF_ACCESS_WORDS, effectiveAccess, hasLiveSubscription } from "../billing-state";
 import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, brandFontLabel, brandThemeLabel, parseBrandFont, parseBrandTheme } from "../branding";
 import { labelsInOrder, type CategoryDetails } from "../categories";

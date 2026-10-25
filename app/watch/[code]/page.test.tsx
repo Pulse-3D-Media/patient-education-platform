@@ -70,7 +70,7 @@ async function render(shareCode: string) {
 }
 
 beforeAll(async () => {
-  const make = (data: Partial<Prisma.VideoCreateInput>) =>
+  const make = (data: Partial<Prisma.VideoUncheckedCreateInput>) =>
     prisma.video.create({
       data: { title: "Vitest Total Knee Replacement", category: "KNEE", videoUrl: "https://example.com/vitest.mp4", durationSeconds: 110, isPublished: true, ...data },
       select: { id: true },

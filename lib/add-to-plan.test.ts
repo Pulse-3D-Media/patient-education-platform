@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "./categories";
 import { describe, expect, it } from "vitest";
 import { addToPlanHref, addToPlanOffer, readSuggestedCategory } from "./add-to-plan";
 import type { CategoryAvailability } from "./categories";

@@ -1,5 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import type { BillingStatus, Category, ClinicStatus, PracticeType } from "@prisma/client";
+import type { BillingStatus, ClinicStatus, PracticeType } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";

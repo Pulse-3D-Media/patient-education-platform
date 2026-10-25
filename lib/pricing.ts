@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "./categories";
 import { CATEGORY_DEFAULTS } from "./categories";
 
 /**

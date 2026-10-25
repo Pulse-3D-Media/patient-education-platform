@@ -8,20 +8,20 @@ datasource db {
   directUrl = env("DIRECT_URL") // direct connection, used by migrations
 }
 
-enum Category {
-  SPINE
-  COMPLEX_SPINE
-  KNEE
-  SHOULDER
-  HIP
-  FOOT_ANKLE
-}
+// The categories used to be a fixed list here (an enum called Category, with
+// SPINE, COMPLEX_SPINE, KNEE, SHOULDER, HIP and FOOT_ANKLE). Since K2 they are
+// plain text, and the CategoryConfig table is the list of categories that
+// exist: every place a category arrives checks it against that table
+// (isKnownCategory() in lib/categories.ts), and a video's category is held to
+// it by a foreign key. The old enum type is still in the database, unused,
+// until a later clean-up migration drops it (see the K2 migration).
 
 /// Pulse 3D's own library. Not owned by any clinic.
 model Video {
   id              String          @id @default(cuid())
   title           String // "Total Knee Replacement"
-  category        Category
+  category        String // a CategoryConfig row's key ("KNEE"); the foreign key below refuses any other
+  categoryConfig  CategoryConfig  @relation(fields: [category], references: [category], onDelete: Restrict)
   videoUrl        String? // the MP4 on the Webflow CDN, read only through lib/playback-auth.ts, never directly. Optional since October 2026: a video uploaded from the app lives in Mux only and has none. A video needs this or muxPlaybackId before it can be published
   durationSeconds Int?
   isPublished     Boolean         @default(false) // staging: Van finishes animations before they go live
@@ -50,7 +50,7 @@ model Video {
 /// that was never touched. An empty detail means today's value from
 /// lib/categories.ts (CATEGORY_DEFAULTS).
 model CategoryConfig {
-  category       Category @id
+  category       String   @id // the category's key ("KNEE"), what every plan, video and link stores. Never changed once made
   sellable       Boolean  @default(true) // false takes the category off the price list; it still shows in the library
   comingSoonText String? // shown on the library's "Coming soon" tile while the category has no published video
   label          String? // the name people read ("Knee"); empty means the default name
@@ -58,6 +58,7 @@ model CategoryConfig {
   imageUrl       String? // the tile picture, https only; empty means the default picture
   sortOrder      Int? // place in the list, smallest first; empty means the default place
   formerSlugs    String[] @default([]) // earlier addresses that redirect to the current one, so no bookmark breaks. Only ever added to
+  videos         Video[]
 }
 
 /// Where a clinic stands with us. Only ACTIVE clinics can use the library
@@ -93,7 +94,7 @@ model Clinic {
   showPlaceholders Boolean         @default(true) // false hides placeholder videos from this clinic's library
   viewDaysOverride Int? // days a patient link works after the first play, instead of AppSettings.viewDays; copied onto each new link when it is made
   phone            String? // the clinic's phone, stored as digits only; see lib/phone.ts
-  categories       Category[]      @default([]) // the categories on the clinic's plan; empty means none yet
+  categories       String[]        @default([]) // the categories on the clinic's plan; empty means none yet
   surgeonSeats     Int             @default(0) // surgeon seats the clinic pays for
   // The clinic's own look, on its /admin, /library and patient pages. Set by
   // the clinic's admin on /admin/branding or by Pulse staff on /pulse; the
@@ -275,8 +276,8 @@ model BillingPlan {
   clinic             Clinic          @relation(fields: [clinicId], references: [id])
   pricingVersionId   String
   pricingVersion     PricingVersion  @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
-  categories         Category[] // what the clinic picked
-  entitledCategories Category[] // what it gets, which is every category when the full library is included
+  categories         String[] // what the clinic picked
+  entitledCategories String[] // what it gets, which is every category when the full library is included
   surgeonSeats       Int
   interval           BillingInterval
   perSeatCents       Int // the per-seat amount for the interval, from the pricing engine: the unit price Stripe is given

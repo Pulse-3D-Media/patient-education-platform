@@ -1,6 +1,7 @@
 "use client";
 
-import type { Category, PracticeType, StaffAccess } from "@prisma/client";
+import type { PracticeType, StaffAccess } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { unstable_rethrow } from "next/navigation";
 import { useActionState, useState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";

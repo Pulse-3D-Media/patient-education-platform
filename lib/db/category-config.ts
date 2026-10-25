@@ -1,4 +1,5 @@
-import { Category, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { Category } from "../categories";
 import { cache } from "react";
 import {
   CATEGORY_DEFAULTS,
@@ -34,7 +35,8 @@ export { DEFAULT_COMING_SOON, comingSoonSentence, type CategoryConfig, type Cate
  * clinicId (rule 1 only requires it for clinic-owned data).
  */
 
-const ALL_CATEGORIES = Object.values(Category);
+/** The categories every installation starts with. Their rows are made on first read; rows for categories added later are made when they are added. */
+const STARTING_CATEGORIES = CATEGORY_DEFAULTS.map((entry) => entry.value);
 
 const ROW_FIELDS = {
   category: true,
@@ -50,10 +52,10 @@ const ROW_FIELDS = {
 /** Every row, creating any that is missing with the defaults first. One query when the rows exist; three on the first read. */
 async function readRows(): Promise<CategoryRow[]> {
   let rows = await prisma.categoryConfig.findMany({ select: ROW_FIELDS });
-  if (rows.length < ALL_CATEGORIES.length) {
-    const have = new Set(rows.map((row) => row.category));
+  const have = new Set(rows.map((row) => row.category));
+  if (STARTING_CATEGORIES.some((category) => !have.has(category))) {
     await prisma.categoryConfig.createMany({
-      data: ALL_CATEGORIES.filter((category) => !have.has(category)).map((category) => ({ category })),
+      data: STARTING_CATEGORIES.filter((category) => !have.has(category)).map((category) => ({ category })),
       // Two first reads at the same moment: one insert wins, the other is skipped, neither fails.
       skipDuplicates: true,
     });
@@ -155,7 +157,7 @@ export async function getCategoryAvailability(): Promise<Record<Category, Catego
   const hasVideos = new Set(published.map((row) => row.category));
 
   const availability = {} as Record<Category, CategoryAvailability>;
-  for (const category of ALL_CATEGORIES) {
+  for (const category of Object.keys(configs)) {
     availability[category] = !configs[category].sellable ? "not-for-sale" : hasVideos.has(category) ? "sellable" : "coming-soon";
   }
   return availability;
@@ -167,6 +169,6 @@ export async function getCategoryAvailability(): Promise<Record<Category, Catego
  * screens will offer; nothing sells a category that has nothing in it.
  */
 export async function listSellableCategories(): Promise<Category[]> {
-  const availability = await getCategoryAvailability();
-  return ALL_CATEGORIES.filter((category) => availability[category] === "sellable");
+  const [availability, list] = await Promise.all([getCategoryAvailability(), getCategoryList()]);
+  return list.map((entry) => entry.value).filter((category) => availability[category] === "sellable");
 }

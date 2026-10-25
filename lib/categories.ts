@@ -1,5 +1,13 @@
-import type { Category } from "@prisma/client";
 import { parseLogoUrl } from "./branding";
+
+/**
+ * A category's key, the word every plan, video and link stores ("KNEE",
+ * "FOOT_ANKLE"). Plain text since K2: the categories that exist are the rows
+ * of the CategoryConfig table, so the compiler cannot know them in advance.
+ * A value that came from a form, an address or a script is only used once
+ * isKnownCategory() has checked it against that list.
+ */
+export type Category = string;
 
 /**
  * The library categories AS THEY START: each one's default label, slug and
@@ -166,6 +174,7 @@ export function defaultOrder(category: Category): number {
  */
 export function categoryListFromRows(rows: CategoryRow[]): CategoryDetails[] {
   const byCategory = new Map(rows.map((row) => [row.category, row]));
+  const known = new Set(CATEGORY_DEFAULTS.map((entry) => entry.value));
   const list = CATEGORY_DEFAULTS.map((entry, index) => {
     const row = byCategory.get(entry.value);
     const details: CategoryDetails = {
@@ -180,6 +189,23 @@ export function categoryListFromRows(rows: CategoryRow[]): CategoryDetails[] {
     };
     return { details, index };
   });
+  // A category with a row but no starting details (one added later, from the table): its row is all there is.
+  for (const row of rows) {
+    if (known.has(row.category)) continue;
+    list.push({
+      details: {
+        value: row.category,
+        label: row.label?.trim() || row.category,
+        slug: row.slug || row.category.toLowerCase().replace(/_/g, "-"),
+        image: row.imageUrl || "",
+        order: row.sortOrder ?? (CATEGORY_DEFAULTS.length + 1) * 10,
+        sellable: row.sellable,
+        comingSoonText: row.comingSoonText,
+        formerSlugs: row.formerSlugs,
+      },
+      index: CATEGORY_DEFAULTS.length + list.length,
+    });
+  }
   list.sort((a, b) => a.details.order - b.details.order || a.index - b.index);
   return list.map((entry) => entry.details);
 }
@@ -197,7 +223,23 @@ export function labelOf(list: CategoryDetails[], category: Category | string): s
 export function labelsOf(list: CategoryDetails[]): Record<Category, string> {
   const labels = {} as Record<Category, string>;
   for (const entry of CATEGORY_DEFAULTS) labels[entry.value] = labelOf(list, entry.value);
+  for (const entry of list) labels[entry.value] = entry.label;
   return labels;
+}
+
+/**
+ * Is this a category that exists, one of the list's keys? The one check every
+ * place a category arrives makes (a form, an address, a script, a stored plan),
+ * because a text column would hold any word. `list` is getCategoryList() on
+ * the server, or the list handed to a page.
+ */
+export function isKnownCategory(list: readonly { value: string }[], value: unknown): value is Category {
+  return typeof value === "string" && list.some((entry) => entry.value === value);
+}
+
+/** The given values that are not categories in the list, for a plain refusal. */
+export function unknownCategories(list: readonly { value: string }[], values: readonly unknown[]): string[] {
+  return values.filter((value) => !isKnownCategory(list, value)).map((value) => String(value));
 }
 
 /** The given categories in the list's order, each once. Values not in the list are dropped. */

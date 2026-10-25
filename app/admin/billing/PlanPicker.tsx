@@ -1,6 +1,7 @@
 "use client";
 
-import type { BillingInterval, Category } from "@prisma/client";
+import type { BillingInterval } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { PRIMARY_BUTTON } from "@/components/ui/styles";

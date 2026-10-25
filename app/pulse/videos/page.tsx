@@ -1,7 +1,6 @@
-import { Category } from "@prisma/client";
 import Link from "next/link";
 import { INPUT, PLACEHOLDER_BADGE, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
-import { labelOf } from "@/lib/categories";
+import { isKnownCategory, labelOf } from "@/lib/categories";
 import { getCategoryList } from "@/lib/db/category-config";
 import { countPublishedVideosByCategory, listVideosForPulse, type PulseVideoFilter } from "@/lib/db/videos";
 import { formatDuration } from "@/lib/format";
@@ -28,8 +27,6 @@ import { CategoryConfigForm } from "./CategoryConfigForm";
  */
 export const dynamic = "force-dynamic";
 
-const ALL_CATEGORIES = Object.values(Category);
-
 const STATUS_CHOICES: { value: NonNullable<PulseVideoFilter["status"]>; label: string }[] = [
   { value: "published", label: "Published" },
   { value: "unpublished", label: "Not published" },
@@ -42,7 +39,7 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
 
   const params = await searchParams;
   const categoryParam = typeof params.category === "string" ? params.category : "";
-  const category = (ALL_CATEGORIES as string[]).includes(categoryParam) ? (categoryParam as Category) : undefined;
+  const category = isKnownCategory(await getCategoryList(), categoryParam) ? categoryParam : undefined;
   const statusParam = typeof params.status === "string" ? params.status : "";
   const status = STATUS_CHOICES.find((choice) => choice.value === statusParam)?.value;
   const filtering = Boolean(category) || Boolean(status);

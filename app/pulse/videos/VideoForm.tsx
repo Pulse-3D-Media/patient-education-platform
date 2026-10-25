@@ -1,6 +1,6 @@
 "use client";
 
-import type { Category } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";

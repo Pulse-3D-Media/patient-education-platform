@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Category } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CloseIcon, SearchIcon } from "@/components/ui/icons";
 import { INPUT, PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";

@@ -1,14 +1,15 @@
 "use server";
 
-import { Category, PracticeType, type StaffAccess } from "@prisma/client";
+import { PracticeType, type StaffAccess } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { retryBillingEvent } from "@/lib/billing-events";
 import { MAX_GRACE_DAYS, MIN_GRACE_DAYS } from "@/lib/billing-state";
 import { chaptersKey, checkChapters, parseChapterLines, readStoredChapters, type Chapter } from "@/lib/chapters";
-import { readCategoryDetails } from "@/lib/categories";
-import { CategoryDetailsError, saveCategoryConfig } from "@/lib/db/category-config";
+import { isKnownCategory, readCategoryDetails, unknownCategories, type CategoryDetails } from "@/lib/categories";
+import { CategoryDetailsError, getCategoryList, saveCategoryConfig } from "@/lib/db/category-config";
 import { readBrandingForm, readLogoField } from "@/lib/branding-form";
 import {
   PlanSeatsRefusedError,
@@ -66,7 +67,6 @@ const STAFF_CHOICES: Record<string, StaffAccess | null> = { OPEN: "OPEN", PAUSED
 const STILL_CHARGING =
   " This clinic has a card subscription in Stripe, and this did not cancel it: the card keeps being charged until the subscription is cancelled in Stripe.";
 
-const ALL_CATEGORIES = Object.values(Category);
 
 /** The longest a notice or reason may be. Keeps the admin banner one line or two. */
 const SHORT_TEXT_LIMIT = 300;
@@ -180,7 +180,7 @@ export async function setPlanAction(_previous: FormState, formData: FormData): P
   if (!clinic) return { error: "That clinic no longer exists." };
 
   const chosen = formData.getAll("categories").map(String);
-  const unknown = chosen.filter((value) => !(ALL_CATEGORIES as string[]).includes(value));
+  const unknown = unknownCategories(await getCategoryList(), chosen);
   if (unknown.length > 0) return { error: "One of the categories is not one we have." };
 
   const seats = wholeNumber(formData.get("surgeonSeats"));
@@ -433,13 +433,13 @@ const CHAPTER_LINES_LIMIT = 100;
  * chapters it did not change. Lines that were changed, or every line
  * removed (which clears them), win.
  */
-function videoFromForm(formData: FormData, existing: RowNow | null = null): { input: VideoInput } | { error: string } {
+function videoFromForm(formData: FormData, existing: RowNow | null, known: CategoryDetails[]): { input: VideoInput } | { error: string } {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return { error: "The video needs a title: the procedure name a surgeon would look for." };
   if (title.length > TITLE_LIMIT) return { error: `Keep the title under ${TITLE_LIMIT} characters.` };
 
   const category = String(formData.get("category") ?? "") as Category;
-  if (!ALL_CATEGORIES.includes(category)) return { error: "Choose one of our categories." };
+  if (!isKnownCategory(known, category)) return { error: "Choose one of our categories." };
 
   // The CDN address is optional since October 2026: a video uploaded to Mux from the app has none.
   const videoUrl = String(formData.get("videoUrl") ?? "").trim();
@@ -579,7 +579,7 @@ export async function saveVideoAction(_previous: FormState, formData: FormData):
       // The row as it is now is read first, so the form's boxes can be compared with what an upload may have written since the page was drawn.
       const existing = await getVideoForPulse(id);
       if (!existing) return { error: "That video no longer exists." };
-      const checked = videoFromForm(formData, existing);
+      const checked = videoFromForm(formData, existing, await getCategoryList());
       if ("error" in checked) return checked;
       const refused = await checkMuxBeforeSave(checked.input, existing);
       if (refused) return { error: refused };
@@ -588,7 +588,7 @@ export async function saveVideoAction(_previous: FormState, formData: FormData):
       return { ok: "Saved. Every link that points at this video plays the new version." };
     }
 
-    const checked = videoFromForm(formData);
+    const checked = videoFromForm(formData, null, await getCategoryList());
     if ("error" in checked) return checked;
     if (!hasPlayableSource(checked.input) && !uploadPending) {
       return { error: "Give the video a CDN address, a Mux playback id, or a file to upload. With none of the three there would be nothing to play." };
@@ -701,7 +701,7 @@ export async function saveCategoryConfigAction(_previous: FormState, formData: F
   await requirePulseStaff();
 
   const category = String(formData.get("category") ?? "") as Category;
-  if (!ALL_CATEGORIES.includes(category)) return { error: "That is not one of our categories." };
+  if (!isKnownCategory(await getCategoryList(), category)) return { error: "That is not one of our categories." };
 
   const text = String(formData.get("comingSoonText") ?? "").trim();
   if (text.length > SHORT_TEXT_LIMIT) return { error: `Keep the sentence under ${SHORT_TEXT_LIMIT} characters.` };

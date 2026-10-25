@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "./categories";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as billingDb from "./db/billing";

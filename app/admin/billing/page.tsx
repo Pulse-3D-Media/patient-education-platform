@@ -1,4 +1,5 @@
-import type { Category, ClinicStatus } from "@prisma/client";
+import type { ClinicStatus } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import Link from "next/link";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";

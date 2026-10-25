@@ -26,30 +26,29 @@
  * sanctioned way to change a plan by hand (never in the Neon console). It
  * prints what it changed and refuses to run with missing or odd arguments.
  */
-import { Category } from "@prisma/client";
+import { unknownCategories, type Category } from "../lib/categories";
+import { getCategoryList } from "../lib/db/category-config";
 import { prisma } from "../lib/db/client";
 import { PlanSeatsRefusedError, setClinicPlan } from "../lib/db/clinics";
 import { errorKind } from "../lib/error-kind";
 import { preflight } from "./preflight";
 
-const ALL_CATEGORIES = Object.values(Category);
-
 function usage(): never {
   console.error("Usage: npm run db:set-plan -- <clinicId> --categories <all|none|A,B,C> --seats <number> [--allow-fewer-seats] [--production]");
-  console.error(`Categories: ${ALL_CATEGORIES.join(", ")}`);
+  console.error("Categories: their keys as /pulse/videos lists them (KNEE, FOOT_ANKLE ...), comma separated, or all, or none.");
   process.exit(1);
 }
 
 /** Turn "all", "none" or "KNEE,HIP" into a list of categories, or print usage and stop. */
-function parseCategories(value: string): Category[] {
+function parseCategories(value: string, known: Category[]): Category[] {
   const text = value.trim().toUpperCase();
-  if (text === "ALL") return ALL_CATEGORIES;
+  if (text === "ALL") return known;
   if (text === "NONE" || text === "") return [];
 
   const names = text.split(",").map((name) => name.trim()).filter(Boolean);
-  const unknown = names.filter((name) => !(ALL_CATEGORIES as string[]).includes(name));
+  const unknown = unknownCategories(known.map((value) => ({ value })), names);
   if (unknown.length > 0) {
-    console.error(`Not a category: ${unknown.join(", ")}`);
+    console.error(`Not a category: ${unknown.join(", ")}. The categories are: ${known.join(", ")}.`);
     usage();
   }
   return names as Category[];
@@ -78,7 +77,9 @@ async function main() {
   const seatsValue = args[seatsIndex + 1];
   if (categoriesValue == null || seatsValue == null) usage();
 
-  const categories = parseCategories(categoriesValue);
+  // The categories that exist are the CategoryConfig rows (since K2 a category is text, so it is checked here).
+  const known = (await getCategoryList()).map((entry) => entry.value);
+  const categories = parseCategories(categoriesValue, known);
   const seats = parseSeats(seatsValue);
 
   const before = await prisma.clinic.findUnique({

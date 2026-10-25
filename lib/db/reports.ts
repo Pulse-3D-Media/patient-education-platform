@@ -1,4 +1,5 @@
-import { Prisma, type Category, type ClinicStatus, ClinicStatus as ClinicStatuses } from "@prisma/client";
+import { Prisma, type ClinicStatus, ClinicStatus as ClinicStatuses } from "@prisma/client";
+import type { Category } from "../categories";
 import { clinicIsOpen } from "../clinic-status";
 import { isValidRenewalCount, MAX_LINK_DAYS, MIN_LINK_DAYS } from "../expiry";
 import { clampPage } from "../paging";

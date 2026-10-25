@@ -1,6 +1,6 @@
 "use client";
 
-import type { Category } from "@prisma/client";
+import type { Category } from "@/lib/categories";
 import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";

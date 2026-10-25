@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "./categories";
 import { DEFAULT_CATEGORY_LIST, findCategoryBySlug, type CategoryAvailability, type CategoryConfig, type CategoryDetails } from "./categories";
 
 /**

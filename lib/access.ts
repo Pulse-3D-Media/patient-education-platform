@@ -1,4 +1,5 @@
-import type { Category, ClinicStatus } from "@prisma/client";
+import type { ClinicStatus } from "@prisma/client";
+import type { Category } from "./categories";
 import { CATEGORY_DEFAULTS } from "./categories";
 import { clinicIsOpen } from "./clinic-status";
 
@@ -61,10 +62,18 @@ export type AccessReason = "clinic-closed" | "no-such-video" | "unpublished" | "
 
 export type AccessDecision = { allowed: true } | { allowed: false; reason: AccessReason };
 
-/** The categories in the order the library shows them, each once. Values that are not ours are dropped. */
+/**
+ * The categories in a fixed order, each once: the starting six in their
+ * order, then any other (a category added on /pulse/videos) after them, A to
+ * Z. Nothing is dropped: since K2 a category is text, and every one that
+ * reaches a plan was checked against the CategoryConfig rows when it was
+ * written (isKnownCategory()). Screens put them in the list's own order.
+ */
 export function inLibraryOrder(categories: Category[]): Category[] {
   const wanted = new Set(categories);
-  return CATEGORY_DEFAULTS.filter((c) => wanted.has(c.value)).map((c) => c.value);
+  const starting = CATEGORY_DEFAULTS.filter((c) => wanted.has(c.value)).map((c) => c.value);
+  const others = [...wanted].filter((category) => !starting.includes(category)).sort();
+  return [...starting, ...others];
 }
 
 /** Turn the fields of a clinic row into a ClinicAccess. Pure, so lib/db/access.ts and the tests share it. */

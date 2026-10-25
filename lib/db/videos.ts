@@ -1,4 +1,4 @@
-import type { Category } from "@prisma/client";
+import type { Category } from "../categories";
 import type { ClinicAccess, PublishedCounts } from "../access";
 import type { CategoryDetails } from "../categories";
 import { getCategoryList } from "./category-config";

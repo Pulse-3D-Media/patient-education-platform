@@ -1,4 +1,5 @@
-import type { BillingInterval, BillingStatus, Category } from "@prisma/client";
+import type { BillingInterval, BillingStatus } from "@prisma/client";
+import type { Category } from "./categories";
 import { SELF_SERVE_REFUSALS, type SelfServeEligibility } from "./billing-state";
 import { readPlanSelection, type PlanSelection } from "./checkout-rules";
 

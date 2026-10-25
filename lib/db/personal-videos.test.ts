@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Category } from "@prisma/client";
+import type { Category } from "../categories";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getClinicAccess } from "./access";
 import { prisma } from "./client";

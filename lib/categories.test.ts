@@ -7,11 +7,13 @@ import {
   findCategoryBySlug,
   formerSlugsAfter,
   inListOrder,
+  isKnownCategory,
   labelOf,
   labelsInOrder,
   labelsOf,
   readCategoryDetails,
   takenSlugs,
+  unknownCategories,
   type CategoryRow,
 } from "./categories";
 
@@ -56,6 +58,25 @@ describe("categoryListFromRows", () => {
 
   it("reads a blank label as the default", () => {
     expect(labelOf(categoryListFromRows(allRows({ KNEE: { label: "   " } })), "KNEE")).toBe("Knee");
+  });
+});
+
+describe("isKnownCategory (since K2 a category is text, checked against the list)", () => {
+  const list = categoryListFromRows([...allRows(), row("WRIST", { label: "Wrist", slug: "wrist", sortOrder: 70 })]);
+
+  it("knows the list's keys, a category added later included, and nothing else", () => {
+    expect(isKnownCategory(list, "KNEE")).toBe(true);
+    expect(isKnownCategory(list, "WRIST")).toBe(true);
+    for (const value of ["knee", "Knee", " KNEE", "ELBOW", "", null, undefined, 7, ["KNEE"]]) expect(isKnownCategory(list, value)).toBe(false);
+    expect(unknownCategories(list, ["KNEE", "ELBOW", "knee"])).toEqual(["ELBOW", "knee"]);
+  });
+
+  it("puts a category added later in the list, from its row alone", () => {
+    expect(list.at(-1)).toMatchObject({ value: "WRIST", label: "Wrist", slug: "wrist", order: 70, sellable: true });
+    expect(labelOf(list, "WRIST")).toBe("Wrist");
+    // With nothing filled in, its key stands in for its name and its address.
+    const bare = categoryListFromRows([row("WRIST_HAND")]);
+    expect(bare.find((entry) => entry.value === "WRIST_HAND")).toMatchObject({ label: "WRIST_HAND", slug: "wrist-hand" });
   });
 });
 

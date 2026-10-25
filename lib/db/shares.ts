@@ -1,4 +1,5 @@
-import { type Category, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { Category } from "../categories";
 import { createHash, randomInt } from "crypto";
 import { accessRefusalMessage, decideVideoAccess, planBlockFor, planBlockMessage, type AccessDecision, type AccessReason, type PlanBlock } from "../access";
 import {

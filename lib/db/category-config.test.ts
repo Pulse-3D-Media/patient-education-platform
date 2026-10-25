@@ -1,4 +1,4 @@
-import { Category } from "@prisma/client";
+import { CATEGORY_DEFAULTS, type Category } from "../categories";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEFAULT_COMING_SOON, CategoryDetailsError, comingSoonSentence, getCategoryConfigs, getCategoryList, saveCategoryConfig } from "./category-config";
 import { prisma } from "./client";
@@ -10,7 +10,7 @@ import { prisma } from "./client";
  * afterwards. Rows that already existed are left as they were found.
  */
 
-const ALL = Object.values(Category);
+const ALL: Category[] = CATEGORY_DEFAULTS.map((entry) => entry.value);
 const EDITED: Category = "FOOT_ANKLE";
 
 /** Every column a test here may change, so a row can be put back exactly. */
@@ -67,6 +67,18 @@ describe("getCategoryConfigs", () => {
     expect(saved).toEqual({ sellable: false, comingSoonText: "Ankle and foot arrive after launch." });
     expect((await getCategoryConfigs())[EDITED]).toEqual(saved);
     expect(await prisma.categoryConfig.count()).toBe(ALL.length);
+  });
+});
+
+describe("categories as text (K2)", () => {
+  it("the database refuses a video in a category that has no CategoryConfig row, and stores the six as the same words", async () => {
+    await expect(
+      prisma.video.create({ data: { title: "Vitest made-up category", category: "VITEST_NOT_A_CATEGORY", videoUrl: "https://example.com/vitest.mp4" } }),
+    ).rejects.toMatchObject({ code: "P2003" });
+    expect(await prisma.video.count({ where: { title: "Vitest made-up category" } })).toBe(0);
+
+    const rows = await prisma.categoryConfig.findMany({ select: { category: true } });
+    for (const category of ALL) expect(rows.map((row) => row.category)).toContain(category);
   });
 });
 

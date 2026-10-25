@@ -7,6 +7,7 @@ import { formatDuration } from "@/lib/format";
 import { requirePulseStaff } from "@/lib/pulse";
 import { describeVideoSource } from "@/lib/video";
 import { formatDate } from "../ui";
+import { AddCategoryForm } from "./AddCategoryForm";
 import { CategoryConfigForm } from "./CategoryConfigForm";
 
 /**
@@ -184,6 +185,9 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
               </li>
             ))}
           </ul>
+          <div className="mt-4">
+            <AddCategoryForm nextOrder={Math.min(9999, Math.max(0, ...categories.map((c) => c.order)) + 10)} />
+          </div>
         </section>
       </div>
     </main>

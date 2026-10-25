@@ -8,8 +8,8 @@ import { redirect } from "next/navigation";
 import { retryBillingEvent } from "@/lib/billing-events";
 import { MAX_GRACE_DAYS, MIN_GRACE_DAYS } from "@/lib/billing-state";
 import { chaptersKey, checkChapters, parseChapterLines, readStoredChapters, type Chapter } from "@/lib/chapters";
-import { isKnownCategory, readCategoryDetails, unknownCategories, type CategoryDetails } from "@/lib/categories";
-import { CategoryDetailsError, getCategoryList, saveCategoryConfig } from "@/lib/db/category-config";
+import { isKnownCategory, readCategoryDetails, readNewCategory, unknownCategories, type CategoryDetails } from "@/lib/categories";
+import { CategoryDetailsError, addCategory, getCategoryList, saveCategoryConfig } from "@/lib/db/category-config";
 import { readBrandingForm, readLogoField } from "@/lib/branding-form";
 import {
   PlanSeatsRefusedError,
@@ -701,7 +701,8 @@ export async function saveCategoryConfigAction(_previous: FormState, formData: F
   await requirePulseStaff();
 
   const category = String(formData.get("category") ?? "") as Category;
-  if (!isKnownCategory(await getCategoryList(), category)) return { error: "That is not one of our categories." };
+  const list = await getCategoryList();
+  if (!isKnownCategory(list, category)) return { error: "That is not one of our categories." };
 
   const text = String(formData.get("comingSoonText") ?? "").trim();
   if (text.length > SHORT_TEXT_LIMIT) return { error: `Keep the sentence under ${SHORT_TEXT_LIMIT} characters.` };
@@ -713,7 +714,7 @@ export async function saveCategoryConfigAction(_previous: FormState, formData: F
       slug: formData.get("slug"),
       imageUrl: formData.get("imageUrl"),
       sortOrder: formData.get("sortOrder"),
-    });
+    }, list);
     if (!read.ok) return { error: read.error };
     details = read.details;
   }
@@ -728,6 +729,34 @@ export async function saveCategoryConfigAction(_previous: FormState, formData: F
   // A category's name and address show on nearly every page, so everything is drawn again.
   revalidatePath("/", "layout");
   return { ok: saved.sellable ? "Saved. This category is for sale." : "Saved. This category is not for sale." };
+}
+
+/**
+ * Add a category: the "+" in the Categories panel. Pulse staff only. The key
+ * is made from the name and never changes; the category starts not for sale
+ * and shows as Coming soon until a video in it is published. Refused in one
+ * plain sentence, with every box kept as typed (useKeptForm in the form). The
+ * addition goes in the server log under the staff member's name (categories
+ * belong to Pulse, not to a clinic, so there is no clinic log to write it in).
+ */
+export async function addCategoryAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePulseStaff();
+  const read = readNewCategory(
+    { label: formData.get("label"), slug: formData.get("slug"), imageUrl: formData.get("imageUrl"), sortOrder: formData.get("sortOrder") },
+    await getCategoryList(),
+  );
+  if (!read.ok) return { error: read.error };
+
+  let added;
+  try {
+    added = await addCategory(read.category);
+  } catch (error) {
+    if (error instanceof CategoryDetailsError) return { error: error.message };
+    throw error;
+  }
+  console.info(`Category added: ${added.value} ("${added.label}", /library/${added.slug}) by ${staff.name}`);
+  revalidatePath("/", "layout");
+  return { ok: `Added ${added.label}. It is not for sale and shows as Coming soon until a video in it is published.` };
 }
 
 // ---------------------------------------------------------------------------

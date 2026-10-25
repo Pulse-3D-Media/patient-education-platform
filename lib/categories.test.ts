@@ -11,7 +11,11 @@ import {
   labelOf,
   labelsInOrder,
   labelsOf,
+  isStartingCategory,
   readCategoryDetails,
+  readNewCategory,
+  suggestKey,
+  suggestSlug,
   takenSlugs,
   unknownCategories,
   type CategoryRow,
@@ -193,5 +197,62 @@ describe("takenSlugs and formerSlugsAfter", () => {
     expect(formerSlugsAfter("HIP", { slug: "hip-joint", formerSlugs: ["hips"] }, "hips")).toEqual(["hip-joint"]);
     // No change, nothing new remembered.
     expect(formerSlugsAfter("HIP", { slug: "hip-joint", formerSlugs: ["hips"] }, "hip-joint")).toEqual(["hips"]);
+  });
+});
+
+describe("adding a category (K3)", () => {
+  const list = DEFAULT_CATEGORY_LIST;
+  const read = (raw: Partial<{ label: unknown; slug: unknown; imageUrl: unknown; sortOrder: unknown }>) =>
+    readNewCategory({ label: "Hand & Wrist", slug: "hand-wrist", imageUrl: "", sortOrder: "", ...raw }, list);
+
+  it("suggests an address and a key from the name", () => {
+    expect(suggestSlug("Hand & Wrist")).toBe("hand-wrist");
+    expect(suggestSlug("  Pédiatrie  Spine!! ")).toBe("pediatrie-spine");
+    expect(suggestSlug("!!!")).toBe("");
+    expect(suggestKey("Hand & Wrist", ["KNEE"])).toBe("HAND_WRIST");
+    expect(suggestKey("Knee!", ["KNEE"])).toBe("KNEE_2");
+    expect(suggestKey("Knee", ["KNEE", "KNEE_2"])).toBe("KNEE_3");
+    expect(suggestKey("3D Spine", [])).toBe("CATEGORY_3D_SPINE");
+    expect(suggestKey("!!!", [])).toBe("CATEGORY");
+    expect(suggestKey("x".repeat(80), []).length).toBeLessThanOrEqual(40);
+  });
+
+  it("makes a new category from the form, last in the list when no place is given", () => {
+    expect(read({})).toEqual({ ok: true, category: { key: "HAND_WRIST", label: "Hand & Wrist", slug: "hand-wrist", imageUrl: null, sortOrder: 70 } });
+    expect(read({ imageUrl: "https://example.com/hand.jpg", sortOrder: "25" })).toMatchObject({
+      ok: true,
+      category: { imageUrl: "https://example.com/hand.jpg", sortOrder: 25 },
+    });
+  });
+
+  it("refuses a missing or duplicate name, and a name too long or on two lines", () => {
+    expect(read({ label: "  " })).toEqual({ ok: false, error: "Give the category a name." });
+    expect(read({ label: "knee" })).toMatchObject({ ok: false, error: expect.stringContaining("already a category") });
+    expect(read({ label: "x".repeat(41) })).toMatchObject({ ok: false });
+    expect(read({ label: "Hand\nWrist" })).toMatchObject({ ok: false });
+  });
+
+  it("refuses a missing, badly shaped, reserved or taken address", () => {
+    expect(read({ slug: "" })).toEqual({ ok: false, error: "Give the category a web address." });
+    for (const slug of ["Hand", "hand wrist", "search", "watch", "knee", "foot-ankle", "a".repeat(41)]) expect(read({ slug })).toMatchObject({ ok: false });
+  });
+
+  it("refuses a picture that is not https and a place out of range", () => {
+    expect(read({ imageUrl: "http://example.com/a.jpg" })).toMatchObject({ ok: false });
+    for (const sortOrder of ["0", "10000", "x"]) expect(read({ sortOrder })).toMatchObject({ ok: false });
+  });
+
+  it("lets an added category's details be edited, its name and address always required", () => {
+    const withWrist = categoryListFromRows([row("WRIST", { label: "Wrist", slug: "wrist", sellable: false })]);
+    expect(isStartingCategory("WRIST")).toBe(false);
+    expect(isStartingCategory("KNEE")).toBe(true);
+    expect(readCategoryDetails("WRIST", { label: "Wrist and Hand", slug: "wrist-hand", imageUrl: "", sortOrder: "" }, withWrist)).toEqual({
+      ok: true,
+      details: { label: "Wrist and Hand", slug: "wrist-hand", imageUrl: null, sortOrder: null },
+    });
+    expect(readCategoryDetails("WRIST", { label: "", slug: "wrist", imageUrl: "", sortOrder: "" }, withWrist)).toMatchObject({ ok: false });
+    expect(readCategoryDetails("WRIST", { label: "Wrist", slug: "", imageUrl: "", sortOrder: "" }, withWrist)).toMatchObject({ ok: false });
+    // Without the list that has it, it is not one of ours.
+    expect(readCategoryDetails("WRIST", { label: "Wrist", slug: "wrist", imageUrl: "", sortOrder: "" })).toMatchObject({ ok: false });
   });
 });

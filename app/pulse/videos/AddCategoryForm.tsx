@@ -23,17 +23,23 @@ export function AddCategoryForm({ nextOrder }: { nextOrder: number }) {
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const { state, pending, form } = useKeptForm(addCategoryAction, () => {
-    // Added: the new category is in the list above now, so the boxes start empty for the next one.
+    // Added: the new category is in the list above now, so the form closes back to the "+" button
+    // (with the confirmation beside it), and starts empty if it is opened for another one.
     setLabel("");
     setSlug("");
     setSlugTouched(false);
+    setOpen(false);
   });
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} className={`${SECONDARY_BUTTON} h-11`}>
-        + Add a category
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={() => setOpen(true)} className={`${SECONDARY_BUTTON} h-11`}>
+          + Add a category
+        </button>
+        {/* The confirmation of the last add. A refusal never gets here: the form stays open with it. */}
+        {state?.ok && <Outcome state={state} />}
+      </div>
     );
   }
 
@@ -101,7 +107,7 @@ export function AddCategoryForm({ nextOrder }: { nextOrder: number }) {
         <button type="button" onClick={() => setOpen(false)} className={`${SECONDARY_BUTTON} h-11`}>
           Close
         </button>
-        <Outcome state={state} />
+        {state?.error && <Outcome state={state} />}
       </div>
     </form>
   );

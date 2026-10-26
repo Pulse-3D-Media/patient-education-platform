@@ -877,3 +877,46 @@ export async function recordUploadedLogo(clinicId: string, logoUrl: string, chan
     changedBy,
   );
 }
+
+/**
+ * A category was just added on /pulse/videos: give it to every clinic whose
+ * paid plan is the full library (Option A, decided by Evan on 2026-10-26),
+ * each with an entry in its clinic log under "billing". Not to a clinic Pulse
+ * manages: it keeps the plan staff gave it. Nothing is charged: the full
+ * library's price does not depend on how many categories there are.
+ *
+ * Safe to run again (a clinic that has the category already is skipped, under
+ * its row lock), and also kept true by billing itself: every look at Stripe
+ * gives a full-library clinic every category there is (reconcileSubscription()
+ * in lib/db/billing.ts), so a clinic this misses, say because the server
+ * stopped halfway, is put right at its next notification or "Check with
+ * Stripe". Read a hundred clinics at a time. Returns how many were given it.
+ */
+export async function includeInFullLibraries(category: Category, label: string): Promise<number> {
+  let given = 0;
+  let after: string | undefined;
+  for (;;) {
+    const page = await prisma.clinic.findMany({
+      where: { managedByPulse: false, billing: { currentPlan: { fullLibrary: true } }, NOT: { categories: { has: category } }, ...(after ? { id: { gt: after } } : {}) },
+      select: { id: true },
+      orderBy: { id: "asc" },
+      take: 100,
+    });
+    for (const { id } of page) {
+      const { logged } = await changeClinicWithLog(
+        id,
+        async (before, tx) => {
+          // Checked again under the clinic's lock: still on a full-library plan, still not managed, not given it already.
+          const plan = await tx.clinicBilling.findUnique({ where: { clinicId: id }, select: { currentPlan: { select: { fullLibrary: true } } } });
+          if (!plan?.currentPlan?.fullLibrary || before.managedByPulse || before.categories.includes(category)) return {};
+          return { categories: [...before.categories, category] };
+        },
+        (_before, values) => (values.categories ? `${label} was added to the library, and is included in this clinic's full library.` : null),
+        "billing",
+      );
+      if (logged) given++;
+    }
+    if (page.length < 100) return given;
+    after = page[page.length - 1]?.id;
+  }
+}

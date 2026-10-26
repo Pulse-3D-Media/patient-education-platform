@@ -99,7 +99,20 @@ export type QuoteInput = {
   sellable: Category[];
   /** The categories' current names, for the receipt line and messages. Left out, the starting names. Never changes an amount. */
   labels?: Partial<Record<Category, string>>;
+  /**
+   * The whole library as it is now (libraryForQuote() in lib/db/category-config.ts): every category that exists,
+   * the six starting ones and any added on /pulse/videos, and which of them are Coming soon (for sale, nothing
+   * published yet). Left out, the six starting categories with none coming soon, which is how the engine worked
+   * before categories could be added.
+   */
+  library?: QuoteLibrary;
 };
+
+/** Every category that exists, and the ones that are Coming soon. See QuoteInput.library. */
+export type QuoteLibrary = { all: Category[]; comingSoon: Category[] };
+
+/** The library before categories could be added: the six, none coming soon. */
+const STARTING_LIBRARY: QuoteLibrary = { all: CATEGORY_VALUES, comingSoon: [] };
 
 /** One line of the receipt: a per-seat amount for the interval, in cents. Every line is exact. */
 export type QuoteLine = { label: string; cents: number };
@@ -319,10 +332,10 @@ function roundedDivide(numerator: number, denominator: number): number {
   return Math.floor((numerator + denominator / 2) / denominator);
 }
 
-/** The categories given, each once, in library order. Unknown values are dropped (the caller has already refused them). */
-function inLibraryOrder(categories: Category[]): Category[] {
+/** The categories given, each once, in library order (the library's own order). Unknown values are dropped (the caller has already refused them). */
+function inLibraryOrder(categories: Category[], library: QuoteLibrary = STARTING_LIBRARY): Category[] {
   const wanted = new Set(categories);
-  return CATEGORY_VALUES.filter((category) => wanted.has(category));
+  return library.all.filter((category) => wanted.has(category));
 }
 
 /**
@@ -349,12 +362,15 @@ export function bandFor(config: PricingConfig, seats: number, practiceType: Prac
 
 /**
  * Is the full library on offer right now? Only when the config has a
- * full-library count and every category is for sale. An incomplete library
- * is never sold as the full one.
+ * full-library count and every category is for sale, or Coming soon (decided
+ * by Evan on 2026-10-26: a category with nothing published yet does not hold
+ * the full library back; it is included, and opens up once a video in it is
+ * published). A category Pulse staff switched off sale on purpose still keeps
+ * the full library off sale: an incomplete library is never sold as the full one.
  */
-export function fullLibraryOffered(config: PricingConfig, sellable: Category[]): boolean {
+export function fullLibraryOffered(config: PricingConfig, sellable: Category[], library: QuoteLibrary = STARTING_LIBRARY): boolean {
   if (config.fullLibraryFrom === null) return false;
-  return CATEGORY_VALUES.every((category) => sellable.includes(category));
+  return library.all.every((category) => sellable.includes(category) || library.comingSoon.includes(category));
 }
 
 /**
@@ -375,11 +391,12 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
     return { ok: false, error: "The practice type must be clinic or hospital." };
   }
 
-  const unknown = input.categories.filter((category) => !(CATEGORY_VALUES as string[]).includes(category));
+  const library = input.library ?? STARTING_LIBRARY;
+  const unknown = input.categories.filter((category) => !library.all.includes(category));
   if (unknown.length > 0) {
     return { ok: false, error: `Not one of our categories: ${unknown.join(", ")}.` };
   }
-  const selected = inLibraryOrder(input.categories);
+  const selected = inLibraryOrder(input.categories, library);
   if (selected.length === 0) {
     return { ok: false, error: "Choose at least one category." };
   }
@@ -414,10 +431,12 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
   // clinic gets. The full library caps the count and includes everything.
   const notes: string[] = [];
   const wantsFullLibrary = config.fullLibraryFrom !== null && selected.length >= config.fullLibraryFrom;
-  const fullLibrary = wantsFullLibrary && fullLibraryOffered(config, input.sellable);
+  const fullLibrary = wantsFullLibrary && fullLibraryOffered(config, input.sellable, library);
   const chargedCount = fullLibrary ? (config.fullLibraryFrom as number) : selected.length;
   const chargedCategories = fullLibrary ? [] : selected;
-  const entitledCategories = fullLibrary ? [...CATEGORY_VALUES] : selected;
+  // The full library is every category there is, Coming soon ones included; the plan remembers it was the full
+  // library (BillingPlan.fullLibrary), so categories added later reach it too (Option A, decided by Evan on 2026-10-26).
+  const entitledCategories = fullLibrary ? inLibraryOrder(library.all, library) : selected;
   if (fullLibrary) {
     notes.push(`The full library: every category, at the ${countWords(chargedCount)} price.`);
   } else if (wantsFullLibrary) {
@@ -429,7 +448,10 @@ export function quote(config: PricingConfig, input: QuoteInput): QuoteResult {
   // The one receipt line: the ladder price for that count, per seat, for
   // the interval, before the founding offer. Exact.
   const months = input.interval === "year" ? config.yearlyMonths : 1;
-  const ladderCents = config.perSeatByCountCents[chargedCount - 1];
+  // The ladder has one price per count up to the six starting categories. With categories added since, a count
+  // past the end of it is charged the top price (decided by Evan on 2026-10-26). With a full-library count set,
+  // which is the usual case, the count never gets that far.
+  const ladderCents = config.perSeatByCountCents[Math.min(chargedCount, config.perSeatByCountCents.length) - 1];
   const lines: QuoteLine[] = [
     {
       label: fullLibrary

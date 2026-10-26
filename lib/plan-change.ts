@@ -192,8 +192,8 @@ export type ChangeRequest = {
 
 export type ChangeRequestResult = { ok: true; request: ChangeRequest } | { ok: false; error: string };
 
-export function readChangeRequest(formData: FormData): ChangeRequestResult {
-  const read = readPlanSelection(formData);
+export function readChangeRequest(formData: FormData, known?: Category[]): ChangeRequestResult {
+  const read = readPlanSelection(formData, known);
   if (!read.ok) return read;
   return { ok: true, request: { selection: read.selection, moveToCurrentPricing: formData.get("moveToCurrentPricing") === "yes" } };
 }
@@ -215,8 +215,8 @@ export type ChangeConfirmResult = { ok: true; request: ChangeRequest; seen: Chan
 
 const OUT_OF_DATE = "This page is out of date. Review the change again.";
 
-export function readChangeConfirm(formData: FormData): ChangeConfirmResult {
-  const read = readChangeRequest(formData);
+export function readChangeConfirm(formData: FormData, known?: Category[]): ChangeConfirmResult {
+  const read = readChangeRequest(formData, known);
   if (!read.ok) return read;
 
   const timing = String(formData.get("seenTiming") ?? "");

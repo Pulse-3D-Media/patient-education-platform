@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import { errorKind } from "@/lib/error-kind";
 import { checkPayment, startCheckout } from "@/lib/checkout";
 import { readPlanSelection } from "@/lib/checkout-rules";
+import { getCategoryList } from "@/lib/db/category-config";
 import { getBillingClinicId } from "@/lib/clinic";
 import { getSignedInName } from "@/lib/people";
 import { readChangeConfirm, readChangeRequest } from "@/lib/plan-change";
@@ -62,7 +63,7 @@ export async function startCheckoutAction(_previous: CheckoutFormState, formData
   const clinicId = await getBillingClinicId();
   if (!clinicId) return { error: "Only your clinic's office admins can choose a plan." };
 
-  const read = readPlanSelection(formData);
+  const read = readPlanSelection(formData, await knownCategories());
   if (!read.ok) return { error: read.error };
 
   try {
@@ -151,7 +152,7 @@ export async function reviewPlanChangeAction(formData: FormData): Promise<Review
   const clinicId = await getBillingClinicId();
   if (!clinicId) return { error: ADMINS_ONLY };
 
-  const read = readChangeRequest(formData);
+  const read = readChangeRequest(formData, await knownCategories());
   if (!read.ok) return { error: read.error };
 
   try {
@@ -185,7 +186,7 @@ export async function confirmPlanChangeAction(formData: FormData): Promise<Confi
   const clinicId = await getBillingClinicId();
   if (!clinicId) return { error: ADMINS_ONLY };
 
-  const read = readChangeConfirm(formData);
+  const read = readChangeConfirm(formData, await knownCategories());
   if (!read.ok) return { stale: read.error };
 
   try {
@@ -272,4 +273,9 @@ export async function payInvoiceAction(): Promise<BillingActionState> {
     console.error(`Finding the invoice to pay failed: ${errorKind(error)}`);
     return { error: "We could not reach Stripe just now. Try again in a moment." };
   }
+}
+
+/** Every category that exists, in list order: what the plan forms may name (added ones included). */
+async function knownCategories() {
+  return (await getCategoryList()).map((entry) => entry.value);
 }

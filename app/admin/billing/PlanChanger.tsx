@@ -74,13 +74,21 @@ export function PlanChanger({ offer, suggested = null }: { offer: Changer; sugge
   const sellable = useMemo(() => offer.options.filter((option) => canPick(option, current.included)).map((option) => option.value), [offer.options, current.included]);
   // The categories' current names, from the server, for the receipt line.
   const names = useMemo(() => Object.fromEntries(offer.options.map((option) => [option.value, option.label])), [offer.options]);
+  // The whole library as the server sees it, so the full library here includes every category the server's does.
+  const library = useMemo(
+    () => ({
+      all: offer.options.map((option) => option.value),
+      comingSoon: offer.options.filter((option) => option.availability === "coming-soon").map((option) => option.value),
+    }),
+    [offer.options],
+  );
   const seats = /^\d{1,5}$/.test(seatsText.trim()) ? Number(seatsText.trim()) : 0;
   const clinicMax = config.seats.clinicMax;
   const tooManySeats = seats > clinicMax;
 
   const quoteFor = (which: BillingInterval): Quote | null => {
     if (picked.length === 0 || seats < 1) return null;
-    const result = quote(config, { seats, categories: picked, interval: engineInterval(which), founding: false, practiceType: "clinic", sellable, labels: names });
+    const result = quote(config, { seats, categories: picked, interval: engineInterval(which), founding: false, practiceType: "clinic", sellable, labels: names, library });
     return result.ok ? result.quote : null;
   };
   const monthly = quoteFor("MONTH");

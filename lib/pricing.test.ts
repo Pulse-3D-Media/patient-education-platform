@@ -449,3 +449,56 @@ describe("reading and writing the numbers", () => {
     expect(parsePercentToBp("twelve")).toBeNull();
   });
 });
+
+/**
+ * OPTION A for categories added on /pulse/videos, decided by Evan on
+ * 2026-10-26: the full library grows to include every category, the
+ * threshold stays at 5; a Coming soon category does not hold the full
+ * library back, but one switched off sale on purpose still does; a count past
+ * the end of the ladder is charged the top price.
+ */
+describe("a library with a category added (Option A)", () => {
+  const all = [...CATEGORY_VALUES, "ELBOW"];
+  const library = { all, comingSoon: [] as string[] };
+
+  it("sells the full library from 5 categories at the 5-category price, and it includes the added one", () => {
+    const { quote: q, amounts } = amountsFor(DEFAULT_PRICING_CONFIG, { seats: 3, categories: firstCategories(5), sellable: all, library });
+    expect(q.fullLibrary).toBe(true);
+    expect(q.entitledCategories).toEqual(all);
+    expect(amounts.totalCents).toBe(3 * 13_900);
+  });
+
+  it("lets the added category be bought on its own like any other, counted on the ladder", () => {
+    const { quote: q, amounts } = amountsFor(DEFAULT_PRICING_CONFIG, { seats: 3, categories: ["KNEE", "HIP", "ELBOW"], sellable: all, library });
+    expect(q.fullLibrary).toBe(false);
+    expect(q.entitledCategories).toEqual(["KNEE", "HIP", "ELBOW"]);
+    expect(amounts.totalCents).toBe(3 * 10_900);
+  });
+
+  it("keeps the full library on sale while the added category is Coming soon, and includes it", () => {
+    const comingSoon = { all, comingSoon: ["ELBOW"] };
+    expect(fullLibraryOffered(DEFAULT_PRICING_CONFIG, CATEGORY_VALUES, comingSoon)).toBe(true);
+    const { quote: q } = amountsFor(DEFAULT_PRICING_CONFIG, { categories: firstCategories(5), sellable: CATEGORY_VALUES, library: comingSoon });
+    expect(q.fullLibrary).toBe(true);
+    expect(q.entitledCategories).toContain("ELBOW");
+    // It cannot be picked on its own while nothing is in it.
+    expect(quote(DEFAULT_PRICING_CONFIG, input({ categories: ["ELBOW"], sellable: CATEGORY_VALUES, library: comingSoon }))).toMatchObject({ ok: false });
+  });
+
+  it("does not sell the full library while a category is switched off sale on purpose", () => {
+    expect(fullLibraryOffered(DEFAULT_PRICING_CONFIG, CATEGORY_VALUES, library)).toBe(false);
+    const { quote: q } = amountsFor(DEFAULT_PRICING_CONFIG, { categories: firstCategories(5), sellable: CATEGORY_VALUES, library });
+    expect(q.fullLibrary).toBe(false);
+    expect(q.entitledCategories).toEqual(firstCategories(5));
+  });
+
+  it("charges a count past the end of the ladder the top price when no full-library count is set", () => {
+    const noFull: PricingConfig = { ...DEFAULT_PRICING_CONFIG, fullLibraryFrom: null };
+    const { amounts } = amountsFor(noFull, { categories: all, sellable: all, library });
+    expect(amounts.perSeatCents).toBe(noFull.perSeatByCountCents[noFull.perSeatByCountCents.length - 1]);
+  });
+
+  it("refuses the added category when the engine is not told about it, as before", () => {
+    expect(quote(DEFAULT_PRICING_CONFIG, input({ categories: ["ELBOW"], sellable: all }))).toMatchObject({ ok: false, error: expect.stringContaining("Not one of our categories") });
+  });
+});

@@ -10,7 +10,6 @@ import {
   CATEGORY_SLUG_MAX,
   DEFAULT_COMING_SOON,
   defaultOrder,
-  isStartingCategory,
   type CategoryDetails,
 } from "@/lib/categories";
 import { deleteCategoryAction, saveCategoryConfigAction, type FormState } from "../actions";
@@ -42,8 +41,6 @@ export function CategoryConfigForm({
 }) {
   const { state, pending, form } = useKeptForm(saveCategoryConfigAction);
   const start = CATEGORY_DEFAULTS.find((entry) => entry.value === category.value);
-  // A category added on this page (K3) rather than one of the six it starts with.
-  const added = !isStartingCategory(category.value);
   const id = (name: string) => `${name}-${category.value}`;
   const own = (value: string | number, fallback: string | number | undefined) => (value === fallback ? "" : String(value));
 
@@ -59,15 +56,10 @@ export function CategoryConfigForm({
               : `${publishedCount} published ${publishedCount === 1 ? "video" : "videos"}.`}
           </p>
         </div>
-        {added ? (
-          // An added category cannot go on sale until it is decided how new categories are priced (NOT_FOR_SALE_YET).
-          <p className="max-w-xs text-sm text-[#bfbfbf]">Not for sale: how new categories are priced has not been decided yet. It can be put on a clinic&apos;s plan by hand.</p>
-        ) : (
-          <label className="flex h-12 cursor-pointer items-center gap-3 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15">
-            <input type="checkbox" name="sellable" defaultChecked={category.sellable} className="h-5 w-5 accent-[#2a829b]" />
-            <span className="text-[15px] font-medium">For sale</span>
-          </label>
-        )}
+        <label className="flex h-12 cursor-pointer items-center gap-3 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15">
+          <input type="checkbox" name="sellable" defaultChecked={category.sellable} className="h-5 w-5 accent-[#2a829b]" />
+          <span className="text-[15px] font-medium">For sale</span>
+        </label>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>

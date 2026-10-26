@@ -14,6 +14,7 @@ import {
 import { attemptIsReusable, samePlanShape } from "../checkout-rules";
 import { checkSeatReduction, overAllocatedWords, seatSummary } from "../seats";
 import { readClinicLocked } from "./clinic-lock";
+import { getCategoryList } from "./category-config";
 import { prisma } from "./client";
 import { countSeatsInUseIn } from "./seats";
 import { readSettingsIn } from "./settings";
@@ -85,6 +86,7 @@ const PLAN_SELECT = {
   pricingVersionId: true,
   categories: true,
   entitledCategories: true,
+  fullLibrary: true,
   surgeonSeats: true,
   interval: true,
   perSeatCents: true,
@@ -94,18 +96,41 @@ const PLAN_SELECT = {
   pricingVersion: { select: { version: true } },
 } as const;
 
+/**
+ * A plan as it stands now: a plan bought as the full library includes every
+ * category there is today, ones added on /pulse/videos since it was bought
+ * included (Option A, decided by Evan on 2026-10-26). Its stored
+ * entitledCategories are what it included the day it was accepted, kept as
+ * history; every screen and rule that asks "what does this plan include"
+ * reads the plans through this.
+ */
+export function includedNow<T extends { fullLibrary: boolean; entitledCategories: Category[] }>(plan: T, all: Category[]): T {
+  return plan.fullLibrary ? { ...plan, entitledCategories: [...all] } : plan;
+}
+
 /** Everything /pulse shows about one clinic's billing: the record, and the plans it points at. Null when the clinic has none. */
 export async function getClinicBilling(clinicId: string) {
-  return prisma.clinicBilling.findUnique({
-    where: { clinicId },
-    select: {
-      ...FACTS_SELECT,
-      lastReconciledAt: true,
-      currentPlan: { select: PLAN_SELECT },
-      pendingPlan: { select: PLAN_SELECT },
-      scheduledPlan: { select: PLAN_SELECT },
-    },
-  });
+  const [row, all] = await Promise.all([
+    prisma.clinicBilling.findUnique({
+      where: { clinicId },
+      select: {
+        ...FACTS_SELECT,
+        lastReconciledAt: true,
+        currentPlan: { select: PLAN_SELECT },
+        pendingPlan: { select: PLAN_SELECT },
+        scheduledPlan: { select: PLAN_SELECT },
+      },
+    }),
+    allCategories(),
+  ]);
+  if (!row) return null;
+  const now = <P extends { fullLibrary: boolean; entitledCategories: Category[] } | null>(plan: P) => (plan ? includedNow(plan, all) : plan);
+  return { ...row, currentPlan: now(row.currentPlan), pendingPlan: now(row.pendingPlan), scheduledPlan: now(row.scheduledPlan) };
+}
+
+/** Every category that exists, in list order. */
+async function allCategories(): Promise<Category[]> {
+  return (await getCategoryList()).map((entry) => entry.value);
 }
 
 /** Which clinic a Stripe customer belongs to, or null. stripeCustomerId is unique, so at most one. */
@@ -154,6 +179,8 @@ export type AcceptedPlanInput = {
   totalCents: number;
   acceptedById: string;
   acceptedByName: string;
+  /** Bought as the full library (the pricing engine's quote.fullLibrary): it then includes every category, ones added later too. Left out, false. */
+  fullLibrary?: boolean;
 };
 
 const MAX_CENTS = 2_000_000_000; // what a Postgres integer holds, near enough
@@ -242,6 +269,8 @@ export async function recordAcceptedPlan(clinicId: string, input: AcceptedPlanIn
 
 /** What the Billing page and the checkout flow read about one clinic, in one query. */
 export async function getCheckoutFacts(clinicId: string) {
+  const all = await allCategories();
+  const now = <P extends { fullLibrary: boolean; entitledCategories: Category[] } | null>(plan: P) => (plan ? includedNow(plan, all) : plan);
   const clinic = await prisma.clinic.findUnique({
     where: { id: clinicId },
     select: {
@@ -271,9 +300,9 @@ export async function getCheckoutFacts(clinicId: string) {
           scheduledChangeAt: billing.scheduledChangeAt,
         }
       : NO_BILLING,
-    currentPlan: billing?.currentPlan ?? null,
-    pendingPlan: billing?.pendingPlan ?? null,
-    scheduledPlan: billing?.scheduledPlan ?? null,
+    currentPlan: now(billing?.currentPlan ?? null),
+    pendingPlan: now(billing?.pendingPlan ?? null),
+    scheduledPlan: now(billing?.scheduledPlan ?? null),
   };
 }
 
@@ -598,7 +627,7 @@ export type ReconcileResult = {
 };
 
 /** What the locked read asks for about the clinic. */
-const RECONCILE_CLINIC = { id: true, status: true, graceEndsAt: true, staffAccess: true, managedByPulse: true } as const;
+const RECONCILE_CLINIC = { id: true, status: true, graceEndsAt: true, staffAccess: true, managedByPulse: true, categories: true } as const;
 
 const STATUS_WORDS: Record<ClinicStatus, string> = {
   PENDING: "Pending",
@@ -736,7 +765,7 @@ export async function reconcileSubscription(args: {
       } else {
         const plan = await tx.billingPlan.findUnique({
           where: { id: activatePlanId },
-          select: { clinicId: true, entitledCategories: true, surgeonSeats: true, pricingVersionId: true },
+          select: { clinicId: true, entitledCategories: true, fullLibrary: true, surgeonSeats: true, pricingVersionId: true },
         });
         if (!plan || plan.clinicId !== clinicId) throw new Error("Billing: the accepted plan does not belong to this clinic.");
         // Every accepted plan was checked when it was written (checkPlanCategories). Should one ever name a
@@ -745,11 +774,13 @@ export async function reconcileSubscription(args: {
         const known = new Set((await tx.categoryConfig.findMany({ select: { category: true } })).map((row) => row.category));
         const leftOut = plan.entitledCategories.filter((category) => !known.has(category));
         if (leftOut.length > 0) entries.push(`Needs a look: the plan names ${leftOut.join(", ")}, which is not one of our categories, so it was left out.`);
-        clinicData.categories = plan.entitledCategories.filter((category) => known.has(category));
+        // A full-library plan includes every category there is now, ones added since it was bought too (Option A),
+        // so every look at Stripe also brings such a clinic up to date with the library.
+        clinicData.categories = plan.fullLibrary ? [...known].sort() : plan.entitledCategories.filter((category) => known.has(category));
         clinicData.surgeonSeats = plan.surgeonSeats;
         clinicData.pricingVersionId = plan.pricingVersionId;
         entries.push(
-          `${decision.planChanged ? "The plan is now" : "Plan started:"} ${plan.entitledCategories.length} ${plan.entitledCategories.length === 1 ? "category" : "categories"}, ${plan.surgeonSeats} ${plan.surgeonSeats === 1 ? "seat" : "seats"}.`,
+          `${decision.planChanged ? "The plan is now" : "Plan started:"} ${(clinicData.categories as string[]).length} ${(clinicData.categories as string[]).length === 1 ? "category" : "categories"}${plan.fullLibrary ? " (the full library)" : ""}, ${plan.surgeonSeats} ${plan.surgeonSeats === 1 ? "seat" : "seats"}.`,
         );
         // The "when it takes effect" half of the seat rule. The plan was
         // checked against the seats in use when it was accepted, but people
@@ -766,6 +797,19 @@ export async function reconcileSubscription(args: {
           staffAccess = null;
           clinicData.staffAccess = null;
           entries.push("The clinic had been opened by hand; it now pays by card, so its access follows its payments from here on.");
+        }
+      }
+    } else if (!clinic.managedByPulse && next.currentPlanId) {
+      // No plan started or changed. A plan in force that is the full library still includes every category there
+      // is now (Option A): if one was added since and this clinic did not get it (includeInFullLibraries() in
+      // lib/db/clinics.ts missed it), it is given here, so any look at Stripe puts it right.
+      const inForce = await tx.billingPlan.findUnique({ where: { id: next.currentPlanId }, select: { fullLibrary: true, clinicId: true } });
+      if (inForce?.fullLibrary && inForce.clinicId === clinicId) {
+        const known = (await tx.categoryConfig.findMany({ select: { category: true } })).map((row) => row.category);
+        const missing = known.filter((category) => !clinic.categories.includes(category));
+        if (missing.length > 0) {
+          clinicData.categories = [...clinic.categories, ...missing];
+          entries.push(`The full library now includes ${missing.join(", ")}, added to the library since.`);
         }
       }
     } else if (clinic.managedByPulse && entries.length > 0) {

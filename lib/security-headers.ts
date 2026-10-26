@@ -37,11 +37,20 @@
  *   Permissions-Policy             No page here may ask for the camera, the
  *                                  microphone or the location. Full screen
  *                                  and picture-in-picture stay allowed.
+ *   Cross-Origin-Opener-Policy     A page of ours opened from another site
+ *     (-Report-Only for now)       (a link in an email, a popup) is cut off
+ *                                  from the page that opened it, so that
+ *                                  page cannot reach into ours or redirect
+ *                                  it behind the person's back. Reported
+ *                                  only, like the full list, until the same
+ *                                  click-through (see COOP_ENFORCED).
  *
  * None of this is copy protection: it does not stop a screenshot, a screen
  * recording or someone saving the video file. See "The video boundary" in
  * CLAUDE.md.
  */
+
+import { PICTURE_SOURCES } from "./picture-hosts";
 
 export type Header = { key: string; value: string };
 
@@ -62,6 +71,15 @@ export type SecurityHeaderSettings = {
  */
 export const CSP_ENFORCED = false;
 
+/**
+ * Whether Cross-Origin-Opener-Policy: same-origin is enforced. False for now: the browser only
+ * reports. Clerk can sign people in through a popup (for "Sign in with Google" and the like), and
+ * same-origin cuts a popup off from the page that opened it, so this is turned on together with
+ * CSP_ENFORCED, after sign-in and sign-up have been tried on a preview with it reported clean.
+ * If Clerk's popup turns out to need it, the fallback is "same-origin-allow-popups".
+ */
+export const COOP_ENFORCED = false;
+
 /** Where the finished animations, posters and the Pulse logo are served from today. */
 const WEBFLOW_CDN = ["https://cdn.prod.website-files.com", "https://*.website-files.com", "https://uploads-ssl.webflow.com"];
 
@@ -70,7 +88,7 @@ const WEBFLOW_CDN = ["https://cdn.prod.website-files.com", "https://*.website-fi
  * playlist and its pieces come from stream.mux.com; on browsers without
  * HLS of their own they are fetched by script (hls.js), which is a
  * connection, not a media load, so the address is in both lists. Stills
- * come from image.mux.com, which the picture rule (any https) already lets in.
+ * come from image.mux.com, which is on the picture list (lib/picture-hosts.ts).
  */
 const MUX_STREAM = ["https://stream.mux.com"];
 
@@ -120,9 +138,12 @@ export function contentSecurityPolicy(settings: SecurityHeaderSettings): string 
     // patient page. 'unsafe-eval' is for `next dev` only.
     "script-src": ["'self'", "'unsafe-inline'", ...(settings.dev ? ["'unsafe-eval'"] : []), clerk, ...CLERK_CHALLENGES, ...(preview ? ["https://vercel.live"] : [])],
     "style-src": ["'self'", "'unsafe-inline'", ...(preview ? ["https://vercel.live"] : [])],
-    // Pictures may come from any https address: a clinic's logo is an
-    // address Pulse staff approve, on whatever site the clinic keeps it.
-    "img-src": ["'self'", "data:", "blob:", "https:"],
+    // Pictures come only from the list in lib/picture-hosts.ts (the Webflow
+    // CDN, Clerk's image host, Mux's stills), which the logo, poster and tile
+    // picture boxes on /pulse also refuse anything outside of. Clerk's own
+    // address too, for anything its sign-in pieces draw, and Vercel's on
+    // previews for the comment toolbar's avatars.
+    "img-src": ["'self'", "data:", "blob:", ...PICTURE_SOURCES, clerk, ...(preview ? ["https://vercel.live", "https://vercel.com"] : [])],
     "media-src": ["'self'", "blob:", ...WEBFLOW_CDN, ...MUX_STREAM],
     // Our fonts are served from our own address (app/brand-fonts.ts).
     "font-src": ["'self'", "data:", ...(preview ? ["https://vercel.live", "https://assets.vercel.com"] : [])],
@@ -166,5 +187,6 @@ export function securityHeaders(settings: SecurityHeaderSettings): Header[] {
     { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
     { key: "X-Content-Type-Options", value: "nosniff" },
     { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+    { key: COOP_ENFORCED ? "Cross-Origin-Opener-Policy" : "Cross-Origin-Opener-Policy-Report-Only", value: "same-origin" },
   ];
 }

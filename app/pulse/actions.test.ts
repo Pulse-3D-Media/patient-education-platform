@@ -359,7 +359,7 @@ describe("saveDetailsAction and the clinic's branding", () => {
 });
 
 describe("saveBrandingAction", () => {
-  const good = { logoUrl: "https://example.com/logo.png", brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "light", phone: "801-555-0123" };
+  const good = { logoUrl: "https://cdn.prod.website-files.com/test/logo.png", brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "light", phone: "801-555-0123" };
 
   it("refuses a user who is not Pulse staff with not-found, and writes nothing", async () => {
     const clinicId = await makeClinic();
@@ -379,13 +379,13 @@ describe("saveBrandingAction", () => {
     expect(await saveBrandingAction(null, form({ clinicId, ...good }))).toMatchObject({ ok: expect.stringContaining("Branding saved") });
 
     const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, brandTheme: true, phone: true } });
-    expect(clinic).toEqual({ logoUrl: "https://example.com/logo.png", brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light", phone: "8015550123" });
+    expect(clinic).toEqual({ logoUrl: "https://cdn.prod.website-files.com/test/logo.png", brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light", phone: "8015550123" });
 
     const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { body: true, authorName: true, kind: true } });
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({ authorName: "Evan Miller", kind: "STATUS" });
     expect(notes[0].body).toBe(
-      "Branding changed: logo set to https://example.com/logo.png; colour set to #7a1f2b; font changed from Inter to Merriweather; mode changed from Dark to Light; phone set to (801) 555-0123.",
+      "Branding changed: logo set to https://cdn.prod.website-files.com/test/logo.png; colour set to #7a1f2b; font changed from Inter to Merriweather; mode changed from Dark to Light; phone set to (801) 555-0123.",
     );
 
     // The same form again changes nothing and logs nothing.
@@ -416,6 +416,8 @@ describe("saveBrandingAction", () => {
       [{ ...good, phone: "555-0123" }, "US phone number"],
       [{ ...good, logoUrl: "http://example.com/logo.png" }, "https://"],
       [{ ...good, logoUrl: "javascript:alert(1)" }, "https://"],
+      // Only the sites pictures may come from (lib/picture-hosts.ts).
+      [{ ...good, logoUrl: "https://example.com/logo.png" }, "Webflow CDN"],
     ];
     for (const [fields, words] of bad) {
       expect(await saveBrandingAction(null, form({ clinicId, ...fields }))).toMatchObject({ error: expect.stringContaining(words) });
@@ -609,6 +611,25 @@ describe("saveVideoAction", () => {
       notes: null,
     });
     expect(await prisma.video.count({ where: { title: fields.title } })).toBe(1);
+  });
+
+  it("takes a poster only from the sites pictures may come from, except the poster a video already has", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await saveVideoAction(null, form({ ...fields, posterUrl: "https://example.com/still.jpg" }))).toMatchObject({ error: expect.stringContaining("Webflow CDN") });
+
+    const title = `${fields.title} poster`;
+    await expect(saveVideoAction(null, form({ ...fields, title, posterUrl: "https://image.mux.com/made-up/thumbnail.jpg" }))).rejects.toMatchObject({
+      digest: expect.stringContaining("NEXT_REDIRECT"),
+    });
+    const video = await prisma.video.findFirstOrThrow({ where: { title }, orderBy: { createdAt: "desc" } });
+    createdVideoIds.push(video.id);
+    expect(video.posterUrl).toBe("https://image.mux.com/made-up/thumbnail.jpg");
+
+    // A poster saved before the list existed (written straight to the row here) is let through unchanged.
+    await prisma.video.update({ where: { id: video.id }, data: { posterUrl: "https://example.com/old.jpg" } });
+    const base = { ...fields, id: video.id, title };
+    expect(await saveVideoAction(null, form({ ...base, posterUrl: "https://example.com/old.jpg", notes: "edited" }))).toMatchObject({ ok: expect.any(String) });
+    expect(await saveVideoAction(null, form({ ...base, posterUrl: "https://example.com/new.jpg" }))).toMatchObject({ error: expect.stringContaining("Webflow CDN") });
   });
 
   it("rejects a non-https address, a length that is not a length, and an unknown category", async () => {

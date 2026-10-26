@@ -1,4 +1,5 @@
 import { parseLogoUrl } from "./branding";
+import { isAllowedPictureUrl, pictureHostRefusal } from "./picture-hosts";
 
 /**
  * A category's key, the word every plan, video and link stores ("KNEE",
@@ -335,6 +336,10 @@ export function readCategoryDetails(
   const imageText = typeof raw.imageUrl === "string" ? raw.imageUrl.trim() : "";
   const image = imageText ? parseLogoUrl(imageText) : null;
   if (imageText && !image) return { ok: false, error: "The tile picture must be a full address starting with https://." };
+  // Only the sites pictures may come from (lib/picture-hosts.ts). The picture it has now is let through
+  // unchanged, so a category saved before the list existed can still have its other boxes saved.
+  const currentImage = list.find((entry) => entry.value === category)?.image;
+  if (image && image !== currentImage && !isAllowedPictureUrl(image)) return { ok: false, error: pictureHostRefusal("tile picture") };
 
   const orderText = typeof raw.sortOrder === "string" ? raw.sortOrder.trim() : "";
   let sortOrder: number | null = null;
@@ -470,6 +475,7 @@ export function readNewCategory(
   const imageText = typeof raw.imageUrl === "string" ? raw.imageUrl.trim() : "";
   const imageUrl = imageText ? parseLogoUrl(imageText) : null;
   if (imageText && !imageUrl) return { ok: false, error: "The tile picture must be a full address starting with https://." };
+  if (imageUrl && !isAllowedPictureUrl(imageUrl)) return { ok: false, error: pictureHostRefusal("tile picture") };
 
   const orderText = typeof raw.sortOrder === "string" ? raw.sortOrder.trim() : "";
   let sortOrder = Math.min(CATEGORY_ORDER_MAX, Math.max(0, ...list.map((entry) => entry.order)) + 10);

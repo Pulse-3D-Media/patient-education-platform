@@ -3,8 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { getCurrentClinicId } from "@/lib/clinic";
-import { getSignedInName } from "@/lib/people";
+import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getCurrentClinicId } from "@/lib/clinic";
 import { isClinicAdmin } from "@/lib/roles";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
 import {
@@ -53,8 +52,12 @@ async function asAdmin(): Promise<{ clinicId: string; actor: Actor } | { error: 
   // Null for a clinic that is not open: the People page offers nothing then either.
   const clinicId = await getCurrentClinicId();
   if (!clinicId) return { error: NOT_OPEN };
-  const name = (await getSignedInName()) ?? "An office admin";
-  return { clinicId, actor: { userId, name } };
+  // The session token can be up to a minute old: ask Clerk itself that this person is still an admin
+  // here (confirmAdminWithClerk in lib/clinic.ts). Its answer carries their name for the log, which
+  // used to be a separate call to Clerk, so this check costs nothing extra.
+  const live = await confirmAdminWithClerk(clinicId);
+  if (!live.ok) return { error: live.reason === "unreachable" ? ADMIN_CHECK_UNREACHABLE : NOT_ADMIN };
+  return { clinicId, actor: { userId, name: live.name } };
 }
 
 /** Run one change, turn its outcome into what the page shows, and refresh the page on success. */

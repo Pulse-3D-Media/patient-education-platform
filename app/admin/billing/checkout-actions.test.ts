@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkPayment, startCheckout } from "@/lib/checkout";
+import { ADMIN_CHECK_UNREACHABLE } from "@/lib/clinic";
 import { prisma } from "@/lib/db/client";
 import { checkPaymentAction, startCheckoutAction } from "./actions";
 
@@ -40,6 +41,13 @@ function signInAs(orgId: string | null, role: "admin" | "member") {
   } as never);
   vi.mocked(clerkClient).mockResolvedValue({
     users: { getUser: async () => ({ firstName: "Jane", lastName: "Smith", emailAddresses: [] }) },
+    // The live admin check (confirmAdminWithClerk) asks for this person's membership in the clinic's organization.
+    organizations: {
+      getOrganizationMembershipList: async ({ userId: ids }: { userId?: string[] }) => ({
+        data: [{ role: role === "admin" ? "org:admin" : "org:member", createdAt: 0, publicMetadata: {}, publicUserData: { userId: ids?.[0] ?? "", firstName: "Jane", lastName: "Smith", identifier: "jane@example.test", imageUrl: "" } }],
+        totalCount: 1,
+      }),
+    },
   } as never);
 }
 
@@ -86,6 +94,26 @@ describe("startCheckoutAction", () => {
     signInAs(orgId, "member");
     expect(await startCheckoutAction(null, form(GOOD))).toMatchObject({ error: expect.stringContaining("office admins") });
 
+    expect(startCheckout).not.toHaveBeenCalled();
+  });
+
+  it("refuses an admin demoted in Clerk whose session token still says admin, and says so plainly when Clerk cannot be asked", async () => {
+    const { orgId } = await makeClinic();
+    signInAs(orgId, "admin");
+    // Clerk itself, asked live, says they are a plain member now.
+    vi.mocked(clerkClient).mockResolvedValue({
+      organizations: {
+        getOrganizationMembershipList: async () => ({
+          data: [{ role: "org:member", createdAt: 0, publicMetadata: {}, publicUserData: { userId: "user_vitest", firstName: "Jane", lastName: "Smith", identifier: "jane@example.test", imageUrl: "" } }],
+          totalCount: 1,
+        }),
+      },
+    } as never);
+    expect(await startCheckoutAction(null, form(GOOD))).toMatchObject({ error: expect.stringContaining("office admins") });
+
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(clerkClient).mockResolvedValue({ organizations: { getOrganizationMembershipList: async () => Promise.reject(new Error("made-up outage")) } } as never);
+    expect(await startCheckoutAction(null, form(GOOD))).toEqual({ error: ADMIN_CHECK_UNREACHABLE });
     expect(startCheckout).not.toHaveBeenCalled();
   });
 

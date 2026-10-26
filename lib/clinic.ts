@@ -5,6 +5,8 @@ import { readBranding, type Branding } from "./branding";
 import { askClerk } from "./clerk-timeout";
 import { clinicIsOpen } from "./clinic-status";
 import { getClinicByClerkOrgId, upsertClinicForClerkOrg } from "./db/clinics";
+import { getSeatClinic } from "./db/seats";
+import { getMember } from "./people";
 import { ADMIN_ROLE, isClinicAdmin } from "./roles";
 import { defaultSenderName } from "./sender-name";
 import type { ClinicStatus, PracticeType } from "@prisma/client";
@@ -211,6 +213,52 @@ export async function getBillingClinicId(): Promise<string | null> {
 
   const clinic = (await getClinicByClerkOrgId(orgId)) ?? (await getCurrentClinic());
   return clinic?.id ?? null;
+}
+
+/** What confirmAdminWithClerk() answers. `name` is the person's name as Clerk has it now, for the clinic log. */
+export type LiveAdminCheck = { ok: true; userId: string; name: string } | { ok: false; reason: "not-admin" | "unreachable" };
+
+/** The sentence an action shows when Clerk could not be asked. Nothing was changed. */
+export const ADMIN_CHECK_UNREACHABLE =
+  "We could not reach sign-in just now to confirm you are still an office admin, so nothing was changed. Try again in a moment.";
+
+/**
+ * Ask Clerk, live, whether the signed-in person is STILL an admin of this
+ * clinic's organization. Used right before the highest-impact changes only:
+ * people changes, billing changes, retiring or replacing a printed QR code,
+ * and turning a paused link back on.
+ *
+ * Why it is needed: isClinicAdmin() and the clinic come from Clerk's session
+ * token, which the browser refreshes about once a minute. An admin who has
+ * just been switched to a plain member, or removed from the clinic, keeps a
+ * token that still says "admin" until it refreshes. For most things that
+ * minute does not matter; for these it might. So these actions ask Clerk
+ * itself (one membership lookup of this person in this clinic's own
+ * organization, read from the clinic's row, never from the browser).
+ *
+ * The cost is one extra round trip to Clerk, usually well under half a
+ * second, with the usual five-second limit (askClerk). Where an action
+ * already asked Clerk for the person's name, this answer carries the name
+ * instead, so that action makes no extra call at all. It is never used on
+ * the exam room's Send path (the speed rule).
+ *
+ * Fails closed: Clerk slow or failing is "unreachable", and the action
+ * changes nothing and says ADMIN_CHECK_UNREACHABLE.
+ */
+export async function confirmAdminWithClerk(clinicId: string): Promise<LiveAdminCheck> {
+  const { userId } = await auth();
+  if (!userId) return { ok: false, reason: "not-admin" };
+  const clinic = await getSeatClinic(clinicId);
+  if (!clinic?.clerkOrgId) return { ok: false, reason: "not-admin" };
+  try {
+    const member = await getMember(clinic.clerkOrgId, userId);
+    if (!member || member.role !== "admin") return { ok: false, reason: "not-admin" };
+    return { ok: true, userId, name: member.name };
+  } catch (error) {
+    // getMember's call has the time limit; a timeout or a failure arrives here. The kind only, for the log.
+    console.error("The live admin check could not reach Clerk", errorKind(error));
+    return { ok: false, reason: "unreachable" };
+  }
 }
 
 /**

@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkPayment } from "@/lib/checkout";
+import { ADMIN_CHECK_UNREACHABLE } from "@/lib/clinic";
 import { prisma } from "@/lib/db/client";
 import { cancelWaitingChange, confirmPlanChange, findInvoiceToPay, openBillingPortal, reviewPlanChange } from "@/lib/plan-changes";
 import {
@@ -61,6 +62,13 @@ function signInAs(orgId: string | null, role: "admin" | "member", userId: string
   } as never);
   vi.mocked(clerkClient).mockResolvedValue({
     users: { getUser: async () => ({ firstName: "Jane", lastName: "Smith", emailAddresses: [] }) },
+    // The live admin check (confirmAdminWithClerk) asks for this person's membership in the clinic's organization.
+    organizations: {
+      getOrganizationMembershipList: async ({ userId: ids }: { userId?: string[] }) => ({
+        data: [{ role: role === "admin" ? "org:admin" : "org:member", createdAt: 0, publicMetadata: {}, publicUserData: { userId: ids?.[0] ?? "", firstName: "Jane", lastName: "Smith", identifier: "jane@example.test", imageUrl: "" } }],
+        totalCount: 1,
+      }),
+    },
   } as never);
 }
 
@@ -145,6 +153,40 @@ describe("billing changes belong to the clinic's office admins", () => {
     }
     // The log names the admin who confirmed, by their own id.
     expect(vi.mocked(confirmPlanChange).mock.calls[0][0].actor).toEqual({ id: OTHER_ADMIN, name: "Jane Smith" });
+  });
+
+  it("an admin demoted or removed in Clerk, whose session token still says admin, changes nothing: Clerk is asked live", async () => {
+    const { orgId } = await makeClinic();
+    const changes = everyOwnerAction().slice(1); // every action but Review, which changes nothing and is not checked live
+
+    // Demoted: the token says admin, Clerk itself says member.
+    signInAs(orgId, "admin", OTHER_ADMIN);
+    const membership = (role: string) => ({
+      users: { getUser: async () => ({ firstName: "Jane", lastName: "Smith", emailAddresses: [] }) },
+      organizations: {
+        getOrganizationMembershipList: async () => ({
+          data: role ? [{ role, createdAt: 0, publicMetadata: {}, publicUserData: { userId: OTHER_ADMIN, firstName: "Jane", lastName: "Smith", identifier: "jane@example.test", imageUrl: "" } }] : [],
+          totalCount: role ? 1 : 0,
+        }),
+      },
+    });
+    vi.mocked(clerkClient).mockResolvedValue(membership("org:member") as never);
+    for (const run of changes) expect(await run()).toMatchObject({ error: expect.stringContaining("office admins") });
+    // Removed: Clerk no longer has them in the organization at all.
+    vi.mocked(clerkClient).mockResolvedValue(membership("") as never);
+    for (const run of changes) expect(await run()).toMatchObject({ error: expect.stringContaining("office admins") });
+    for (const flow of [confirmPlanChange, cancelWaitingChange, openBillingPortal, findInvoiceToPay]) expect(flow).not.toHaveBeenCalled();
+  });
+
+  it("a Clerk that cannot be asked is answered in plain words, and nothing reaches Stripe", async () => {
+    const { orgId } = await makeClinic();
+    signInAs(orgId, "admin", OTHER_ADMIN);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(clerkClient).mockResolvedValue({
+      organizations: { getOrganizationMembershipList: async () => Promise.reject(Object.assign(new Error("made-up outage"), { status: 503 })) },
+    } as never);
+    for (const run of everyOwnerAction().slice(1)) expect(await run()).toEqual({ error: ADMIN_CHECK_UNREACHABLE });
+    for (const flow of [confirmPlanChange, cancelWaitingChange, openBillingPortal, findInvoiceToPay]) expect(flow).not.toHaveBeenCalled();
   });
 
   it("a clinic with no account owner can still have its billing changed by an office admin", async () => {

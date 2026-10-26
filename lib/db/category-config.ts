@@ -220,3 +220,48 @@ export async function listSellableCategories(): Promise<Category[]> {
   const [availability, list] = await Promise.all([getCategoryAvailability(), getCategoryList()]);
   return list.map((entry) => entry.value).filter((category) => availability[category] === "sellable");
 }
+
+/** Why a category cannot be deleted. The message is one plain sentence for Pulse staff. */
+export const CATEGORY_IN_USE =
+  "This category is in use now (a video, a clinic's plan or an accepted plan), so it cannot be deleted. Switch it off sale and unpublish its videos instead.";
+
+/** "Nothing uses this category": no video of any kind, no clinic's plan, no accepted plan. One SQL condition, used to list and to delete. */
+const UNUSED = Prisma.sql`NOT EXISTS (SELECT 1 FROM "Video" v WHERE v."category" = c."category")
+  AND NOT EXISTS (SELECT 1 FROM "Clinic" k WHERE k."categories" @> ARRAY[c."category"])
+  AND NOT EXISTS (SELECT 1 FROM "BillingPlan" b WHERE b."categories" @> ARRAY[c."category"] OR b."entitledCategories" @> ARRAY[c."category"])`;
+
+/**
+ * The added categories (not one of the six starting ones) that nothing uses
+ * yet: the ones the Categories panel offers a Delete for. A courtesy for the
+ * page; deleteUnusedCategory() checks again.
+ */
+export async function listDeletableCategories(): Promise<Category[]> {
+  const starting = CATEGORY_DEFAULTS.map((entry) => entry.value);
+  const rows = await prisma.$queryRaw<{ category: string }[]>`
+    SELECT c."category" FROM "CategoryConfig" c WHERE NOT (c."category" = ANY(${starting}::text[])) AND ${UNUSED}`;
+  return rows.map((row) => row.category);
+}
+
+/**
+ * Delete an added category that nothing uses (a mistake caught early, decided
+ * by Evan on 2026-10-26). Never one of the six starting categories, and never
+ * one with a video (published or not), on a clinic's plan, or in an accepted
+ * plan: those must never disappear, so they are only ever taken off sale.
+ *
+ * One transaction that locks the category's row first. Adding a video in it
+ * (its foreign key) and saving a clinic's plan with it (setClinicPlan() locks
+ * the plan's category rows) both need that row too, so they either finished
+ * before, and the check below sees them and refuses, or wait and then find
+ * the category gone and refuse. Throws a CategoryDetailsError, deleting
+ * nothing, when it may not be deleted.
+ */
+export async function deleteUnusedCategory(category: Category): Promise<void> {
+  if (isStartingCategory(category)) throw new CategoryDetailsError("The six starting categories can never be deleted.");
+  await prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ category: string }[]>`SELECT "category" FROM "CategoryConfig" WHERE "category" = ${category} FOR UPDATE`;
+    if (locked.length === 0) throw new CategoryDetailsError("That category no longer exists.");
+    const unused = await tx.$queryRaw<{ category: string }[]>`SELECT c."category" FROM "CategoryConfig" c WHERE c."category" = ${category} AND ${UNUSED}`;
+    if (unused.length === 0) throw new CategoryDetailsError(CATEGORY_IN_USE);
+    await tx.categoryConfig.delete({ where: { category } });
+  });
+}

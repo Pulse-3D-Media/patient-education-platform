@@ -515,6 +515,9 @@ export class PlanSeatsRefusedError extends Error {
   }
 }
 
+/** A plan refused because a category on it no longer exists. A kind of PlanSeatsRefusedError, so every caller already shows its sentence. */
+export class PlanCategoriesRefusedError extends PlanSeatsRefusedError {}
+
 /**
  * Set the categories on a clinic's plan and how many surgeon seats it pays
  * for, and log what changed under the name given. Used by /pulse and by npm
@@ -549,6 +552,15 @@ export async function setClinicPlan(
         throw new PlanSeatsRefusedError(
           `${inUse} ${inUse === 1 ? "seat is" : "seats are"} taken at this clinic (people and open invitations), so ${surgeonSeats} ${surgeonSeats === 1 ? "seat" : "seats"} would leave it ${inUse - surgeonSeats} over. Nothing was saved. To save it anyway, tick "Allow fewer seats than are in use": nobody is removed and no charge is changed, but nobody new can be given a seat until it is settled.`,
         );
+      }
+      // Every category on the plan must still exist, and must not be deleted while this plan is written: a
+      // share lock on their CategoryConfig rows makes a delete of an unused category (deleteUnusedCategory())
+      // wait for this save, then see the category is in use and refuse; or, if the delete came first, this
+      // save sees the row gone and refuses.
+      if (wanted.length > 0) {
+        const rows = await tx.$queryRaw<{ category: string }[]>`SELECT "category" FROM "CategoryConfig" WHERE "category" = ANY(${wanted}::text[]) FOR SHARE`;
+        const gone = wanted.filter((category) => !rows.some((row) => row.category === category));
+        if (gone.length > 0) throw new PlanCategoriesRefusedError("One of the categories no longer exists. Reload the page and try again. Nothing was saved.");
       }
       over = overAllocatedWords(seatSummary(surgeonSeats, inUse));
       return { categories: wanted, surgeonSeats };

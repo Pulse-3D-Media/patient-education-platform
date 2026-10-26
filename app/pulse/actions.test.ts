@@ -23,6 +23,7 @@ import {
   saveBrandingAction,
   saveCategoryConfigAction,
   addCategoryAction,
+  deleteCategoryAction,
   saveDetailsAction,
   savePricingVersionAction,
   saveSettingsAction,
@@ -1167,5 +1168,28 @@ describe("addCategoryAction (the + in the Categories panel)", () => {
     expect(await saveCategoryConfigAction(null, form({ category: row!.category, sellable: "on", comingSoonText: "", label: row!.label!, slug: row!.slug!, imageUrl: "", sortOrder: "" }))).toEqual({
       error: expect.stringContaining("cannot be put on sale yet"),
     });
+  });
+});
+
+describe("deleteCategoryAction", () => {
+  it("refuses a non-staff user, never deletes a starting category, and deletes an unused added one for staff", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    const tag = randomBytes(3).toString("hex");
+    expect(await addCategoryAction(null, form({ label: `Vitest Gone ${tag}`, slug: `vitest-gone-${tag}`, imageUrl: "", sortOrder: "" }))).toMatchObject({ ok: expect.any(String) });
+    const row = await prisma.categoryConfig.findFirst({ where: { slug: `vitest-gone-${tag}` } });
+    expect(row).not.toBeNull();
+    try {
+      signInAs("user_clinic_admin", {});
+      await expect(deleteCategoryAction(row!.category)).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+      expect(await prisma.categoryConfig.findUnique({ where: { category: row!.category } })).not.toBeNull();
+
+      signInAs("user_staff", { pulseStaff: true });
+      expect(await deleteCategoryAction("KNEE")).toEqual({ error: expect.stringContaining("never be deleted") });
+      expect(await deleteCategoryAction("NOT_A_CATEGORY")).toEqual({ error: "That category no longer exists." });
+      expect(await deleteCategoryAction(row!.category)).toEqual({ ok: `Deleted Vitest Gone ${tag}.` });
+      expect(await prisma.categoryConfig.findUnique({ where: { category: row!.category } })).toBeNull();
+    } finally {
+      await prisma.categoryConfig.deleteMany({ where: { category: row!.category } });
+    }
   });
 });

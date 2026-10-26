@@ -9,7 +9,7 @@ import { retryBillingEvent } from "@/lib/billing-events";
 import { MAX_GRACE_DAYS, MIN_GRACE_DAYS } from "@/lib/billing-state";
 import { chaptersKey, checkChapters, parseChapterLines, readStoredChapters, type Chapter } from "@/lib/chapters";
 import { isKnownCategory, readCategoryDetails, readNewCategory, unknownCategories, type CategoryDetails } from "@/lib/categories";
-import { CategoryDetailsError, addCategory, getCategoryList, saveCategoryConfig } from "@/lib/db/category-config";
+import { CategoryDetailsError, addCategory, deleteUnusedCategory, getCategoryList, saveCategoryConfig } from "@/lib/db/category-config";
 import { readBrandingForm, readLogoField } from "@/lib/branding-form";
 import {
   PlanSeatsRefusedError,
@@ -757,6 +757,30 @@ export async function addCategoryAction(_previous: FormState, formData: FormData
   console.info(`Category added: ${added.value} ("${added.label}", /library/${added.slug}) by ${staff.name}`);
   revalidatePath("/", "layout");
   return { ok: `Added ${added.label}. It is not for sale and shows as Coming soon until a video in it is published.` };
+}
+
+/**
+ * Delete a category Pulse staff added that nothing uses yet (no video, no
+ * clinic's plan, no accepted plan): the Delete on its row in the Categories
+ * panel, after a yes. Pulse staff only. Never one of the six starting
+ * categories. deleteUnusedCategory() checks all of it again under a lock;
+ * anything in use is refused in one plain sentence and nothing is deleted.
+ * Written to the server log under the staff member's name.
+ */
+export async function deleteCategoryAction(category: unknown): Promise<FormState> {
+  const staff = await requirePulseStaff();
+  const list = await getCategoryList();
+  if (!isKnownCategory(list, category)) return { error: "That category no longer exists." };
+  const label = list.find((entry) => entry.value === category)?.label ?? category;
+  try {
+    await deleteUnusedCategory(category);
+  } catch (error) {
+    if (error instanceof CategoryDetailsError) return { error: error.message };
+    throw error;
+  }
+  console.info(`Category deleted: ${category} ("${label}") by ${staff.name}`);
+  revalidatePath("/", "layout");
+  return { ok: `Deleted ${label}.` };
 }
 
 // ---------------------------------------------------------------------------

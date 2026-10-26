@@ -22,6 +22,8 @@ import {
   startMuxUploadAction,
   saveBrandingAction,
   saveCategoryConfigAction,
+  addCategoryAction,
+  deleteCategoryAction,
   saveDetailsAction,
   savePricingVersionAction,
   saveSettingsAction,
@@ -1126,6 +1128,68 @@ describe("saveCategoryConfigAction, the details boxes", () => {
       });
     } finally {
       if (before) await prisma.categoryConfig.update({ where: { category: "SHOULDER" }, data: before });
+    }
+  });
+});
+
+describe("addCategoryAction (the + in the Categories panel)", () => {
+  const tag = randomBytes(3).toString("hex");
+  const added: string[] = [];
+  afterAll(async () => {
+    await prisma.categoryConfig.deleteMany({ where: { category: { in: added } } });
+  });
+  const fields = (changes: Record<string, string> = {}) =>
+    form({ label: `Vitest Wrist ${tag}`, slug: `vitest-wrist-${tag}`, imageUrl: "", sortOrder: "", ...changes });
+
+  it("refuses a non-staff user before anything is written", async () => {
+    signInAs("user_clinic_admin", {});
+    const before = await prisma.categoryConfig.count();
+    await expect(addCategoryAction(null, fields())).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    expect(await prisma.categoryConfig.count()).toBe(before);
+  });
+
+  it("adds one for staff, not for sale, and refuses bad or taken boxes in words with nothing written", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    const before = await prisma.categoryConfig.count();
+    const bads: Record<string, string>[] = [{ label: "" }, { label: "Knee" }, { slug: "" }, { slug: "knee" }, { slug: "Not A Slug" }, { imageUrl: "http://example.com/a.jpg" }, { sortOrder: "0" }];
+    for (const bad of bads) expect(await addCategoryAction(null, fields(bad))).toEqual({ error: expect.any(String) });
+    expect(await prisma.categoryConfig.count()).toBe(before);
+
+    const result = await addCategoryAction(null, fields());
+    expect(result).toMatchObject({ ok: expect.stringContaining("not for sale") });
+    const row = await prisma.categoryConfig.findFirst({ where: { slug: `vitest-wrist-${tag}` } });
+    if (row) added.push(row.category);
+    expect(row).toMatchObject({ label: `Vitest Wrist ${tag}`, sellable: false });
+
+    // The same again is refused: the name and the address are taken now.
+    expect(await addCategoryAction(null, fields())).toEqual({ error: expect.stringContaining("already a category") });
+
+    // And the panel will not put it on sale.
+    expect(await saveCategoryConfigAction(null, form({ category: row!.category, sellable: "on", comingSoonText: "", label: row!.label!, slug: row!.slug!, imageUrl: "", sortOrder: "" }))).toEqual({
+      error: expect.stringContaining("cannot be put on sale yet"),
+    });
+  });
+});
+
+describe("deleteCategoryAction", () => {
+  it("refuses a non-staff user, never deletes a starting category, and deletes an unused added one for staff", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    const tag = randomBytes(3).toString("hex");
+    expect(await addCategoryAction(null, form({ label: `Vitest Gone ${tag}`, slug: `vitest-gone-${tag}`, imageUrl: "", sortOrder: "" }))).toMatchObject({ ok: expect.any(String) });
+    const row = await prisma.categoryConfig.findFirst({ where: { slug: `vitest-gone-${tag}` } });
+    expect(row).not.toBeNull();
+    try {
+      signInAs("user_clinic_admin", {});
+      await expect(deleteCategoryAction(row!.category)).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+      expect(await prisma.categoryConfig.findUnique({ where: { category: row!.category } })).not.toBeNull();
+
+      signInAs("user_staff", { pulseStaff: true });
+      expect(await deleteCategoryAction("KNEE")).toEqual({ error: expect.stringContaining("never be deleted") });
+      expect(await deleteCategoryAction("NOT_A_CATEGORY")).toEqual({ error: "That category no longer exists." });
+      expect(await deleteCategoryAction(row!.category)).toEqual({ ok: `Deleted Vitest Gone ${tag}.` });
+      expect(await prisma.categoryConfig.findUnique({ where: { category: row!.category } })).toBeNull();
+    } finally {
+      await prisma.categoryConfig.deleteMany({ where: { category: row!.category } });
     }
   });
 });

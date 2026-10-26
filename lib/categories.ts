@@ -163,7 +163,7 @@ export type CategoryRow = {
 /** A category's default place: 10, 20, 30, so a new place can be typed between two. */
 export function defaultOrder(category: Category): number {
   const index = CATEGORY_DEFAULTS.findIndex((entry) => entry.value === category);
-  return (index < 0 ? CATEGORY_DEFAULTS.length : index + 1) * 10;
+  return (index < 0 ? CATEGORY_DEFAULTS.length + 1 : index + 1) * 10;
 }
 
 /**
@@ -198,7 +198,7 @@ export function categoryListFromRows(rows: CategoryRow[]): CategoryDetails[] {
         label: row.label?.trim() || row.category,
         slug: row.slug || row.category.toLowerCase().replace(/_/g, "-"),
         image: row.imageUrl || "",
-        order: row.sortOrder ?? (CATEGORY_DEFAULTS.length + 1) * 10,
+        order: row.sortOrder ?? defaultOrder(row.category),
         sellable: row.sellable,
         comingSoonText: row.comingSoonText,
         formerSlugs: row.formerSlugs,
@@ -310,16 +310,20 @@ export type CategoryDetailsInput = {
 export function readCategoryDetails(
   category: Category,
   raw: { label: unknown; slug: unknown; imageUrl: unknown; sortOrder: unknown },
+  list: CategoryDetails[] = DEFAULT_CATEGORY_LIST,
 ): { ok: true; details: CategoryDetailsInput } | { ok: false; error: string } {
+  if (!isKnownCategory(list, category)) return { ok: false, error: "That is not one of our categories." };
+  // A category added on /pulse/videos (K3) has no starting values to fall back to, so its name and address are required.
   const start = CATEGORY_DEFAULTS.find((entry) => entry.value === category);
-  if (!start) return { ok: false, error: "That is not one of our categories." };
 
   const labelRaw = typeof raw.label === "string" ? raw.label : "";
   if (/[\r\n\t]/.test(labelRaw.trim())) return { ok: false, error: "Keep the name on one line." };
   const labelText = labelRaw.trim();
   if (labelText.length > CATEGORY_LABEL_MAX) return { ok: false, error: `Keep the name to ${CATEGORY_LABEL_MAX} characters.` };
+  if (!start && !labelText) return { ok: false, error: "Give the category a name." };
 
   const slugText = typeof raw.slug === "string" ? raw.slug.trim() : "";
+  if (!start && !slugText) return { ok: false, error: "Give the category a web address." };
   if (slugText) {
     if (slugText.length > CATEGORY_SLUG_MAX) return { ok: false, error: `Keep the web address to ${CATEGORY_SLUG_MAX} characters.` };
     if (!SLUG_SHAPE.test(slugText)) {
@@ -345,9 +349,9 @@ export function readCategoryDetails(
   return {
     ok: true,
     details: {
-      label: labelText && labelText !== start.label ? labelText : null,
-      slug: slugText && slugText !== start.slug ? slugText : null,
-      imageUrl: image && image !== start.image ? image : null,
+      label: labelText && labelText !== start?.label ? labelText : null,
+      slug: slugText && slugText !== start?.slug ? slugText : null,
+      imageUrl: image && image !== start?.image ? image : null,
       sortOrder,
     },
   };
@@ -388,4 +392,94 @@ export function formerSlugsAfter(category: Category, before: { slug: string; for
   if (before.slug !== newSlug && before.slug !== start) kept.add(before.slug);
   kept.delete(newSlug);
   return [...kept];
+}
+
+// ---------------------------------------------------------------------------
+// Adding a category (K3): the "+" in the Categories panel on /pulse/videos.
+// ---------------------------------------------------------------------------
+
+/** The longest a category's key may be. */
+export const CATEGORY_KEY_MAX = 40;
+
+/** Whether a category is one of the six every installation starts with (rather than one added on /pulse/videos). */
+export function isStartingCategory(category: Category): boolean {
+  return CATEGORY_DEFAULTS.some((entry) => entry.value === category);
+}
+
+/**
+ * The web address suggested for a name: "Hand & Wrist" becomes "hand-wrist".
+ * Only a suggestion for the box; whatever is in the box is checked when saved.
+ */
+export function suggestSlug(label: string): string {
+  return label
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, CATEGORY_SLUG_MAX)
+    .replace(/-+$/, "");
+}
+
+/**
+ * The key a new category is stored under, made from its name: "Hand & Wrist"
+ * becomes HAND_WRIST, the way KNEE and FOOT_ANKLE look. It is what every plan,
+ * video and link will store, so it is never changed once made (the name and
+ * the address can be). A key already taken gets _2, _3 and so on; a name with
+ * no letters or numbers in it gets CATEGORY.
+ */
+export function suggestKey(label: string, taken: readonly string[]): Category {
+  let base = suggestSlug(label).replace(/-/g, "_").toUpperCase().slice(0, CATEGORY_KEY_MAX - 3);
+  if (!/^[A-Z]/.test(base)) base = `CATEGORY${base ? `_${base}` : ""}`.slice(0, CATEGORY_KEY_MAX - 3);
+  if (!taken.includes(base)) return base;
+  for (let n = 2; ; n++) if (!taken.includes(`${base}_${n}`)) return `${base}_${n}`;
+}
+
+/** What a new category is made with, checked. */
+export type NewCategory = { key: Category; label: string; slug: string; imageUrl: string | null; sortOrder: number };
+
+/**
+ * Check the "+" form: a name (1 to 40 characters, one line), a web address
+ * (the same shape as a rename, and not one any category has or had), an
+ * optional https tile picture, and an optional place in the list (after the
+ * last one when left empty). The key is made from the name (suggestKey()).
+ * One plain sentence when something is refused. `list` is the category list
+ * from the server; the database checks the key and the address again.
+ */
+export function readNewCategory(
+  raw: { label: unknown; slug: unknown; imageUrl: unknown; sortOrder: unknown },
+  list: CategoryDetails[],
+): { ok: true; category: NewCategory } | { ok: false; error: string } {
+  const labelRaw = typeof raw.label === "string" ? raw.label : "";
+  if (/[\r\n\t]/.test(labelRaw.trim())) return { ok: false, error: "Keep the name on one line." };
+  const label = labelRaw.trim();
+  if (!label) return { ok: false, error: "Give the category a name." };
+  if (label.length > CATEGORY_LABEL_MAX) return { ok: false, error: `Keep the name to ${CATEGORY_LABEL_MAX} characters.` };
+  if (list.some((entry) => entry.label.toLowerCase() === label.toLowerCase())) {
+    return { ok: false, error: `There is already a category called "${label}".` };
+  }
+
+  const slug = typeof raw.slug === "string" ? raw.slug.trim() : "";
+  if (!slug) return { ok: false, error: "Give the category a web address." };
+  if (slug.length > CATEGORY_SLUG_MAX) return { ok: false, error: `Keep the web address to ${CATEGORY_SLUG_MAX} characters.` };
+  if (!SLUG_SHAPE.test(slug)) return { ok: false, error: "The web address can only use lowercase letters, numbers and single hyphens, like foot-ankle." };
+  if (RESERVED_SLUGS.includes(slug)) return { ok: false, error: `"${slug}" is already a page of its own. Choose another web address.` };
+  const key = suggestKey(label, list.map((entry) => entry.value));
+  if (takenSlugs(list, key).has(slug)) return { ok: false, error: `The web address "${slug}" belongs to another category. Choose another.` };
+
+  const imageText = typeof raw.imageUrl === "string" ? raw.imageUrl.trim() : "";
+  const imageUrl = imageText ? parseLogoUrl(imageText) : null;
+  if (imageText && !imageUrl) return { ok: false, error: "The tile picture must be a full address starting with https://." };
+
+  const orderText = typeof raw.sortOrder === "string" ? raw.sortOrder.trim() : "";
+  let sortOrder = Math.min(CATEGORY_ORDER_MAX, Math.max(0, ...list.map((entry) => entry.order)) + 10);
+  if (orderText) {
+    const n = Number(orderText);
+    if (!/^\d+$/.test(orderText) || !Number.isInteger(n) || n < 1 || n > CATEGORY_ORDER_MAX) {
+      return { ok: false, error: `The place in the list must be a whole number from 1 to ${CATEGORY_ORDER_MAX}.` };
+    }
+    sortOrder = n;
+  }
+
+  return { ok: true, category: { key, label, slug, imageUrl, sortOrder } };
 }

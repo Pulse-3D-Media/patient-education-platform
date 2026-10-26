@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { INPUT, PLACEHOLDER_BADGE, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { isKnownCategory, labelOf } from "@/lib/categories";
-import { getCategoryList } from "@/lib/db/category-config";
+import { getCategoryList, listDeletableCategories } from "@/lib/db/category-config";
 import { countPublishedVideosByCategory, listVideosForPulse, type PulseVideoFilter } from "@/lib/db/videos";
 import { formatDuration } from "@/lib/format";
 import { requirePulseStaff } from "@/lib/pulse";
 import { describeVideoSource } from "@/lib/video";
 import { formatDate } from "../ui";
+import { AddCategoryForm } from "./AddCategoryForm";
 import { CategoryConfigForm } from "./CategoryConfigForm";
 
 /**
@@ -44,10 +45,11 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
   const status = STATUS_CHOICES.find((choice) => choice.value === statusParam)?.value;
   const filtering = Boolean(category) || Boolean(status);
 
-  const [videos, categories, published] = await Promise.all([
+  const [videos, categories, published, deletable] = await Promise.all([
     listVideosForPulse({ category, status }),
     getCategoryList(),
     countPublishedVideosByCategory(),
+    listDeletableCategories(),
   ]);
 
   return (
@@ -180,10 +182,13 @@ export default async function PulseVideosPage({ searchParams }: PageProps<"/puls
           <ul className="mt-4 flex flex-col gap-3">
             {categories.map((c) => (
               <li key={c.value} className="rounded-2xl border border-white/10 bg-[#0d1113] p-5">
-                <CategoryConfigForm category={c} publishedCount={published[c.value] ?? 0} />
+                <CategoryConfigForm category={c} publishedCount={published[c.value] ?? 0} deletable={deletable.includes(c.value)} />
               </li>
             ))}
           </ul>
+          <div className="mt-4">
+            <AddCategoryForm nextOrder={Math.min(9999, Math.max(0, ...categories.map((c) => c.order)) + 10)} />
+          </div>
         </section>
       </div>
     </main>

@@ -5,12 +5,14 @@ import {
   CATEGORY_DEFAULTS,
   categoryListFromRows,
   formerSlugsAfter,
+  isStartingCategory,
   takenSlugs,
   type CategoryAvailability,
   type CategoryConfig,
   type CategoryDetails,
   type CategoryDetailsInput,
   type CategoryRow,
+  type NewCategory,
 } from "../categories";
 import { prisma } from "./client";
 
@@ -90,6 +92,51 @@ export async function getCategoryConfigs(): Promise<Record<Category, CategoryCon
 export class CategoryDetailsError extends Error {}
 
 /**
+ * Why a category added on /pulse/videos cannot be switched on for sale yet: the
+ * pricing engine prices a count of categories and treats five or more as the
+ * full library of the six starting ones, and how an added category fits that is
+ * a pricing decision Evan has not made (K3). Until it is, an added category is
+ * never offered for sale; Pulse staff can still put it on a clinic's plan by hand.
+ */
+export const NOT_FOR_SALE_YET =
+  "A category added here cannot be put on sale yet: how new categories are priced has not been decided. You can still add it to a clinic's plan by hand on its Plan tab.";
+
+/**
+ * Add a category (the "+" in the Categories panel). It starts NOT for sale,
+ * and the library shows it as Coming soon until a video in it is published,
+ * the same rule as any category (categoryState()). Checked first by
+ * readNewCategory(); here, in one transaction that locks every row, the key
+ * and the web address are checked again against the rows as they are now, so
+ * two staff members adding at once cannot both take one. Nothing is ever
+ * deleted: a category stays, at most off sale with nothing published in it.
+ */
+export async function addCategory(input: NewCategory): Promise<CategoryDetails> {
+  await readRows();
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "category" FROM "CategoryConfig" FOR UPDATE`;
+      const list = categoryListFromRows(await tx.categoryConfig.findMany({ select: ROW_FIELDS }));
+      if (list.some((entry) => entry.value === input.key || entry.label.toLowerCase() === input.label.toLowerCase())) {
+        throw new CategoryDetailsError(`There is already a category called "${input.label}".`);
+      }
+      if (takenSlugs(list, input.key).has(input.slug)) {
+        throw new CategoryDetailsError(`The web address "${input.slug}" belongs to another category. Choose another.`);
+      }
+      await tx.categoryConfig.create({
+        data: { category: input.key, sellable: false, label: input.label, slug: input.slug, imageUrl: input.imageUrl, sortOrder: input.sortOrder },
+      });
+      const after = categoryListFromRows(await tx.categoryConfig.findMany({ select: ROW_FIELDS }));
+      return after.find((entry) => entry.value === input.key) as CategoryDetails;
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw new CategoryDetailsError("That category or web address was taken a moment ago. Check the list and try again.");
+    }
+    throw error;
+  }
+}
+
+/**
  * Save one category's row: its sale settings and its details, creating the
  * row if it has never been read. Returns its sale settings as they now are. Callers
  * check the text first (readCategoryDetails() in lib/categories.ts); this
@@ -114,6 +161,7 @@ export async function saveCategoryConfig(
       const list = categoryListFromRows(await tx.categoryConfig.findMany({ select: ROW_FIELDS }));
       const before = list.find((entry) => entry.value === category);
       if (!before) throw new CategoryDetailsError("That is not one of our categories.");
+      if (config.sellable && !isStartingCategory(category)) throw new CategoryDetailsError(NOT_FOR_SALE_YET);
 
       let detailFields = {};
       if (details) {
@@ -171,4 +219,49 @@ export async function getCategoryAvailability(): Promise<Record<Category, Catego
 export async function listSellableCategories(): Promise<Category[]> {
   const [availability, list] = await Promise.all([getCategoryAvailability(), getCategoryList()]);
   return list.map((entry) => entry.value).filter((category) => availability[category] === "sellable");
+}
+
+/** Why a category cannot be deleted. The message is one plain sentence for Pulse staff. */
+export const CATEGORY_IN_USE =
+  "This category is in use now (a video, a clinic's plan or an accepted plan), so it cannot be deleted. Switch it off sale and unpublish its videos instead.";
+
+/** "Nothing uses this category": no video of any kind, no clinic's plan, no accepted plan. One SQL condition, used to list and to delete. */
+const UNUSED = Prisma.sql`NOT EXISTS (SELECT 1 FROM "Video" v WHERE v."category" = c."category")
+  AND NOT EXISTS (SELECT 1 FROM "Clinic" k WHERE k."categories" @> ARRAY[c."category"])
+  AND NOT EXISTS (SELECT 1 FROM "BillingPlan" b WHERE b."categories" @> ARRAY[c."category"] OR b."entitledCategories" @> ARRAY[c."category"])`;
+
+/**
+ * The added categories (not one of the six starting ones) that nothing uses
+ * yet: the ones the Categories panel offers a Delete for. A courtesy for the
+ * page; deleteUnusedCategory() checks again.
+ */
+export async function listDeletableCategories(): Promise<Category[]> {
+  const starting = CATEGORY_DEFAULTS.map((entry) => entry.value);
+  const rows = await prisma.$queryRaw<{ category: string }[]>`
+    SELECT c."category" FROM "CategoryConfig" c WHERE NOT (c."category" = ANY(${starting}::text[])) AND ${UNUSED}`;
+  return rows.map((row) => row.category);
+}
+
+/**
+ * Delete an added category that nothing uses (a mistake caught early, decided
+ * by Evan on 2026-10-26). Never one of the six starting categories, and never
+ * one with a video (published or not), on a clinic's plan, or in an accepted
+ * plan: those must never disappear, so they are only ever taken off sale.
+ *
+ * One transaction that locks the category's row first. Adding a video in it
+ * (its foreign key) and saving a clinic's plan with it (setClinicPlan() locks
+ * the plan's category rows) both need that row too, so they either finished
+ * before, and the check below sees them and refuses, or wait and then find
+ * the category gone and refuse. Throws a CategoryDetailsError, deleting
+ * nothing, when it may not be deleted.
+ */
+export async function deleteUnusedCategory(category: Category): Promise<void> {
+  if (isStartingCategory(category)) throw new CategoryDetailsError("The six starting categories can never be deleted.");
+  await prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ category: string }[]>`SELECT "category" FROM "CategoryConfig" WHERE "category" = ${category} FOR UPDATE`;
+    if (locked.length === 0) throw new CategoryDetailsError("That category no longer exists.");
+    const unused = await tx.$queryRaw<{ category: string }[]>`SELECT c."category" FROM "CategoryConfig" c WHERE c."category" = ${category} AND ${UNUSED}`;
+    if (unused.length === 0) throw new CategoryDetailsError(CATEGORY_IN_USE);
+    await tx.categoryConfig.delete({ where: { category } });
+  });
 }

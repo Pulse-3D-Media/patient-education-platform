@@ -1,6 +1,8 @@
 "use client";
 
-import { INPUT } from "@/components/ui/styles";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { INPUT, SECONDARY_BUTTON } from "@/components/ui/styles";
 import {
   CATEGORY_DEFAULTS,
   CATEGORY_LABEL_MAX,
@@ -8,9 +10,10 @@ import {
   CATEGORY_SLUG_MAX,
   DEFAULT_COMING_SOON,
   defaultOrder,
+  isStartingCategory,
   type CategoryDetails,
 } from "@/lib/categories";
-import { saveCategoryConfigAction } from "../actions";
+import { deleteCategoryAction, saveCategoryConfigAction, type FormState } from "../actions";
 import { Outcome, SaveButton, useKeptForm } from "../FormBits";
 
 /**
@@ -27,9 +30,20 @@ import { Outcome, SaveButton, useKeptForm } from "../FormBits";
  * The server checks everything again (readCategoryDetails() and, for the web
  * address, every other category's addresses).
  */
-export function CategoryConfigForm({ category, publishedCount }: { category: CategoryDetails; publishedCount: number }) {
+export function CategoryConfigForm({
+  category,
+  publishedCount,
+  deletable = false,
+}: {
+  category: CategoryDetails;
+  publishedCount: number;
+  /** An added category nothing uses yet (listDeletableCategories()): offered a Delete. The server checks again. */
+  deletable?: boolean;
+}) {
   const { state, pending, form } = useKeptForm(saveCategoryConfigAction);
   const start = CATEGORY_DEFAULTS.find((entry) => entry.value === category.value);
+  // A category added on this page (K3) rather than one of the six it starts with.
+  const added = !isStartingCategory(category.value);
   const id = (name: string) => `${name}-${category.value}`;
   const own = (value: string | number, fallback: string | number | undefined) => (value === fallback ? "" : String(value));
 
@@ -45,10 +59,15 @@ export function CategoryConfigForm({ category, publishedCount }: { category: Cat
               : `${publishedCount} published ${publishedCount === 1 ? "video" : "videos"}.`}
           </p>
         </div>
-        <label className="flex h-12 cursor-pointer items-center gap-3 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15">
-          <input type="checkbox" name="sellable" defaultChecked={category.sellable} className="h-5 w-5 accent-[#2a829b]" />
-          <span className="text-[15px] font-medium">For sale</span>
-        </label>
+        {added ? (
+          // An added category cannot go on sale until it is decided how new categories are priced (NOT_FOR_SALE_YET).
+          <p className="max-w-xs text-sm text-[#bfbfbf]">Not for sale: how new categories are priced has not been decided yet. It can be put on a clinic&apos;s plan by hand.</p>
+        ) : (
+          <label className="flex h-12 cursor-pointer items-center gap-3 rounded-lg border border-white/15 px-3 has-[:checked]:border-[#2a829b] has-[:checked]:bg-[#2a829b]/15">
+            <input type="checkbox" name="sellable" defaultChecked={category.sellable} className="h-5 w-5 accent-[#2a829b]" />
+            <span className="text-[15px] font-medium">For sale</span>
+          </label>
+        )}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
@@ -63,7 +82,7 @@ export function CategoryConfigForm({ category, publishedCount }: { category: Cat
             maxLength={CATEGORY_LABEL_MAX}
             className={INPUT}
           />
-          <p className="mt-1 text-xs text-[#667085]">What surgeons, office staff and plans read. Empty means {start?.label}.</p>
+          <p className="mt-1 text-xs text-[#667085]">What surgeons, office staff and plans read.{start ? ` Empty means ${start.label}.` : ""}</p>
         </div>
         <div>
           <label htmlFor={id("slug")} className="mb-1 block text-sm font-medium text-[#bfbfbf]">
@@ -93,7 +112,7 @@ export function CategoryConfigForm({ category, publishedCount }: { category: Cat
             placeholder="https://"
             className={INPUT}
           />
-          <p className="mt-1 text-xs text-[#667085]">A full https:// address. Empty means the standard picture.</p>
+          <p className="mt-1 text-xs text-[#667085]">A full https:// address. {start ? "Empty means the standard picture." : "Empty shows the name's first letter."}</p>
         </div>
         <div>
           <label htmlFor={id("sortOrder")} className="mb-1 block text-sm font-medium text-[#bfbfbf]">
@@ -128,7 +147,51 @@ export function CategoryConfigForm({ category, publishedCount }: { category: Cat
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} />
         <Outcome state={state} />
+        {deletable && <DeleteCategory category={category.value} label={category.label} />}
       </div>
     </form>
+  );
+}
+
+/**
+ * Delete, for an added category nothing uses yet. Two taps: Delete, then a
+ * plain "Delete <name> for good?" with Yes and Cancel, so a slip of the finger
+ * does nothing. A refusal (it came into use a moment ago) is one sentence.
+ */
+function DeleteCategory({ category, label }: { category: string; label: string }) {
+  const router = useRouter();
+  const [asking, setAsking] = useState(false);
+  const [outcome, setOutcome] = useState<FormState>(null);
+  const [pending, startTransition] = useTransition();
+
+  if (!asking) {
+    return (
+      <button type="button" onClick={() => setAsking(true)} className={`${SECONDARY_BUTTON} h-11 sm:ml-auto`}>
+        Delete
+      </button>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3 sm:ml-auto" role="group" aria-label={`Delete ${label}`}>
+      <span className="text-sm text-[#bfbfbf]">Delete {label} for good? Nothing uses it yet.</span>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            const result: FormState = await deleteCategoryAction(category).catch(() => ({ error: "We could not confirm the delete. Try again." }));
+            setOutcome(result);
+            if (result?.ok) router.refresh();
+          })
+        }
+        className="h-11 rounded-lg bg-[#b42318] px-4 text-[15px] font-semibold text-white disabled:opacity-60"
+      >
+        {pending ? "Deleting..." : "Yes, delete"}
+      </button>
+      <button type="button" onClick={() => setAsking(false)} className={`${SECONDARY_BUTTON} h-11`}>
+        Cancel
+      </button>
+      {outcome?.error && <Outcome state={outcome} />}
+    </div>
   );
 }

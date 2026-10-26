@@ -433,8 +433,26 @@ describe("saveBrandingAction", () => {
 });
 
 describe("saveSettingsAction", () => {
-  const typed = (over: Partial<Record<"unclaimedDays" | "viewDays" | "graceDays" | "qrDailyFlag" | "maxRenewals", string>> = {}) =>
-    form({ unclaimedDays: "90", viewDays: "7", graceDays: "14", qrDailyFlag: "200", maxRenewals: "3", ...over });
+  it("takes the printed-code limit and flag at their edges, and refuses a flag at or above the limit, or either one out of range, without saving", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await saveSettingsAction(null, typed({ qrDailyFlag: "1", qrDailyCap: "10000" }))).toEqual({ ok: "Settings saved." });
+    expect(vi.mocked(saveSettings)).toHaveBeenLastCalledWith(expect.objectContaining({ qrDailyFlag: 1, qrDailyCap: 10000 }));
+    vi.mocked(saveSettings).mockClear();
+
+    expect(await saveSettingsAction(null, typed({ qrDailyFlag: "200", qrDailyCap: "200" }))).toEqual({
+      error: "Printed-code links per day to flag must be below the daily limit, or the flag would never show before the limit stops a code.",
+    });
+    expect(await saveSettingsAction(null, typed({ qrDailyFlag: "300", qrDailyCap: "200" }))).toMatchObject({ error: expect.stringContaining("below the daily limit") });
+    expect(await saveSettingsAction(null, typed({ qrDailyCap: "10001", qrDailyFlag: "100" }))).toEqual({
+      error: "Printed-code links per day must be a whole number from 1 to 10,000.",
+    });
+    expect(await saveSettingsAction(null, typed({ qrDailyCap: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
+    expect(await saveSettingsAction(null, typed({ qrDailyCap: "2.5" }))).toMatchObject({ error: expect.stringContaining("whole number") });
+    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+  });
+
+  const typed = (over: Partial<Record<"unclaimedDays" | "viewDays" | "graceDays" | "qrDailyFlag" | "qrDailyCap" | "maxRenewals", string>> = {}) =>
+    form({ unclaimedDays: "90", viewDays: "7", graceDays: "14", qrDailyFlag: "100", qrDailyCap: "200", maxRenewals: "3", ...over });
 
   it("refuses a user who is not Pulse staff with not-found, and saves nothing", async () => {
     signInAs("user_clinic_admin", { kind: "staff" });
@@ -445,7 +463,7 @@ describe("saveSettingsAction", () => {
   it("accepts a year for both link day counts, the limit itself, and hands the save exactly what was typed", async () => {
     signInAs("user_staff", { pulseStaff: true });
     expect(await saveSettingsAction(null, typed({ unclaimedDays: String(MAX_LINK_DAYS), viewDays: String(MAX_LINK_DAYS) }))).toEqual({ ok: "Settings saved." });
-    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 200, maxRenewals: 3 });
+    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 100, qrDailyCap: 200, maxRenewals: 3 });
   });
 
   it("refuses a day count past a year, or of zero, for either link setting, naming the field, without saving", async () => {

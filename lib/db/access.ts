@@ -184,23 +184,39 @@ export async function lockShareForRenewal(tx: Prisma.TransactionClient, clinicId
  * from it, with the row held against change until that transaction ends.
  * Null when no code has that id.
  *
- * "FOR SHARE", like the clinic and video reads above: two patients scanning
- * the same code at once do not wait for each other, but retiring or
- * replacing the code (an UPDATE of this row) waits until the link being made
- * is committed, and a retirement that landed first is seen here, so the link
- * is refused. A code can never hand out a link after the moment it was
- * retired. Taken AFTER the clinic's lock, the same order every other path
- * takes, so the two can never wait on each other in a circle. In this file
- * with the other locking reads so the overlap test can wrap it
- * (qr-codes.race.test.ts).
+ * "FOR NO KEY UPDATE": one link at a time per printed code. Until Prompt M
+ * this was FOR SHARE, so two taps on the same code did not wait for each
+ * other; with a daily limit they must, or two taps at once could both count
+ * 199 and both write, making 201. So a second tap on the SAME code waits the
+ * few milliseconds the first takes to commit, then counts again and sees it.
+ * Taps on different codes never wait for each other. Retiring or replacing
+ * the code (an UPDATE of this row) also waits until the link being made is
+ * committed, and a retirement that landed first is seen here, so the link is
+ * refused: a code can never hand out a link after the moment it was retired.
+ * The new link's own row only needs the weakest lock on this one (its
+ * foreign key), which this lock does not block. Taken AFTER the clinic's
+ * lock, the same order every other path takes, so the two can never wait on
+ * each other in a circle. In this file with the other locking reads so the
+ * overlap tests can wrap it (qr-codes.race.test.ts).
+ *
+ * With the lock held it also counts the links this code has handed out since
+ * `since` (midnight UTC today), for the daily limit: the count and the lock
+ * are one step, so nothing can slip in between them.
  */
-export async function lockQrCodeForIssue(tx: Prisma.TransactionClient, qrCodeId: string): Promise<{ retiredAt: Date | null } | null> {
+export async function lockQrCodeForIssue(
+  tx: Prisma.TransactionClient,
+  qrCodeId: string,
+  since: Date,
+): Promise<{ retiredAt: Date | null; issuedSince: number } | null> {
   const rows = await tx.$queryRaw<{ retiredAt: Date | null }[]>`
     SELECT "retiredAt"
     FROM "QrCode"
     WHERE "id" = ${qrCodeId}
-    FOR SHARE`;
-  return rows[0] ?? null;
+    FOR NO KEY UPDATE`;
+  if (!rows[0]) return null;
+  // The index on Share(qrCodeId, createdAt) makes this a short count.
+  const issuedSince = await tx.share.count({ where: { qrCodeId, createdAt: { gte: since } } });
+  return { retiredAt: rows[0].retiredAt, issuedSince };
 }
 
 /**

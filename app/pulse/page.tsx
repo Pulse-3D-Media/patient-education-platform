@@ -2,6 +2,8 @@ import { ClinicStatus } from "@prisma/client";
 import Link from "next/link";
 import { INPUT, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { PULSE_CLINICS_PAGE_SIZE, listClinicsForPulse } from "@/lib/db/clinics";
+import { listFlaggedQrCodesToday, type FlaggedQrCodeRow } from "@/lib/db/qr-codes";
+import { getSettings } from "@/lib/db/settings";
 import { pageInfo, readPage } from "@/lib/paging";
 import { requirePulseStaff } from "@/lib/pulse";
 import { Pager, StatusBadge, formatDate, statusLabel } from "./ui";
@@ -39,7 +41,11 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
   const status = (STATUSES as string[]).includes(statusParam) ? (statusParam as ClinicStatus) : undefined;
   const filtering = Boolean(query) || Boolean(status);
 
-  const { rows: clinics, total, page } = await listClinicsForPulse({ query, status, page: readPage(params.page) });
+  const settings = await getSettings();
+  const [{ rows: clinics, total, page }, flagged] = await Promise.all([
+    listClinicsForPulse({ query, status, page: readPage(params.page) }),
+    listFlaggedQrCodesToday(settings.qrDailyFlag),
+  ]);
   const info = pageInfo(page, total, PULSE_CLINICS_PAGE_SIZE);
 
   /** The address of another page of the same search. */
@@ -61,6 +67,10 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
             Every clinic on the platform. Open one to change its status, plan, details or notes.
           </p>
         </header>
+
+        {flagged.rows.length > 0 && (
+          <FlaggedCodes rows={flagged.rows} total={flagged.total} flagAt={settings.qrDailyFlag} capAt={settings.qrDailyCap} />
+        )}
 
         <form method="get" className="mt-6 flex flex-wrap items-end gap-3" role="search">
           <div className="min-w-56 flex-1">
@@ -152,3 +162,39 @@ export default async function PulseClinicsPage({ searchParams }: PageProps<"/pul
   );
 }
 
+
+/**
+ * Printed QR codes that reached the flag today (the qrDailyFlag setting,
+ * counted from midnight UTC), at any clinic, busiest first. Drawn only when
+ * there is one. Pulse staff only, like everything here: a clinic never sees
+ * it. A code at the daily limit (qrDailyCap) is handing out nothing more
+ * until midnight UTC, and says so. The numbers are links made by a tap on
+ * Play, not scans and not people.
+ */
+function FlaggedCodes({ rows, total, flagAt, capAt }: { rows: FlaggedQrCodeRow[]; total: number; flagAt: number; capAt: number }) {
+  return (
+    <section aria-labelledby="flagged-heading" className="mt-6 rounded-2xl border border-[#f3b94d]/40 bg-[#0d1113] p-5">
+      <h2 id="flagged-heading" className="text-base font-semibold text-[#f3b94d]">
+        Printed QR codes flagged today
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm text-[#bfbfbf]">
+        Codes that handed out {flagAt} or more links since midnight UTC. A code stops at {capAt} until midnight UTC. Links, not scans or people.
+        {total > rows.length ? ` Showing the busiest ${rows.length} of ${total}.` : ""}
+      </p>
+      <ul className="mt-3 flex flex-col gap-2">
+        {rows.map((code) => (
+          <li key={code.id} className="flex flex-wrap items-baseline gap-x-3 text-[15px]">
+            <Link href={`/pulse/clinics/${code.clinicId}#links`} className="font-medium text-white hover:text-[#5fb8d4]">
+              {code.clinicName}
+            </Link>
+            <span className="text-[#bfbfbf]">{code.videoTitle}</span>
+            <span className="text-[#f3b94d]">
+              {code.issuedToday} {code.issuedToday === 1 ? "link" : "links"} today
+              {code.issuedToday >= capAt ? ", at the daily limit" : ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

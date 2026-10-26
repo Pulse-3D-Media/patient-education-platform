@@ -270,7 +270,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
           printed.total > printed.rows.length ? `Showing the newest ${printed.rows.length} of ${printed.total}, live ones first.` : ""
         }`}
       >
-        <PrintedCodesTable rows={printed.rows} flagAt={settings.qrDailyFlag} />
+        <PrintedCodesTable rows={printed.rows} flagAt={settings.qrDailyFlag} capAt={settings.qrDailyCap} />
       </Section>
       <Section
         title="Recent links"
@@ -491,10 +491,11 @@ function planWords(list: CategoryDetails[], plan: NonNullable<Awaited<ReturnType
  * links MADE by a tap on Play, not scans and not people (a scan nobody taps
  * makes nothing; one patient visiting twice makes two). "Today" is since
  * midnight UTC; "30 days" is the 30 times 24 hours before now. A code at or
- * over the qrDailyFlag setting today is flagged: a sign to look, not a limit,
- * and nothing is stopped by it.
+ * over the qrDailyFlag setting today is flagged: a sign to look, which stops
+ * nothing. A code at the qrDailyCap setting has reached its daily limit and
+ * hands out nothing more until midnight UTC.
  */
-function PrintedCodesTable({ rows, flagAt }: { rows: PulseQrCodeRow[]; flagAt: number }) {
+function PrintedCodesTable({ rows, flagAt, capAt }: { rows: PulseQrCodeRow[]; flagAt: number; capAt: number }) {
   if (rows.length === 0) return <p className="text-sm text-[#667085]">No printed codes yet.</p>;
   return (
     <div className="overflow-x-auto">
@@ -528,7 +529,11 @@ function PrintedCodesTable({ rows, flagAt }: { rows: PulseQrCodeRow[]; flagAt: n
                 </td>
                 <td className={`px-3 py-2 text-right ${flagged ? "font-semibold text-[#f3b94d]" : "text-[#bfbfbf]"}`}>
                   {code.issuedToday}
-                  {flagged && <span className="block text-sm font-normal">Flagged: {flagAt} or more today</span>}
+                  {flagged && (
+                    <span className="block text-sm font-normal">
+                      {code.issuedToday >= capAt ? `At the daily limit (${capAt}): nothing more until midnight UTC` : `Flagged: ${flagAt} or more today`}
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-right text-[#bfbfbf]">{code.issuedRecently}</td>
               </tr>

@@ -16,8 +16,10 @@ export type Settings = {
   viewDays: number;
   /** Days a clinic keeps access after a missed payment. */
   graceDays: number;
-  /** Scans of one QR code in a day that get flagged for a look. */
+  /** Links one printed QR code may hand out in a day (from midnight UTC) before Pulse staff see it flagged. Always below qrDailyCap. */
   qrDailyFlag: number;
+  /** Links one printed QR code may hand out in a day (from midnight UTC). Past it, nothing more is handed out until the next UTC day (lib/qr-code.ts). */
+  qrDailyCap: number;
   /**
    * How many times a clinic may turn a paused patient link back on (0 to 10;
    * 0 means never). Read when it is needed, never copied onto a link, so a
@@ -31,7 +33,8 @@ export const SETTINGS_DEFAULTS: Settings = {
   unclaimedDays: 90,
   viewDays: 7,
   graceDays: 14,
-  qrDailyFlag: 200,
+  qrDailyFlag: 100,
+  qrDailyCap: 200,
   maxRenewals: 3,
 };
 
@@ -43,7 +46,9 @@ export const SETTINGS_HELP: Record<keyof Settings, string> = {
     "Once a patient first plays their video, how many more days the link works. Then it pauses, and the clinic can turn it back on for the same number of days again (see Maximum renewals). A clinic can be given its own number. Applies to links made from now on; a link already sent keeps the number it was made with.",
   graceDays: "How many days a clinic keeps using the library after a payment fails, before it is switched off.",
   qrDailyFlag:
-    "If one printed QR code gives patients this many links or more in one day (counted from midnight UTC), it is flagged on the clinic's page here for a look. A sign to look, never a limit: nothing is stopped by it. A link is made only when a patient taps Play, so this counts links, not scans and not people.",
+    "If one printed QR code gives patients this many links or more in one day (counted from midnight UTC), it is flagged for a look: on the clinic's page here, and in a list at the top of Clinics. Only Pulse staff see it, and nothing is stopped by it. It must be below the daily limit. A link is made only when a patient taps Play, so this counts links, not scans and not people.",
+  qrDailyCap:
+    "The most links one printed QR code can give patients in one day (counted from midnight UTC). After that, a patient who taps Play sees the calm \"not available right now\" page with the clinic's number, and nothing is made, until midnight UTC. Links already handed out keep working. Counts links, not scans and not people.",
   maxRenewals:
     "How many times a clinic can turn a paused patient link back on. 0 means never. Unlike the day counts, this is not copied onto each link: a change applies to every link at once, links already sent included.",
 };

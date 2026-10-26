@@ -48,9 +48,9 @@ describe("settings that are saved but not active yet", () => {
     expect(Object.keys(SETTINGS_NOT_ACTIVE).sort()).toEqual(unread);
   });
 
-  it("today there are none: the printed-code flag became live with printed QR codes, beside the four link and billing numbers", () => {
+  it("today there are none: the printed-code flag and daily limit are live, beside the four link and billing numbers", () => {
     expect(Object.keys(SETTINGS_NOT_ACTIVE)).toEqual([]);
-    expect([...settingsInUse()].sort()).toEqual(["graceDays", "maxRenewals", "qrDailyFlag", "unclaimedDays", "viewDays"]);
+    expect([...settingsInUse()].sort()).toEqual(["graceDays", "maxRenewals", "qrDailyCap", "qrDailyFlag", "unclaimedDays", "viewDays"]);
   });
 
   it("each one says so in plain words", () => {

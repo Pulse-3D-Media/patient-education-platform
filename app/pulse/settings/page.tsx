@@ -3,7 +3,7 @@ import { requirePulseStaff } from "@/lib/pulse";
 import { SettingsForm } from "./SettingsForm";
 
 /**
- * The platform settings: the five numbers in the AppSettings row, each with
+ * The platform settings: the six numbers in the AppSettings row, each with
  * its default beside it and a sentence saying what it does. Saving writes
  * the row (creating it the first time). Until then the app runs on the
  * defaults, which getSettings() returns when the row is missing.

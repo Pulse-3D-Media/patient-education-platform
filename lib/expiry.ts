@@ -261,6 +261,18 @@ export function isValidRenewalCount(value: unknown): value is number {
  */
 export const RENEWAL_REQUEST_GAP_MS = DAY_MS;
 
+/**
+ * How many "ask my clinic" emails one clinic's office admins get in one UTC
+ * day, at most (decided by Evan on 2026-10-08, Prompt M). The first ten
+ * requests recorded in a day each send the usual email; after that a request
+ * is still recorded and still listed on the overview's "Links waiting to be
+ * reactivated", and no email goes out until midnight UTC. So a script that
+ * taps Ask my clinic on many paused links cannot flood an office's inbox.
+ * A constant rather than a setting: it protects an inbox, nobody needs to
+ * tune it day to day, and a code change is the right weight for changing it.
+ */
+export const RENEWAL_EMAILS_PER_DAY = 10;
+
 /** The fields the reactivation rule reads. A Share row from Prisma satisfies this as it is. */
 export type RenewalFacts = ShareExpiryFacts & {
   /** How many times the clinic has turned this link back on. */

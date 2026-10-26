@@ -23,8 +23,9 @@ import { isAttemptKey, isQrCodeShape } from "@/lib/qr-code";
  * (no-store), so one visit's link is never handed to another.
  *
  *   200 {"code": "..."}   this visit's link
- *   200 {"code": null}    no link: the code is unknown or retired, or the
- *                         clinic may not show this video right now. One
+ *   200 {"code": null}    no link: the code is unknown or retired, it has
+ *                         handed out its daily limit, or the clinic may
+ *                         not show this video right now. One
  *                         answer for all of them, so the page says only
  *                         "not available right now" and nothing is given
  *                         away about why
@@ -34,8 +35,9 @@ import { isAttemptKey, isQrCodeShape } from "@/lib/qr-code";
  *
  * Abuse: requests to addresses starting /q are counted by the rate-limit
  * rule in Vercel's firewall (set by Evan in the dashboard, beside the one
- * for /watch), and a code handing out an unusual number of links in a day
- * is flagged on the clinic's /pulse page (the qrDailyFlag setting). The log
+ * for /watch); each code hands out at most the qrDailyCap setting's links
+ * per UTC day (200 by default), and one that reaches the qrDailyFlag setting
+ * (100) is flagged for Pulse staff on /pulse and the clinic's page. The log
  * never holds the code, the key, or the link made.
  */
 export async function POST(request: Request, { params }: RouteContext<"/q/[code]/issue">) {

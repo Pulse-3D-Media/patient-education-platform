@@ -90,7 +90,46 @@ export function liveKeyFor(clinicId: string, videoId: string, senderUserId: stri
   return `${clinicId}:${videoId}:${senderUserId}`;
 }
 
-/** The start of the day, in UTC, that `now` falls in. The daily flag counts links handed out since this moment. */
+/*
+ * THE DAILY LIMIT AND THE FLAG (Prompt M, decided by Evan on 2026-10-08).
+ * Someone holding the paper could script the Play tap and mint links without
+ * end, so each printed code hands out at most `qrDailyCap` links per UTC day
+ * (200 by default, a setting on /pulse/settings). Past it, the patient sees
+ * the calm "not available right now" page and nothing is written, until
+ * midnight UTC. The flag (`qrDailyFlag`, 100 by default) comes earlier and
+ * only tells Pulse staff to look; it must always be below the limit.
+ */
+
+/** The limits on the two numbers: whole numbers from 1 to 10,000. The flag must also be below the cap. */
+export const MIN_QR_DAILY = 1;
+export const MAX_QR_DAILY = 10_000;
+
+/** True for a number the cap or the flag may hold. */
+export function isValidQrDaily(value: number): boolean {
+  return Number.isInteger(value) && value >= MIN_QR_DAILY && value <= MAX_QR_DAILY;
+}
+
+/**
+ * Why a flag and cap pair cannot be saved, in one sentence, or null when it
+ * can. The settings action asks this before it saves.
+ */
+export function qrDailyProblem(flag: number, cap: number): string | null {
+  if (!isValidQrDaily(cap)) return `Printed-code links per day must be a whole number from ${MIN_QR_DAILY} to ${MAX_QR_DAILY.toLocaleString("en-US")}.`;
+  if (!isValidQrDaily(flag)) return `Printed-code links per day to flag must be a whole number from ${MIN_QR_DAILY} to ${MAX_QR_DAILY.toLocaleString("en-US")}.`;
+  if (flag >= cap) return "Printed-code links per day to flag must be below the daily limit, or the flag would never show before the limit stops a code.";
+  return null;
+}
+
+/**
+ * The cap actually applied. A stored number outside the limits (nothing in
+ * the app writes one) is never read as "no limit": it falls back to the
+ * default, 200.
+ */
+export function effectiveQrDailyCap(stored: number, fallback: number): number {
+  return isValidQrDaily(stored) ? stored : fallback;
+}
+
+/** The start of the day, in UTC, that `now` falls in. The daily flag and the daily limit count links handed out since this moment. */
 export function utcDayStart(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }

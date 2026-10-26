@@ -375,7 +375,8 @@ model AppSettings {
   unclaimedDays Int      @default(90) // days a patient link works if nobody ever plays it
   viewDays      Int      @default(7) // days a patient link keeps working after the first play; copied onto each new link as Share.daysAfterFirstPlay
   graceDays     Int      @default(14) // days a clinic keeps access after a missed payment
-  qrDailyFlag   Int      @default(200) // scans of one QR code in a day that get flagged for a look
+  qrDailyFlag   Int      @default(100) // links one printed QR code may hand out in a day (from midnight UTC) before it is flagged for Pulse staff. Always below qrDailyCap
+  qrDailyCap    Int      @default(200) // links one printed QR code may hand out in a day (from midnight UTC); past it, the patient sees the calm "not available right now" page and nothing is written
   maxRenewals   Int      @default(3) // times a clinic may turn a paused patient link back on (0 to 10; 0 means never). Read live, so a change applies to every link at once
   updatedAt     DateTime @updatedAt
 }

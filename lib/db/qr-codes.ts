@@ -407,6 +407,58 @@ export async function listQrCodesForPulse(clinicId: string, now: Date = new Date
   };
 }
 
+/** One printed code that reached the flag today, for the list at the top of /pulse. Pulse staff only; never shown to a clinic. */
+export type FlaggedQrCodeRow = {
+  id: string;
+  clinicId: string;
+  clinicName: string;
+  videoTitle: string;
+  /** Links handed out since midnight UTC today. */
+  issuedToday: number;
+};
+
+/** How many flagged codes the list at the top of /pulse shows at most. */
+export const FLAGGED_QR_LIMIT = 20;
+
+/**
+ * Every printed code, at any clinic, that has handed out `flagAt` links or
+ * more since midnight UTC today, busiest first, at most FLAGGED_QR_LIMIT,
+ * with the total. So Pulse staff see a busy code without opening every
+ * clinic. Counted and sorted in the database (one grouped count over today's
+ * links, which the Share(qrCodeId, createdAt) index keeps short), then the
+ * few codes' names read. Pulse staff only: takes no clinicId because it
+ * looks across every clinic, like the rest of /pulse.
+ */
+export async function listFlaggedQrCodesToday(flagAt: number, now: Date = new Date()): Promise<{ rows: FlaggedQrCodeRow[]; total: number }> {
+  const start = utcDayStart(now);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  const groups = await prisma.share.groupBy({
+    by: ["qrCodeId"],
+    where: { qrCodeId: { not: null }, createdAt: { gte: start, lt: end } },
+    having: { qrCodeId: { _count: { gte: flagAt } } },
+    _count: { _all: true },
+  });
+  // A few hundred codes at most could ever be busy on one day; sort the counts here and keep the top ones.
+  const busiest = groups
+    .map((group) => ({ id: group.qrCodeId as string, issuedToday: group._count._all }))
+    .sort((a, b) => b.issuedToday - a.issuedToday)
+    .slice(0, FLAGGED_QR_LIMIT);
+  if (busiest.length === 0) return { rows: [], total: groups.length };
+
+  const codes = await prisma.qrCode.findMany({
+    where: { id: { in: busiest.map((code) => code.id) } },
+    select: { id: true, clinicId: true, clinic: { select: { name: true } }, video: { select: { title: true } } },
+  });
+  const byId = new Map(codes.map((qr) => [qr.id, qr]));
+  const rows: FlaggedQrCodeRow[] = [];
+  for (const code of busiest) {
+    const qr = byId.get(code.id);
+    if (!qr) continue;
+    rows.push({ id: qr.id, clinicId: qr.clinicId, clinicName: qr.clinic.name, videoTitle: qr.video.title, issuedToday: code.issuedToday });
+  }
+  return { rows, total: groups.length };
+}
+
 /** Links handed out by each of these codes since `since`, counted in the database. */
 async function countIssued(ids: string[], since: Date): Promise<Map<string, number>> {
   if (ids.length === 0) return new Map();

@@ -175,7 +175,12 @@ export function PricingEditor({
   const [saveState, setSaveState] = useState<PricingSaveResult | null>(null);
   const [saving, startSaving] = useTransition();
 
-  const sellable = CATEGORY_VALUES.filter((category) => availability[category] === "sellable");
+  const sellable = categories.map((category) => category.value).filter((category) => availability[category] === "sellable");
+  // The whole library, added categories included, so the calculator's full library is the one checkout sells.
+  const library = {
+    all: categories.map((category) => category.value),
+    comingSoon: categories.map((category) => category.value).filter((category) => availability[category] === "coming-soon"),
+  };
   const [calc, setCalc] = useState<Calc>({
     seats: "1",
     categories: sellable.slice(0, 1),
@@ -192,7 +197,7 @@ export function PricingEditor({
 
   const seats = /^\d+$/.test(calc.seats.trim()) ? Number(calc.seats.trim()) : Number.NaN;
   const result = parsed.config
-    ? quote(parsed.config, { seats, categories: calc.categories, interval: calc.interval, founding: calc.founding, practiceType: calc.practiceType, sellable, labels: names })
+    ? quote(parsed.config, { seats, categories: calc.categories, interval: calc.interval, founding: calc.founding, practiceType: calc.practiceType, sellable, labels: names, library })
     : null;
 
   /** Change one field of the draft, and forget what the server said about the last save. */

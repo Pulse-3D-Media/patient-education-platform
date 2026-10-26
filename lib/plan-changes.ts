@@ -14,7 +14,7 @@ import {
   type CheckoutFacts,
 } from "./db/billing";
 import { labelsOf } from "./categories";
-import { getCategoryList, listSellableCategories } from "./db/category-config";
+import { getCategoryList, libraryForQuote, listSellableCategories } from "./db/category-config";
 import { getActivePricing, getPricingVersion } from "./db/pricing";
 import {
   PLAN_CHANGES_CLOSED_MESSAGE,
@@ -184,6 +184,7 @@ async function prepare(clinicId: string, request: ChangeRequest, deps: PlanChang
     practiceType: "clinic",
     sellable,
     labels: labelsOf(await getCategoryList()),
+    library: await libraryForQuote(),
   });
   if (!result.ok) return refused(result.error);
   const amounts = result.quote.amounts;
@@ -203,6 +204,7 @@ async function prepare(clinicId: string, request: ChangeRequest, deps: PlanChang
     pricingVersionId: version.id,
     categories: result.quote.selectedCategories,
     entitledCategories: result.quote.entitledCategories,
+    fullLibrary: result.quote.fullLibrary,
     surgeonSeats: selection.seats,
     interval: selection.interval,
     perSeatCents: amounts.perSeatCents,

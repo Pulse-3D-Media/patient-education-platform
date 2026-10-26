@@ -92,16 +92,6 @@ export async function getCategoryConfigs(): Promise<Record<Category, CategoryCon
 export class CategoryDetailsError extends Error {}
 
 /**
- * Why a category added on /pulse/videos cannot be switched on for sale yet: the
- * pricing engine prices a count of categories and treats five or more as the
- * full library of the six starting ones, and how an added category fits that is
- * a pricing decision Evan has not made (K3). Until it is, an added category is
- * never offered for sale; Pulse staff can still put it on a clinic's plan by hand.
- */
-export const NOT_FOR_SALE_YET =
-  "A category added here cannot be put on sale yet: how new categories are priced has not been decided. You can still add it to a clinic's plan by hand on its Plan tab.";
-
-/**
  * Add a category (the "+" in the Categories panel). It starts NOT for sale,
  * and the library shows it as Coming soon until a video in it is published,
  * the same rule as any category (categoryState()). Checked first by
@@ -161,7 +151,6 @@ export async function saveCategoryConfig(
       const list = categoryListFromRows(await tx.categoryConfig.findMany({ select: ROW_FIELDS }));
       const before = list.find((entry) => entry.value === category);
       if (!before) throw new CategoryDetailsError("That is not one of our categories.");
-      if (config.sellable && !isStartingCategory(category)) throw new CategoryDetailsError(NOT_FOR_SALE_YET);
 
       let detailFields = {};
       if (details) {
@@ -264,4 +253,17 @@ export async function deleteUnusedCategory(category: Category): Promise<void> {
     if (unused.length === 0) throw new CategoryDetailsError(CATEGORY_IN_USE);
     await tx.categoryConfig.delete({ where: { category } });
   });
+}
+
+/**
+ * The library as the pricing engine needs it (QuoteInput.library in
+ * lib/pricing.ts): every category that exists, in list order, and the ones
+ * that are Coming soon (for sale, nothing published). So the full library
+ * includes a category added on /pulse/videos, and a Coming soon one does not
+ * hold the full library back (Option A, decided by Evan on 2026-10-26).
+ */
+export async function libraryForQuote(): Promise<{ all: Category[]; comingSoon: Category[] }> {
+  const [list, availability] = await Promise.all([getCategoryList(), getCategoryAvailability()]);
+  const all = list.map((entry) => entry.value);
+  return { all, comingSoon: all.filter((category) => availability[category] === "coming-soon") };
 }

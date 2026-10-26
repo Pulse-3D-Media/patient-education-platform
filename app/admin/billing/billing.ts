@@ -1,4 +1,5 @@
 import type { Category } from "@/lib/categories";
+import { libraryForQuote } from "@/lib/db/category-config";
 import { getClinicPlan, type ClinicPlan } from "@/lib/db/clinics";
 import { getPricingForClinic } from "@/lib/db/pricing";
 import { getSeatSummary } from "@/lib/db/seats";
@@ -73,8 +74,9 @@ export async function getBillingView(clinicId: string): Promise<BillingView | nu
   // whose database is behind on migrations) both become the same plain
   // sentence, with the detail in the server log.
   let pricing;
+  let library;
   try {
-    pricing = await getPricingForClinic(clinicId);
+    [pricing, library] = await Promise.all([getPricingForClinic(clinicId), libraryForQuote()]);
   } catch (error) {
     console.error(`Billing estimate for clinic ${clinicId}: ${errorKind(error)}`);
     return { plan, hasPlan, seatsInUse, estimate: null, problem: "We could not work out an estimate right now. Your plan is unchanged." };
@@ -93,6 +95,7 @@ export async function getBillingView(clinicId: string): Promise<BillingView | nu
       // said what it is gets a clinic's estimate, labelled as an estimate.
       practiceType: plan.practiceType === "HOSPITAL" ? "hospital" : "clinic",
       sellable: plan.categories,
+      library,
     });
 
   const monthly = ask("month");

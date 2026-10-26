@@ -10,7 +10,7 @@ import {
   type PurchaseAttempt,
 } from "./db/billing";
 import { labelsOf } from "./categories";
-import { getCategoryList, listSellableCategories } from "./db/category-config";
+import { getCategoryList, libraryForQuote, listSellableCategories } from "./db/category-config";
 import { getActivePricing } from "./db/pricing";
 import { categoryLabel, formatCents, quote } from "./pricing";
 import { PULSE_CONTACT_WORDS } from "./brand";
@@ -125,7 +125,7 @@ export async function startCheckout(args: {
   const pricing = await getActivePricing();
   if (pricing.source.kind !== "version") return { kind: "refused", message: CHECKOUT_CLOSED_MESSAGE };
   const version = pricing.source.version;
-  const [sellable, list] = await Promise.all([listSellableCategories(), getCategoryList()]);
+  const [sellable, list, library] = await Promise.all([listSellableCategories(), getCategoryList(), libraryForQuote()]);
   const labels = labelsOf(list);
   const result = quote(pricing.config, {
     seats: selection.seats,
@@ -139,6 +139,7 @@ export async function startCheckout(args: {
     practiceType: "clinic",
     sellable,
     labels,
+    library,
   });
   if (!result.ok) return { kind: "refused", message: result.error };
   const amounts = result.quote.amounts;
@@ -178,6 +179,7 @@ export async function startCheckout(args: {
     pricingVersionId: version.id,
     categories: result.quote.selectedCategories,
     entitledCategories: result.quote.entitledCategories,
+    fullLibrary: result.quote.fullLibrary,
     surgeonSeats: selection.seats,
     interval: selection.interval,
     perSeatCents: amounts.perSeatCents,

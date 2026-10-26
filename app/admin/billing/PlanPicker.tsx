@@ -54,6 +54,11 @@ export function PlanPicker({
   const sellable = useMemo(() => options.filter((option) => option.availability === "sellable").map((option) => option.value), [options]);
   // The categories' current names, from the server, for the receipt line.
   const names = useMemo(() => Object.fromEntries(options.map((option) => [option.value, option.label])), [options]);
+  // The whole library as the server sees it, so the full library here includes every category the server's does.
+  const library = useMemo(
+    () => ({ all: options.map((option) => option.value), comingSoon: options.filter((option) => option.availability === "coming-soon").map((option) => option.value) }),
+    [options],
+  );
   const seats = /^\d{1,5}$/.test(seatsText.trim()) ? Number(seatsText.trim()) : 0;
   const clinicMax = config.seats.clinicMax;
   const tooManySeats = seats > clinicMax;
@@ -61,7 +66,7 @@ export function PlanPicker({
   // Both intervals are quoted so each choice can show its own total.
   const quoteFor = (which: BillingInterval): Quote | null => {
     if (picked.length === 0 || seats < 1) return null;
-    const result = quote(config, { seats, categories: picked, interval: engineInterval(which), founding: false, practiceType: "clinic", sellable, labels: names });
+    const result = quote(config, { seats, categories: picked, interval: engineInterval(which), founding: false, practiceType: "clinic", sellable, labels: names, library });
     return result.ok ? result.quote : null;
   };
   const monthly = quoteFor("MONTH");

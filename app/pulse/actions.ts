@@ -15,6 +15,7 @@ import {
   PlanSeatsRefusedError,
   getClinicForPulse,
   setClinicManagedByPulse,
+  includeInFullLibraries,
   setClinicPlan,
   setClinicPracticeType,
   setClinicStatusByStaff,
@@ -755,8 +756,18 @@ export async function addCategoryAction(_previous: FormState, formData: FormData
     throw error;
   }
   console.info(`Category added: ${added.value} ("${added.label}", /library/${added.slug}) by ${staff.name}`);
+  // Clinics on the full library get it straight away (Option A). If this fails, the category is still added, and
+  // billing gives it to them at their next look at Stripe; staff are told.
+  let note = "";
+  try {
+    const given = await includeInFullLibraries(added.value, added.label);
+    if (given > 0) note = ` Added to ${given} ${given === 1 ? "clinic" : "clinics"} on the full library.`;
+  } catch (error) {
+    console.error("Giving a new category to full-library clinics failed", errorKind(error));
+    note = " Clinics on the full library could not all be given it just now; billing will catch up.";
+  }
   revalidatePath("/", "layout");
-  return { ok: `Added ${added.label}. It is not for sale and shows as Coming soon until a video in it is published.` };
+  return { ok: `Added ${added.label}. It starts not for sale and shows as Coming soon until a video in it is published.${note}` };
 }
 
 /**

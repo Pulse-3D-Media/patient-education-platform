@@ -1164,9 +1164,9 @@ describe("addCategoryAction (the + in the Categories panel)", () => {
     // The same again is refused: the name and the address are taken now.
     expect(await addCategoryAction(null, fields())).toEqual({ error: expect.stringContaining("already a category") });
 
-    // And the panel will not put it on sale.
+    // And the panel can put it on sale (Option A, decided by Evan on 2026-10-26).
     expect(await saveCategoryConfigAction(null, form({ category: row!.category, sellable: "on", comingSoonText: "", label: row!.label!, slug: row!.slug!, imageUrl: "", sortOrder: "" }))).toEqual({
-      error: expect.stringContaining("cannot be put on sale yet"),
+      ok: "Saved. This category is for sale.",
     });
   });
 });

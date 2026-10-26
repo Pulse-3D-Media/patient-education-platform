@@ -6,7 +6,6 @@ import { getClinicAccess } from "./access";
 import {
   CATEGORY_IN_USE,
   CategoryDetailsError,
-  NOT_FOR_SALE_YET,
   addCategory,
   deleteUnusedCategory,
   getCategoryAvailability,
@@ -100,10 +99,12 @@ describe("addCategory", () => {
     expect(await prisma.categoryConfig.count({ where: { category: read.category.key } })).toBe(1);
   });
 
-  it("cannot be put on sale until new categories' pricing is decided, and its details can be changed", async () => {
+  it("can be put on sale (Option A, 2026-10-26): Coming soon until a video is published, then for sale; its details can be changed", async () => {
     const added = await add("sale");
-    await expect(saveCategoryConfig(added.value, { sellable: true, comingSoonText: null })).rejects.toThrow(NOT_FOR_SALE_YET);
-    expect((await prisma.categoryConfig.findUnique({ where: { category: added.value } }))?.sellable).toBe(false);
+    await saveCategoryConfig(added.value, { sellable: true, comingSoonText: null });
+    expect((await prisma.categoryConfig.findUnique({ where: { category: added.value } }))?.sellable).toBe(true);
+    expect((await getCategoryAvailability())[added.value]).toBe("coming-soon");
+    expect(await listSellableCategories()).not.toContain(added.value);
     await saveCategoryConfig(added.value, { sellable: false, comingSoonText: "Soon." }, { label: name("sale2"), slug: `vitest-sale2-${tag}`, imageUrl: null, sortOrder: 95 });
     expect((await getCategoryList()).find((entry) => entry.value === added.value)).toMatchObject({
       label: name("sale2"),

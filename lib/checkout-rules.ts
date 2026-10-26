@@ -46,17 +46,19 @@ export function engineInterval(interval: BillingInterval): Interval {
  * at: a category that is not ours, the same category twice, seats that are
  * not a whole number, an interval that is not MONTH or YEAR. Fields the
  * form does not have (a clinic id, an amount, a founding flag) are simply
- * never read, so adding them to a request changes nothing.
+ * never read, so adding them to a request changes nothing. `known` is every
+ * category that exists, in list order (from getCategoryList() on the server);
+ * left out, the six starting ones.
  */
-export function readPlanSelection(formData: FormData): SelectionResult {
+export function readPlanSelection(formData: FormData, known: Category[] = CATEGORY_VALUES): SelectionResult {
   const rawCategories = formData.getAll("categories").map((value) => String(value));
   if (rawCategories.length === 0) return { ok: false, error: "Choose at least one category." };
-  if (rawCategories.length > CATEGORY_VALUES.length) return { ok: false, error: "That is more categories than there are." };
-  const unknown = rawCategories.filter((value) => !(CATEGORY_VALUES as string[]).includes(value));
+  if (rawCategories.length > known.length) return { ok: false, error: "That is more categories than there are." };
+  const unknown = rawCategories.filter((value) => !known.includes(value));
   if (unknown.length > 0) return { ok: false, error: "One of those is not a category we have." };
   if (new Set(rawCategories).size !== rawCategories.length) return { ok: false, error: "A category was sent twice." };
   // In library order, so the same picks always make the same plan.
-  const categories = CATEGORY_VALUES.filter((category) => rawCategories.includes(category));
+  const categories = known.filter((category) => rawCategories.includes(category));
 
   const seatsText = String(formData.get("seats") ?? "").trim();
   if (!/^\d{1,5}$/.test(seatsText)) return { ok: false, error: "Surgeon seats must be a whole number." };

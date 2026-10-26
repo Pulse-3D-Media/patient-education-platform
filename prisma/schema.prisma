@@ -278,6 +278,7 @@ model BillingPlan {
   pricingVersion     PricingVersion  @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
   categories         String[] // what the clinic picked
   entitledCategories String[] // what it gets, which is every category when the full library is included
+  fullLibrary        Boolean         @default(false) // bought as the full library: it includes every category, ones added later too (decided by Evan on 2026-10-26, Option A). False for every plan before it
   surgeonSeats       Int
   interval           BillingInterval
   perSeatCents       Int // the per-seat amount for the interval, from the pricing engine: the unit price Stripe is given

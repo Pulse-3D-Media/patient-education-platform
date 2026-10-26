@@ -11,15 +11,19 @@ import {
   finishedLinkMessage,
   isExpired,
   isValidRenewalCount,
+  RENEWAL_EMAILS_PER_DAY,
   RENEWAL_REQUEST_GAP_MS,
   renewalState,
   resolveShareTerms,
   type ShareTerms,
 } from "../expiry";
+import { effectiveQrDailyCap, utcDayStart } from "../qr-code";
 import { isClerkUserId } from "../seats";
 import { effectiveSenderName } from "../sender-name";
+import { SETTINGS_DEFAULTS } from "../settings-defaults";
 import { getClinicAccess, lockClinicAccess, lockQrCodeForIssue, lockSenderSeat, lockShareForRenewal, lockVideoFacts } from "./access";
 import { prisma } from "./client";
+import { lockAndCountRenewalRequests } from "./renewal-lock";
 import { getSettings, lockSettings } from "./settings";
 
 /**
@@ -285,8 +289,13 @@ export function childShareCode(qrCodeId: string, attemptKey: string): string {
   return code;
 }
 
-/** Why a printed code handed out nothing: no code has that value, it was retired, or the clinic may not use the video right now (the access rule's reason). */
-export type QrIssueRefusal = "no-such-code" | "retired" | AccessReason;
+/**
+ * Why a printed code handed out nothing: no code has that value, it was
+ * retired, it has handed out its daily limit already (qrDailyCap, until
+ * midnight UTC), or the clinic may not use the video right now (the access
+ * rule's reason).
+ */
+export type QrIssueRefusal = "no-such-code" | "retired" | "daily-cap" | AccessReason;
 
 /** What issueShareFromQrCode() did: the patient's link, or why there is none. */
 export type QrIssueOutcome = { ok: true; code: string } | { ok: false; reason: QrIssueRefusal };
@@ -304,7 +313,7 @@ export type QrIssueOutcome = { ok: true; code: string } | { ok: false; reason: Q
  *
  * THE CHECKS, in one transaction, in the order every other path locks:
  * the clinic's row (lockClinicAccess, FOR SHARE), then the printed code's row
- * (lockQrCodeForIssue, FOR SHARE), then the video's (lockVideoFacts). So:
+ * (lockQrCodeForIssue, FOR NO KEY UPDATE, so taps on one code take turns), then the video's (lockVideoFacts). So:
  *
  *   - a code retired or replaced a moment ago hands out nothing, and one
  *     being retired right now waits for this link to be written first (the
@@ -314,7 +323,14 @@ export type QrIssueOutcome = { ok: true; code: string } | { ok: false; reason: Q
  *     a placeholder only while the clinic is shown them. A plan change, a
  *     pause or an unpublish either waits or is seen;
  *   - the link carries the days in the settings at this moment (the
- *     settings lock), exactly as a link made by hand does.
+ *     settings lock), exactly as a link made by hand does;
+ *   - the code has handed out fewer than the daily limit (qrDailyCap, 200 by
+ *     default) since midnight UTC. Counted while this transaction holds the
+ *     code's row (FOR NO KEY UPDATE), so a second tap on the same code waits
+ *     for this one and then counts it: two taps at once can never both slip
+ *     past the limit. Past it, nothing is written and the page says only
+ *     "not available right now" (decided by Evan on 2026-10-08, replacing
+ *     "a flag only, never a stop").
  *
  * WHO IT IS FROM. The surgeon on the printed code, while they hold a seat at
  * this clinic (read with a share lock, lockSenderSeat), with the name chosen
@@ -366,7 +382,7 @@ export async function issueShareFromQrCode(
   try {
     return await prisma.$transaction(async (tx): Promise<QrIssueOutcome> => {
       const access = await lockClinicAccess(tx, qr.clinicId, now);
-      const live = await lockQrCodeForIssue(tx, qr.id);
+      const live = await lockQrCodeForIssue(tx, qr.id, utcDayStart(now));
       if (!live || live.retiredAt) return { ok: false, reason: "retired" };
 
       const decision: AccessDecision = access
@@ -376,6 +392,11 @@ export async function issueShareFromQrCode(
 
       // The same numbers createShare copies onto a link, read the same way.
       const settings = await lockSettings(tx);
+
+      // The daily limit: the links counted since midnight UTC while the code's row lock was taken above.
+      const cap = effectiveQrDailyCap(settings.qrDailyCap, SETTINGS_DEFAULTS.qrDailyCap);
+      if (live.issuedSince >= cap) return { ok: false, reason: "daily-cap" };
+
       const clinic = await tx.clinic.findUniqueOrThrow({ where: { id: qr.clinicId }, select: { viewDaysOverride: true } });
       const terms = resolveShareTerms(settings, clinic);
 
@@ -767,8 +788,13 @@ export type RenewalRequestFacts = {
 
 /** What requestShareRenewal() did. */
 export type RenewalRequestOutcome =
-  /** The request was written just now; the clinic should be told. */
-  | { kind: "requested"; facts: RenewalRequestFacts }
+  /**
+   * The request was written just now. `emailClinic` says whether the office
+   * admins should be emailed: true for the first RENEWAL_EMAILS_PER_DAY
+   * requests recorded at this clinic since midnight UTC, false after that
+   * (the request is still listed on the overview).
+   */
+  | { kind: "requested"; facts: RenewalRequestFacts; emailClinic: boolean }
   /** The link was asked about within the last day (by this tap's twin, or earlier). Nothing written; the patient sees the same confirmation. */
   | { kind: "already-asked" }
   /** No request can be made: the code is nobody's, the link is not paused, or its video is not available. */
@@ -793,6 +819,14 @@ export type RenewalRequestOutcome =
  * already-asked and writes nothing; the patient page shows the same calm
  * confirmation either way.
  *
+ * At most RENEWAL_EMAILS_PER_DAY (10) emails per clinic per UTC day. The
+ * write happens in a transaction that first takes this clinic's renewal lock
+ * and counts the requests already recorded there today
+ * (lockAndCountRenewalRequests in lib/db/renewal-lock.ts), so two requests
+ * arriving together are counted one after the other and can never both be
+ * the tenth email. The answer says whether to email (`emailClinic`); the
+ * request itself is recorded either way.
+ *
  * Only a paused link can be asked about (renewalState in lib/expiry.ts): a
  * working link, a finished one, a legacy link, one nobody played, and a
  * link whose video is not published right now are all refused, with the
@@ -809,29 +843,37 @@ export async function requestShareRenewal(code: string, now: Date = new Date()):
   if (!share.video.isPublished) return { kind: "refused", reason: "unpublished" };
   if (!canRequestRenewal(share, now)) return { kind: "already-asked" };
 
-  // The same conditions again, in the WHERE of the one write, so what was
-  // read a moment ago cannot have changed under it: the link must still be
-  // paused, and nobody may have asked within the last day.
-  const written = await prisma.share.updateMany({
-    where: {
-      code,
-      expiryPolicy: "FIRST_PLAY",
-      firstPlayedAt: { not: null },
-      expiresAt: { lte: now },
-      renewalsUsed: { lt: allowed },
-      video: { isPublished: true },
-      OR: [{ renewalRequestedAt: null }, { renewalRequestedAt: { lte: new Date(now.getTime() - RENEWAL_REQUEST_GAP_MS) } }],
-    },
-    // The tally for the Pulse reports goes up in the same write, so it counts
-    // exactly the requests that were recorded: once per link per day at most.
-    data: { renewalRequestedAt: now, renewalRequests: { increment: 1 } },
+  const outcome = await prisma.$transaction(async (tx) => {
+    // This clinic's renewal lock first, then today's count: the requests
+    // recorded here since midnight UTC, before this one.
+    const earlierToday = await lockAndCountRenewalRequests(tx, share.clinic.id, utcDayStart(now));
+
+    // The same conditions again, in the WHERE of the one write, so what was
+    // read a moment ago cannot have changed under it: the link must still be
+    // paused, and nobody may have asked within the last day.
+    const written = await tx.share.updateMany({
+      where: {
+        code,
+        expiryPolicy: "FIRST_PLAY",
+        firstPlayedAt: { not: null },
+        expiresAt: { lte: now },
+        renewalsUsed: { lt: allowed },
+        video: { isPublished: true },
+        OR: [{ renewalRequestedAt: null }, { renewalRequestedAt: { lte: new Date(now.getTime() - RENEWAL_REQUEST_GAP_MS) } }],
+      },
+      // The tally for the Pulse reports goes up in the same write, so it counts
+      // exactly the requests that were recorded: once per link per day at most.
+      data: { renewalRequestedAt: now, renewalRequests: { increment: 1 } },
+    });
+    return { written: written.count === 1, emailClinic: earlierToday < RENEWAL_EMAILS_PER_DAY };
   });
   // Nothing written means another tap got there first, or the clinic turned
   // the link back on in between. Either way the calm confirmation is right.
-  if (written.count !== 1) return { kind: "already-asked" };
+  if (!outcome.written) return { kind: "already-asked" };
 
   return {
     kind: "requested",
+    emailClinic: outcome.emailClinic,
     facts: {
       shareId: share.id,
       videoTitle: share.video.title,

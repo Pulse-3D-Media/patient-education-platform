@@ -352,6 +352,22 @@ describe("POST /watch/<code>/ask", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain(paused);
   });
 
+  it("records the request but emails nobody once the clinic has had its ten emails today", async () => {
+    const paused = await pausedLink();
+    // The database says this request is past the day's limit (lib/db/shares.renewal-email.test.ts proves the count itself).
+    vi.mocked(shares.requestShareRenewal).mockImplementationOnce(async (linkCode, now) => {
+      const outcome = await vi.importActual<typeof import("@/lib/db/shares")>("@/lib/db/shares").then((real) => real.requestShareRenewal(linkCode, now));
+      return outcome.kind === "requested" ? { ...outcome, emailClinic: false } : outcome;
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    expect(await requestReactivation(paused)).toEqual({ asked: true });
+    expect((await prisma.share.findUniqueOrThrow({ where: { code: paused }, select: { renewalRequestedAt: true } })).renewalRequestedAt).not.toBeNull();
+    expect(vi.mocked(renewalEmail.notifyClinicOfRenewalRequest)).not.toHaveBeenCalled();
+    expect(JSON.stringify(log.mock.calls)).toContain("daily email limit reached");
+    expect(JSON.stringify(log.mock.calls)).not.toContain(paused);
+  });
+
   it("refuses a link that is not paused, and a code nobody has, telling the clinic nothing", async () => {
     // `code` is the working link from the play tests above.
     expect(await call(askRoute, "ask", code)).toEqual({ status: 200, body: { asked: false } });

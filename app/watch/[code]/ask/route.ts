@@ -17,7 +17,9 @@ import { pickTrustedOrigin } from "@/lib/trusted-origin";
  *      This is the part that must not be lost, and it is done first. The
  *      clinic's overview lists the link from this moment on.
  *   2. Tell the clinic's office admins by email (lib/renewal-email.ts), if
- *      email is set up. This part is allowed to fail: without a key, with
+ *      email is set up and the clinic has had fewer than ten of these
+ *      emails today (RENEWAL_EMAILS_PER_DAY, counted from midnight UTC;
+ *      requestShareRenewal says which). This part is allowed to fail: without a key, with
  *      no admins, or with the service down, the request is still recorded
  *      and still listed, and the reason goes to the server log.
  *
@@ -43,6 +45,11 @@ export async function POST(request: Request, { params }: RouteContext<"/watch/[c
     if (outcome.kind === "already-asked") return answer(true, 200);
     if (outcome.kind === "refused") return answer(false, 200);
 
+    // Past the day's limit of emails for this clinic (RENEWAL_EMAILS_PER_DAY): recorded and listed, no email until midnight UTC.
+    if (!outcome.emailClinic) {
+      console.log("A request to turn a link back on was recorded; the clinic was not emailed: daily email limit reached.");
+      return answer(true, 200);
+    }
     const origin = pickTrustedOrigin(request.headers.get("host"), process.env);
     const told = await notifyClinicOfRenewalRequest(outcome.facts, origin);
     // The request is recorded either way; this line only says whether the office was emailed. Never the code.

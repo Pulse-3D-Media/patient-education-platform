@@ -24,8 +24,8 @@ export { SETTINGS_DEFAULTS, SETTINGS_HELP, type Settings } from "../settings-def
 /** The id of the one row. Never any other value. */
 export const SETTINGS_ID = "default";
 
-/** The five columns, as every read here asks for them. */
-const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true, maxRenewals: true } as const;
+/** The six columns, as every read here asks for them. */
+const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true, qrDailyCap: true, maxRenewals: true } as const;
 
 /**
  * The current settings. Returns the row when it exists, and the defaults
@@ -73,7 +73,7 @@ export async function readSettingsIn(tx: Prisma.TransactionClient): Promise<Sett
 // nothing (Postgres's "void"), which $queryRaw cannot read back.
 // ---------------------------------------------------------------------------
 
-/** The number that names the settings lock in Postgres. Nothing else in the app takes an advisory lock. */
+/** The number that names the settings lock in Postgres. The only other named lock in the app, the renewal email limit's (lib/db/renewal-lock.ts), uses the two-number form, so the two never meet. */
 const SETTINGS_LOCK_KEY = 20260914;
 
 /**
@@ -89,7 +89,7 @@ export async function lockSettings(tx: Prisma.TransactionClient): Promise<Settin
 }
 
 /**
- * Save all five settings at once, creating the row the first time. Returns
+ * Save all six settings at once, creating the row the first time. Returns
  * the settings as they now are. Callers check the values first (whole
  * numbers, at least 1, the day counts no more than a year, and the renewal
  * count from 0 to 10, see lib/expiry.ts); this function trusts them.

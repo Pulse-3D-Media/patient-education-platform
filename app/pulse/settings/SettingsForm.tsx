@@ -2,13 +2,14 @@
 
 import { INPUT, PRIMARY_BUTTON } from "@/components/ui/styles";
 import { MAX_LINK_DAYS, MAX_RENEWALS, MIN_RENEWALS } from "@/lib/expiry";
+import { MAX_QR_DAILY } from "@/lib/qr-code";
 import { SETTINGS_DEFAULTS, SETTINGS_HELP, SETTINGS_NOT_ACTIVE, type Settings } from "@/lib/settings-defaults";
 import { saveSettingsAction } from "../actions";
 import { useKeptForm } from "../FormBits";
 
 /**
  * The settings form: one row per setting, with the field, its default and
- * a plain sentence about what it does. Saves all five at once through
+ * a plain sentence about what it does. Saves all six at once through
  * saveSettingsAction and shows the answer under the button.
  *
  * A setting that nothing in the app reads yet carries an amber "Not active
@@ -27,7 +28,9 @@ const FIELDS: { name: keyof Settings; label: string; unit: string; min?: number;
   { name: "viewDays", label: "Days after first play", unit: "days", max: MAX_LINK_DAYS },
   { name: "maxRenewals", label: "Maximum renewals", unit: "times", min: MIN_RENEWALS, max: MAX_RENEWALS },
   { name: "graceDays", label: "Grace days", unit: "days" },
-  { name: "qrDailyFlag", label: "Printed-code links per day to flag", unit: "links" },
+  // The printed-code limit and flag run from 1 to 10,000, and the flag must be below the limit (the action checks, qrDailyProblem).
+  { name: "qrDailyCap", label: "Printed-code links per day", unit: "links", max: MAX_QR_DAILY },
+  { name: "qrDailyFlag", label: "Printed-code links per day to flag", unit: "links", max: MAX_QR_DAILY },
 ];
 
 export function SettingsForm({ settings }: { settings: Settings }) {

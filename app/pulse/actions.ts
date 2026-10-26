@@ -36,6 +36,7 @@ import { renameClerkOrganization } from "@/lib/organization";
 import { isPlaybackIdShape } from "@/lib/playback-source";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
+import { qrDailyProblem } from "@/lib/qr-code";
 import { setOwnerByStaff } from "@/lib/seat-changes";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
 import { MAX_VIDEO_SECONDS, hasPlayableSource } from "@/lib/video";
@@ -343,11 +344,16 @@ export async function addNoteAction(_previous: FormState, formData: FormData): P
 /** The two settings that become link deadlines. They may not exceed a year (MAX_LINK_DAYS), the limit the clinic override already has. */
 const DAY_LIMITED: (keyof Settings)[] = ["unclaimedDays", "viewDays"];
 
-/** Save the five platform settings. Each must be a whole number: at least 1, the two day counts no more than a year, the renewal count from 0 to 10. */
+/**
+ * Save the six platform settings. Each must be a whole number: at least 1,
+ * the two day counts no more than a year, the renewal count from 0 to 10,
+ * the printed-code limit and flag from 1 to 10,000 with the flag below the
+ * limit (qrDailyProblem in lib/qr-code.ts).
+ */
 export async function saveSettingsAction(_previous: FormState, formData: FormData): Promise<FormState> {
   await requirePulseStaff();
 
-  const fields: (keyof Settings)[] = ["unclaimedDays", "viewDays", "graceDays", "qrDailyFlag", "maxRenewals"];
+  const fields: (keyof Settings)[] = ["unclaimedDays", "viewDays", "graceDays", "qrDailyFlag", "qrDailyCap", "maxRenewals"];
   const values: Partial<Settings> = {};
   for (const field of fields) {
     const value = wholeNumber(formData.get(field));
@@ -370,6 +376,10 @@ export async function saveSettingsAction(_previous: FormState, formData: FormDat
     values[field] = value;
   }
 
+  // The printed-code numbers: each within its limits, and the flag below the limit, or the flag would never show before a code is stopped.
+  const qrProblem = qrDailyProblem(values.qrDailyFlag as number, values.qrDailyCap as number);
+  if (qrProblem) return { error: qrProblem };
+
   await saveSettings(values as Settings);
   revalidatePath("/pulse/settings");
   return { ok: "Settings saved." };
@@ -381,6 +391,7 @@ const LABELS: Record<keyof Settings, string> = {
   viewDays: "Days after first play",
   graceDays: "Grace days",
   qrDailyFlag: "Printed-code links per day to flag",
+  qrDailyCap: "Printed-code links per day",
   maxRenewals: "Maximum renewals",
 };
 

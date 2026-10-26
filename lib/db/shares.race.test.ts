@@ -212,8 +212,8 @@ describe("a change that arrives while a link is being made", () => {
   });
 });
 
-/** The four settings as a row, or null when the row has never been saved. */
-const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true, maxRenewals: true } as const;
+/** The settings as a row, or null when the row has never been saved. */
+const SETTINGS_SELECT = { unclaimedDays: true, viewDays: true, graceDays: true, qrDailyFlag: true, qrDailyCap: true, maxRenewals: true } as const;
 
 async function readSettingsRow() {
   return prisma.appSettings.findUnique({ where: { id: realSettings.SETTINGS_ID }, select: SETTINGS_SELECT });

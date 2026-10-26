@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  effectiveQrDailyCap,
   isAttemptKey,
+  isValidQrDaily,
+  MAX_QR_DAILY,
+  qrDailyProblem,
   isQrCodeShape,
   liveKeyFor,
   PERMANENT_QR_ORIGIN,
@@ -88,5 +92,34 @@ describe("the downloaded picture's file name", () => {
   it("names the procedure and never the code", () => {
     expect(printedQrFileName("Total Knee Replacement", "clx9abcdef123456")).toBe("total-knee-replacement-printed-qr-123456.png");
     expect(printedQrFileName("!!!", "clx9abcdef123456")).toBe("procedure-printed-qr-123456.png");
+  });
+});
+
+describe("the daily limit and the flag", () => {
+  it("takes whole numbers from 1 to 10,000 and nothing else", () => {
+    expect(MAX_QR_DAILY).toBe(10_000);
+    for (const good of [1, 100, 200, 10_000]) expect(isValidQrDaily(good)).toBe(true);
+    for (const bad of [0, -1, 10_001, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) expect(isValidQrDaily(bad)).toBe(false);
+  });
+
+  it("accepts the defaults, and a flag one below the limit", () => {
+    expect(qrDailyProblem(100, 200)).toBeNull();
+    expect(qrDailyProblem(199, 200)).toBeNull();
+    expect(qrDailyProblem(1, 10_000)).toBeNull();
+  });
+
+  it("refuses a flag at or above the limit, and either number out of range, in one sentence", () => {
+    expect(qrDailyProblem(200, 200)).toMatch(/below the daily limit/);
+    expect(qrDailyProblem(300, 200)).toMatch(/below the daily limit/);
+    expect(qrDailyProblem(100, 0)).toBe("Printed-code links per day must be a whole number from 1 to 10,000.");
+    expect(qrDailyProblem(100, 10_001)).toBe("Printed-code links per day must be a whole number from 1 to 10,000.");
+    expect(qrDailyProblem(0, 200)).toBe("Printed-code links per day to flag must be a whole number from 1 to 10,000.");
+  });
+
+  it("never reads a damaged stored limit as no limit: it falls back to the default", () => {
+    expect(effectiveQrDailyCap(150, 200)).toBe(150);
+    expect(effectiveQrDailyCap(0, 200)).toBe(200);
+    expect(effectiveQrDailyCap(-5, 200)).toBe(200);
+    expect(effectiveQrDailyCap(1_000_000, 200)).toBe(200);
   });
 });

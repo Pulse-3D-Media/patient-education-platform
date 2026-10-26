@@ -19,6 +19,7 @@ import {
 import {
   getMember,
   invitationIsOpen,
+  isClerkTimeout,
   listOpenInvitations,
   listPeople,
   parseEmail,
@@ -97,6 +98,13 @@ export type Actor = { userId: string; name: string };
 export type Outcome = { ok: true; message?: string } | { ok: false; message: string };
 
 const NOT_SAVED = "That could not be saved just now. Nothing was changed. Try again in a moment.";
+/**
+ * When a write to Clerk timed out (lib/clerk-timeout.ts), it may still land after we stopped
+ * waiting, so "nothing was changed" would not be honest. The page is reloaded to show where it stands.
+ */
+const MAYBE_SAVED = "Sign-in took too long to answer, so we cannot be sure that went through. Reload this page in a moment to see where things stand.";
+/** The sentence for a failed write to Clerk: NOT_SAVED when Clerk refused, MAYBE_SAVED when it did not answer in time. */
+const failedWrite = (error: unknown) => (isClerkTimeout(error) ? MAYBE_SAVED : NOT_SAVED);
 const NOT_IN_CLINIC = "That person is not in your clinic.";
 
 /** Only the kind of error goes to the server log: never a message, which could carry an id or an address. */
@@ -169,6 +177,11 @@ export async function inviteSomeone(args: { clinicId: string; email: unknown; ro
     invitationId = await sendInvitationFromClerk(clinic.orgId, { email, role, inviterUserId: args.actor.userId, seatHoldId: hold.holdId, acceptUrl: args.acceptUrl ?? null });
   } catch (error) {
     logFailure("Clerk did not send the invitation", error);
+    if (isClerkTimeout(error)) {
+      // Clerk may still send it. So the hold is kept: if the invitation went out, the next check records
+      // it on the hold; if it did not, a hold no invitation was made for lets itself go after a few minutes.
+      return { ok: false, message: "Sign-in took too long to answer, so we cannot be sure the invitation went out. Reload this page in a minute: if it is not listed, send it again." };
+    }
     await releaseSeatHold(args.clinicId, hold.holdId).catch((releaseError) => logFailure("a hold could not be let go; it lets itself go in a few minutes", releaseError));
     return { ok: false, message: "The invitation could not be sent. Check the address and try again. No seat was used." };
   }
@@ -202,7 +215,7 @@ export async function revokeInvitation(args: { clinicId: string; invitationId: u
     await revokeInvitationInClerk(clinic.orgId, invitationId, args.actor.userId);
   } catch (error) {
     logFailure("Clerk did not revoke the invitation", error);
-    return { ok: false, message: NOT_SAVED };
+    return { ok: false, message: failedWrite(error) };
   }
 
   const hold = await getSeatHoldForInvitation(args.clinicId, invitationId).catch(() => null);
@@ -253,7 +266,7 @@ export async function setAdmin(args: { clinicId: string; targetUserId: unknown; 
     await setRoleInClerk(clinic.orgId, member.userId, role);
   } catch (error) {
     logFailure("Clerk did not change the role", error);
-    return { ok: false, message: NOT_SAVED };
+    return { ok: false, message: failedWrite(error) };
   }
   await addClinicNote(args.clinicId, {
     kind: "STATUS",
@@ -281,7 +294,7 @@ export async function removePerson(args: { clinicId: string; targetUserId: unkno
     await removeFromClerk(clinic.orgId, member.userId);
   } catch (error) {
     logFailure("Clerk did not remove the person", error);
-    return { ok: false, message: NOT_SAVED };
+    return { ok: false, message: failedWrite(error) };
   }
 
   const authorName = byAdmin(args.actor);

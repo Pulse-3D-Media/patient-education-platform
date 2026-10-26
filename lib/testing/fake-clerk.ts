@@ -73,6 +73,18 @@ class FakeClerk {
   writes: { op: string; orgId: string; target: string; failed: boolean }[] = [];
   /** Called just before each write lands. A test uses it to do something in that gap. */
   beforeWrite: ((write: { op: string; orgId: string; target: string }) => Promise<void> | void) | null = null;
+  /**
+   * When set, every read of members and invitations never answers, the way a Clerk that has
+   * stopped responding would. The app's time limit (askClerk) is what ends the wait.
+   */
+  hangReads = false;
+  /**
+   * The session token as it was when frozen (freezeToken), or null for a token that always
+   * matches Clerk. Real Clerk keeps the role and organization in a token the browser refreshes
+   * about once a minute, so for that minute auth() can still say "admin" after the person was
+   * made a member or removed. While frozen, auth() answers from this; the member lists do not.
+   */
+  private token: { orgId: string | null; role: string | null } | null = null;
 
   /** Forget everything. Call between tests. */
   reset() {
@@ -83,6 +95,24 @@ class FakeClerk {
     this.failReads = false;
     this.writes = [];
     this.beforeWrite = null;
+    this.hangReads = false;
+    this.token = null;
+  }
+
+  /**
+   * Freeze the signed-in person's session token as it is now. A later setRoleOutsideTheApp or
+   * removeMember then changes Clerk but not what auth() says: the minute before the token refreshes.
+   */
+  freezeToken() {
+    const { userId, orgId } = this.session;
+    const me = orgId ? this.orgs.get(orgId)?.members.find((member) => member.userId === userId) : undefined;
+    this.token = { orgId: me ? orgId : null, role: me?.role ?? null };
+  }
+
+  /** A read that never answers while hangReads is set, else the answer. */
+  private read<T>(answer: () => T): Promise<T> {
+    if (this.hangReads) return new Promise<T>(() => {});
+    return Promise.resolve().then(answer);
   }
 
   /** An organization, with its creator (Clerk's createdBy) and its first people. */
@@ -170,6 +200,7 @@ class FakeClerk {
 
   signIn(userId: string | null, orgId: string | null) {
     this.session = { userId, orgId };
+    this.token = null;
   }
 
   /** Run one write the way Clerk would: the hook, then maybe a failure, then the change. */
@@ -201,6 +232,8 @@ class FakeClerk {
   auth = Object.assign(
     async () => {
       const { userId, orgId } = this.session;
+      const token = this.token;
+      if (token) return { userId, orgId: token.orgId, has: ({ role }: { role: string }) => token.role === role };
       const me = orgId ? this.orgs.get(orgId)?.members.find((member) => member.userId === userId) : undefined;
       return { userId, orgId: me ? orgId : null, has: ({ role }: { role: string }) => me?.role === role };
     },
@@ -209,7 +242,7 @@ class FakeClerk {
 
   clerkClient = async () => ({
     organizations: {
-      getOrganizationMembershipList: async (params: { organizationId: string; userId?: string[]; limit?: number; offset?: number }) => {
+      getOrganizationMembershipList: (params: { organizationId: string; userId?: string[]; limit?: number; offset?: number }) => this.read(() => {
         if (this.failReads) throw new Error("fake Clerk: reads are failing");
         const org = this.orgs.get(params.organizationId);
         const all = (org?.members ?? []).filter((member) => !params.userId || params.userId.includes(member.userId));
@@ -222,7 +255,7 @@ class FakeClerk {
           organization: { name: org?.name ?? "", hasImage: false, imageUrl: "", createdBy: org?.createdBy ?? undefined, membersCount: org?.members.length ?? 0 },
         }));
         return { data, totalCount: all.length };
-      },
+      }),
       updateOrganizationMembership: async (params: { organizationId: string; userId: string; role: string }) =>
         this.write("role", params.organizationId, params.userId, () => {
           this.member(params.organizationId, params.userId).role = params.role as "org:admin" | "org:member";
@@ -234,17 +267,17 @@ class FakeClerk {
           this.removeMember(params.organizationId, params.userId);
           return {};
         }),
-      getOrganizationInvitationList: async (params: { organizationId: string; status?: string[]; limit?: number }) => {
+      getOrganizationInvitationList: (params: { organizationId: string; status?: string[]; limit?: number }) => this.read(() => {
         if (this.failReads) throw new Error("fake Clerk: reads are failing");
         const all = this.invitations(params.organizationId).filter((invitation) => !params.status || params.status.includes(invitation.status));
         return { data: all.slice(0, params.limit ?? 10).map((invitation) => ({ ...invitation, publicMetadata: { ...invitation.publicMetadata } })), totalCount: all.length };
-      },
-      getOrganizationInvitation: async (params: { organizationId: string; invitationId: string }) => {
+      }),
+      getOrganizationInvitation: (params: { organizationId: string; invitationId: string }) => this.read(() => {
         if (this.failReads) throw new Error("fake Clerk: reads are failing");
         const invitation = this.invitations(params.organizationId).find((candidate) => candidate.id === params.invitationId);
         if (!invitation) throw notFound();
         return { ...invitation };
-      },
+      }),
       createOrganizationInvitation: async (params: { organizationId: string; emailAddress: string; role: string; publicMetadata?: Record<string, unknown>; redirectUrl?: string }) =>
         this.write("invite", params.organizationId, params.emailAddress, () => {
           const org = this.org(params.organizationId);
@@ -273,7 +306,7 @@ class FakeClerk {
         }),
     },
     users: {
-      getUser: async (userId: string) => {
+      getUser: (userId: string) => this.read(() => {
         const staff = this.staff.get(userId);
         if (staff) return { ...staff, emailAddresses: [{ emailAddress: `${userId}@example.test` }], publicMetadata: { pulseStaff: true } };
         for (const org of this.orgs.values()) {
@@ -281,7 +314,7 @@ class FakeClerk {
           if (member) return { firstName: member.firstName, lastName: member.lastName, emailAddresses: [{ emailAddress: member.identifier }], publicMetadata: {} };
         }
         throw new Error("fake Clerk: no such user");
-      },
+      }),
     },
   });
 }

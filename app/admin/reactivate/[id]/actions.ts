@@ -1,9 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getCurrentClinicId } from "@/lib/clinic";
+import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getCurrentClinicId } from "@/lib/clinic";
 import { renewShareForClinic } from "@/lib/db/shares";
-import { getSignedInName } from "@/lib/people";
 import { isClinicAdmin } from "@/lib/roles";
 
 /**
@@ -47,8 +46,11 @@ export async function reactivateLinkAction(_previous: ReactivateState, formData:
     const shareId = readShareId(formData.get("shareId"));
     if (!shareId) return { ok: false, message: "We couldn't find that link for your clinic." };
 
-    const name = (await getSignedInName()) ?? "An office admin";
-    const outcome = await renewShareForClinic(clinicId, shareId, name);
+    // Still an admin here, asked of Clerk itself: the session token can be a minute old
+    // (confirmAdminWithClerk in lib/clinic.ts). Its answer carries the name for the log.
+    const live = await confirmAdminWithClerk(clinicId);
+    if (!live.ok) return { ok: false, message: live.reason === "unreachable" ? ADMIN_CHECK_UNREACHABLE : NOT_ADMIN };
+    const outcome = await renewShareForClinic(clinicId, shareId, live.name);
     if (outcome.ok) {
       // The overview's waiting list and its newest links, and this page's own details.
       revalidatePath("/admin");

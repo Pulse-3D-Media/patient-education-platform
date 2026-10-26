@@ -1,4 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
+import { SignInUnavailableError, askClerk } from "./clerk-timeout";
+import { TimeoutError } from "./timeout";
 import { ADMIN_ROLE, clerkRole, type Role } from "./role-names";
 import { SEAT_HOLD_KEY, holdIdFromMetadata } from "./seats";
 import { defaultSenderName } from "./sender-name";
@@ -18,6 +20,14 @@ import { defaultSenderName } from "./sender-name";
  * under the clinic's lock before an invitation goes out, the owner never
  * removed or made a plain member. lib/seat-changes.test.ts reads the source
  * tree and fails if anything else imports them.
+ *
+ * EVERY CALL TO CLERK HERE HAS A TIME LIMIT (askClerk in lib/clerk-timeout.ts,
+ * five seconds). A slow or failing Clerk becomes one SignInUnavailableError,
+ * which every caller already answers with a plain sentence, so a page or a
+ * button never hangs waiting for Clerk. For a write, a timeout means "we do
+ * not know": the write may still land after we stopped waiting. The callers
+ * in lib/seat-changes.ts say so (isClerkTimeout below) rather than "nothing
+ * was changed", and the seat check puts the seats right either way.
  */
 
 /** One person in the clinic, as the People section shows them. */
@@ -74,11 +84,14 @@ export async function listPeople(clerkOrgId: string): Promise<Person[]> {
   const people: Person[] = [];
 
   for (let offset = 0; ; offset += 100) {
-    const page = await client.organizations.getOrganizationMembershipList({
-      organizationId: clerkOrgId,
-      limit: 100,
-      offset,
-    });
+    const page = await askClerk(
+      client.organizations.getOrganizationMembershipList({
+        organizationId: clerkOrgId,
+        limit: 100,
+        offset,
+      }),
+      "the clinic's people",
+    );
 
     for (const membership of page.data) {
       const person = toPerson(membership);
@@ -101,11 +114,14 @@ export async function listPeople(clerkOrgId: string): Promise<Person[]> {
  */
 export async function getMember(clerkOrgId: string, userId: string): Promise<Person | null> {
   const client = await clerkClient();
-  const page = await client.organizations.getOrganizationMembershipList({
-    organizationId: clerkOrgId,
-    userId: [userId],
-    limit: 1,
-  });
+  const page = await askClerk(
+    client.organizations.getOrganizationMembershipList({
+      organizationId: clerkOrgId,
+      userId: [userId],
+      limit: 1,
+    }),
+    "one person in the clinic",
+  );
   const membership = page.data[0];
   // Clerk filters by the user id we gave it; checked again here, so a lookup
   // that came back with someone else can never be mistaken for a match.
@@ -123,7 +139,7 @@ export async function getSignedInName(): Promise<string | null> {
   const { userId } = await auth();
   if (!userId) return null;
   const client = await clerkClient();
-  const user = await client.users.getUser(userId);
+  const user = await askClerk(client.users.getUser(userId), "the signed-in person's name");
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ");
   return fullName || user.emailAddresses[0]?.emailAddress || userId;
 }
@@ -146,7 +162,10 @@ export type OpenInvitation = {
 /** The organization's open invitations, newest first. Bounded like the member list. */
 export async function listOpenInvitations(clerkOrgId: string): Promise<OpenInvitation[]> {
   const client = await clerkClient();
-  const page = await client.organizations.getOrganizationInvitationList({ organizationId: clerkOrgId, status: ["pending"], limit: 100 });
+  const page = await askClerk(
+    client.organizations.getOrganizationInvitationList({ organizationId: clerkOrgId, status: ["pending"], limit: 100 }),
+    "the clinic's open invitations",
+  );
   return page.data
     .map((invitation) => ({
       id: invitation.id,
@@ -166,13 +185,24 @@ export async function listOpenInvitations(clerkOrgId: string): Promise<OpenInvit
  */
 export async function invitationIsOpen(clerkOrgId: string, invitationId: string): Promise<boolean> {
   const client = await clerkClient();
-  try {
-    const invitation = await client.organizations.getOrganizationInvitation({ organizationId: clerkOrgId, invitationId });
-    return invitation.organizationId === clerkOrgId && invitation.status === "pending";
-  } catch (error) {
-    if (typeof error === "object" && error !== null && (error as { status?: unknown }).status === 404) return false;
-    throw error;
-  }
+  const invitation = await askClerk(
+    client.organizations.getOrganizationInvitation({ organizationId: clerkOrgId, invitationId }).catch((error: unknown) => {
+      // "Not found" is an answer (the invitation is not open here), not a failure. Anything else is a failure.
+      if (typeof error === "object" && error !== null && (error as { status?: unknown }).status === 404) return null;
+      throw error;
+    }),
+    "one invitation",
+  );
+  return invitation !== null && invitation.organizationId === clerkOrgId && invitation.status === "pending";
+}
+
+/**
+ * Did this call fail because Clerk did not answer in time (as opposed to
+ * answering with a refusal)? For a write, that means it may still have gone
+ * through, so the caller must not say "nothing was changed".
+ */
+export function isClerkTimeout(error: unknown): boolean {
+  return error instanceof SignInUnavailableError && error.cause instanceof TimeoutError;
 }
 
 /** A plain check that an email address looks like one. Clerk checks it properly; this only turns a typo into a sentence. */
@@ -202,33 +232,36 @@ export async function sendInvitationFromClerk(
   args: { email: string; role: Role; inviterUserId: string; seatHoldId: string; acceptUrl: string | null },
 ) {
   const client = await clerkClient();
-  const invitation = await client.organizations.createOrganizationInvitation({
-    organizationId: clerkOrgId,
-    emailAddress: args.email,
-    role: clerkRole(args.role),
-    inviterUserId: args.inviterUserId,
-    // Clerk copies this onto the membership when the invitation is accepted,
-    // which is how the seat check knows whose seat the hold was.
-    publicMetadata: { [SEAT_HOLD_KEY]: args.seatHoldId },
-    ...(args.acceptUrl ? { redirectUrl: args.acceptUrl } : {}),
-  });
+  const invitation = await askClerk(
+    client.organizations.createOrganizationInvitation({
+      organizationId: clerkOrgId,
+      emailAddress: args.email,
+      role: clerkRole(args.role),
+      inviterUserId: args.inviterUserId,
+      // Clerk copies this onto the membership when the invitation is accepted,
+      // which is how the seat check knows whose seat the hold was.
+      publicMetadata: { [SEAT_HOLD_KEY]: args.seatHoldId },
+      ...(args.acceptUrl ? { redirectUrl: args.acceptUrl } : {}),
+    }),
+    "sending an invitation",
+  );
   return invitation.id;
 }
 
 /** Revoke one invitation of this organization. */
 export async function revokeInvitationInClerk(clerkOrgId: string, invitationId: string, requestingUserId: string) {
   const client = await clerkClient();
-  await client.organizations.revokeOrganizationInvitation({ organizationId: clerkOrgId, invitationId, requestingUserId });
+  await askClerk(client.organizations.revokeOrganizationInvitation({ organizationId: clerkOrgId, invitationId, requestingUserId }), "revoking an invitation");
 }
 
 /** Switch one member's role between admin and member. */
 export async function setRoleInClerk(clerkOrgId: string, userId: string, role: Role) {
   const client = await clerkClient();
-  await client.organizations.updateOrganizationMembership({ organizationId: clerkOrgId, userId, role: clerkRole(role) });
+  await askClerk(client.organizations.updateOrganizationMembership({ organizationId: clerkOrgId, userId, role: clerkRole(role) }), "changing a role");
 }
 
 /** Take one person out of the organization. */
 export async function removeFromClerk(clerkOrgId: string, userId: string) {
   const client = await clerkClient();
-  await client.organizations.deleteOrganizationMembership({ organizationId: clerkOrgId, userId });
+  await askClerk(client.organizations.deleteOrganizationMembership({ organizationId: clerkOrgId, userId }), "removing a person");
 }

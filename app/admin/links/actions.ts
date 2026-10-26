@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getCurrentClinicId } from "@/lib/clinic";
+import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getCurrentClinicId } from "@/lib/clinic";
 import { createQrCode, getLiveQrCodeSender, replaceQrCode, retireQrCode } from "@/lib/db/qr-codes";
 import { createShare, SenderRefusedError, ShareRefusedError } from "@/lib/db/shares";
 import { errorKind } from "@/lib/error-kind";
@@ -129,8 +129,11 @@ export async function retireQrCodeAction(qrCodeId: unknown): Promise<ActionResul
     if (!clinicId) return { error: NOT_ALLOWED_MESSAGE };
     if (typeof qrCodeId !== "string" || !qrCodeId) return { error: "We couldn't find that printed code for your clinic." };
 
-    const actor = (await getSignedInName()) ?? "An office admin";
-    const outcome = await retireQrCode(clinicId, qrCodeId, actor);
+    // Retiring cannot be undone, so ask Clerk itself that this person is still an admin here (the
+    // session token can be a minute old). Its answer carries the name for the log.
+    const live = await confirmAdminWithClerk(clinicId);
+    if (!live.ok) return { error: live.reason === "unreachable" ? ADMIN_CHECK_UNREACHABLE : NOT_ALLOWED_MESSAGE };
+    const outcome = await retireQrCode(clinicId, qrCodeId, live.name);
     if (outcome.ok) revalidatePath("/admin/links");
     return outcome.ok ? { message: outcome.message } : { error: outcome.message };
   } catch (error) {
@@ -154,14 +157,16 @@ export async function replaceQrCodeAction(qrCodeId: unknown): Promise<ActionResu
     if (!clinicId) return { error: NOT_ALLOWED_MESSAGE };
     const notFound = { error: "We couldn't find that printed code for your clinic, or it was already retired." };
     if (typeof qrCodeId !== "string" || !qrCodeId) return notFound;
+    // As for Retire: a live check with Clerk first. Its answer carries the name for the log.
+    const live = await confirmAdminWithClerk(clinicId);
+    if (!live.ok) return { error: live.reason === "unreachable" ? ADMIN_CHECK_UNREACHABLE : NOT_ALLOWED_MESSAGE };
 
     const senderUserId = await getLiveQrCodeSender(clinicId, qrCodeId);
     if (!senderUserId) return notFound;
     const sender = await resolveSender(clinicId, senderUserId);
     if (!sender.ok) return { error: `${sender.message} The old code was left as it was.` };
 
-    const actor = (await getSignedInName()) ?? "An office admin";
-    const outcome = await replaceQrCode(clinicId, qrCodeId, sender.sender, actor);
+    const outcome = await replaceQrCode(clinicId, qrCodeId, sender.sender, live.name);
     if (outcome.ok) revalidatePath("/admin/links");
     return outcome.ok ? { message: outcome.message } : { error: outcome.message };
   } catch (error) {

@@ -1,14 +1,12 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { errorKind } from "@/lib/error-kind";
 import { checkPayment, startCheckout } from "@/lib/checkout";
 import { readPlanSelection } from "@/lib/checkout-rules";
 import { getCategoryList } from "@/lib/db/category-config";
-import { getBillingClinicId } from "@/lib/clinic";
-import { getSignedInName } from "@/lib/people";
+import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getBillingClinicId } from "@/lib/clinic";
 import { readChangeConfirm, readChangeRequest } from "@/lib/plan-change";
 import {
   cancelWaitingChange,
@@ -70,12 +68,13 @@ export async function startCheckoutAction(_previous: CheckoutFormState, formData
     const origin = pickTrustedOrigin((await headers()).get("host"), process.env);
     if (!origin) return { error: "Checkout cannot be started from this address. Get in touch with Pulse 3D." };
 
-    const { userId } = await auth();
-    const name = (await getSignedInName()) ?? "A clinic admin";
+    // Still an admin, asked of Clerk itself (the session token can be a minute old). Its answer carries the name.
+    const live = await confirmAdminWithClerk(clinicId);
+    if (!live.ok) return { error: liveRefusal(live.reason, "Only your clinic's office admins can choose a plan.") };
     const result = await startCheckout({
       clinicId,
       selection: read.selection,
-      actor: { id: userId ?? "unknown", name },
+      actor: { id: live.userId, name: live.name },
       origin,
       deps: { gateway: stripeGateway, fetchSubscription: fetchSubscriptionSnapshot, isOpen: checkoutIsOpen() },
     });
@@ -128,6 +127,16 @@ export async function checkPaymentAction(): Promise<CheckPaymentState> {
  * clinic id, a Stripe customer id, an amount or a price in a form is never read.
  */
 const ADMINS_ONLY = "Only your clinic's office admins can change billing.";
+
+/**
+ * The actions that change billing (checkout, confirming a change, cancelling one, Stripe's billing
+ * page, paying an invoice) also ask Clerk itself that the person is still an admin here, because the
+ * session token getBillingClinicId() reads can be a minute old (confirmAdminWithClerk in lib/clinic.ts).
+ * Review and the two "check" buttons change nothing, so they skip it. This is the sentence for a no.
+ */
+function liveRefusal(reason: "not-admin" | "unreachable", notAdmin: string) {
+  return reason === "unreachable" ? ADMIN_CHECK_UNREACHABLE : notAdmin;
+}
 
 function planDeps(): PlanChangeDeps {
   return { gateway: stripePlanGateway, fetchSubscription: fetchSubscriptionSnapshot, isOpen: checkoutIsOpen() };
@@ -190,9 +199,9 @@ export async function confirmPlanChangeAction(formData: FormData): Promise<Confi
   if (!read.ok) return { stale: read.error };
 
   try {
-    const { userId } = await auth();
-    const name = (await getSignedInName()) ?? "A clinic admin";
-    const result = await confirmPlanChange({ clinicId, request: read.request, seen: read.seen, actor: { id: userId ?? "unknown", name }, deps: planDeps() });
+    const live = await confirmAdminWithClerk(clinicId);
+    if (!live.ok) return { error: liveRefusal(live.reason, ADMINS_ONLY) };
+    const result = await confirmPlanChange({ clinicId, request: read.request, seen: read.seen, actor: { id: live.userId, name: live.name }, deps: planDeps() });
     revalidatePath("/admin/billing");
     if (result.kind === "changed" || result.kind === "scheduled") return { done: result.message };
     if (result.kind === "payment-needed") return { unpaid: result.message, payUrl: result.payUrl };
@@ -213,6 +222,8 @@ export async function cancelWaitingChangeAction(which: "scheduled" | "payment"):
   const clinicId = await getBillingClinicId();
   if (!clinicId) return { error: ADMINS_ONLY };
   if (which !== "scheduled" && which !== "payment") return { error: "That could not be done." };
+  const live = await confirmAdminWithClerk(clinicId);
+  if (!live.ok) return { error: liveRefusal(live.reason, ADMINS_ONLY) };
 
   try {
     const result = await cancelWaitingChange({ clinicId, which, deps: planDeps() });
@@ -249,6 +260,9 @@ export async function checkWithStripeAction(): Promise<BillingActionState> {
 export async function openBillingPortalAction(): Promise<BillingActionState> {
   const clinicId = await getBillingClinicId();
   if (!clinicId) return { error: ADMINS_ONLY };
+  // Stripe's page can cancel the subscription, so this counts as a billing change.
+  const live = await confirmAdminWithClerk(clinicId);
+  if (!live.ok) return { error: liveRefusal(live.reason, ADMINS_ONLY) };
 
   try {
     const origin = pickTrustedOrigin((await headers()).get("host"), process.env);
@@ -265,6 +279,8 @@ export async function openBillingPortalAction(): Promise<BillingActionState> {
 export async function payInvoiceAction(): Promise<BillingActionState> {
   const clinicId = await getBillingClinicId();
   if (!clinicId) return { error: ADMINS_ONLY };
+  const live = await confirmAdminWithClerk(clinicId);
+  if (!live.ok) return { error: liveRefusal(live.reason, ADMINS_ONLY) };
 
   try {
     const result = await findInvoiceToPay({ clinicId, deps: planDeps() });

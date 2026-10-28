@@ -85,12 +85,15 @@ const WEBFLOW_CDN = ["https://cdn.prod.website-files.com", "https://*.website-fi
 
 /**
  * Where a video that has moved to Mux streams from (lib/mux.ts). The
- * playlist and its pieces come from stream.mux.com; on browsers without
+ * playlist starts at stream.mux.com, which hands the player on to Mux's
+ * own delivery hosts for the rest (manifest-...mux.com and chunk-...mux.com,
+ * whose names change; seen on the PR #74 preview), so every mux.com address
+ * is allowed for video. On browsers without
  * HLS of their own they are fetched by script (hls.js), which is a
  * connection, not a media load, so the address is in both lists. Stills
  * come from image.mux.com, which is on the picture list (lib/picture-hosts.ts).
  */
-const MUX_STREAM = ["https://stream.mux.com"];
+const MUX_STREAM = ["https://stream.mux.com", "https://*.mux.com"];
 
 /**
  * Where a staff member's browser sends a video file when uploading to Mux

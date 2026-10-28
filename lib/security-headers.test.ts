@@ -97,6 +97,9 @@ describe("contentSecurityPolicy", () => {
   it("allows Mux streams, both as media and as the connections hls.js makes for them; stills are on the picture list", () => {
     expect(directive(production, "media-src")).toContain("https://stream.mux.com");
     expect(directive(production, "connect-src")).toContain("https://stream.mux.com");
+    // stream.mux.com hands the player on to manifest-...mux.com and chunk-...mux.com.
+    expect(directive(production, "media-src")).toContain("https://*.mux.com");
+    expect(directive(production, "connect-src")).toContain("https://*.mux.com");
     // Nothing of Mux's runs as script here: hls.js is served from our own address.
     expect(directive(production, "script-src")).not.toContain("https://stream.mux.com");
   });

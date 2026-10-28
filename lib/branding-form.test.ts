@@ -75,9 +75,19 @@ describe("readLogoField", () => {
   });
 
   it("accepts a full https address and refuses anything else", () => {
-    expect(readLogoField(form({ logoUrl: "https://cdn.example.org/summit.png" }))).toEqual({ logoUrl: "https://cdn.example.org/summit.png" });
+    expect(readLogoField(form({ logoUrl: "https://cdn.prod.website-files.com/test/summit.png" }))).toEqual({ logoUrl: "https://cdn.prod.website-files.com/test/summit.png" });
     for (const bad of ["http://example.com/a.png", "example.com/a.png", "javascript:alert(1)", "data:image/png;base64,AAAA"]) {
       expect(readLogoField(form({ logoUrl: bad }))).toMatchObject({ error: expect.stringContaining("https://") });
     }
+  });
+
+  it("accepts only the sites pictures may come from, except the logo the clinic already has (lib/picture-hosts.ts)", () => {
+    expect(readLogoField(form({ logoUrl: "https://img.clerk.com/made-up" }))).toEqual({ logoUrl: "https://img.clerk.com/made-up" });
+    for (const elsewhere of ["https://cdn.example.org/summit.png", "https://img.clerk.com.example.org/a.png", "https://website-files.com.evil.test/a.png"]) {
+      expect(readLogoField(form({ logoUrl: elsewhere }))).toMatchObject({ error: expect.stringContaining("Webflow CDN") });
+    }
+    // Saved before the list existed and sent back unchanged: let through, so the rest of the form can be saved.
+    expect(readLogoField(form({ logoUrl: "https://cdn.example.org/summit.png" }), "https://cdn.example.org/summit.png")).toEqual({ logoUrl: "https://cdn.example.org/summit.png" });
+    expect(readLogoField(form({ logoUrl: "https://other.example.org/b.png" }), "https://cdn.example.org/summit.png")).toMatchObject({ error: expect.stringContaining("Webflow CDN") });
   });
 });

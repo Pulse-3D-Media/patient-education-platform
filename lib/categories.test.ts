@@ -134,10 +134,16 @@ describe("readCategoryDetails", () => {
   });
 
   it("keeps a real change, tidied", () => {
-    expect(read({ label: "  Knee and Leg ", slug: " knee-leg ", imageUrl: "https://example.com/a.jpg", sortOrder: "15" })).toEqual({
+    expect(read({ label: "  Knee and Leg ", slug: " knee-leg ", imageUrl: "https://cdn.prod.website-files.com/test/a.jpg", sortOrder: "15" })).toEqual({
       ok: true,
-      details: { label: "Knee and Leg", slug: "knee-leg", imageUrl: "https://example.com/a.jpg", sortOrder: 15 },
+      details: { label: "Knee and Leg", slug: "knee-leg", imageUrl: "https://cdn.prod.website-files.com/test/a.jpg", sortOrder: 15 },
     });
+  });
+
+  it("refuses a tile picture on a site pictures may not come from, unless it is the picture the category has now", () => {
+    expect(read({ imageUrl: "https://example.com/a.jpg" })).toMatchObject({ ok: false, error: expect.stringContaining("Webflow CDN") });
+    const list = DEFAULT_CATEGORY_LIST.map((entry) => (entry.value === "KNEE" ? { ...entry, image: "https://example.com/old.jpg" } : entry));
+    expect(readCategoryDetails("KNEE", { label: "", slug: "", imageUrl: "https://example.com/old.jpg", sortOrder: "" }, list)).toMatchObject({ ok: true });
   });
 
   it("takes a name of 40 characters and refuses 41, or more than one line", () => {
@@ -219,10 +225,11 @@ describe("adding a category (K3)", () => {
 
   it("makes a new category from the form, last in the list when no place is given", () => {
     expect(read({})).toEqual({ ok: true, category: { key: "HAND_WRIST", label: "Hand & Wrist", slug: "hand-wrist", imageUrl: null, sortOrder: 70 } });
-    expect(read({ imageUrl: "https://example.com/hand.jpg", sortOrder: "25" })).toMatchObject({
+    expect(read({ imageUrl: "https://cdn.prod.website-files.com/test/hand.jpg", sortOrder: "25" })).toMatchObject({
       ok: true,
-      category: { imageUrl: "https://example.com/hand.jpg", sortOrder: 25 },
+      category: { imageUrl: "https://cdn.prod.website-files.com/test/hand.jpg", sortOrder: 25 },
     });
+    expect(read({ imageUrl: "https://example.com/hand.jpg" })).toMatchObject({ ok: false, error: expect.stringContaining("Webflow CDN") });
   });
 
   it("refuses a missing or duplicate name, and a name too long or on two lines", () => {

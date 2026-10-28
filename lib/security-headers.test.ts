@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clerkFrontendOrigin, contentSecurityPolicy, CSP_ENFORCED, securityHeaders } from "./security-headers";
+import { clerkFrontendOrigin, contentSecurityPolicy, COOP_ENFORCED, CSP_ENFORCED, securityHeaders } from "./security-headers";
 
 /**
  * The headers every response carries. Made-up Clerk keys only: a key is
@@ -43,6 +43,12 @@ describe("securityHeaders", () => {
     expect(headers["Permissions-Policy"]).toBe("camera=(), microphone=(), geolocation=()");
   });
 
+  it("enforces Cross-Origin-Opener-Policy: same-origin, turned on with the content policy", () => {
+    expect(COOP_ENFORCED).toBe(true);
+    expect(headers["Cross-Origin-Opener-Policy"]).toBe("same-origin");
+    expect(headers["Cross-Origin-Opener-Policy-Report-Only"]).toBeUndefined();
+  });
+
   it("never sends a Referrer-Policy that would stop the browser saying where a request came from", () => {
     // no-referrer would make the browser send "Origin: null" on our own
     // Server Actions, and Next.js refuses those, so a patient's play would
@@ -50,10 +56,14 @@ describe("securityHeaders", () => {
     expect(headers["Referrer-Policy"]).not.toMatch(/no-referrer|unsafe-url/);
   });
 
-  it("enforces no framing, no plug-ins and no <base> trick today, and only reports the full list", () => {
-    expect(CSP_ENFORCED).toBe(false);
-    expect(headers["Content-Security-Policy"]).toBe("frame-ancestors 'none'; object-src 'none'; base-uri 'self'");
-    expect(headers["Content-Security-Policy-Report-Only"]).toBe(contentSecurityPolicy({ clerkPublishableKey: KEY, vercelEnv: "production" }));
+  it("enforces the full list, which still forbids framing, plug-ins and the <base> trick, and reports nothing separately", () => {
+    expect(CSP_ENFORCED).toBe(true);
+    const full = contentSecurityPolicy({ clerkPublishableKey: KEY, vercelEnv: "production" });
+    expect(headers["Content-Security-Policy"]).toBe(full);
+    expect(full).toContain("frame-ancestors 'none'");
+    expect(full).toContain("object-src 'none'");
+    expect(full).toContain("base-uri 'self'");
+    expect(headers["Content-Security-Policy-Report-Only"]).toBeUndefined();
   });
 });
 
@@ -68,15 +78,32 @@ describe("contentSecurityPolicy", () => {
     expect(directive(production, "worker-src")).toEqual(["'self'", "blob:"]);
   });
 
-  it("allows the Webflow video CDN, clinic logos from any https address, and our own fonts", () => {
+  it("allows the Webflow video CDN, pictures only from the list, and our own fonts", () => {
     expect(directive(production, "media-src")).toEqual(expect.arrayContaining(["'self'", "https://cdn.prod.website-files.com"]));
-    expect(directive(production, "img-src")).toEqual(expect.arrayContaining(["'self'", "https:", "data:"]));
+    expect(directive(production, "img-src")).toEqual([
+      "'self'",
+      "data:",
+      "blob:",
+      "https://cdn.prod.website-files.com",
+      "https://*.website-files.com",
+      "https://uploads-ssl.webflow.com",
+      "https://img.clerk.com",
+      "https://image.mux.com",
+      "https://made-up-otter-12.clerk.accounts.dev",
+    ]);
+    // Never "any https address" again.
+    expect(directive(production, "img-src")).not.toContain("https:");
+    // Vercel's toolbar pictures on previews only.
+    expect(directive(contentSecurityPolicy({ clerkPublishableKey: KEY, vercelEnv: "preview" }), "img-src")).toEqual(expect.arrayContaining(["https://vercel.live", "https://vercel.com"]));
     expect(directive(production, "font-src")).toEqual(["'self'", "data:"]);
   });
 
-  it("allows Mux streams, both as media and as the connections hls.js makes for them; stills ride on the https picture rule", () => {
+  it("allows Mux streams, both as media and as the connections hls.js makes for them; stills are on the picture list", () => {
     expect(directive(production, "media-src")).toContain("https://stream.mux.com");
     expect(directive(production, "connect-src")).toContain("https://stream.mux.com");
+    // stream.mux.com hands the player on to manifest-...mux.com and chunk-...mux.com.
+    expect(directive(production, "media-src")).toContain("https://*.mux.com");
+    expect(directive(production, "connect-src")).toContain("https://*.mux.com");
     // Nothing of Mux's runs as script here: hls.js is served from our own address.
     expect(directive(production, "script-src")).not.toContain("https://stream.mux.com");
   });

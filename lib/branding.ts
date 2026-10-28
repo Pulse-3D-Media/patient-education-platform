@@ -354,9 +354,11 @@ export function readBranding(stored: { brandColor?: string | null; brandFont?: s
  * callers treat empty as "no logo" before asking.
  *
  * The browser loads the logo straight from that address. Our server never
- * fetches it, so there is no list of allowed hosts to keep: a bad address
- * costs a missing picture (the clinic's name shows instead), never a
- * request made from inside our own network.
+ * fetches it, so a bad address costs a missing picture (the clinic's name
+ * shows instead), never a request made from inside our own network. Which
+ * SITES a new address may be on is a separate check, made only when one is
+ * saved (lib/picture-hosts.ts): this one is also used to read addresses
+ * already stored, which must keep working.
  */
 export function parseLogoUrl(input: unknown): string | null {
   if (typeof input !== "string") return null;

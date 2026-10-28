@@ -37,11 +37,20 @@
  *   Permissions-Policy             No page here may ask for the camera, the
  *                                  microphone or the location. Full screen
  *                                  and picture-in-picture stay allowed.
+ *   Cross-Origin-Opener-Policy     A page of ours opened from another site
+ *     (-Report-Only for now)       (a link in an email, a popup) is cut off
+ *                                  from the page that opened it, so that
+ *                                  page cannot reach into ours or redirect
+ *                                  it behind the person's back. Reported
+ *                                  only, like the full list, until the same
+ *                                  click-through (see COOP_ENFORCED).
  *
  * None of this is copy protection: it does not stop a screenshot, a screen
  * recording or someone saving the video file. See "The video boundary" in
  * CLAUDE.md.
  */
+
+import { PICTURE_SOURCES } from "./picture-hosts";
 
 export type Header = { key: string; value: string };
 
@@ -55,24 +64,36 @@ export type SecurityHeaderSettings = {
 };
 
 /**
- * Whether the full list is enforced. False while it is being tried: the
- * browser reports what it would block and blocks nothing. Set to true once
- * sign-in, the library, the patient page and checkout have been clicked
- * through on a preview with no report in the browser's console.
+ * Whether the full list is enforced. True since Evan's click-through of the
+ * PR #74 preview (2026-10-27): sign-in with Google, the library (Mux play,
+ * Send, Show QR), every admin section, checkout, the patient page and a
+ * printed code's page, and /pulse, with no report left in the console.
+ * False sends it as report-only again (the browser blocks nothing).
  */
-export const CSP_ENFORCED = false;
+export const CSP_ENFORCED = true;
+
+/**
+ * Whether Cross-Origin-Opener-Policy: same-origin is enforced. Clerk can sign people in through a
+ * popup ("Sign in with Google"), and same-origin cuts a popup off from the page that opened it; Google
+ * sign-in was tried on the PR #74 preview with it reported clean, so it is on with CSP_ENFORCED.
+ * If Clerk's popup ever breaks, the fallback is "same-origin-allow-popups"; false makes it report-only.
+ */
+export const COOP_ENFORCED = true;
 
 /** Where the finished animations, posters and the Pulse logo are served from today. */
 const WEBFLOW_CDN = ["https://cdn.prod.website-files.com", "https://*.website-files.com", "https://uploads-ssl.webflow.com"];
 
 /**
  * Where a video that has moved to Mux streams from (lib/mux.ts). The
- * playlist and its pieces come from stream.mux.com; on browsers without
+ * playlist starts at stream.mux.com, which hands the player on to Mux's
+ * own delivery hosts for the rest (manifest-...mux.com and chunk-...mux.com,
+ * whose names change; seen on the PR #74 preview), so every mux.com address
+ * is allowed for video. On browsers without
  * HLS of their own they are fetched by script (hls.js), which is a
  * connection, not a media load, so the address is in both lists. Stills
- * come from image.mux.com, which the picture rule (any https) already lets in.
+ * come from image.mux.com, which is on the picture list (lib/picture-hosts.ts).
  */
-const MUX_STREAM = ["https://stream.mux.com"];
+const MUX_STREAM = ["https://stream.mux.com", "https://*.mux.com"];
 
 /**
  * Where a staff member's browser sends a video file when uploading to Mux
@@ -120,9 +141,12 @@ export function contentSecurityPolicy(settings: SecurityHeaderSettings): string 
     // patient page. 'unsafe-eval' is for `next dev` only.
     "script-src": ["'self'", "'unsafe-inline'", ...(settings.dev ? ["'unsafe-eval'"] : []), clerk, ...CLERK_CHALLENGES, ...(preview ? ["https://vercel.live"] : [])],
     "style-src": ["'self'", "'unsafe-inline'", ...(preview ? ["https://vercel.live"] : [])],
-    // Pictures may come from any https address: a clinic's logo is an
-    // address Pulse staff approve, on whatever site the clinic keeps it.
-    "img-src": ["'self'", "data:", "blob:", "https:"],
+    // Pictures come only from the list in lib/picture-hosts.ts (the Webflow
+    // CDN, Clerk's image host, Mux's stills), which the logo, poster and tile
+    // picture boxes on /pulse also refuse anything outside of. Clerk's own
+    // address too, for anything its sign-in pieces draw, and Vercel's on
+    // previews for the comment toolbar's avatars.
+    "img-src": ["'self'", "data:", "blob:", ...PICTURE_SOURCES, clerk, ...(preview ? ["https://vercel.live", "https://vercel.com"] : [])],
     "media-src": ["'self'", "blob:", ...WEBFLOW_CDN, ...MUX_STREAM],
     // Our fonts are served from our own address (app/brand-fonts.ts).
     "font-src": ["'self'", "data:", ...(preview ? ["https://vercel.live", "https://assets.vercel.com"] : [])],
@@ -166,5 +190,6 @@ export function securityHeaders(settings: SecurityHeaderSettings): Header[] {
     { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
     { key: "X-Content-Type-Options", value: "nosniff" },
     { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+    { key: COOP_ENFORCED ? "Cross-Origin-Opener-Policy" : "Cross-Origin-Opener-Policy-Report-Only", value: "same-origin" },
   ];
 }

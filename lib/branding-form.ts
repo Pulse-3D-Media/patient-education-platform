@@ -1,5 +1,6 @@
 import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, parseBrandColor, parseBrandFont, parseBrandTheme, parseLogoUrl } from "./branding";
 import { normalizeUsPhone } from "./phone";
+import { isAllowedPictureUrl, pictureHostRefusal } from "./picture-hosts";
 
 /**
  * Reading and checking the branding form, the same way for the two places
@@ -74,7 +75,7 @@ export function readBrandingForm(formData: FormData): { values: BrandingFormValu
  * null for an empty box (no Pulse-set logo). Only Pulse staff send this; the
  * clinic's own admin form has no such field and its action never reads one.
  */
-export function readLogoField(formData: FormData): { logoUrl: string | null } | { error: string } {
+export function readLogoField(formData: FormData, current: string | null = null): { logoUrl: string | null } | { error: string } {
   const values = formData.getAll("logoUrl");
   if (values.length > 1 || values.some((value) => typeof value !== "string")) {
     return { error: "Send one text value for the logo address." };
@@ -83,5 +84,9 @@ export function readLogoField(formData: FormData): { logoUrl: string | null } | 
   if (!text) return { logoUrl: null };
   const logoUrl = parseLogoUrl(text);
   if (!logoUrl) return { error: "The logo address must be a full https:// address." };
+  // Only the sites pictures may come from (lib/picture-hosts.ts), so the patient page never asks an unknown site.
+  // `current` (the logo the clinic has now) is let through unchanged, so a clinic whose logo was saved
+  // before the list existed can still have its colour, font and phone saved.
+  if (logoUrl !== current && !isAllowedPictureUrl(logoUrl)) return { error: pictureHostRefusal("logo") };
   return { logoUrl };
 }

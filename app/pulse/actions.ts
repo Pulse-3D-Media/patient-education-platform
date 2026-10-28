@@ -40,6 +40,8 @@ import { qrDailyProblem } from "@/lib/qr-code";
 import { setOwnerByStaff } from "@/lib/seat-changes";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
 import { MAX_VIDEO_SECONDS, hasPlayableSource } from "@/lib/video";
+import { isAllowedPictureUrl, pictureHostRefusal } from "@/lib/picture-hosts";
+import { parseLogoUrl } from "@/lib/branding";
 
 /**
  * Server Actions for the Pulse 3D master dashboard.
@@ -314,7 +316,7 @@ export async function saveBrandingAction(_previous: FormState, formData: FormDat
 
   const checked = readBrandingForm(formData);
   if ("error" in checked) return checked;
-  const logo = readLogoField(formData);
+  const logo = readLogoField(formData, parseLogoUrl(clinic.logoUrl));
   if ("error" in logo) return logo;
 
   const { logged } = await updateClinicBranding(clinic.id, { ...checked.values, logoUrl: logo.logoUrl }, staff.name);
@@ -420,7 +422,7 @@ function isHttpsUrl(text: string) {
  * holds them), which another staff member may have saved since the form
  * was drawn.
  */
-type RowNow = Pick<VideoInput, "muxPlaybackId" | "muxAssetId" | "durationSeconds"> & { chapters: unknown };
+type RowNow = Pick<VideoInput, "muxPlaybackId" | "muxAssetId" | "durationSeconds" | "posterUrl"> & { chapters: unknown };
 
 /** The most chapter lines a form may send; more is not a form this app drew. */
 const CHAPTER_LINES_LIMIT = 100;
@@ -465,6 +467,9 @@ function videoFromForm(formData: FormData, existing: RowNow | null, known: Categ
 
   const posterText = String(formData.get("posterUrl") ?? "").trim();
   if (posterText && !isHttpsUrl(posterText)) return { error: "The poster address must be a full https:// address, or empty." };
+  // Only the sites pictures may come from (lib/picture-hosts.ts): the poster is shown on patients' phones.
+  // The poster the video has now is let through unchanged, so a video saved before the list existed can still be edited.
+  if (posterText && posterText !== existing?.posterUrl && !isAllowedPictureUrl(posterText)) return { error: pictureHostRefusal("poster") };
 
   const notes = String(formData.get("notes") ?? "").trim();
   if (notes.length > VIDEO_NOTES_LIMIT) return { error: `Keep the notes under ${VIDEO_NOTES_LIMIT} characters.` };

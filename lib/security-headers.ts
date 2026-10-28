@@ -64,21 +64,21 @@ export type SecurityHeaderSettings = {
 };
 
 /**
- * Whether the full list is enforced. False while it is being tried: the
- * browser reports what it would block and blocks nothing. Set to true once
- * sign-in, the library, the patient page and checkout have been clicked
- * through on a preview with no report in the browser's console.
+ * Whether the full list is enforced. True since Evan's click-through of the
+ * PR #74 preview (2026-10-27): sign-in with Google, the library (Mux play,
+ * Send, Show QR), every admin section, checkout, the patient page and a
+ * printed code's page, and /pulse, with no report left in the console.
+ * False sends it as report-only again (the browser blocks nothing).
  */
-export const CSP_ENFORCED = false;
+export const CSP_ENFORCED = true;
 
 /**
- * Whether Cross-Origin-Opener-Policy: same-origin is enforced. False for now: the browser only
- * reports. Clerk can sign people in through a popup (for "Sign in with Google" and the like), and
- * same-origin cuts a popup off from the page that opened it, so this is turned on together with
- * CSP_ENFORCED, after sign-in and sign-up have been tried on a preview with it reported clean.
- * If Clerk's popup turns out to need it, the fallback is "same-origin-allow-popups".
+ * Whether Cross-Origin-Opener-Policy: same-origin is enforced. Clerk can sign people in through a
+ * popup ("Sign in with Google"), and same-origin cuts a popup off from the page that opened it; Google
+ * sign-in was tried on the PR #74 preview with it reported clean, so it is on with CSP_ENFORCED.
+ * If Clerk's popup ever breaks, the fallback is "same-origin-allow-popups"; false makes it report-only.
  */
-export const COOP_ENFORCED = false;
+export const COOP_ENFORCED = true;
 
 /** Where the finished animations, posters and the Pulse logo are served from today. */
 const WEBFLOW_CDN = ["https://cdn.prod.website-files.com", "https://*.website-files.com", "https://uploads-ssl.webflow.com"];

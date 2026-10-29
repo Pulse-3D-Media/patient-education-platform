@@ -120,9 +120,11 @@ export function PlayerOverlay({
         </div>
       )}
 
-      {/* The bottom: play (with a mouse), the time, sound and full screen, then the progress bar. */}
+      {/* The bottom: play (with a mouse), the time, sound and full screen, then the progress bar. The dark fade behind them
+          takes no taps of its own (only its buttons and the bar do): on a short player, a phone's or a tablet's, it reaches
+          up over the middle buttons, and when it took taps it swallowed every tap on Pause and the ten-second buttons. */}
       {showControls && (
-        <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 pt-10 transition-opacity duration-300 @xl:px-3 ${fade}`}>
+        <div className={`pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 pt-10 transition-opacity duration-300 @xl:px-3 ${fade}`}>
           <div className="flex items-center">
             <span className="hidden computer:flex">
               <Control live={controls.showing} onClick={controls.togglePlay} label={playLabel} size="h-11 w-11">
@@ -171,7 +173,7 @@ export function PlayerOverlay({
               value={controls.time}
               onChange={(event) => controls.seekTo(Number(event.target.value))}
               aria-label="Seek"
-              className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              className={`${controls.showing ? "pointer-events-auto" : "pointer-events-none"} absolute inset-0 h-full w-full cursor-pointer opacity-0`}
             />
           </div>
         </div>

@@ -171,6 +171,13 @@ export type SubscriptionSnapshot = {
   status: string;
   /** True only when the subscription's latest invoice is paid. */
   latestInvoicePaid: boolean;
+  /**
+   * True only when Stripe shows a paid invoice on this subscription, the latest
+   * or any earlier one. Asked for only when the subscription is past_due or
+   * unpaid (lib/stripe.ts), because then the latest invoice is the failed one
+   * and says nothing about the past. Left out means no evidence, never "paid".
+   */
+  everPaid?: boolean;
   currentPeriodEnd: Date | null;
   /** When a scheduled cancellation takes effect, or null when none is scheduled. */
   cancelAt: Date | null;
@@ -346,10 +353,13 @@ export function decideBilling(current: BillingFacts, snap: SubscriptionSnapshot,
     case "unpaid": {
       if (base.status === "PAST_DUE") break; // grace started once; a repeated failure never moves it
       if (base.status !== "ACTIVE") {
-        // First seen already failing (we were never told it was active). It
-        // must have been paid once to get here, so the plan it was bought for
-        // takes effect, and grace starts now, the first time the failure is
-        // recorded.
+        // First seen already failing (we were never told it was active). A
+        // first activation needs a paid invoice here as everywhere, so without
+        // one nothing starts and a person is asked to look. With one, the plan
+        // it was bought for takes effect, and grace starts now, the first time
+        // the failure is recorded. A clinic that was ACTIVE skips all this: it
+        // has its plan already, and simply goes into grace below.
+        if (!snap.everPaid) return failingWithNoPaidInvoice(snap.status);
         const paidFor = startPaidForPlan(base, snap, next, entries);
         if (!paidFor) return notMarkedWithAPlan();
         activatePlanId = paidFor;
@@ -490,6 +500,15 @@ function notMarkedWithAPlan(): BillingDecision {
     kind: "ignored",
     reason:
       "Stripe says this subscription has been paid for, but it is not marked with one of this clinic's accepted plans, so no plan was started and nothing was changed. Check the subscription in Stripe.",
+    needsLook: true,
+  };
+}
+
+/** A subscription Stripe reports as failing, on a clinic that was never live, with no paid invoice to show for it. */
+function failingWithNoPaidInvoice(status: string): BillingDecision {
+  return {
+    kind: "ignored",
+    reason: `Stripe reports this subscription as "${status.slice(0, 40)}" and shows no paid invoice on it, so no plan was started and nothing was changed. Check the subscription in Stripe.`,
     needsLook: true,
   };
 }

@@ -481,6 +481,30 @@ describe("whose subscription it is", () => {
   });
 });
 
+describe("a subscription first seen already failing", () => {
+  it("with no paid invoice changes nothing on the clinic and is flagged; with one, the plan starts in grace", async () => {
+    const f = await makeCheckoutClinic("failing-first");
+    const before = await clinicRow(f.clinicId);
+
+    stripeSays(f, "past_due", { everPaid: false });
+    const refused = await handleStripeEvent(event(f, "invoice.payment_failed"), deps);
+    expect(refused.status).toBe("ignored");
+    const after = await clinicRow(f.clinicId);
+    expect(after.status).toBe(before.status);
+    expect(after.graceEndsAt).toBeNull();
+    expect(after.surgeonSeats).toBe(before.surgeonSeats);
+    expect(clinicIsOpen(after)).toBe(false);
+    expect((await billingRow(f.clinicId)).currentPlanId).toBeNull();
+
+    stripeSays(f, "past_due", { everPaid: true });
+    await handleStripeEvent(event(f, "invoice.payment_failed"), deps);
+    const started = await clinicRow(f.clinicId);
+    expect(started.status).toBe("PAST_DUE");
+    expect(clinicIsOpen(started)).toBe(true);
+    expect((await billingRow(f.clinicId)).currentPlanId).toBe(f.planId);
+  });
+});
+
 describe("a failed renewal and grace", () => {
   it("starts grace once, keeps the clinic open inside it, and duplicates do not extend it", async () => {
     const f = await makeCheckoutClinic("grace");

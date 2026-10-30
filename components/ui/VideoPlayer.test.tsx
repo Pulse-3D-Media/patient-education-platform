@@ -153,6 +153,17 @@ describe("the controls once it plays, laid out the way Vimeo does it", () => {
     expect(html).toMatch(/<span class="hidden computer:flex"><button[^>]*aria-label="Pause"/);
   });
 
+  it("lets taps through the dark fade behind the bottom controls, which on a phone or a tablet reaches up over the middle buttons", () => {
+    // Found on 2026-10-29: the fade took taps of its own and sat on top of Pause and the ten-second buttons, so a tap
+    // on any of them only hid the controls. Only the fade's buttons and the progress bar may take a tap.
+    const html = renderPlaying();
+    const fade = html.match(/<div class="([^"]*bg-gradient-to-t[^"]*)"/)?.[1] ?? "";
+
+    expect(fade).toMatch(/\bpointer-events-none\b/);
+    expect(html).toMatch(/<input[^>]*aria-label="Seek"[^>]*class="pointer-events-auto /);
+    expect(renderPlaying({ showing: false })).toMatch(/<input[^>]*aria-label="Seek"[^>]*class="pointer-events-none /);
+  });
+
   it("makes every control at least 44px to tap", () => {
     const html = renderPlaying();
     const sizes = [...html.matchAll(/<button type="button" aria-label="([^"]+)" title="[^"]+" class="([^"]+)"/g)].map(([, label, cls]) => ({ label, cls }));

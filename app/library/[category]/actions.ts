@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { getBaseUrl } from "@/lib/base-url";
+import { headers } from "next/headers";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { createShare, SenderRefusedError, ShareRefusedError } from "@/lib/db/shares";
 import { errorKind } from "@/lib/error-kind";
@@ -10,6 +10,7 @@ import { getSignedInName } from "@/lib/people";
 import { playbackForLibraryVideo } from "@/lib/playback-auth";
 import type { PlaybackSource } from "@/lib/playback-source";
 import { qrSvg } from "@/lib/qr";
+import { qrOriginFor } from "@/lib/qr-code";
 import { setOwnPatientName } from "@/lib/seat-changes";
 import { resolveSender } from "@/lib/senders";
 import { watchLink } from "@/lib/share-link";
@@ -92,8 +93,15 @@ export async function sendShareAction(videoId: string): Promise<SendResult> {
     const sender = await resolveSender(clinicId, userId);
     if (!sender.ok) return { ok: false, error: NO_SEAT };
 
+    // The address comes first, so a deployment that cannot write a link out makes no link at all.
+    const where = qrOriginFor((await headers()).get("host"), process.env);
+    if (!where) {
+      console.error("Making a share link from the library failed: this deployment does not know its own address");
+      return { ok: false, error: COULD_NOT_MAKE_LINK };
+    }
+
     const share = await createShare(clinicId, videoId.trim(), { sender: sender.sender });
-    const link = watchLink(await getBaseUrl(), share.code);
+    const link = watchLink(where.origin, share.code);
 
     // The QR code as SVG, packed into a data address, the same way the
     // printable pamphlet does it. SVG stays sharp at any size on the tablet.

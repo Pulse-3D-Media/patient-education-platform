@@ -232,6 +232,23 @@ export function snapshotFromSubscription(subscription: Stripe.Subscription): Sub
 /** How the database layer asks for a subscription's current state. A parameter there, so tests hand in a stand-in. */
 export type FetchSubscription = (subscriptionId: string) => Promise<SubscriptionSnapshot | null>;
 
+/** Has this subscription ever had a paid invoice? One question to Stripe, stopping at the first it finds. */
+async function subscriptionHasPaidInvoice(subscriptionId: string): Promise<boolean> {
+  const paid = await getStripe().invoices.list({ subscription: subscriptionId, status: "paid", limit: 1 });
+  return paid.data.length > 0;
+}
+
+/**
+ * A failing subscription's latest invoice is the one that failed, so it cannot
+ * say whether any earlier one was paid: for past_due and unpaid, Stripe is
+ * asked. No other status needs the extra call. If Stripe cannot answer this
+ * throws, like the fetch itself, and the attempt is tried again later.
+ */
+export async function addPaidEvidence(snapshot: SubscriptionSnapshot, hasPaidInvoice: (subscriptionId: string) => Promise<boolean>): Promise<SubscriptionSnapshot> {
+  if (snapshot.status !== "past_due" && snapshot.status !== "unpaid") return snapshot;
+  return { ...snapshot, everPaid: await hasPaidInvoice(snapshot.subscriptionId) };
+}
+
 /**
  * Where one subscription stands in Stripe right now. Null when Stripe has
  * no such subscription (or it is a live-mode one, which a test key cannot
@@ -241,7 +258,8 @@ export const fetchSubscriptionSnapshot: FetchSubscription = async (subscriptionI
   try {
     const subscription = await getStripe().subscriptions.retrieve(subscriptionId, { expand: ["latest_invoice", "schedule"] });
     if (subscription.livemode) return null;
-    return snapshotFromSubscription(subscription);
+    const snapshot = snapshotFromSubscription(subscription);
+    return snapshot && addPaidEvidence(snapshot, subscriptionHasPaidInvoice);
   } catch (error) {
     if (error instanceof Stripe.errors.StripeInvalidRequestError && error.code === "resource_missing") return null;
     throw error;

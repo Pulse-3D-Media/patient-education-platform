@@ -59,6 +59,43 @@ describe("checkScriptTarget", () => {
     }
   });
 
+  it("counts production as production however either side spells its host: a port, a trailing dot, capitals", () => {
+    const prodPooledWithPort = "postgresql://user:secret@ep-prod-example-123-pooler.us-east-2.aws.neon.tech:5432/neondb?sslmode=require";
+    const prodPooledWithDot = "postgresql://user:secret@ep-prod-example-123-pooler.us-east-2.aws.neon.tech./neondb?sslmode=require";
+    const prodDirectWithBoth = "postgresql://user:secret@EP-PROD-EXAMPLE-123.us-east-2.aws.neon.tech.:5432/neondb?sslmode=require";
+    for (const [url, host] of [
+      [prodPooledWithPort, prodHost],
+      [prodPooledWithDot, prodHost],
+      [prodDirectWithBoth, prodHost],
+      [prodPooled, `${prodHost}:5432`],
+      [prodPooled, `${prodHost}.`],
+      [prodPooled, `${prodHost}.:5432`],
+      [prodPooled, "ep-prod-example-123-pooler.us-east-2.aws.neon.tech:5432"],
+      [prodPooled, prodPooledWithPort],
+      [prodDirect, prodDirectWithBoth],
+      [prodPooledWithPort, `${prodHost}.`],
+    ]) {
+      const refused = checkScriptTarget({ DATABASE_URL: url, PRODUCTION_DATABASE_HOST: host }, ["clinic_1"]);
+      expect(refused.ok, `${url} against ${host}`).toBe(false);
+      expect(printed(refused)).toContain(PRODUCTION_FLAG);
+      expect(printed(refused)).toContain("is the PRODUCTION database");
+
+      // With the flag it runs, reported as production under the plain host name.
+      const allowed = checkScriptTarget({ DATABASE_URL: url, PRODUCTION_DATABASE_HOST: host }, ["clinic_1", PRODUCTION_FLAG]);
+      expect(allowed).toEqual({ ok: true, host: prodHost, production: true, args: ["clinic_1"] });
+    }
+  });
+
+  it("still tells a different database apart when it is spelled with a port or a trailing dot", () => {
+    for (const url of [
+      "postgresql://user:secret@ep-tst-example-456-pooler.us-east-2.aws.neon.tech:5432/neondb",
+      "postgresql://user:secret@ep-tst-example-456-pooler.us-east-2.aws.neon.tech./neondb",
+    ]) {
+      const result = checkScriptTarget({ DATABASE_URL: url, PRODUCTION_DATABASE_HOST: `${prodHost}:5432` }, []);
+      expect(result).toEqual({ ok: true, host: "ep-tst-example-456.us-east-2.aws.neon.tech", production: false, args: [] });
+    }
+  });
+
   it("treats the target as production when PRODUCTION_DATABASE_HOST is missing or unreadable (fails closed)", () => {
     for (const marker of [undefined, "", "   ", "http://", "postgresql://"]) {
       const refused = checkScriptTarget({ DATABASE_URL: testPooled, PRODUCTION_DATABASE_HOST: marker }, ["clinic_1"]);

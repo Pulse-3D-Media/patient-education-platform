@@ -2,9 +2,10 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import type { Prisma } from "@prisma/client";
 import { randomBytes } from "node:crypto";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { createShare } from "@/lib/db/shares";
+import { PERMANENT_QR_ORIGIN } from "@/lib/qr-code";
 import BillingPage from "./billing/page";
 import BrandingPage from "./branding/page";
 import LinksPage from "./links/page";
@@ -53,9 +54,23 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
+let currentHost = "localhost:3000";
 vi.mock("next/headers", () => ({
-  headers: async () => new Map([["host", "localhost:3000"]]),
+  headers: async () => new Map([["host", currentHost]]),
 }));
+
+// The real rows, with what the page handed them kept for the test to read: the address only shows in the browser, once a link is made.
+let linkRowsProps: { baseUrl: string; linksCanBeMade: boolean } | null = null;
+vi.mock("./links/LinkRows", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./links/LinkRows")>();
+  return {
+    ...real,
+    LinkRows: (props: Parameters<typeof real.LinkRows>[0]) => {
+      linkRowsProps = props;
+      return real.LinkRows(props);
+    },
+  };
+});
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -628,6 +643,76 @@ describe("who a link is from, on People and on the pamphlet", () => {
     await expect(render(() => PrintPage({ params: Promise.resolve({ code: share.code }) } as never), "/admin/print")).rejects.toThrow("notFound");
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     await expect(render(() => PrintPage({ params: Promise.resolve({ code: share.code }) } as never), "/admin/print")).rejects.toThrow("notFound");
+  });
+});
+
+describe("the address on a link's page and its pamphlet", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    currentHost = "localhost:3000";
+  });
+
+  const printPage = (code: string) => render(() => PrintPage({ params: Promise.resolve({ code }) } as never), `/admin/print/${code}`);
+
+  it("is the fixed address on production, whatever the Host header says, a production vercel.app address included, with no test mark", async () => {
+    const { code } = await createShare(createdClinicIds[3], createdVideoIds[0]);
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_URL", "example-app-abc123-team.vercel.app");
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    for (const host of ["evil.example.com", "example-app-abc123-team.vercel.app"]) {
+      currentHost = host;
+      const html = await printPage(code);
+      expect(html).toContain(`${PERMANENT_QR_ORIGIN}/watch/${code}`);
+      expect(html).not.toContain(host);
+      expect(html.toLowerCase()).not.toContain("test only");
+
+      await render(LinksPage, "/admin/links");
+      expect(linkRowsProps).toMatchObject({ baseUrl: PERMANENT_QR_ORIGIN });
+    }
+  });
+
+  it("is a preview's own address on a preview, whatever the Host header says, and the page and both halves of the paper say Test only", async () => {
+    const { code } = await createShare(createdClinicIds[3], createdVideoIds[0]);
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_BRANCH_URL", "example-git-branch.vercel.app");
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    for (const host of ["example-git-branch.vercel.app", "evil.example.com"]) {
+      currentHost = host;
+      const html = await printPage(code);
+      expect(html).toContain(`https://example-git-branch.vercel.app/watch/${code}`);
+      expect(html).not.toContain("evil.example.com");
+      expect(html.match(/Test only: not for patients/g)).toHaveLength(2);
+      expect(html).toContain("Never hand it to a patient");
+
+      await render(LinksPage, "/admin/links");
+      expect(linkRowsProps).toMatchObject({ baseUrl: "https://example-git-branch.vercel.app", linksCanBeMade: true });
+    }
+  });
+
+  it("is localhost on a developer's computer, still marked Test only", async () => {
+    const { code } = await createShare(createdClinicIds[3], createdVideoIds[0]);
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    const html = await printPage(code);
+    expect(html).toContain(`http://localhost:3000/watch/${code}`);
+    expect(html.match(/Test only: not for patients/g)).toHaveLength(2);
+  });
+
+  it("is refused in words when the deployment does not know its own address: no code on the pamphlet, no link can be made", async () => {
+    const { code } = await createShare(createdClinicIds[3], createdVideoIds[0]);
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    currentHost = "evil.example.com";
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
+    const html = await printPage(code);
+    expect(html).toContain("does not know its own address");
+    expect(html).not.toContain(code);
+    expect(html).not.toContain("evil.example.com");
+
+    const links = await render(LinksPage, "/admin/links");
+    expect(links).toContain("does not know its own address");
+    expect(linkRowsProps).toMatchObject({ baseUrl: "", linksCanBeMade: false });
   });
 });
 

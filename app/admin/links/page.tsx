@@ -1,7 +1,7 @@
+import { headers } from "next/headers";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
-import { getBaseUrl } from "@/lib/base-url";
 import { labelOf } from "@/lib/categories";
 import { getCategoryList } from "@/lib/db/category-config";
 import { requireClinicPage } from "@/lib/clinic";
@@ -13,6 +13,7 @@ import { listLiveQrCodesForClinic } from "@/lib/db/qr-codes";
 import { getShareTerms } from "@/lib/db/shares";
 import { listUsableVideos } from "@/lib/db/videos";
 import { errorKind } from "@/lib/error-kind";
+import { qrOriginFor } from "@/lib/qr-code";
 import { listSenders, type Sender } from "@/lib/senders";
 import { AdminFrame } from "../AdminFrame";
 import { LinkRows } from "./LinkRows";
@@ -84,9 +85,10 @@ export default async function LinksPage() {
   // createShare() applies when a link is made (lib/access.ts), so a row and
   // its button can never disagree.
   const access = await getClinicAccess(clinic.id);
-  const [videos, baseUrl, terms, senders, printed, list] = await Promise.all([
+  // The address every link on this page starts with. Null only on a deployment that does not know its own address.
+  const where = qrOriginFor((await headers()).get("host"), process.env);
+  const [videos, terms, senders, printed, list] = await Promise.all([
     access ? listUsableVideos(access) : [],
-    getBaseUrl(),
     readShareTerms(clinic.id),
     readSenders(clinic.id),
     listLiveQrCodesForClinic(clinic.id),
@@ -126,15 +128,16 @@ export default async function LinksPage() {
           ) : (
             TERMS_PROBLEM
           )}
+          {!where && <> {ADDRESS_PROBLEM}</>}
         </>
       }
       wide
     >
       <LinkRows
         procedures={procedures}
-        baseUrl={baseUrl}
+        baseUrl={where?.origin ?? ""}
         emptyProceduresText={emptyProceduresText}
-        linksCanBeMade={terms !== null}
+        linksCanBeMade={terms !== null && where !== null}
         senders={senders}
         categories={list.map((category) => ({ value: category.value, label: category.label }))}
       />
@@ -156,6 +159,9 @@ export default async function LinksPage() {
 
 /** What the page says instead of the numbers when a link setting is out of range. createShare refuses for the same reason, so no link can be made. */
 const TERMS_PROBLEM = "Links cannot be made right now: a link setting is out of range. Ask Pulse 3D to check the platform settings.";
+
+/** What the page says when the deployment does not know its own address, so a link could not be written out. */
+const ADDRESS_PROBLEM = "Links cannot be made here: this deployment does not know its own address. Ask Pulse 3D.";
 
 /**
  * The clinic's share terms, or null when they cannot be worked out: a

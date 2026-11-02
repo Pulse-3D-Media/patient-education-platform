@@ -37,6 +37,31 @@ describe("endpointOf", () => {
     expect(endpointOf("postgresql://u:p@ep-pooler-fan-1.region.aws.neon.tech/db")).toBe("ep-pooler-fan-1.region.aws.neon.tech");
   });
 
+  it("gives one form for every spelling of one host: no port, no trailing dot, no pooler suffix, lower case", () => {
+    const expected = "ep-prod-example-123.us-east-2.aws.neon.tech";
+    for (const host of [
+      "ep-prod-example-123.us-east-2.aws.neon.tech:5432",
+      "ep-prod-example-123.us-east-2.aws.neon.tech:6543",
+      "ep-prod-example-123.us-east-2.aws.neon.tech.",
+      "ep-prod-example-123.us-east-2.aws.neon.tech.:5432",
+      "ep-prod-example-123-pooler.us-east-2.aws.neon.tech:5432",
+      "ep-prod-example-123-pooler.us-east-2.aws.neon.tech.",
+      "EP-Prod-Example-123-POOLER.US-EAST-2.aws.neon.tech.:5432",
+    ]) {
+      expect(endpointOf(`postgresql://u:p@${host}/db`), host).toBe(expected);
+    }
+  });
+
+  it("reduces a host with no dots the same way", () => {
+    expect(endpointOf("postgresql://u:p@ep-one-pooler:5432/db")).toBe("ep-one");
+    expect(endpointOf("postgresql://u:p@localhost.:5432/db")).toBe("localhost");
+  });
+
+  it("returns null when a string has no host once the spelling is taken away", () => {
+    expect(endpointOf("postgresql://u:p@:5432/db")).toBeNull();
+    expect(endpointOf("postgresql://u:p@./db")).toBeNull();
+  });
+
   it("returns null for anything that is not a connection string", () => {
     expect(endpointOf(undefined)).toBeNull();
     expect(endpointOf("")).toBeNull();
@@ -66,6 +91,37 @@ describe("checkTestDatabase", () => {
     const result = checkTestDatabase(prodDirect, withProduction({ DATABASE_URL: prodPooled }));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("DATABASE_URL");
+  });
+
+  it("refuses production however the test string or the production string spells its host", () => {
+    const withPort = "postgresql://user:secret@ep-prod-example-123-pooler.us-east-2.aws.neon.tech:5432/neondb?sslmode=require";
+    const withDot = "postgresql://user:secret@ep-prod-example-123.us-east-2.aws.neon.tech./neondb?sslmode=require";
+    for (const [test, production] of [
+      [withPort, prodPooled],
+      [withPort, prodDirect],
+      [withDot, prodPooled],
+      [prodPooled, withPort],
+      [prodDirect, withDot],
+      [withPort, withDot],
+    ]) {
+      const result = checkTestDatabase(test, withProduction({ DATABASE_URL: production }));
+      expect(result.ok, `${test} against ${production}`).toBe(false);
+      if (!result.ok) expect(result.reason).toContain("same database");
+    }
+  });
+
+  it("refuses a production string that has no host left once the spelling is taken away", () => {
+    const result = checkTestDatabase(testPooled, withProduction({ DATABASE_URL: "postgresql://u:p@./db", DIRECT_URL: prodDirect }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toContain("DATABASE_URL");
+  });
+
+  it("still allows a real testing endpoint spelled with a port", () => {
+    const result = checkTestDatabase(
+      "postgresql://user:secret@ep-tst-example-456-pooler.us-east-2.aws.neon.tech:5432/neondb",
+      withProduction({ DATABASE_URL: prodPooled, DIRECT_URL: prodDirect }),
+    );
+    expect(result).toEqual({ ok: true, endpoint: "ep-tst-example-456.us-east-2.aws.neon.tech" });
   });
 
   it("refuses when there is no production string to compare against", () => {

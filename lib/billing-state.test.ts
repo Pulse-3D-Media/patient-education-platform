@@ -186,14 +186,42 @@ describe("decideBilling: checkout and the first payment", () => {
     expect(d.entries.join(" ")).toContain("earlier checkout");
 
     // The same when the subscription is first seen already failing.
-    const failing = apply(startedAgain, snap({ status: "past_due", latestInvoicePaid: false, planId: PLAN }));
+    const failing = apply(startedAgain, snap({ status: "past_due", latestInvoicePaid: false, everPaid: true, planId: PLAN }));
     expect(failing.activatePlanId).toBe(PLAN);
     expect(failing.next).toMatchObject({ status: "PAST_DUE", currentPlanId: PLAN, pendingPlanId: null });
   });
 
+  describe("first seen already failing: a first activation needs a paid invoice", () => {
+    const onSub = facts({ status: "INCOMPLETE", stripeSubscriptionId: SUB, pendingPlanId: PLAN });
+
+    it.each(["past_due", "unpaid"])("%s with no paid invoice starts nothing, opens nothing and asks for a look", (status) => {
+      for (const everPaid of [false, undefined]) {
+        const d = decideBilling(onSub, snap({ status, latestInvoicePaid: false, everPaid, planId: PLAN }), NOW, 14);
+        expect(d).toMatchObject({ kind: "ignored", needsLook: true });
+      }
+    });
+
+    it("a payment that looked active, was never paid and then failed starts nothing", () => {
+      const started = apply(waiting, snap({ status: "active", latestInvoicePaid: false })).next;
+      const d = decideBilling(started, snap({ status: "past_due", latestInvoicePaid: false, everPaid: false, planId: PLAN }), NOW, 14);
+      expect(d).toMatchObject({ kind: "ignored", needsLook: true });
+    });
+
+    it.each(["past_due", "unpaid"])("%s with a paid invoice starts the plan it was bought for, in grace", (status) => {
+      const d = apply(onSub, snap({ status, latestInvoicePaid: false, everPaid: true, planId: PLAN }));
+      expect(d.activatePlanId).toBe(PLAN);
+      expect(d.next).toMatchObject({ status: "PAST_DUE", currentPlanId: PLAN, graceEndsAt: GRACE_END });
+    });
+
+    it("a clinic already live needs no such evidence: a failed renewal still gets its grace period", () => {
+      const d = apply(active, snap({ status: "past_due", latestInvoicePaid: false, everPaid: false }));
+      expect(d.next).toMatchObject({ status: "PAST_DUE", graceEndsAt: GRACE_END });
+    });
+  });
+
   it("a paid subscription not marked with one of this clinic's plans starts nothing and asks for a look", () => {
     const waitingOnSub = facts({ status: "INCOMPLETE", stripeSubscriptionId: SUB, pendingPlanId: PLAN });
-    for (const paid of [snap({ planId: null }), snap({ status: "past_due", latestInvoicePaid: false, planId: null }), snap({ status: "unpaid", latestInvoicePaid: false, planId: null })]) {
+    for (const paid of [snap({ planId: null }), snap({ status: "past_due", latestInvoicePaid: false, everPaid: true, planId: null }), snap({ status: "unpaid", latestInvoicePaid: false, everPaid: true, planId: null })]) {
       const d = decideBilling(waitingOnSub, paid, NOW, 14);
       expect(d).toMatchObject({ kind: "ignored", needsLook: true });
     }

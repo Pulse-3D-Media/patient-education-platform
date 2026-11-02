@@ -15,8 +15,9 @@
  * part after the "@", for instance ep-something.us-east-2.aws.neon.tech).
  * The target is DATABASE_URL, the connection the scripts actually use. The
  * two are compared the way the test guard compares them (endpointOf in
- * vitest.guard.ts), so Neon's pooled and direct addresses of one database
- * count as the same database.
+ * vitest.guard.ts), which reduces each to one form first, so Neon's pooled and
+ * direct addresses of one database count as the same database, and so does a
+ * host written with a port, a trailing dot or capitals.
  *
  * It fails closed. Whenever the answer is not a clear "this is not
  * production", the target is treated as production:

@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   StripeConfigError,
+  addPaidEvidence,
   checkoutIsOpen,
   checkoutSessionParams,
   eventRefs,
@@ -218,6 +219,29 @@ describe("snapshotFromSubscription", () => {
     for (const latest_invoice of [{ status: "open" }, { status: "uncollectible" }, { status: "void" }, { status: "draft" }, null, "in_not_expanded"]) {
       expect(snapshotFromSubscription(subscription({ latest_invoice }))?.latestInvoicePaid).toBe(false);
     }
+  });
+
+  it("asks for a paid invoice only for a failing subscription, and passes on the answer", async () => {
+    const base = snapshotFromSubscription(subscription())!;
+    const asked: string[] = [];
+    const ask = (answer: boolean) => async (id: string) => {
+      asked.push(id);
+      return answer;
+    };
+
+    expect(await addPaidEvidence(base, ask(true))).toEqual(base);
+    expect(await addPaidEvidence({ ...base, status: "incomplete" }, ask(true))).not.toHaveProperty("everPaid");
+    expect(asked).toEqual([]);
+
+    expect((await addPaidEvidence({ ...base, status: "past_due" }, ask(true))).everPaid).toBe(true);
+    expect((await addPaidEvidence({ ...base, status: "unpaid" }, ask(false))).everPaid).toBe(false);
+    expect(asked).toEqual(["sub_1", "sub_1"]);
+
+    await expect(
+      addPaidEvidence({ ...base, status: "past_due" }, async () => {
+        throw new Error("Stripe is down");
+      }),
+    ).rejects.toThrow();
   });
 
   it("reads a scheduled cancellation from either way Stripe expresses it", () => {

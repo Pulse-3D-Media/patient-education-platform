@@ -1,8 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
+import { createShare } from "@/lib/db/shares";
+import { qrPng } from "@/lib/qr";
+import { PERMANENT_QR_ORIGIN } from "@/lib/qr-code";
 import { fakeClerk } from "@/lib/testing/fake-clerk";
 import { GET as qrImage } from "../qr-codes/[id]/image/route";
+import { GET as linkQrImage } from "../qr/[code]/route";
 import { createQrCodeAction, replaceQrCodeAction, retireQrCodeAction } from "./actions";
 
 /**
@@ -19,11 +23,20 @@ import { createQrCodeAction, replaceQrCodeAction, retireQrCodeAction } from "./a
  *   - Replace keeps the code's own surgeon, and is refused (the old code left
  *     working) once that surgeon has left the clinic;
  *   - the picture is a PNG to save, never cached, named TEST-ONLY away from
- *     production, and gone once the code is retired.
+ *     production, and gone once the code is retired;
+ *   - a one-time link's QR picture carries the fixed address on production and
+ *     the deployment's own address elsewhere, whatever the Host header says,
+ *     is named TEST-ONLY away from production, and is refused where no address
+ *     can be trusted.
  */
 
 vi.mock("@clerk/nextjs/server", async () => (await import("@/lib/testing/fake-clerk")).clerkServerModule());
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// The real picture, with the address it was asked to draw kept for the test to read.
+vi.mock("@/lib/qr", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/qr")>();
+  return { ...real, qrPng: vi.fn(real.qrPng) };
+});
 
 const tag = () => randomBytes(6).toString("hex");
 const orgA = `org_test_${tag()}`;
@@ -119,6 +132,63 @@ describe("making a printed code", () => {
     expect(again).toEqual({ ok: true, id: (first as { id: string }).id, created: false });
     const row = await prisma.qrCode.findUniqueOrThrow({ where: { id: (first as { id: string }).id } });
     expect(row).toMatchObject({ clinicId: clinicA, senderUserId: surgeonA, senderFallbackName: "Dr. Jane Smith" });
+  });
+});
+
+describe("a one-time link's QR picture", () => {
+  /** Ask for the picture with this Host header: the answer, and the address drawn into it. */
+  async function ask(code: string, host: string) {
+    vi.mocked(qrPng).mockClear();
+    const picture = await linkQrImage(new Request("http://x/x", { headers: { host } }), { params: Promise.resolve({ code }) } as never);
+    return { picture, drawn: vi.mocked(qrPng).mock.calls[0]?.[0] };
+  }
+
+  it("carries the fixed address on production, whatever the Host header says, a production vercel.app address included", async () => {
+    const { code } = await createShare(clinicA, video);
+    fakeClerk.signIn(adminA, orgA);
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_URL", "example-app-abc123-team.vercel.app");
+    for (const host of ["evil.example.com", "example-app-abc123-team.vercel.app"]) {
+      const { picture, drawn } = await ask(code, host);
+      expect(picture.status).toBe(200);
+      expect(drawn).toBe(`${PERMANENT_QR_ORIGIN}/watch/${code}`);
+      expect(picture.headers.get("Content-Disposition")).not.toContain("TEST-ONLY");
+    }
+  });
+
+  it("carries a preview's own address on a preview, whatever the Host header says, and its file is named TEST-ONLY", async () => {
+    const { code } = await createShare(clinicA, video);
+    fakeClerk.signIn(adminA, orgA);
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_BRANCH_URL", "example-git-branch.vercel.app");
+    for (const host of ["example-git-branch.vercel.app", "evil.example.com"]) {
+      const { picture, drawn } = await ask(code, host);
+      expect(picture.status).toBe(200);
+      expect(drawn).toBe(`https://example-git-branch.vercel.app/watch/${code}`);
+      expect(picture.headers.get("Content-Disposition")).toMatch(/^inline; filename="TEST-ONLY-vitest-qr-action-video-/);
+    }
+  });
+
+  it("draws nothing when the deployment does not know its own address", async () => {
+    const { code } = await createShare(clinicA, video);
+    fakeClerk.signIn(adminA, orgA);
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const { picture, drawn } = await ask(code, "evil.example.com");
+    expect(picture.status).toBe(503);
+    expect(drawn).toBeUndefined();
+  });
+
+  it("is a plain 404 for a member, another clinic's admin and someone signed out", async () => {
+    const { code } = await createShare(clinicA, video);
+    for (const [user, org] of [[memberA, orgA], [adminB, orgB], [null, null]] as const) {
+      fakeClerk.signIn(user, org);
+      const { picture, drawn } = await ask(code, "localhost:3000");
+      expect(picture.status).toBe(404);
+      expect(drawn).toBeUndefined();
+    }
   });
 });
 

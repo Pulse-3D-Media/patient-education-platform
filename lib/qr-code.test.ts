@@ -50,6 +50,10 @@ describe("the address a printed code carries", () => {
     expect(qrOriginFor("example-app.vercel.app", env)).toEqual({ origin: PERMANENT_QR_ORIGIN, testOnly: false });
     expect(qrOriginFor("evil.example.com", env)).toEqual({ origin: PERMANENT_QR_ORIGIN, testOnly: false });
     expect(qrOriginFor(null, env)).toEqual({ origin: PERMANENT_QR_ORIGIN, testOnly: false });
+    // One of the production deployment's own vercel.app addresses, which pickTrustedOrigin would answer with: paper must not carry it.
+    const deployed = { ...env, VERCEL_URL: "example-app-abc123-team.vercel.app", VERCEL_BRANCH_URL: "example-app-git-main-team.vercel.app" };
+    expect(qrOriginFor("example-app-abc123-team.vercel.app", deployed)).toEqual({ origin: PERMANENT_QR_ORIGIN, testOnly: false });
+    expect(qrOriginFor("example-app-git-main-team.vercel.app", deployed)).toEqual({ origin: PERMANENT_QR_ORIGIN, testOnly: false });
     expect(PERMANENT_QR_ORIGIN).toBe("https://learn.pulse3dmedia.com");
   });
 

@@ -1,17 +1,17 @@
 /**
- * Which web address Stripe may send a person back to after checkout.
+ * Which web address Stripe may send a person back to after checkout, and which
+ * address goes in an email or, away from production, in a patient link or a
+ * printed code (qrOriginFor in lib/qr-code.ts).
  *
  * Pure: no request, no database. The caller hands in the request's Host
  * header and the environment, and gets back an origin such as
  * "https://example.vercel.app", or null when none can be trusted.
  *
- * WHY THIS EXISTS. lib/base-url.ts builds links from the Host header of the
- * incoming request, which is fine for a QR code shown to the person who made
- * the request. A return address handed to Stripe is different: the Host
- * header is something the sender of a request chooses, and an address that
- * ends up in a payment flow must not be one an attacker chose. So the Host
- * header is only ever used to PICK among addresses this deployment already
- * knows are its own. It is never trusted by itself.
+ * WHY THIS EXISTS. The Host header is something the sender of a request
+ * chooses, and an address that ends up in a payment flow, an email or on paper
+ * must not be one an attacker chose. So the Host header is only ever used to
+ * PICK among addresses this deployment already knows are its own. It is never
+ * trusted by itself.
  *
  * The addresses a deployment knows are its own:
  *

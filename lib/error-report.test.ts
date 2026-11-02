@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SIGN_IN_UNAVAILABLE_DIGEST, SignInUnavailableError } from "./clerk-timeout";
-import { ALERT_WINDOW_MS, alertEmail, alertKey, alertRecipients, describeRequestError } from "./error-report";
+import { ALERT_CEILING, ALERT_WINDOW_MS, alertEmail, alertGroup, alertKey, alertRecipients, describeRequestError, distinctError, heldBackEmail, heldBackKey } from "./error-report";
 
 /**
  * What an error report may carry, with plain values and everything
@@ -97,30 +97,47 @@ describe("alertKey", () => {
   it("is the same for the same error within one ten-minute window, and different in the next", () => {
     const later = new Date(NOW.getTime() + 60_000);
     const nextWindow = new Date(NOW.getTime() + ALERT_WINDOW_MS);
-    expect(alertKey(report, later)).toBe(alertKey(report, NOW));
-    expect(alertKey(report, nextWindow)).not.toBe(alertKey(report, NOW));
+    expect(alertKey(report, 1, later)).toBe(alertKey(report, 1, NOW));
+    expect(alertKey(report, 1, nextWindow)).not.toBe(alertKey(report, 1, NOW));
   });
 
-  it("differs between two different errors", () => {
+  it("differs between two errors of different classes, and between one group's alerts", () => {
     const other = describeRequestError(new SignInUnavailableError("x", null), request, context, vercel, NOW);
-    expect(alertKey(other, NOW)).not.toBe(alertKey(report, NOW));
+    expect(alertKey(other, 1, NOW)).not.toBe(alertKey(report, 1, NOW));
+    expect(alertKey(report, 2, NOW)).not.toBe(alertKey(report, 1, NOW));
   });
 
-  it("falls back to the error's name when there is no digest, and holds only safe characters", () => {
+  it("leaves the digest out, so one group only has the ceiling's number of keys however many digests it sees", () => {
+    const withDigest = (digest: string) => describeRequestError(Object.assign(new Error("x"), { digest }), request, context, vercel, NOW);
+    expect(alertKey(withDigest("111"), 1, NOW)).toBe(alertKey(withDigest("222"), 1, NOW));
+    expect(distinctError(withDigest("111"))).toBe("111");
+    expect(distinctError(describeRequestError("boom", request, context, vercel, NOW))).toBe("string");
+  });
+
+  it("never shares a key between a preview and production", () => {
+    const production = describeRequestError(new Error("x"), request, context, vercel, NOW);
+    const preview = describeRequestError(new Error("x"), request, context, { ...vercel, VERCEL_ENV: "preview" }, NOW);
+    expect(alertKey(preview, 1, NOW)).not.toBe(alertKey(production, 1, NOW));
+    expect(heldBackKey(preview, NOW)).not.toBe(heldBackKey(production, NOW));
+  });
+
+  it("holds only safe characters, and nothing from the request", () => {
     const named = describeRequestError("boom", request, context, vercel, NOW);
-    expect(alertKey(named, NOW)).toMatch(/^error-alert-string-_watch__code_-page-\d+$/);
-    expect(alertKey(report, NOW)).toMatch(/^[\w-]+$/);
+    expect(alertKey(named, 1, NOW)).toMatch(/^error-alert-[\w]+-_watch__code_-page-string-1-\d+$/);
+    expect(alertKey(report, 1, NOW)).toMatch(/^[\w-]+$/);
+    expect(heldBackKey(report, NOW)).toMatch(/^error-alert-held-back-[\w-]+$/);
+    expect(alertGroup(report)).not.toContain("k7m2xq");
   });
 
-  it("keeps two errors with no digest and the same class name apart when they happen at different routes or of different kinds", () => {
+  it("keeps two errors with the same class name apart when they happen at different routes or of different kinds", () => {
     const plain = () => new Error("no digest here");
     const onWatch = describeRequestError(plain(), request, context, vercel, NOW);
     const onBilling = describeRequestError(plain(), request, { routePath: "/admin/billing", routeType: "render" }, vercel, NOW);
     const asAction = describeRequestError(plain(), request, { routePath: "/watch/[code]", routeType: "action" }, vercel, NOW);
     expect(onWatch.digest).toBeNull();
-    expect(new Set([alertKey(onWatch, NOW), alertKey(onBilling, NOW), alertKey(asAction, NOW)]).size).toBe(3);
+    expect(new Set([alertKey(onWatch, 1, NOW), alertKey(onBilling, 1, NOW), alertKey(asAction, 1, NOW)]).size).toBe(3);
     // The same error at the same place is still one key.
-    expect(alertKey(describeRequestError(plain(), request, context, vercel, NOW), NOW)).toBe(alertKey(onWatch, NOW));
+    expect(alertKey(describeRequestError(plain(), request, context, vercel, NOW), 1, NOW)).toBe(alertKey(onWatch, 1, NOW));
   });
 });
 
@@ -131,6 +148,39 @@ describe("alertRecipients", () => {
     expect(alertRecipients({ ERROR_ALERT_EMAIL: "not an address" })).toEqual([]);
     expect(alertRecipients({ ERROR_ALERT_EMAIL: "evan@example.test" })).toEqual(["evan@example.test"]);
     expect(alertRecipients({ ERROR_ALERT_EMAIL: " evan@example.test , van@example.test ,, junk" })).toEqual(["evan@example.test", "van@example.test"]);
+  });
+});
+
+describe("heldBackEmail", () => {
+  const failure = describeRequestError(databaseFailure(), request, context, vercel, NOW);
+  const message = heldBackEmail(failure, ["evan@example.test"], "held-key", NOW);
+
+  it("says what was held back, where, and where the rest are", () => {
+    expect(message.to).toEqual(["evan@example.test"]);
+    expect(message.idempotencyKey).toBe("held-key");
+    expect(message.subject).toContain("error alerts held back");
+    expect(message.subject).toContain("/watch/[code]");
+    expect(message.text).toContain(`limit of ${ALERT_CEILING} messages`);
+    expect(message.text).toContain("Where: /watch/[code] (page)");
+    expect(message.text).toContain(`What: ${failure.errorName}`);
+    expect(message.text).toContain("server log");
+  });
+
+  it("reads the same from every server, whichever error tipped it over and whenever in the window", () => {
+    const later = new Date(NOW.getTime() + 1_000);
+    const other = describeRequestError(Object.assign(databaseFailure(), { digest: "other" }), request, context, vercel, later);
+    const again = heldBackEmail(other, ["evan@example.test"], "held-key", later);
+    expect(again.text).toBe(message.text);
+    expect(again.html).toBe(message.html);
+    expect(heldBackKey(other, later)).toBe(heldBackKey(failure, NOW));
+  });
+
+  it("carries no digest, share code, connection string or error message", () => {
+    for (const text of [message.subject, message.text, message.html]) {
+      expect(text).not.toContain("k7m2xq");
+      expect(text).not.toContain("postgresql://");
+      if (failure.digest) expect(text).not.toContain(failure.digest);
+    }
   });
 });
 

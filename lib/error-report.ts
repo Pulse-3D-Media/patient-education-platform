@@ -88,21 +88,52 @@ function safeRoute(routePath: unknown): string {
 export const ALERT_WINDOW_MS = 10 * 60_000;
 
 /**
- * The key that makes repeated alerts for one error harmless: the same for
- * the same error, at the same route and of the same kind, within the same
- * ten-minute window. Resend keeps the first message sent under a key and
- * answers a repeat with it (see lib/email.ts), so every server sending the
- * same key in that window results in one email.
- *
- * The route and the kind are part of the key because an error with no
- * digest falls back to its class name ("Error", "TypeError"), and without
- * them one plain Error on the patient page would hide a different one in
- * Billing for the whole window.
+ * The most alert emails in one ten-minute window for one route, kind and
+ * error name, however many different errors that is. A digest is worked out
+ * from the error's text, and some error text can vary with the request, so
+ * "one email per distinct error" alone has no upper limit.
  */
-export function alertKey(report: ErrorReport, now: Date): string {
-  const bucket = Math.floor(now.getTime() / ALERT_WINDOW_MS);
-  const what = `${report.digest ?? report.errorName}-${report.route}-${report.kind}`.replace(/[^\w-]/g, "_").slice(0, 200);
-  return `error-alert-${what}-${bucket}`;
+export const ALERT_CEILING = 3;
+
+/** Which ten-minute window a moment falls in. */
+export function alertWindow(now: Date): number {
+  return Math.floor(now.getTime() / ALERT_WINDOW_MS);
+}
+
+/** What makes two reports "the same error" on one server: the digest, or the class name when there is none. */
+export function distinctError(report: ErrorReport): string {
+  return report.digest ?? report.errorName;
+}
+
+/**
+ * The group the ceiling counts within: deployment type, route, kind and error
+ * name. The route and the kind are in it because an error with no digest
+ * falls back to its class name ("Error", "TypeError"), and without them one
+ * plain Error on the patient page would use up Billing's alerts too. The
+ * deployment type is in it so a preview can never use up production's.
+ */
+export function alertGroup(report: ErrorReport): string {
+  return `${report.environment}-${report.route}-${report.kind}-${report.errorName}`.replace(/[^\w-]/g, "_").slice(0, 200);
+}
+
+/**
+ * The key of the nth alert email (1 up to ALERT_CEILING) for a group in a
+ * window. Resend keeps the first message sent under a key and drops the rest
+ * (see lib/email.ts). This is what makes the ceiling hold across servers: a
+ * serverless function may be one of many running at once, each counting only
+ * for itself, but between them they only have ALERT_CEILING keys to send
+ * under. An outage with one error is that group's first alert on every
+ * server, so it is one email. The price: when two servers each see a
+ * different first error in the same window, only one of them is emailed. The
+ * other is still in the server log.
+ */
+export function alertKey(report: ErrorReport, slot: number, now: Date): string {
+  return `error-alert-${alertGroup(report)}-${slot}-${alertWindow(now)}`;
+}
+
+/** The key of the one "alerts were held back" note for a group in a window. The same on every server, so there is one note. */
+export function heldBackKey(report: ErrorReport, now: Date): string {
+  return `error-alert-held-back-${alertGroup(report)}-${alertWindow(now)}`;
 }
 
 /** Who gets alerts: ERROR_ALERT_EMAIL, one address or several separated by commas. Empty means nobody, and no email is sent. */
@@ -128,7 +159,7 @@ export function alertEmail(report: ErrorReport, to: string[], idempotencyKey: st
     "",
     "This message names the route pattern and the kind of error only, never the address a person opened, a link code, an error message or a request body. The full detail is in the server log: Vercel, the project, Logs; search for the digest.",
     "",
-    "You get at most one message per distinct error every ten minutes.",
+    `You get at most one message per distinct error every ten minutes, and at most ${ALERT_CEILING} for one kind of error at one route.`,
   ];
   const html = `<p>${lines.map(escapeHtml).join("<br>")}</p>`;
   return {
@@ -136,6 +167,31 @@ export function alertEmail(report: ErrorReport, to: string[], idempotencyKey: st
     subject: `Pulse 3D app: an error on ${report.environment} (${report.route})`,
     text: lines.join("\n"),
     html,
+    idempotencyKey,
+  };
+}
+
+/**
+ * The one note that says the ceiling was reached. It names the group and the
+ * window, not the error that tipped it over, so it reads the same from every
+ * server (Resend answers the same key with different words as a refusal).
+ */
+export function heldBackEmail(report: ErrorReport, to: string[], idempotencyKey: string, now: Date): EmailMessage {
+  const windowStart = new Date(alertWindow(now) * ALERT_WINDOW_MS).toISOString();
+  const lines = [
+    `The Pulse 3D app has held back error alerts on ${report.environment}: it reached its limit of ${ALERT_CEILING} messages in ten minutes for one kind of error at one route.`,
+    "",
+    `Ten minutes starting: ${windowStart}`,
+    `Where: ${report.route} (${report.kind})`,
+    `What: ${report.errorName}`,
+    "",
+    'More errors of this kind may happen in these ten minutes, and no message will be sent about them. Each one is still in the server log: Vercel, the project, Logs; search for "Request error:". Alerts start again with the next ten minutes.',
+  ];
+  return {
+    to,
+    subject: `Pulse 3D app: error alerts held back on ${report.environment} (${report.route})`,
+    text: lines.join("\n"),
+    html: `<p>${lines.map(escapeHtml).join("<br>")}</p>`,
     idempotencyKey,
   };
 }

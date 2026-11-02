@@ -7,7 +7,7 @@ import { CopyButton } from "@/components/ui/CopyButton";
 import { CloseIcon, SearchIcon } from "@/components/ui/icons";
 import { INPUT, PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
 import type { Sender } from "@/lib/sender-name";
-import { qrFileName, watchLink } from "@/lib/share-link";
+import { watchLink } from "@/lib/share-link";
 import { createLinkAction, createQrCodeAction } from "./actions";
 
 /** One video this clinic may share, as the Shared links page shows it. */
@@ -70,7 +70,7 @@ export function LinkRows({
   baseUrl: string;
   /** What the page says when the clinic has nothing to share, worked out by the page from the clinic's plan. */
   emptyProceduresText: string;
-  /** False when a link setting is out of range: pressing Create link says so, and the page's intro says why. */
+  /** False when a link setting is out of range, or this deployment does not know its own address: pressing Create link says so, and the page's intro says why. */
   linksCanBeMade: boolean;
   /** Everyone holding a seat, or null when the clinic's people could not be read just now. */
   senders: Sender[] | null;
@@ -480,8 +480,8 @@ function LinkMenu({ title, link, baseUrl, onClose }: { title: string; link: Made
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <CopyButton text={address} label="Copy link" />
-        {/* A plain link with a download name: the browser saves the picture instead of opening it. */}
-        <a href={`/admin/qr/${link.code}`} download={qrFileName(title, link.code)} className={SECONDARY_BUTTON}>
+        {/* A plain download link: the browser saves the picture instead of opening it, under the name the server gives it. */}
+        <a href={`/admin/qr/${link.code}`} download className={SECONDARY_BUTTON}>
           Download QR code
         </a>
         {/* The pamphlet opens in a new tab, so this menu is still here afterwards. */}

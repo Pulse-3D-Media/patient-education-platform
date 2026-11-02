@@ -1,10 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
+import { headers } from "next/headers";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getBaseUrl } from "@/lib/base-url";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { getShareForClinic } from "@/lib/db/shares";
 import { qrSvg } from "@/lib/qr";
+import { qrOriginFor } from "@/lib/qr-code";
 import { senderLines } from "@/lib/sender-name";
 import { isClinicAdmin } from "@/lib/roles";
 import { watchLink } from "@/lib/share-link";
@@ -26,6 +27,11 @@ import { PrintButton } from "./PrintButton";
  * same "for education only" sentence the patient page carries. A
  * placeholder video carries its mark on the paper too, so a pamphlet for a
  * sample animation can never pass for the real one.
+ *
+ * The address on it is fixed on the production deployment (PERMANENT_QR_ORIGIN
+ * in lib/qr-code.ts), never taken from the request. Printed from a preview or
+ * a developer's computer, it opens that test address instead, and the page and
+ * the paper both say "Test only" in large letters.
  */
 export const dynamic = "force-dynamic";
 
@@ -44,7 +50,14 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
   const share = await getShareForClinic(clinicId, code);
   if (!share) notFound();
 
-  const link = watchLink(await getBaseUrl(), share.code);
+  const where = qrOriginFor((await headers()).get("host"), process.env);
+  if (!where) {
+    return (
+      <p className="p-8 text-black">This deployment does not know its own address, so no code can be drawn here. Ask Pulse 3D.</p>
+    );
+  }
+
+  const link = watchLink(where.origin, share.code);
   // The QR code as a picture the browser can show: SVG, so it prints sharp.
   const qrImage = "data:image/svg+xml;utf8," + encodeURIComponent(await qrSvg(link));
   const pamphlet = {
@@ -53,6 +66,7 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
     placeholder: share.video.isPlaceholder,
     link,
     qrImage,
+    testOnly: where.testOnly,
   };
 
   return (
@@ -66,6 +80,11 @@ export default async function PrintPage({ params }: PageProps<"/admin/print/[cod
         </Link>
         <PrintButton />
       </div>
+      {where.testOnly && (
+        <p className="mx-auto mb-4 w-[8.5in] border-2 border-black bg-white p-3 text-sm font-semibold print:hidden">
+          Test only. This code opens a test copy of the app, not the real one. Never hand it to a patient; print the real code from the live site.
+        </p>
+      )}
 
       {/* The sheet of paper: the pamphlet twice, one per half */}
       <div className="sheet mx-auto bg-white shadow-[0_8px_40px_rgba(0,0,0,.15)] print:shadow-none">

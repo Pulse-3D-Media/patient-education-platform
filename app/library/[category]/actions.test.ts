@@ -1,9 +1,10 @@
 import { generateKeyPairSync, randomBytes } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { createShare } from "@/lib/db/shares";
 import { ShareTermsError } from "@/lib/expiry";
 import { getCurrentClinicId } from "@/lib/clinic";
+import { PERMANENT_QR_ORIGIN } from "@/lib/qr-code";
 import { fakeClerk } from "@/lib/testing/fake-clerk";
 import { refreshPlaybackAction, sendShareAction, setMyPatientNameAction } from "./actions";
 
@@ -36,9 +37,10 @@ vi.mock("@/lib/clinic", async (importOriginal) => {
 
 vi.mock("@clerk/nextjs/server", async () => (await import("@/lib/testing/fake-clerk")).clerkServerModule());
 
-// getBaseUrl() reads the request headers; there is no request here.
+// The link's address is picked using the request's Host header; there is no request here.
+let currentHost = "localhost:3000";
 vi.mock("next/headers", () => ({
-  headers: async () => new Map([["host", "localhost:3000"]]),
+  headers: async () => new Map([["host", currentHost]]),
 }));
 
 function fakeOrgId() {
@@ -126,6 +128,55 @@ afterAll(async () => {
 async function linksFor(clinicId: string) {
   return prisma.share.count({ where: { clinicId } });
 }
+
+describe("the address a link from the library carries", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    currentHost = "localhost:3000";
+  });
+
+  it("is the fixed address on production, whatever the Host header says, a production vercel.app address included", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_URL", "example-app-abc123-team.vercel.app");
+    signInAs(orgKnee);
+    for (const host of ["evil.example.com", "example-app-abc123-team.vercel.app"]) {
+      currentHost = host;
+      const result = await sendShareAction(placeholderId);
+      if (!result.ok) throw new Error(result.error);
+      expect(result.link).toBe(`${PERMANENT_QR_ORIGIN}/watch/${result.code}`);
+    }
+  });
+
+  it("is a preview's own address on a preview, and a forged Host header cannot change it", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("VERCEL_BRANCH_URL", "example-git-branch.vercel.app");
+    signInAs(orgKnee);
+    for (const host of ["example-git-branch.vercel.app", "evil.example.com"]) {
+      currentHost = host;
+      const result = await sendShareAction(placeholderId);
+      if (!result.ok) throw new Error(result.error);
+      expect(result.link).toBe(`https://example-git-branch.vercel.app/watch/${result.code}`);
+    }
+  });
+
+  it("makes no link at all when the deployment does not know its own address, and says one plain sentence", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    currentHost = "evil.example.com";
+    signInAs(orgKnee);
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const before = await linksFor(kneeClinic);
+      const result = await sendShareAction(placeholderId);
+      expect(result).toEqual({ ok: false, error: expect.stringContaining("Nothing was sent") });
+      expect(await linksFor(kneeClinic)).toBe(before);
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+});
 
 describe("sendShareAction", () => {
   it("makes the link for someone holding a seat at an open clinic with the category on its plan, in that clinic, from them", async () => {

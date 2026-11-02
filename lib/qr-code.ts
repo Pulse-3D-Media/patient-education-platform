@@ -53,26 +53,28 @@ export function qrLink(origin: string, code: string): string {
 }
 
 /**
- * THE ADDRESS EVERY PRINTED CODE CARRIES ON PRODUCTION. Fixed here in the
- * code, never read from the request, because paper cannot be updated: a code
- * printed today must open the same address in five years. The app moved to
- * this address on 2026-10-05; changing it means every code ever printed
- * stops working, so it is changed only on Evan's say-so.
+ * THE ADDRESS EVERY PRINTED CODE AND EVERY PATIENT LINK CARRIES ON PRODUCTION.
+ * Fixed here in the code, never read from the request, because paper cannot be
+ * updated: a code printed today must open the same address in five years. The
+ * app moved to this address on 2026-10-05; changing it means every code ever
+ * printed stops working, so it is changed only on Evan's say-so.
  */
 export const PERMANENT_QR_ORIGIN = "https://learn.pulse3dmedia.com";
 
-/** Where a printed code points, and whether the paper must say it is a test. */
+/** Where a printed code or a patient link points, and whether the paper must say it is a test. */
 export type QrOrigin = { origin: string; testOnly: boolean };
 
 /**
- * The address to put in a printed code. On the production deployment it is
- * always PERMANENT_QR_ORIGIN. Anywhere else (a preview, a developer's
- * computer) it is that deployment's own address, picked the same careful way
- * as a Stripe return address (pickTrustedOrigin: the Host header only chooses
- * among addresses the deployment knows are its own), and `testOnly` is true:
- * the pamphlet says "Test only" across it and the code is never to be handed
- * to a patient. Null when no address can be trusted; the page then says so
- * and draws no code.
+ * The address to put in a printed code, and in a patient link and its QR code
+ * or pamphlet. On the production deployment it is always PERMANENT_QR_ORIGIN,
+ * even for someone working on one of the production deployment's own
+ * *.vercel.app addresses, because what they print would carry that address
+ * for good. Anywhere else (a preview, a developer's computer) it is that
+ * deployment's own address, picked the same careful way as a Stripe return
+ * address (pickTrustedOrigin: the Host header only chooses among addresses
+ * the deployment knows are its own), and `testOnly` is true: the pamphlet
+ * says "Test only" across it and it is never to be handed to a patient. Null
+ * when no address can be trusted; the page then says so and draws no code.
  */
 export function qrOriginFor(host: string | null, env: OriginEnv & { VERCEL_ENV?: string }): QrOrigin | null {
   if (env.VERCEL_ENV === "production") return { origin: PERMANENT_QR_ORIGIN, testOnly: false };

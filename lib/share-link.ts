@@ -4,6 +4,9 @@
  *
  * Plain functions with no server code in them, so the browser-side form can
  * use them too.
+ *
+ * The address in front of the code comes from qrOriginFor() in lib/qr-code.ts,
+ * on the server, never from the request's Host header on its own.
  */
 
 /** "k7m2xq" becomes "https://example.com/watch/k7m2xq". */

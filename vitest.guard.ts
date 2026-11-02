@@ -13,13 +13,14 @@
  * - a production connection string that is set but cannot be read
  * - no production connection string at all, so there is nothing to compare
  *   against (a worktree with no .env, for example)
- * - the test string names the same Neon endpoint as production, whether or
- *   not one side goes through Neon's connection pooler
+ * - the test string names the same Neon endpoint as production, however
+ *   either side spells it: through Neon's connection pooler or not, with a
+ *   port or a trailing dot or without
  *
  * That last one matters: Neon gives the same database two host names,
- * ep-abc.region.aws.neon.tech and ep-abc-pooler.region.aws.neon.tech. A
- * guard that compared host names as written would let the pooled address of
- * production through when .env only held the direct one.
+ * ep-abc.region.aws.neon.tech and ep-abc-pooler.region.aws.neon.tech, and any
+ * host can be written with ":5432" or a dot on the end. A guard that compared
+ * host names as written would let production through under another spelling.
  */
 
 /** One connection string the app runs on, and the variable it came from. */
@@ -28,16 +29,21 @@ export type ProductionUrl = { name: string; value: string | undefined };
 export type GuardResult = { ok: true; endpoint: string } | { ok: false; reason: string };
 
 /**
- * The database a connection string points at, in a form that is the same for
- * its pooled and direct addresses: the host, lower-cased, with Neon's
- * "-pooler" removed from the endpoint name. Null when the string cannot be
- * read as a URL.
+ * The database a connection string points at, reduced to one form, so that
+ * two spellings of one database can never look like two databases. Lower
+ * case, no port, no trailing dot, and Neon's "-pooler" removed from the
+ * endpoint name. Null when the string cannot be read as a URL, or no host is
+ * left.
+ *
+ * Leaving the port out means two databases on one host at different ports
+ * count as the same database. That is on purpose: the mistake it can make is
+ * a refusal, never a pass.
  */
 export function endpointOf(url: string | undefined): string | null {
   if (!url) return null;
   let host: string;
   try {
-    host = new URL(url.trim()).host.toLowerCase();
+    host = new URL(url.trim()).hostname.toLowerCase().replace(/\.+$/, "");
   } catch {
     return null;
   }

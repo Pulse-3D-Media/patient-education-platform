@@ -48,8 +48,8 @@ vi.mock("./settings", async (importOriginal) => {
 const real = await vi.importActual<typeof import("./access")>("./access");
 const realSettings = await vi.importActual<typeof import("./settings")>("./settings");
 
-/** How long the wrapper waits for the change to finish. A change that is not blocked finishes in tens of milliseconds. */
-const WAIT_MS = 600;
+/** How long the wrapper waits for the change to finish. A change that is not blocked takes several hundred milliseconds against the remote testing branch, more when it has to open a connection. */
+const WAIT_MS = 2000;
 
 const createdClinicIds: string[] = [];
 const createdVideoIds: string[] = [];

@@ -264,6 +264,10 @@ describe("the library's watch page", () => {
     const unpublished = await makeVideo({ category: "KNEE", isPublished: false });
     const hip = await makeVideo({ category: "HIP", isPlaceholder: false });
     const ids = (videos: { id: string }[]) => videos.map((v) => v.id);
+    // Made one after the other, the two can share a creation time to the millisecond on a fast
+    // database (the local copy), and then "newer" means nothing. So the placeholder is made one
+    // second newer on purpose, for the "newest first" check below.
+    await prisma.video.update({ where: { id: placeholder.id }, data: { createdAt: new Date(other.createdAt.getTime() + 1000) } });
 
     const clinic = await accessOf(await makeClinic({ categories: ["KNEE", "HIP"] }));
     const more = ids(await listMoreInCategory(clinic, "KNEE", watched.id, 500));

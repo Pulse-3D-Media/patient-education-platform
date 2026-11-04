@@ -28,5 +28,16 @@ export default defineConfig({
     // One test file at a time. They share one database, so running files side
     // by side would only make failures harder to read.
     fileParallelism: false,
+    // How long one test, or one beforeAll or afterAll, may take before it is
+    // failed. Vitest's own limits (5 and 10 seconds) are too short here: almost
+    // all of a database test's time is waiting on the remote testing branch, at
+    // about 70ms a query, and the busiest tests make over 100 queries (one makes
+    // nearly 600). On 2026-11-02, with the branch to itself, 44 of 1,841 tests
+    // passed 5 seconds and the slowest took 28. A test that hits a limit keeps
+    // running behind the next ones, and its cleanup can run too early, which
+    // leaves rows behind that fail other tests. So a limit should only ever
+    // catch something that has really hung.
+    testTimeout: 60_000,
+    hookTimeout: 60_000,
   },
 });

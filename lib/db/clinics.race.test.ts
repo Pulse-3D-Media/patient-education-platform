@@ -44,8 +44,8 @@ vi.mock("./clinic-lock", async (importOriginal) => {
 
 const real = await vi.importActual<typeof import("./clinic-lock")>("./clinic-lock");
 
-/** How long save A holds still, after its read, while save B tries to get through. A save that is not blocked finishes in tens of milliseconds. */
-const WAIT_MS = 600;
+/** How long save A holds still, after its read, while save B tries to get through. A save that is not blocked takes several hundred milliseconds against the remote testing branch, more when it has to open a connection. */
+const WAIT_MS = 2000;
 
 const RED = "#aa0000";
 const GREEN = "#00aa00";

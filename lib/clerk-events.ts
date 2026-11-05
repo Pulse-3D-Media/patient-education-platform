@@ -10,7 +10,7 @@
  * switch their admin off. Without this, the app only noticed the next time
  * someone opened People or the clinic's /pulse page. With it, Clerk tells
  * us within seconds, the clinic log says the change was made in Clerk and
- * not on our screens, and Pulse staff get an email.
+ * in Clerk, and Pulse staff get an email.
  *
  * What it cannot do: stop the change (it has already happened), or say WHO
  * made it. Clerk's notification carries the request's address and browser,
@@ -77,14 +77,14 @@ export const CLERK_AUTHOR = "Clerk";
 /** What happened, as the webhook found it once Clerk had been asked. */
 export type OwnerFinding = "owner-left" | "owner-not-admin" | "organization-deleted";
 
-/** The clinic log entry for each finding. Each says it was done in Clerk and that Clerk does not say who. */
+/** The clinic log entry for each finding. Each starts "Changed in Clerk:" and says what to do next. */
 export const FINDING_NOTES: Record<OwnerFinding, string> = {
   "owner-left":
-    "Changed in Clerk, not on our screens: the account owner is no longer a member of the clinic. Either an admin removed them in Clerk directly or they left from their own account menu; Clerk does not say which, or who. Set a new account owner on the People tab.",
+    "Changed in Clerk: the account owner is no longer a member of the clinic. Set a new account owner on the People tab.",
   "owner-not-admin":
-    "Changed in Clerk, not on our screens: the account owner's admin was switched off. Clerk does not say who did it. The owner is refused by the office-admin actions until an admin switches admin back on from People.",
+    "Changed in Clerk: the account owner's admin was switched off. Switch it back on from the clinic's People page.",
   "organization-deleted":
-    "Changed in Clerk, not on our screens: the clinic's Clerk organization was deleted. Clerk does not say who did it. Nobody can sign in to this clinic any more. A card subscription, if the clinic has one, keeps charging until it is cancelled in Stripe.",
+    "Changed in Clerk: the clinic's organization was deleted. Nobody can sign in to this clinic any more. A card subscription, if the clinic has one, keeps charging until it is cancelled in Stripe.",
 };
 
 /** The email to Pulse staff. The clinic's name and its /pulse address (a path, no host), and nothing about any person. */

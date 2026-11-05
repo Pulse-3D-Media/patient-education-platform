@@ -43,10 +43,9 @@ describe("readDeliveryId", () => {
 });
 
 describe("the words", () => {
-  it("every entry says it was done in Clerk, not on our screens, and never calls the change ours", () => {
+  it("every entry starts 'Changed in Clerk:'", () => {
     for (const note of Object.values(FINDING_NOTES)) {
-      expect(note.startsWith("Changed in Clerk, not on our screens:")).toBe(true);
-      expect(note).toContain("Clerk does not say");
+      expect(note.startsWith("Changed in Clerk:")).toBe(true);
       expect(note).not.toContain("—");
     }
   });

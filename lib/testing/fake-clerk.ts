@@ -267,6 +267,18 @@ class FakeClerk {
           this.removeMember(params.organizationId, params.userId);
           return {};
         }),
+      // The clinic's name and logo (lib/organization.ts), written from /admin/branding.
+      updateOrganization: async (organizationId: string, params: { name?: string }) =>
+        this.write("rename", organizationId, params.name ?? "", () => {
+          const org = this.org(organizationId);
+          if (params.name !== undefined) org.name = params.name;
+          return { id: organizationId, name: org.name };
+        }),
+      updateOrganizationLogo: async (organizationId: string, params: { uploaderUserId?: string }) =>
+        this.write("logo", organizationId, params.uploaderUserId ?? "", () => {
+          this.org(organizationId);
+          return { id: organizationId, hasImage: true, imageUrl: `https://img.clerk.com/fake-logo-${organizationId}` };
+        }),
       getOrganizationInvitationList: (params: { organizationId: string; status?: string[]; limit?: number }) => this.read(() => {
         if (this.failReads) throw new Error("fake Clerk: reads are failing");
         const all = this.invitations(params.organizationId).filter((invitation) => !params.status || params.status.includes(invitation.status));

@@ -44,7 +44,18 @@ function signInAs(orgId: string | null, role: "admin" | "member", userId: string
   } as never);
   vi.mocked(clerkClient).mockResolvedValue({
     users: { getUser: async () => ({ firstName: "Jane", lastName: "Smith", emailAddresses: [] }) },
-    organizations: { updateOrganization, updateOrganizationLogo },
+    organizations: {
+      updateOrganization,
+      updateOrganizationLogo,
+      // The live admin check (confirmAdminWithClerk): this person, in their own organization only.
+      getOrganizationMembershipList: async (params: { organizationId: string; userId?: string[] }) => {
+        const found = orgId !== null && userId !== null && params.organizationId === orgId && (params.userId ?? []).includes(userId);
+        const data = found
+          ? [{ role: `org:${role}`, createdAt: 0, publicMetadata: {}, publicUserData: { userId, firstName: "Jane", lastName: "Smith", identifier: "jane@example.test", imageUrl: "" } }]
+          : [];
+        return { data, totalCount: data.length };
+      },
+    },
   } as never);
   updateOrganization.mockResolvedValue({});
   updateOrganizationLogo.mockResolvedValue({ hasImage: true, imageUrl: CLERK_LOGO });

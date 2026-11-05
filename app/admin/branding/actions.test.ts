@@ -43,6 +43,15 @@ vi.mock("@/lib/db/clinics", async (importOriginal) => {
 
 const realClinics = await vi.importActual<typeof import("@/lib/db/clinics")>("@/lib/db/clinics");
 
+/** Clerk's answer to "is this user in this organization": Jane Smith, in her own organization only. */
+function membershipPage(orgId: string | null, role: "admin" | "member", userId: string | null, params: { organizationId: string; userId?: string[] }) {
+  const found = orgId !== null && userId !== null && params.organizationId === orgId && (params.userId ?? []).includes(userId);
+  const data = found
+    ? [{ role: `org:${role}`, createdAt: 0, publicMetadata: {}, publicUserData: { userId, firstName: "Jane", lastName: "Smith", identifier: "jane@example.test", imageUrl: "" } }]
+    : [];
+  return { data, totalCount: data.length };
+}
+
 /** Pretend Clerk says this person is signed in to this organization, as an admin or a member, called Jane Smith. */
 function signInAs(orgId: string | null, role: "admin" | "member", userId: string | null = "user_vitest") {
   vi.mocked(auth).mockResolvedValue({
@@ -52,6 +61,8 @@ function signInAs(orgId: string | null, role: "admin" | "member", userId: string
   } as never);
   vi.mocked(clerkClient).mockResolvedValue({
     users: { getUser: async () => ({ firstName: "Jane", lastName: "Smith", emailAddresses: [] }) },
+    // The live admin check (confirmAdminWithClerk) looks this person up in the clinic's organization.
+    organizations: { getOrganizationMembershipList: async (params: { organizationId: string; userId?: string[] }) => membershipPage(orgId, role, userId, params) },
   } as never);
   vi.mocked(clinics.updateClinicBranding).mockImplementation(realClinics.updateClinicBranding);
 }

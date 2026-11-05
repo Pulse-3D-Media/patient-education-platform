@@ -1,14 +1,12 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { readBrandingForm } from "@/lib/branding-form";
-import { getCurrentClinicId } from "@/lib/clinic";
+import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getCurrentClinicId, type LiveAdminCheck } from "@/lib/clinic";
 import { checkLogoBytes, checkLogoSize, LOGO_MISSING, readClinicName } from "@/lib/clinic-identity";
 import { getClerkOrgIdForClinic, recordClinicName, recordUploadedLogo, updateClinicBranding } from "@/lib/db/clinics";
 import { errorKind } from "@/lib/error-kind";
 import { renameClerkOrganization, uploadClerkOrganizationLogo } from "@/lib/organization";
-import { getSignedInName } from "@/lib/people";
 import { isClinicAdmin } from "@/lib/roles";
 
 /**
@@ -25,7 +23,12 @@ import { isClinicAdmin } from "@/lib/roles";
  *     The forms carry no clinic id, and if one is added, it is never read,
  *     so one clinic cannot restyle or rename another. The Clerk organization
  *     the name and logo are written to is read from that clinic's own row;
- *   - the clinic has to be open, like every admin page but Billing.
+ *   - the clinic has to be open, like every admin page but Billing;
+ *   - right before anything is written, Clerk itself is asked that this
+ *     person is STILL an admin here (confirmAdminWithClerk in lib/clinic.ts),
+ *     because the session token can be a minute old and the name, logo and
+ *     look are what every patient sees. A Clerk that does not answer means
+ *     nothing is changed (ADMIN_CHECK_UNREACHABLE).
  *
  * The logo is NOT saved by saveClinicBrandingAction, and a logo address added
  * to that form is never read. A clinic's logo is the picture its admin
@@ -49,9 +52,20 @@ const NOT_ADMIN = "Only your clinic's office admins can change the branding.";
 const NOT_OPEN = "Your clinic is not open right now, so its branding cannot be changed. See Billing.";
 const NO_ORGANIZATION = "Your clinic's sign-in account is not set up for this yet. Get in touch with Pulse 3D and we will sort it out.";
 
+/**
+ * Ask Clerk, live, that the signed-in person is still an admin of this
+ * clinic. Its answer carries their name, so no separate call is made for the
+ * log. Returns the sentence to show when the answer is no.
+ */
+async function liveAdmin(clinicId: string): Promise<{ ok: true; userId: string; name: string } | { ok: false; error: string }> {
+  const live: LiveAdminCheck = await confirmAdminWithClerk(clinicId);
+  if (!live.ok) return { ok: false, error: live.reason === "unreachable" ? ADMIN_CHECK_UNREACHABLE : NOT_ADMIN };
+  return live;
+}
+
 /** Who the log says made the change. */
-async function adminName() {
-  return `${(await getSignedInName()) ?? "A clinic admin"} (clinic admin)`;
+function adminName(name: string) {
+  return `${name || "A clinic admin"} (clinic admin)`;
 }
 
 /** The pages that show the clinic's name, logo and look. The library's frame is a layout, which the browser otherwise keeps between pages, so it is named as one. The patient page is always fresh. */
@@ -69,8 +83,11 @@ export async function saveClinicBrandingAction(_previous: BrandingFormState, for
   const checked = readBrandingForm(formData);
   if ("error" in checked) return checked;
 
+  const live = await liveAdmin(clinicId);
+  if (!live.ok) return { error: live.error };
+
   try {
-    const { logged } = await updateClinicBranding(clinicId, checked.values, await adminName());
+    const { logged } = await updateClinicBranding(clinicId, checked.values, adminName(live.name));
     if (!logged) return { ok: "Nothing changed, so nothing was saved." };
   } catch (error) {
     console.error("Saving a clinic's branding failed", errorKind(error));
@@ -102,6 +119,9 @@ export async function saveClinicNameAction(_previous: BrandingFormState, formDat
   const clerkOrgId = await getClerkOrgIdForClinic(clinicId);
   if (!clerkOrgId) return { error: NO_ORGANIZATION };
 
+  const live = await liveAdmin(clinicId);
+  if (!live.ok) return { error: live.error };
+
   try {
     await renameClerkOrganization(clerkOrgId, checked.name);
   } catch (error) {
@@ -110,7 +130,7 @@ export async function saveClinicNameAction(_previous: BrandingFormState, formDat
   }
 
   try {
-    const { logged } = await recordClinicName(clinicId, checked.name, await adminName());
+    const { logged } = await recordClinicName(clinicId, checked.name, adminName(live.name));
     refreshClinicScreens();
     if (!logged) return { ok: "That is already your clinic's name, so nothing was changed." };
   } catch (error) {
@@ -135,9 +155,6 @@ export async function uploadClinicLogoAction(_previous: BrandingFormState, formD
   const clinicId = await getCurrentClinicId();
   if (!clinicId) return { error: NOT_OPEN };
 
-  const { userId } = await auth();
-  if (!userId) return { error: NOT_ADMIN };
-
   const files = formData.getAll("logo");
   if (files.length !== 1 || typeof files[0] === "string") return { error: LOGO_MISSING };
   const file = files[0];
@@ -152,9 +169,13 @@ export async function uploadClinicLogoAction(_previous: BrandingFormState, formD
   const clerkOrgId = await getClerkOrgIdForClinic(clinicId);
   if (!clerkOrgId) return { error: NO_ORGANIZATION };
 
+  // Also who Clerk records as the uploader.
+  const live = await liveAdmin(clinicId);
+  if (!live.ok) return { error: live.error };
+
   let logoUrl: string | null;
   try {
-    ({ logoUrl } = await uploadClerkOrganizationLogo(clerkOrgId, { bytes, kind: checked.kind }, userId));
+    ({ logoUrl } = await uploadClerkOrganizationLogo(clerkOrgId, { bytes, kind: checked.kind }, live.userId));
   } catch (error) {
     console.error("Uploading a clinic logo to Clerk failed", errorKind(error));
     return { error: "We could not upload the logo just now, so nothing was changed. Try again in a moment." };
@@ -165,7 +186,7 @@ export async function uploadClinicLogoAction(_previous: BrandingFormState, formD
   }
 
   try {
-    await recordUploadedLogo(clinicId, logoUrl, await adminName());
+    await recordUploadedLogo(clinicId, logoUrl, adminName(live.name));
   } catch (error) {
     // Clerk has the logo; the next page copies it over.
     console.error("Recording a clinic's new logo failed", errorKind(error));

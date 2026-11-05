@@ -51,6 +51,13 @@ export default clerkMiddleware(
     signInUrl: "/sign-in",
     // Where the sign-up page lives, so the sign-in page can link to it.
     signUpUrl: "/sign-up",
+    // The Clerk forward is OFF, on purpose (CLAUDE.md, "Auth"). Clerk's
+    // middleware can pass requests under /__clerk on to Clerk's servers, and
+    // left to itself turns that on for a live key on a *.vercel.app address.
+    // We do not use it: the browser talks to Clerk directly. Saying so here
+    // means the choice no longer depends on which key or address is in use.
+    // lib/proxy-clerk-forward.test.ts fails if this line goes.
+    frontendApiProxy: { enabled: false },
   },
 );
 

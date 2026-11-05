@@ -225,8 +225,9 @@ export const ADMIN_CHECK_UNREACHABLE =
 /**
  * Ask Clerk, live, whether the signed-in person is STILL an admin of this
  * clinic's organization. Used right before the highest-impact changes only:
- * people changes, billing changes, retiring or replacing a printed QR code,
- * and turning a paused link back on.
+ * people changes, billing changes, making, retiring or replacing a printed
+ * QR code, the clinic's branding, name and logo, and turning a paused link
+ * back on.
  *
  * Why it is needed: isClinicAdmin() and the clinic come from Clerk's session
  * token, which the browser refreshes about once a minute. An admin who has

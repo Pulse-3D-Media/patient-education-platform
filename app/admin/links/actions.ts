@@ -6,7 +6,6 @@ import { createQrCode, getLiveQrCodeSender, replaceQrCode, retireQrCode } from "
 import { createShare, SenderRefusedError, ShareRefusedError } from "@/lib/db/shares";
 import { errorKind } from "@/lib/error-kind";
 import { ShareTermsError } from "@/lib/expiry";
-import { getSignedInName } from "@/lib/people";
 import { isClinicAdmin } from "@/lib/roles";
 import { resolveSender } from "@/lib/senders";
 import type { ActionResult } from "../people/actions";
@@ -107,11 +106,16 @@ export async function createQrCodeAction(videoId: unknown, senderUserId: unknown
     if (!clinicId) return { ok: false, error: NOT_ALLOWED_MESSAGE };
     if (typeof videoId !== "string" || !videoId.trim()) return { ok: false, error: "No video was selected." };
 
+    // A printed code never runs out, so ask Clerk itself that this person is still an admin here
+    // (the session token can be a minute old), as Retire and Replace do. Its answer carries the
+    // name for the log. Create link does NOT ask: a link runs out on its own, and it stays quick.
+    const live = await confirmAdminWithClerk(clinicId);
+    if (!live.ok) return { ok: false, error: live.reason === "unreachable" ? ADMIN_CHECK_UNREACHABLE : NOT_ALLOWED_MESSAGE };
+
     const sender = await resolveSender(clinicId, senderUserId);
     if (!sender.ok) return { ok: false, error: sender.message };
 
-    const actor = (await getSignedInName()) ?? "An office admin";
-    const made = await createQrCode(clinicId, videoId.trim(), sender.sender, actor);
+    const made = await createQrCode(clinicId, videoId.trim(), sender.sender, live.name);
     revalidatePath("/admin/links");
     return { ok: true, id: made.id, created: made.created };
   } catch (error) {

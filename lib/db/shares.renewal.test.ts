@@ -63,7 +63,7 @@ async function makePlayed(clinicId: string, videoId: string, playedAt: Date = T)
 
 /** A link the way every link was written before the first-play rule: no policy, so the database makes it FIXED. */
 async function makeLegacy(clinicId: string, videoId: string, expiresAt: Date) {
-  const share = await prisma.share.create({ data: { code: `l${tag().slice(0, 5)}`, clinicId, videoId, expiresAt, viewCount: 3 }, select: { code: true } });
+  const share = await prisma.share.create({ data: { code: `l${tag()}${tag().slice(0, 1)}`, clinicId, videoId, expiresAt, viewCount: 3 }, select: { code: true } });
   return share.code;
 }
 

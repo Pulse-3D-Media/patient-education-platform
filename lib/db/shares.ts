@@ -20,6 +20,7 @@ import {
 import { effectiveQrDailyCap, utcDayStart } from "../qr-code";
 import { isClerkUserId } from "../seats";
 import { effectiveSenderName } from "../sender-name";
+import { isAcceptedShareCode, SHARE_CODE_LENGTH } from "../share-link";
 import { SETTINGS_DEFAULTS } from "../settings-defaults";
 import { getClinicAccess, lockClinicAccess, lockQrCodeForIssue, lockSenderSeat, lockShareForRenewal, lockVideoFacts } from "./access";
 import { prisma } from "./client";
@@ -89,11 +90,11 @@ const CODE_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789";
 /**
  * Ten characters gives about 3.6 million billion possible codes, so a script
  * trying codes at random practically never lands on a real link, however many
- * internet addresses it uses. Links made before October 2026 have six
- * characters; they keep their codes and keep working, because a code is only
- * ever looked up, never checked for length.
+ * internet addresses it uses. Links made before October 2026 had six
+ * characters; a code shorter than this is no longer accepted by the patient
+ * lookups below (isAcceptedShareCode() in lib/share-link.ts).
  */
-const CODE_LENGTH = 10;
+const CODE_LENGTH = SHARE_CODE_LENGTH;
 
 /** A random ten-character code such as "k7m2xq4v9p". */
 function randomCode() {
@@ -551,6 +552,8 @@ export const PATIENT_CLINIC_FIELDS = { name: true, logoUrl: true, phone: true, b
  * file allows exactly this for the watch page.
  */
 export async function getShareByCode(code: string) {
+  // A short old code is answered like a code that does not exist (lib/share-link.ts).
+  if (!isAcceptedShareCode(code)) return null;
   return prisma.share.findUnique({
     where: { code },
     include: { video: true, clinic: { select: PATIENT_CLINIC_FIELDS } },
@@ -616,6 +619,7 @@ const EXPIRED_MEANWHILE: PlayRecord = { recorded: false, reason: "expired" };
  * stays where it is, played or not.
  */
 export async function recordSharePlay(code: string, now: Date = new Date()): Promise<PlayRecord> {
+  if (!isAcceptedShareCode(code)) return { recorded: false, reason: "no-such-link" };
   const share = await prisma.share.findUnique({ where: { code }, select: PLAY_FIELDS });
   if (!share) return { recorded: false, reason: "no-such-link" };
   const refusal = whyNotWorking(share, now);
@@ -690,6 +694,7 @@ export async function acceptShareDisclaimer(
   now: Date = new Date(),
   db: Pick<Prisma.TransactionClient, "$queryRaw"> = prisma,
 ): Promise<DisclaimerRecord> {
+  if (!isAcceptedShareCode(code)) return { recorded: false };
   const rows = await db.$queryRaw<AcceptedRow[]>`
     UPDATE "Share" AS s
     SET "disclaimerAcceptances" = s."disclaimerAcceptances" + 1,
@@ -834,6 +839,7 @@ export type RenewalRequestOutcome =
  * test hands in its own.
  */
 export async function requestShareRenewal(code: string, now: Date = new Date()): Promise<RenewalRequestOutcome> {
+  if (!isAcceptedShareCode(code)) return { kind: "refused", reason: "no-such-link" };
   const [settings, share] = await Promise.all([getSettings(), prisma.share.findUnique({ where: { code }, select: RENEWAL_REQUEST_FIELDS })]);
   if (!share) return { kind: "refused", reason: "no-such-link" };
 

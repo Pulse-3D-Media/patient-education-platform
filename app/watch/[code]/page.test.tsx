@@ -44,7 +44,7 @@ let noLengthVideoId = "";
 const LONG_NAME = "The Intermountain Center for Advanced Orthopedic, Spine and Sports Medicine Surgery of Greater Salt Lake";
 
 function code() {
-  return `w${randomBytes(4).toString("hex").slice(0, 7)}`;
+  return `w${randomBytes(5).toString("hex").slice(0, 9)}`;
 }
 
 async function makeClinic(data: Partial<Prisma.ClinicCreateInput>) {
@@ -199,6 +199,18 @@ describe("the tap-to-call button", () => {
     expect(html).toContain("We couldn&#x27;t find this link");
     expect(html).not.toContain("tel:");
     expect(html).toContain("--brand-accent:#1e5668");
+  });
+
+  it("draws the same not-found page for a short old six-character code, even on a working link, with nothing about the clinic or the video", async () => {
+    const clinic = await makeClinic({ phone: "8015550123" });
+    const short = randomBytes(3).toString("hex");
+    await prisma.share.create({ data: { code: short, clinicId: clinic.id, videoId: videoId, expiresAt: new Date(Date.now() + 30 * 86_400_000) } });
+    const html = await render(short);
+
+    expect(html).toContain("We couldn&#x27;t find this link");
+    expect(html).not.toContain("tel:");
+    expect(html).not.toContain("Vitest Total Knee Replacement");
+    expect(html).not.toContain(clinic.name);
   });
 
   it("is offered on a working link only if the video fails, so it is not in the page a patient first sees", async () => {

@@ -176,7 +176,7 @@ beforeAll(async () => {
     },
   });
   await prisma.share.create({
-    data: { code: `p${randomBytes(3).toString("hex").slice(0, 5)}`, clinicId: hipClinic, videoId: video.id, expiresAt: new Date(Date.now() + 60 * 86_400_000), viewCount: 2 },
+    data: { code: `p${randomBytes(5).toString("hex").slice(0, 9)}`, clinicId: hipClinic, videoId: video.id, expiresAt: new Date(Date.now() + 60 * 86_400_000), viewCount: 2 },
   });
   await createShare(hipClinic, video.id);
 });
@@ -721,7 +721,7 @@ describe("a paused link a patient has asked about", () => {
   async function makeAskedAbout(over: Partial<Prisma.ShareUncheckedCreateInput> = {}) {
     const share = await prisma.share.create({
       data: {
-        code: `r${randomBytes(3).toString("hex").slice(0, 5)}`,
+        code: `r${randomBytes(5).toString("hex").slice(0, 9)}`,
         clinicId: createdClinicIds[3],
         videoId: createdVideoIds[0],
         expiryPolicy: "FIRST_PLAY",

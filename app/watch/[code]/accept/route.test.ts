@@ -151,6 +151,31 @@ describe("POST /watch/<code>/accept", () => {
     }
   });
 
+  it("no longer accepts a short old code: no video and nothing written, here or through the play route, while a ten-character link still plays", async () => {
+    // A link the way an older copy of the app wrote it: a six-character code, working for another day.
+    const short = randomBytes(3).toString("hex");
+    await prisma.share.create({
+      data: { code: short, clinicId: clinic, videoId: fileVideo, expiryPolicy: "FIRST_PLAY", daysAfterFirstPlay: 7, expiresAt: new Date(Date.now() + 86_400_000) },
+    });
+    const before = await prisma.share.findUniqueOrThrow({ where: { code: short }, select: { expiresAt: true } });
+
+    const response = await post(short, { version: V });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ source: null });
+    expect((await record(short)).disclaimerAcceptances).toBe(0);
+
+    const playRoute = await import("../play/route");
+    const played = await playRoute.POST(new Request(`http://localhost/watch/${short}/play`, { method: "POST" }), { params: Promise.resolve({ code: short }) } as never);
+    expect(played.status).toBe(200);
+    expect(await played.json()).toEqual({ recorded: false });
+    const after = await prisma.share.findUniqueOrThrow({ where: { code: short }, select: { firstPlayedAt: true, expiresAt: true, viewCount: true } });
+    expect(after).toEqual({ firstPlayedAt: null, expiresAt: before.expiresAt, viewCount: 0 });
+
+    // The control: a link made today still gets its video.
+    const { code } = await createShare(clinic, fileVideo);
+    expect(await (await post(code, { version: V })).json()).toEqual({ source: { kind: "file", src: "https://example.com/vitest-accept.mp4" } });
+  });
+
   it("refuses a malformed code or body before the database is asked", async () => {
     const { code } = await createShare(clinic, fileVideo);
     for (const [c, body] of [

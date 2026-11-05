@@ -57,7 +57,7 @@ async function makeVideo() {
  */
 async function makeLegacy(clinicId: string, videoId: string, expiresAt: Date, viewCount = 0) {
   return prisma.share.create({
-    data: { code: `l${tag().slice(0, 5)}`, clinicId, videoId, expiresAt, viewCount },
+    data: { code: `l${tag()}${tag().slice(0, 1)}`, clinicId, videoId, expiresAt, viewCount },
     select: { code: true },
   });
 }

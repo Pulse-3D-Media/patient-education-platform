@@ -4,9 +4,11 @@ import { prisma } from "./client";
 import {
   createShare,
   deleteShareForClinic,
+  acceptShareDisclaimer,
   getShareByCode,
   listRecentSharesForClinic,
   recordSharePlay,
+  requestShareRenewal,
   SenderRefusedError,
   ShareRefusedError,
   summarizeSharesForClinic,
@@ -359,18 +361,47 @@ describe("link codes", () => {
     }
   });
 
-  it("still finds and counts a six-character link made before codes got longer", async () => {
+  it("no longer accepts a short code made before codes got longer: answered like an unknown code, with nothing written", async () => {
     const clinic = await makeClinic("Vitest legacy code clinic");
-    // Written the way an older copy of the app wrote it: a six-character code.
-    const code = randomBytes(3).toString("hex");
-    const legacy = await prisma.share.create({
+    const day = 24 * 60 * 60 * 1000;
+    // Written the way an older copy of the app wrote it: a six-character code,
+    // on a link that would otherwise be working. And a nine-character one, one
+    // short of today's length.
+    const six = randomBytes(3).toString("hex");
+    const nine = randomBytes(5).toString("hex").slice(0, 9);
+    for (const code of [six, nine]) {
+      const legacy = await prisma.share.create({
+        data: { code, clinicId: clinic, videoId: publishedVideo, expiryPolicy: "FIRST_PLAY", daysAfterFirstPlay: 7, expiresAt: new Date(Date.now() + day) },
+        select: { id: true, expiresAt: true },
+      });
+      createdShareIds.push(legacy.id);
+
+      expect(await getShareByCode(code)).toBeNull();
+      expect(await recordSharePlay(code)).toEqual({ recorded: false, reason: "no-such-link" });
+      expect(await acceptShareDisclaimer(code, "v1")).toEqual({ recorded: false });
+      expect(await requestShareRenewal(code)).toEqual({ kind: "refused", reason: "no-such-link" });
+
+      // The row is still there, exactly as it was: nothing counted, claimed or recorded.
+      const row = await prisma.share.findUniqueOrThrow({
+        where: { id: legacy.id },
+        select: { viewCount: true, firstPlayedAt: true, expiresAt: true, disclaimerAcceptances: true, renewalRequestedAt: true },
+      });
+      expect(row).toEqual({ viewCount: 0, firstPlayedAt: null, expiresAt: legacy.expiresAt, disclaimerAcceptances: 0, renewalRequestedAt: null });
+    }
+  });
+
+  it("still accepts a code longer than ten characters, as a printed QR code's links have", async () => {
+    const clinic = await makeClinic("Vitest long code clinic");
+    const code = randomBytes(8).toString("hex"); // 16 characters, like childShareCode()
+    const share = await prisma.share.create({
       data: { code, clinicId: clinic, videoId: publishedVideo, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
       select: { id: true },
     });
-    createdShareIds.push(legacy.id);
+    createdShareIds.push(share.id);
 
-    expect((await getShareByCode(code))?.id).toBe(legacy.id);
-    await recordSharePlay(code);
+    expect((await getShareByCode(code))?.id).toBe(share.id);
+    expect(await recordSharePlay(code)).toEqual({ recorded: true, firstPlay: false });
+    expect((await acceptShareDisclaimer(code, "v1")).recorded).toBe(true);
     expect((await getShareByCode(code))?.viewCount).toBe(1);
   });
 });

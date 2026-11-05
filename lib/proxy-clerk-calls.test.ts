@@ -133,8 +133,11 @@ describe("the code under those paths does not need Clerk's middleware", () => {
   // auth() and currentUser() throw when the middleware did not run. Nothing
   // under these folders imports Clerk directly; the renewal email reaches
   // Clerk through lib/people.ts's listPeople(), which uses only clerkClient()
-  // (that reads its keys from the environment and works without it).
-  it("no file under app/watch, app/q, app/api/health or app/api/webhooks imports Clerk", async () => {
+  // (that reads its keys from the environment and works without it). The one
+  // exception is Clerk's webhook signature check (verifyWebhook, from
+  // @clerk/nextjs/webhooks, used by app/api/webhooks/clerk), which is plain
+  // arithmetic over the request and never asks who is signed in.
+  it("no file under app/watch, app/q, app/api/health or app/api/webhooks imports Clerk, but for the webhook signature check", async () => {
     const { readdirSync, readFileSync, statSync } = await import("node:fs");
     const { join } = await import("node:path");
     const files: string[] = [];
@@ -147,7 +150,8 @@ describe("the code under those paths does not need Clerk's middleware", () => {
     };
     for (const dir of ["app/watch", "app/q", "app/api/health", "app/api/webhooks"]) walk(dir);
     expect(files.length).toBeGreaterThan(5);
-    const offenders = files.filter((file) => /@clerk\//.test(readFileSync(file, "utf8")));
+    const allowed = /^import \{ verifyWebhook \} from "@clerk\/nextjs\/webhooks";$/gm;
+    const offenders = files.filter((file) => /@clerk\//.test(readFileSync(file, "utf8").replace(allowed, "")));
     expect(offenders).toEqual([]);
   });
 });

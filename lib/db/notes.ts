@@ -60,3 +60,13 @@ export async function addClinicNote(clinicId: string, note: NewNote) {
     select: NOTE_FIELDS,
   });
 }
+
+/** The words of a clinic's newest log entry, or null when its log is empty. Lets a writer skip an entry that would only repeat the one just written. */
+export async function getNewestNoteBody(clinicId: string): Promise<string | null> {
+  const newest = await prisma.clinicNote.findFirst({
+    where: { clinicId },
+    select: { body: true },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  });
+  return newest?.body ?? null;
+}

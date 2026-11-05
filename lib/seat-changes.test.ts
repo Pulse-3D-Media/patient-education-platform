@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { getCurrentClinic } from "./clinic";
+import { confirmAdminWithClerk, getCurrentClinic } from "./clinic";
 import { prisma } from "./db/client";
 import { listNotesForClinic } from "./db/notes";
 import * as seatsDb from "./db/seats";
@@ -561,6 +561,51 @@ describe("the seat check", () => {
     expect(board.ownerUserId).toBeNull();
     expect(await ownerOf(clinicId)).toBeNull();
     expect((await logOf(clinicId)).at(-1)).toContain("the account owner is no longer in the clinic");
+  });
+
+  // Audit run 2, section 2: another admin acting in Clerk directly (its browser API, with the
+  // permissions Clerk will not take away from org:admin), not through our People page. These
+  // pin down what the app does TODAY: it refuses nothing, because it never sees the write, and
+  // what it notices later carries no record of who did it.
+  it("an admin removing the owner in Clerk directly: noticed only at the next check, logged as 'seats' with no name of who did it", async () => {
+    const admin = user();
+    const { clinicId, orgId, owner } = await makeClinic(1, [{ userId: admin, firstName: "Ada", lastName: "Admin", role: "org:admin" }]);
+    fakeClerk.removeMember(orgId, owner); // what Clerk.organization.removeMember(owner) from the browser would do
+
+    // Nothing on our side has changed yet: the owner is still on the row.
+    expect(await ownerOf(clinicId)).toBe(owner);
+
+    const board = await checkSeats(clinicId);
+    expect(board.ownerUserId).toBeNull();
+    expect(await ownerOf(clinicId)).toBeNull();
+    const newest = (await logOf(clinicId)).at(-1) ?? "";
+    expect(newest.startsWith("seats:")).toBe(true);
+    expect(newest).toContain("the account owner is no longer in the clinic");
+    // The same words as an owner who left on their own: no actor, no "removed".
+    expect(newest).not.toMatch(/Ada|Admin \(|removed/);
+  });
+
+  it("an admin switching the owner's admin off in Clerk directly: shown on the board, refused by the live check, never logged", async () => {
+    const admin = user();
+    const { clinicId, orgId, owner } = await makeClinic(1, [{ userId: admin, firstName: "Ada", lastName: "Admin", role: "org:admin" }]);
+    await checkSeats(clinicId); // settle the seats first (the waiting admin is given the free one), so only the role change is left
+    const before = (await logOf(clinicId)).length;
+    fakeClerk.setRoleOutsideTheApp(orgId, owner, "org:member"); // Clerk.organization.updateMember({ userId: owner, role: "org:member" })
+
+    const board = await checkSeats(clinicId);
+    expect(board.ownerUserId).toBe(owner); // still the owner on our row
+    expect(board.ownerNotAdmin).toBe(true); // what /admin/people and /pulse show
+    expect(await logOf(clinicId)).toHaveLength(before); // and nothing in the log says it happened, or who did it
+
+    // The owner is refused by every action that asks Clerk live, until an admin switches it back on.
+    fakeClerk.signIn(owner, orgId);
+    expect(await confirmAdminWithClerk(clinicId)).toEqual({ ok: false, reason: "not-admin" });
+
+    // The way back exists on our page: the other admin switches admin on again, logged under their name.
+    expect(await setAdmin({ clinicId, targetUserId: owner, admin: true, actor: { userId: admin, name: "Ada Admin" } })).toEqual({ ok: true });
+    expect((await logOf(clinicId)).at(-1)).toContain("Ada Admin (clinic admin): Admin switched on for Olive Owner");
+    fakeClerk.signIn(owner, orgId);
+    expect((await confirmAdminWithClerk(clinicId)).ok).toBe(true);
   });
 
   it("existing people who were once marked staff are shown waiting, and nobody is removed or relabelled", async () => {

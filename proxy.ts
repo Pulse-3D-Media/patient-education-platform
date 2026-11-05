@@ -1,4 +1,5 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 
 /**
  * Clerk's request middleware. Next.js 16 calls this file proxy.ts (it was
@@ -24,16 +25,43 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
  * page (/watch), the sign-in and sign-up pages, the health check
  * (/api/health, for an uptime monitor), /api/webhooks, and /q (a printed QR
  * code's page, and the route its Play tap posts to).
+ *
+ * Fewer outside calls on public paths (CLAUDE.md, "Auth"). Clerk's middleware
+ * looks at every request it is handed BEFORE our code below runs, and some
+ * made-up credentials make it ask Clerk's servers about them, once per
+ * request (five times, with its retries, for a made-up session token). So
+ * the exported function at the bottom does two things first:
+ *
+ *   - The paths in NO_CLERK_PATHS never reach Clerk's middleware at all. None
+ *     of them needs to know who is signed in: the patient page and its
+ *     routes, a printed code's page and its routes, the health check and the
+ *     webhooks (Stripe and Mux prove themselves with their own signatures).
+ *     The renewal email a paused link's "Ask my clinic" sends still works:
+ *     Clerk's backend client reads its keys from the environment when the
+ *     middleware did not run.
+ *
+ *   - Any other request carrying an Authorization header is answered 401
+ *     before Clerk sees it. The app never signs anyone in with a header
+ *     (staff are signed in by Clerk's cookie), so only a script sends one.
+ *
+ * lib/proxy-clerk-calls.test.ts counts the calls and fails if either goes.
  */
 
 /** The path prefixes that need a signed-in user. Everything under them too. */
 const STAFF_PATHS = ["/admin", "/library", "/pulse", "/onboarding"];
 
-function isStaffPath(pathname: string) {
-  return STAFF_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+/** Path prefixes that never need to know who is signed in, so Clerk is not asked. Everything under them too. */
+const NO_CLERK_PATHS = ["/watch", "/q", "/api/health", "/api/webhooks"];
+
+function isUnder(pathname: string, prefixes: string[]) {
+  return prefixes.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
-export default clerkMiddleware(
+function isStaffPath(pathname: string) {
+  return isUnder(pathname, STAFF_PATHS);
+}
+
+const clerk = clerkMiddleware(
   async (auth, request) => {
     if (!isStaffPath(request.nextUrl.pathname)) return;
 
@@ -60,6 +88,23 @@ export default clerkMiddleware(
     frontendApiProxy: { enabled: false },
   },
 );
+
+export default function proxy(request: NextRequest, event: NextFetchEvent) {
+  // The patient's pages, printed codes, health check and webhooks: straight
+  // on, with Clerk never involved (see the top of this file).
+  if (isUnder(request.nextUrl.pathname, NO_CLERK_PATHS)) return NextResponse.next();
+
+  // Nobody here signs in with a header, so a request with one is refused
+  // before Clerk would ask its servers about it. Plain words, never cached.
+  if (request.headers.has("authorization")) {
+    return new NextResponse("Not signed in.", {
+      status: 401,
+      headers: { "cache-control": "no-store", "content-type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  return clerk(request, event);
+}
 
 // Which requests the middleware runs for. This is Clerk's recommended matcher:
 // every page and API route, but not Next.js internals or static files.

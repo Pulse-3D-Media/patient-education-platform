@@ -4,7 +4,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { addDays } from "../expiry";
 import * as access from "./access";
 import { prisma } from "./client";
-import { createShare, recordSharePlay, renewShareForClinic, type RenewalOutcome } from "./shares";
+import { createShare, renewShareForClinic, type RenewalOutcome } from "./shares";
+import { playAfterTick } from "@/lib/testing/ticked-play";
 
 /**
  * The forced overlap: two admins (or one double click) turn the same paused
@@ -67,7 +68,7 @@ afterAll(async () => {
 /** A link played at T, so it has paused by T + 11 days. */
 async function makePaused() {
   const share = await createShare(clinic, video, { now: T });
-  expect(await recordSharePlay(share.code, T)).toEqual({ recorded: true, firstPlay: true });
+  expect(await playAfterTick(share.code, T)).toEqual({ recorded: true, firstPlay: true });
   return share.code;
 }
 
@@ -167,7 +168,7 @@ describe("a change the plan check depends on, arriving while a link is turned ba
     });
     createdVideoIds.push(made.id);
     const share = await createShare(row.id, made.id, { now: T });
-    expect(await recordSharePlay(share.code, T)).toEqual({ recorded: true, firstPlay: true });
+    expect(await playAfterTick(share.code, T)).toEqual({ recorded: true, firstPlay: true });
     return { clinicId: row.id, videoId: made.id, shareId: share.id };
   }
 

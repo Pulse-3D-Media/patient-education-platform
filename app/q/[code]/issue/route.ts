@@ -42,8 +42,11 @@ import { isAttemptKey, isQrCodeShape } from "@/lib/qr-code";
  */
 export async function POST(request: Request, { params }: RouteContext<"/q/[code]/issue">) {
   const { code } = await params;
+  // The code is checked before the body is read, so a request for an address
+  // that cannot be a code costs nothing more than its answer (audit run 2).
+  if (!isQrCodeShape(code)) return answer({ code: null }, 400);
   const body = (await request.json().catch(() => null)) as { key?: unknown; accepted?: unknown } | null;
-  if (!isQrCodeShape(code) || !isAttemptKey(body?.key)) return answer({ code: null }, 400);
+  if (!isAttemptKey(body?.key)) return answer({ code: null }, 400);
   const accepted = judgeAcceptedVersion(body.accepted);
   if (accepted === "malformed") return answer({ code: null }, 400);
   if (accepted === "stale") return answer({ code: null }, 409);

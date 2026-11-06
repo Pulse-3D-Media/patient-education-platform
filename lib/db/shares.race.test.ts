@@ -4,7 +4,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import * as access from "./access";
 import { prisma } from "./client";
 import * as settingsDb from "./settings";
-import { createShare, getShareByCode, recordSharePlay, ShareRefusedError } from "./shares";
+import { createShare, getShareByCode, ShareRefusedError } from "./shares";
+import { playAfterTick } from "@/lib/testing/ticked-play";
 
 /**
  * The forced overlap: a change to what the clinic may use arrives AFTER
@@ -169,7 +170,7 @@ describe("a change that arrives while a link is being made", () => {
 
     expect(changeFinishedDuringWait).toBe(false);
     // The link exists, and because its video is now unpublished a play is not counted.
-    await recordSharePlay(share.code);
+    await playAfterTick(share.code);
     const after = await getShareByCode(share.code);
     expect(after?.id).toBe(share.id);
     expect(after?.video.isPublished).toBe(false);

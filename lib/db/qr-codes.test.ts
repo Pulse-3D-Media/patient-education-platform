@@ -403,7 +403,8 @@ describe("the link a patient's Play tap gets", () => {
     const surgeon = surgeonId();
     const clinic = await makeClinic([surgeon]);
     const made = await createQrCode(clinic, video.id, sender(surgeon), "Ann Admin");
-    const outcome = await issueShareFromQrCode(await codeOf(made.id), key());
+    // As the issue route does it: the tick of the box goes onto the new link.
+    const outcome = await issueShareFromQrCode(await codeOf(made.id), key(), { disclaimerVersion: "2026-10-08" });
     const code = (outcome as { code: string }).code;
 
     await retireQrCode(clinic, made.id, "Ann Admin");

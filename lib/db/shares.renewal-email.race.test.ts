@@ -4,7 +4,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { addDays, RENEWAL_EMAILS_PER_DAY } from "../expiry";
 import { prisma } from "./client";
 import * as renewalLock from "./renewal-lock";
-import { createShare, recordSharePlay, requestShareRenewal, type RenewalRequestOutcome } from "./shares";
+import { createShare, requestShareRenewal, type RenewalRequestOutcome } from "./shares";
+import { playAfterTick } from "@/lib/testing/ticked-play";
 
 /**
  * The forced overlap for THE TENTH RENEWAL EMAIL OF THE DAY. Nine requests
@@ -72,7 +73,7 @@ async function nineDown() {
   const codes: string[] = [];
   for (let i = 0; i < 2; i++) {
     const share = await createShare(clinic, video, { now: T });
-    expect(await recordSharePlay(share.code, T)).toEqual({ recorded: true, firstPlay: true });
+    expect(await playAfterTick(share.code, T)).toEqual({ recorded: true, firstPlay: true });
     codes.push(share.code);
   }
   return codes;

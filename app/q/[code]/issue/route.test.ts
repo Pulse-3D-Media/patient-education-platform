@@ -96,3 +96,21 @@ describe("POST /q/<code>/issue", () => {
     expect(Object.keys(route)).toEqual(["POST"]);
   });
 });
+
+describe("a code that cannot be one", () => {
+  /** Post with a body whose reading is watched, to prove the code is judged first. */
+  async function postWatched(code: string) {
+    const request = new Request(`http://localhost/q/${encodeURIComponent(code)}/issue`, { method: "POST", body: JSON.stringify({ key: KEY, accepted: V }) });
+    const read = vi.spyOn(request, "json");
+    const response = await route.POST(request, { params: Promise.resolve({ code }) } as never);
+    return { status: response.status, bodyRead: read.mock.calls.length > 0 };
+  }
+
+  it("is refused with a 400 before the body is read", async () => {
+    for (const bad of ["has space", "<script>", "x".repeat(40), "abc'--", ""]) {
+      expect(await postWatched(bad), bad).toEqual({ status: 400, bodyRead: false });
+    }
+    // The control: a code of the right shape does read the body.
+    expect((await postWatched("abcdefghijklmnopqrstuvwx1")).bodyRead).toBe(true);
+  });
+});

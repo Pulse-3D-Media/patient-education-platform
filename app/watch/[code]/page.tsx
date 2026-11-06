@@ -5,6 +5,7 @@ import { getSettings } from "@/lib/db/settings";
 import { getShareByCode } from "@/lib/db/shares";
 import { canRequestRenewal, isExpired, patientDeadline, renewalState } from "@/lib/expiry";
 import { posterForVideo } from "@/lib/playback-auth";
+import { isAcceptedShareCode } from "@/lib/share-link";
 import { windowCoversVideo } from "@/lib/playback-source";
 import { AskClinic } from "./AskClinic";
 import { PatientViewer, Unavailable } from "../PatientPage";
@@ -86,19 +87,13 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 export default async function WatchPage({ params }: PageProps<"/watch/[code]">) {
   const { code } = await params;
-  const share = await getShareByCode(code);
+  // A code of the wrong shape (junk, too long, or a short old code) is
+  // answered here, before anything is looked up: the same calm page as a code
+  // nobody has, and not one query (audit run 2, November 2026).
+  // getShareByCode() refuses it too, so neither check depends on the other.
+  const share = isAcceptedShareCode(code) ? await getShareByCode(code) : null;
 
-  if (!share) {
-    // No link, so no clinic: the page keeps the Pulse look and offers no number to call.
-    return (
-      <Unavailable
-        look={patientLook(null)}
-        icon={<SearchIcon className="h-8 w-8" />}
-        heading="We couldn't find this link"
-        body="Please check the address you were given, or ask your doctor's office for a new link."
-      />
-    );
-  }
+  if (!share) return <LinkNotFound />;
 
   // The clinic's logo, colour, font and phone, each checked on the way in (app/brand-look.ts).
   const look = patientLook(share.clinic);
@@ -178,6 +173,18 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
           call={look.call}
         />
       }
+    />
+  );
+}
+
+/** No link has this code (or it is not a code at all), so no clinic: the page keeps the Pulse look and offers no number to call. */
+function LinkNotFound() {
+  return (
+    <Unavailable
+      look={patientLook(null)}
+      icon={<SearchIcon className="h-8 w-8" />}
+      heading="We couldn't find this link"
+      body="Please check the address you were given, or ask your doctor's office for a new link."
     />
   );
 }

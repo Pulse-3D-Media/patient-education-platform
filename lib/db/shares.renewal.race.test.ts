@@ -124,7 +124,7 @@ describe("two reactivations of the same link at once", () => {
     const row = await prisma.share.findUniqueOrThrow({ where: { code } });
     expect(row.renewalsUsed).toBe(1);
     expect(row.expiresAt).toEqual(addDays(T, 21));
-    const notes = await prisma.clinicNote.findMany({ where: { clinicId: clinic, body: { contains: `Link ${code}` } } });
+    const notes = await prisma.clinicNote.findMany({ where: { clinicId: clinic, body: { contains: `link id ${row.id}` } } });
     expect(notes).toHaveLength(1);
     expect(notes[0].authorName).toBe("First admin (clinic admin)");
   });
@@ -139,7 +139,7 @@ describe("two reactivations of the same link at once", () => {
 
     const row = await prisma.share.findUniqueOrThrow({ where: { code } });
     expect(row.renewalsUsed).toBe(2);
-    expect(await prisma.clinicNote.count({ where: { clinicId: clinic, body: { contains: `Link ${code}` } } })).toBe(2);
+    expect(await prisma.clinicNote.count({ where: { clinicId: clinic, body: { contains: `link id ${row.id}` } } })).toBe(2);
   });
 });
 

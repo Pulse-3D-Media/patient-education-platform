@@ -224,7 +224,10 @@ describe("the clinic turning a link back on", () => {
     const notes = await notesFor(clinic);
     expect(notes).toHaveLength(notesBefore + 1);
     expect(notes.at(-1)).toMatchObject({ kind: "STATUS", authorName: "Pat Lee (clinic admin)" });
-    expect(notes.at(-1)?.body).toContain(`Link ${code}`);
+    expect(notes.at(-1)?.body).toMatch(/^A link for Vitest renewal video .* \(link id /);
+    expect(notes.at(-1)?.body).toContain(`link id ${await idOf(code)}`);
+    // The live code is never written into the log, which is kept for good.
+    expect(notes.at(-1)?.body).not.toContain(code);
     expect(notes.at(-1)?.body).toContain(`renewal 1 of ${max}`);
 
     // Plays count again, and the deadline stays where the renewal put it.

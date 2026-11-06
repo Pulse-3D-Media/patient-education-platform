@@ -157,7 +157,10 @@ describe("an admin of the clinic", () => {
     expect(first?.ok).toBe(true);
     expect(first?.message).toContain("Done. The link works again until");
     expect(await renewalsOf(code)).toBe(1);
-    const note = await prisma.clinicNote.findFirst({ where: { clinicId: clinicA, body: { contains: `Link ${code}` } } });
+    const note = await prisma.clinicNote.findFirst({ where: { clinicId: clinicA, body: { contains: `link id ${await idOf(code)}` } } });
+    expect(note).not.toBeNull();
+    // The live code is never written into the log, which is kept for good.
+    expect(note?.body).not.toContain(code);
     expect(note?.authorName).toBe("Pat Lee (clinic admin)");
 
     const second = await reactivateLinkAction(null, form(await idOf(code)));

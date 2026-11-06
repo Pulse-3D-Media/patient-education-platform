@@ -982,7 +982,10 @@ export async function renewShareForClinic(clinicId: string, shareId: string, act
       data: {
         clinicId,
         kind: "STATUS",
-        body: `Link ${share.code} (${share.videoTitle}) turned back on: renewal ${renewalsUsed} of ${allowed}. It works until ${dayWords(expiresAt)}.`,
+        // The link is named by its video and its row id, never its code: the
+        // code is what plays the video, and this log is kept for good (the
+        // renewal email and /admin/reactivate avoid the code for the same reason).
+        body: `A link for ${share.videoTitle} (link id ${share.id}) turned back on: renewal ${renewalsUsed} of ${allowed}. It works until ${dayWords(expiresAt)}.`,
         authorName: `${actorName} (clinic admin)`,
       },
       select: { id: true },

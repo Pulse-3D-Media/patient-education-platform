@@ -264,6 +264,26 @@ describe("an admin of a PENDING clinic", () => {
     expect(html.match(/<main\b/g)).toHaveLength(1);
   });
 
+  it("can still remove someone from People while closed, and nothing else: no seats, admin switches, names or invitations", async () => {
+    signInAs(orgPending, "admin", "Vitest pages clinic (pending)", [HIP_SURGEON]);
+    const html = await render(PeoplePage, "/admin/people");
+    expect(html).toContain("Choose a plan first");
+    expect(html).toContain("Remove someone who has left");
+    expect(html).toContain("Jane Smith");
+    expect(html).toContain(">Remove<");
+    // The person looking is never offered to themselves.
+    expect(html).not.toContain("Vi Test");
+    expect(html).not.toContain("Member with admin</option>");
+    expect(html).not.toContain("Give a seat");
+    expect(html).not.toContain("Invite someone");
+  });
+
+  it("shows no removal list on a closed clinic with nobody else in it", async () => {
+    signInAs(orgPending, "admin", "Vitest pages clinic (pending)");
+    const html = await render(PeoplePage, "/admin/people");
+    expect(html).not.toContain("Remove someone who has left");
+  });
+
   it("gets the closed-clinic page on the overview, Shared links and Branding, with a way to Billing, no links workspace, and one main landmark", async () => {
     for (const [page, path] of [
       [AdminOverviewPage, "/admin"],

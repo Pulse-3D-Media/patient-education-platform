@@ -1,6 +1,6 @@
 import { SignUp } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
-import { LOGO_URL } from "@/lib/brand";
+import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { signInHandoffHref } from "@/lib/invitation-handoff";
 
 /**
@@ -32,8 +32,8 @@ export default async function SignUpPage({ searchParams }: PageProps<"/sign-up/[
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-[#e4ebf3] px-4 py-10">
-      {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-      <img src={LOGO_URL} alt="Pulse 3D" className="h-9 w-auto" />
+      {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+      <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="h-12 w-auto" />
       <SignUp path="/sign-up" />
       <p className="max-w-sm text-center text-sm text-[#667085]">
         For clinic staff. Once you are in, you can set up your clinic or join one you were invited to. Patients never

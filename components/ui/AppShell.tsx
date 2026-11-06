@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ADMIN_SECTIONS, activeAdminSection } from "@/lib/admin-nav";
 import { CATEGORY_GROUP } from "@/lib/categories";
-import { LOGO_URL } from "@/lib/brand";
+import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
 import { ClinicLogo } from "./ClinicLogo";
 import { AdminIcon, ArrowLeftIcon, BooksIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
@@ -181,8 +181,8 @@ export function AppShell({
     </Link>
   ) : (
     <Link href="/library" className="flex items-center" aria-label="Pulse 3D, library home">
-      {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-      <img src={LOGO_URL} alt="Pulse 3D" className="h-7 w-auto" />
+      {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+      <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="h-10 w-auto" />
     </Link>
   );
 
@@ -460,8 +460,8 @@ function PoweredBy() {
       Powered by
       {/* Lazy: the full sidebar is in every page's HTML but hidden on smaller screens, and a lazy picture that is hidden is
           never fetched (nor preloaded by React), so a phone or a tablet does not download it for nothing. */}
-      {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-      <img src={LOGO_URL} alt="Pulse 3D" loading="lazy" className="h-4 w-auto" />
+      {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+      <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" loading="lazy" className="h-7 w-auto" />
     </p>
   );
 }

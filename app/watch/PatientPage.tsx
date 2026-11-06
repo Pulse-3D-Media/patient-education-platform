@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { Look } from "@/app/brand-look";
 import { ClinicLogo } from "@/components/ui/ClinicLogo";
 import { CalendarIcon, ClockIcon } from "@/components/ui/icons";
-import { LOGO_URL } from "@/lib/brand";
+import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { afterFirstPlaySentence, type PatientDeadline } from "@/lib/expiry";
 import { describeDuration } from "@/lib/format";
 import { senderLines } from "@/lib/sender-name";
@@ -120,8 +120,8 @@ export function PatientViewer({
 
         {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
         <div className="mt-auto pt-10">
-          {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-          <img src={LOGO_URL} alt="Pulse 3D" className="h-6 w-auto" />
+          {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+          <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="h-8 w-auto" />
         </div>
       </div>
     </main>
@@ -174,8 +174,8 @@ export function Unavailable({
             {look.call && <CallButton call={look.call} />}
           </>
         )}
-        {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-        <img src={LOGO_URL} alt="Pulse 3D" className="mt-12 h-6 w-auto" />
+        {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+        <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="mt-12 h-8 w-auto" />
       </div>
     </main>
   );

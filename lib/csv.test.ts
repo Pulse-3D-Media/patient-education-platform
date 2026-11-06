@@ -28,6 +28,29 @@ describe("csvCell", () => {
     expect(csvCell("@SUM(A1)")).toBe('"\'@SUM(A1)"');
     expect(csvCell("\tlead")).toBe('"\'\tlead"');
   });
+
+  // The audit's section 15 cases: a formula hidden behind a line break or a
+  // space, and the full-width forms of = + - @ (which some spreadsheets read
+  // as the plain ones). Each must get the protective apostrophe.
+  it.each(["\n=1+1", " =1+1", "＝1+1", "＋1", "－1", "＠SUM(A1)"])("neutralizes %j", (value) => {
+    expect(csvCell(value).startsWith("\"'")).toBe(true);
+  });
+
+  it("looks past every kind of leading space, control and hidden character", () => {
+    for (const lead of ["\r", "\t", "\n\n", " ", "　", "​", "‮", "﻿", " \n ​"]) {
+      expect(csvCell(`${lead}=1+1`)).toBe(`"'${lead}=1+1"`);
+    }
+    // The small forms too, which read as the plain sign once normalized.
+    expect(csvCell("﹢1")).toBe(`"'﹢1"`);
+  });
+
+  it("leaves ordinary text alone, a sign that is not first included", () => {
+    expect(csvCell("Knee")).toBe('"Knee"');
+    expect(csvCell(" Knee")).toBe('" Knee"');
+    expect(csvCell("Smith-Jones Ortho")).toBe('"Smith-Jones Ortho"');
+    expect(csvCell("A+ Orthopedics")).toBe('"A+ Orthopedics"');
+    expect(csvCell("   ")).toBe('"   "');
+  });
 });
 
 describe("toCsv", () => {

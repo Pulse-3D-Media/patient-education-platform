@@ -9,6 +9,7 @@ import { PULSE_CONTACT_URL } from "@/lib/brand";
 import { engineInterval } from "@/lib/checkout-rules";
 import { classifyPlanChange, planLibraryGap, RENEWAL_REASON_WORDS } from "@/lib/plan-change";
 import { formatCents, quote, type Quote } from "@/lib/pricing";
+import { stripeInvoicePage } from "@/lib/stripe-pages";
 import { confirmPlanChangeAction, reviewPlanChangeAction, type ChangeReview } from "./actions";
 import type { ChangeOffer } from "./checkout-view";
 import { canPick, CategoryChoices, IntervalChoices, RunningTotal, SeatsField, TestModeNote } from "./PlanFields";
@@ -138,7 +139,7 @@ export function PlanChanger({ offer, suggested = null }: { offer: Changer; sugge
       const result = await confirmPlanChangeAction(data);
       setReview(null);
       if (result?.done) setNote({ text: result.done, problem: false });
-      else if (result?.unpaid) setUnpaid({ text: result.unpaid, payUrl: result.payUrl ?? null });
+      else if (result?.unpaid) setUnpaid({ text: result.unpaid, payUrl: stripeInvoicePage(result.payUrl) }); // only ever Stripe's invoice page, checked again here
       else setNote({ text: result?.stale ?? result?.error ?? "We could not confirm that change just now.", problem: true });
       router.refresh();
     });

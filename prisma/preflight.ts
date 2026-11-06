@@ -65,6 +65,24 @@ function productionEndpoint(value: string | undefined): string | null {
 }
 
 /**
+ * Is DATABASE_URL the production database? The same comparison the scripts
+ * make below, with no command line: "production" when it names the host in
+ * PRODUCTION_DATABASE_HOST, "not-production" when both can be read and
+ * differ, and "unknown" whenever either cannot be read (the caller decides
+ * what unknown means; for anything that matters it means production).
+ *
+ * Also asked by checkoutIsOpen() in lib/stripe.ts, so the app run on a
+ * computer with the production .env never opens test-mode checkout. Pure,
+ * and never returns or prints a connection string or a host.
+ */
+export function databaseKind(env: { DATABASE_URL?: string; PRODUCTION_DATABASE_HOST?: string }): "production" | "not-production" | "unknown" {
+  const target = env.DATABASE_URL?.trim() ? endpointOf(env.DATABASE_URL) : null;
+  const production = productionEndpoint(env.PRODUCTION_DATABASE_HOST);
+  if (!target || !production) return "unknown";
+  return target === production ? "production" : "not-production";
+}
+
+/**
  * May this script run? Pure: give it the environment and the arguments, it
  * gives back the decision. Never returns a connection string.
  */

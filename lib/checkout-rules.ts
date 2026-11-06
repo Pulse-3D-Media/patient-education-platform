@@ -86,6 +86,8 @@ export type PlanShape = {
   interval: BillingInterval;
   perSeatCents: number;
   totalCents: number;
+  /** Bought as the full library, which includes categories added later too. Left out, false (as on every plan before it). */
+  fullLibrary?: boolean;
 };
 
 const sameSet = (a: Category[], b: Category[]) => a.length === b.length && a.every((category) => b.includes(category));
@@ -98,6 +100,9 @@ export function samePlanShape(a: PlanShape, b: PlanShape): boolean {
     a.interval === b.interval &&
     a.perSeatCents === b.perSeatCents &&
     a.totalCents === b.totalCents &&
+    // A full-library plan and an ordinary plan of the same categories are different purchases:
+    // only the first gains categories added later, so one is never reused for the other.
+    (a.fullLibrary ?? false) === (b.fullLibrary ?? false) &&
     sameSet(a.categories, b.categories) &&
     sameSet(a.entitledCategories, b.entitledCategories)
   );

@@ -371,7 +371,7 @@ export async function acceptPlanForCheckout(
     if (facts.pendingPlanId && !options.forceNew) {
       const waiting = await tx.billingPlan.findUnique({
         where: { id: facts.pendingPlanId },
-        select: { id: true, clinicId: true, createdAt: true, pricingVersionId: true, categories: true, entitledCategories: true, surgeonSeats: true, interval: true, perSeatCents: true, totalCents: true },
+        select: { id: true, clinicId: true, createdAt: true, pricingVersionId: true, categories: true, entitledCategories: true, surgeonSeats: true, interval: true, perSeatCents: true, totalCents: true, fullLibrary: true },
       });
       if (waiting && waiting.clinicId === clinicId && samePlanShape(waiting, input) && attemptIsReusable(waiting.createdAt, now)) {
         return { planId: waiting.id, createdAt: waiting.createdAt, reused: true };
@@ -550,12 +550,17 @@ export async function setBillingEventClinic(id: string, clinicId: string) {
   await prisma.billingEvent.update({ where: { id }, data: { clinicId }, select: { id: true } });
 }
 
-/** Close a notification with nothing done, and say why. Used for the cases decided before any clinic is locked. */
+/**
+ * Close a notification with nothing done, and say why. Used for the cases
+ * decided before any clinic is locked. Like markBillingEventFailed, it only
+ * touches a notification that is not finished yet: one that another attempt
+ * (a retry, or Stripe sending it again) has already PROCESSED or IGNORED
+ * keeps its own outcome rather than being relabelled "nothing was done".
+ */
 export async function ignoreBillingEvent(id: string, outcome: string, clinicId: string | null = null) {
-  await prisma.billingEvent.update({
-    where: { id },
+  await prisma.billingEvent.updateMany({
+    where: { id, status: { in: ["RECEIVED", "FAILED"] } },
     data: { status: "IGNORED", outcome, processedAt: new Date(), lastErrorCode: null, ...(clinicId ? { clinicId } : {}) },
-    select: { id: true },
   });
 }
 

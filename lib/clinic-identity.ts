@@ -83,16 +83,73 @@ export function checkLogoBytes(bytes: Uint8Array): { kind: LogoKind } | { error:
   return { kind };
 }
 
+/** A line break, a tab or another control character. */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * Characters that take up no space or reorder the text around them: the
+ * soft hyphen, the zero-width space and joiners, the word joiner and the
+ * invisible operators, the byte-order mark, and the marks and overrides
+ * that change the direction text is drawn in (which can make a name read
+ * differently from what it holds). Nobody types one into a clinic name on
+ * purpose; they arrive by copying and pasting, or to disguise a name.
+ */
+const HIDDEN_CHARACTERS = /[­؜᠎​-‏‪-‮⁠-⁤⁦-⁩﻿]/;
+
+/** The sentence for a name with a hidden character in it. */
+export const CLINIC_NAME_HIDDEN = "The clinic name has a hidden character in it, often from copying and pasting. Type the name again.";
+
 /**
  * A clinic name as typed, tidied (spaces at the ends trimmed, runs of spaces
  * made one), or the sentence saying what to fix. Refuses an empty name, one
- * that is too long, and one with a line break, a tab or another control
- * character, which would break the banner and the log.
+ * that is too long, one with a line break, a tab or another control
+ * character, which would break the banner and the log, and one with a
+ * hidden character (zero-width or a direction control, see above),
+ * including a name made of nothing else.
  */
 export function readClinicName(text: string): { name: string } | { error: string } {
-  if (/[\u0000-\u001f\u007f]/.test(text)) return { error: "Keep the clinic name on one line." };
+  if (CONTROL_CHARACTERS.test(text)) return { error: "Keep the clinic name on one line." };
+  if (HIDDEN_CHARACTERS.test(text)) return { error: CLINIC_NAME_HIDDEN };
   const name = text.trim().replace(/ {2,}/g, " ");
   if (!name) return { error: "The clinic needs a name." };
   if (name.length > CLINIC_NAME_MAX) return { error: `Keep the clinic name to ${CLINIC_NAME_MAX} characters or fewer.` };
   return { name };
+}
+
+/** The name a brand-new clinic gets when its Clerk organization's name has nothing usable in it. */
+export const UNNAMED_CLINIC = "Unnamed clinic";
+
+/**
+ * The clinic name to keep from the name Clerk holds for the organization,
+ * which a person typed into Clerk's own form (on /onboarding, or in Clerk
+ * directly) where our rules do not run. Called on every signed-in visit by
+ * the name sync (upsertClinicForClerkOrg in lib/db/clinics.ts), so it is
+ * pure and quick.
+ *
+ * It CLEANS rather than refuses, because refusing would leave a clinic with
+ * no name: a line break, a tab or another control character becomes a
+ * space, a hidden character is taken out, the spaces are tidied, and a name
+ * longer than the limit is cut to it. What comes out always passes
+ * readClinicName, the rule an office admin's rename follows. Null when
+ * nothing usable is left (a name made only of spaces or hidden
+ * characters): the caller then keeps the name the clinic already has.
+ *
+ * Clerk's own copy is not changed: writing to Clerk on a page load would
+ * slow the page. The next rename on /admin/branding puts a clean name in
+ * both places.
+ */
+export function nameFromClerk(text: string): string | null {
+  const spaced = text
+    .replace(new RegExp(CONTROL_CHARACTERS.source, "g"), " ")
+    .replace(new RegExp(HIDDEN_CHARACTERS.source, "g"), "")
+    .trim()
+    .replace(/ {2,}/g, " ");
+  // Cut at the limit without splitting a character that takes two UTF-16 units.
+  let cut = "";
+  for (const character of spaced) {
+    if (cut.length + character.length > CLINIC_NAME_MAX) break;
+    cut += character;
+  }
+  const checked = readClinicName(cut);
+  return "name" in checked ? checked.name : null;
 }

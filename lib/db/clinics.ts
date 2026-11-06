@@ -4,6 +4,7 @@ import { PRACTICE_TYPE_WORDS, STAFF_ACCESS_WORDS, effectiveAccess, hasLiveSubscr
 import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, brandFontLabel, brandThemeLabel, parseBrandFont, parseBrandTheme } from "../branding";
 import { labelsInOrder, type CategoryDetails } from "../categories";
 import { getCategoryList } from "./category-config";
+import { UNNAMED_CLINIC, nameFromClerk } from "../clinic-identity";
 import { clinicIsOpen } from "../clinic-status";
 import { clampPage } from "../paging";
 import { formatUsPhone } from "../phone";
@@ -98,31 +99,79 @@ export async function getClinicByClerkOrgId(clerkOrgId: string) {
 export async function upsertClinicForClerkOrg(clerkOrgId: string, details: ClerkOrgDetails) {
   const existing = await getClinicByClerkOrgId(clerkOrgId);
 
+  // Clerk's copy of the name was typed into Clerk's own form, where our rules
+  // do not run, so it is put through the same rule an office admin's rename
+  // follows (nameFromClerk cleans it: one line, no hidden characters, at most
+  // 100 characters). When nothing usable is left, the clinic keeps the name
+  // it has: a real clinic never loses its name to a bad copy in Clerk.
+  const cleaned = nameFromClerk(details.name);
+  const name = cleaned ?? existing?.name ?? UNNAMED_CLINIC;
+
   // The logo is copied only when Clerk has one. When the organization has no
   // logo of its own, a logo Pulse staff set on /pulse is left in place rather
   // than wiped on the clinic's next sign-in.
   const logoUrl = details.logoUrl ?? existing?.logoUrl ?? null;
 
-  if (existing && existing.name === details.name && existing.logoUrl === logoUrl) {
+  // The usual visit: nothing has changed, and nothing is written. This is the
+  // one read every signed-in page makes here, so the check above is pure.
+  if (existing && existing.name === name && existing.logoUrl === logoUrl) {
     return existing;
   }
 
-  return prisma.clinic.upsert({
-    where: { clerkOrgId },
-    // The owner is written on create only. An existing clinic's owner is
-    // moved by a handoff or by Pulse staff (setClinicOwner below), never here.
-    create: {
-      clerkOrgId,
-      name: details.name,
-      logoUrl,
-      status: "PENDING",
-      ownerClerkUserId: isClerkUserId(details.creatorClerkUserId) ? details.creatorClerkUserId : null,
-    },
-    // When Clerk has no image, omit the column entirely. Writing the logo
-    // from the earlier read could overwrite a concurrent Pulse branding save.
-    update: { name: details.name, ...(details.logoUrl !== null ? { logoUrl: details.logoUrl } : {}) },
-    select: CLINIC_FIELDS,
-  });
+  if (!existing) {
+    // A brand-new organization. An upsert keyed on clerkOrgId, so two first
+    // visits at once make one row (the second becomes an update). Making the
+    // clinic is not a change to it, so no log entry.
+    return prisma.clinic.upsert({
+      where: { clerkOrgId },
+      // The owner is written on create only. An existing clinic's owner is
+      // moved by a handoff or by Pulse staff (setClinicOwner below), never here.
+      create: {
+        clerkOrgId,
+        name,
+        logoUrl,
+        status: "PENDING",
+        ownerClerkUserId: isClerkUserId(details.creatorClerkUserId) ? details.creatorClerkUserId : null,
+      },
+      // When Clerk has no image, omit the column entirely. Writing the logo
+      // from the earlier read could overwrite a concurrent Pulse branding save.
+      update: { ...(cleaned !== null ? { name: cleaned } : {}), ...(details.logoUrl !== null ? { logoUrl: details.logoUrl } : {}) },
+      select: CLINIC_FIELDS,
+    });
+  }
+
+  // Clerk's name or logo changed (renamed or uploaded in Clerk directly, or
+  // by Clerk's own pieces). The change and its clinic-log entry are written
+  // together under the clinic's row lock, as on /admin/branding, so two
+  // visits at once log it once: the second reads what the first wrote and
+  // finds nothing to change. A rename or upload made on /admin/branding has
+  // already been copied here with its own entry, so its next visit writes
+  // nothing.
+  await changeClinicWithLog(
+    existing.id,
+    async (before) => ({
+      ...(cleaned !== null && before.name !== cleaned ? { name: cleaned } : {}),
+      // Only Clerk's own logo is ever written, never the one read before the
+      // lock: a Pulse branding save in between must not be overwritten.
+      ...(details.logoUrl !== null && before.logoUrl !== details.logoUrl ? { logoUrl: details.logoUrl } : {}),
+    }),
+    (before, values) => clerkSyncWords(before, values),
+    "Clerk",
+  );
+  // Read again for the fields the signed-in pages need. Only on a visit that
+  // found a change, which is rare, so the usual visit stays at one read.
+  const after = await getClinicByClerkOrgId(clerkOrgId);
+  if (!after) throw new Error("The clinic could not be read back after its name or logo was synced.");
+  return after;
+}
+
+/** The clinic-log sentence for a name or logo copied from Clerk, or null when neither changed. */
+function clerkSyncWords(before: { name: string; logoUrl: string | null }, values: Prisma.ClinicUncheckedUpdateInput): string | null {
+  const parts: string[] = [];
+  if (typeof values.name === "string") parts.push(changeWords("name", quoted(before.name), quoted(values.name)) ?? "");
+  if (typeof values.logoUrl === "string") parts.push(before.logoUrl ? "a new logo replaced the old one" : "a logo was set");
+  const said = parts.filter(Boolean);
+  return said.length ? `Changed in Clerk: ${said.join("; ")}.` : null;
 }
 
 /** What /admin/billing shows a clinic about its own plan. */

@@ -82,10 +82,13 @@ describe("upsertClinicForClerkOrg", () => {
     const orgId = fakeOrgId();
     const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest before sync", logoUrl: null });
     createdClinicIds.push(clinic.id);
-    const original = prisma.clinic.upsert.bind(prisma.clinic);
-    const paused = vi.spyOn(prisma.clinic, "upsert").mockImplementationOnce((async (args: Parameters<typeof original>[0]) => {
+    // The Pulse save lands between the sync's first (unlocked) read and its
+    // write: the read hands back the row as it was, then staff save a logo.
+    const original = prisma.clinic.findUnique.bind(prisma.clinic);
+    const paused = vi.spyOn(prisma.clinic, "findUnique").mockImplementationOnce((async (args: Parameters<typeof original>[0]) => {
+      const stale = await original(args);
       await updateClinicBranding(clinic.id, { logoUrl: "https://example.com/new-logo.png", phone: null, brandColor: null, brandFont: null, brandTheme: null }, "Vitest Pulse staff");
-      return original(args);
+      return stale;
     }) as unknown as typeof original);
     try {
       const synced = await upsertClinicForClerkOrg(orgId, { name: "Vitest after sync", logoUrl: null });
@@ -133,6 +136,80 @@ describe("upsertClinicForClerkOrg", () => {
     expect(updated.name).toBe("Vitest new name");
     expect(updated.logoUrl).toBe("https://example.com/l.png");
     expect(updated.status).toBe("ACTIVE");
+  });
+});
+
+describe("upsertClinicForClerkOrg puts Clerk's name through the rename rule, and logs what changed", () => {
+  const logOf = async (clinicId: string) => (await listNotesForClinic(clinicId, 1)).filter((note) => note.authorName === "Clerk").map((note) => note.body);
+
+  it("cleans a name with a line break, a hidden character and extra length when the clinic is made", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: `\n Vitest​ clean‮\tclinic ${"x".repeat(120)}`, logoUrl: null });
+    createdClinicIds.push(clinic.id);
+    expect(clinic.name).toBe(`Vitest clean clinic ${"x".repeat(80)}`);
+    expect(clinic.name).toHaveLength(100);
+    // Making a clinic is not a change to it.
+    expect(await logOf(clinic.id)).toEqual([]);
+  });
+
+  it("gives a brand-new clinic a plain name when Clerk's has nothing usable in it", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: "​‮  ", logoUrl: null });
+    createdClinicIds.push(clinic.id);
+    expect(clinic.name).toBe("Unnamed clinic");
+  });
+
+  it("never takes a real clinic's name away when Clerk's copy cleans to nothing", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest keeps its name", logoUrl: null });
+    createdClinicIds.push(clinic.id);
+    const after = await upsertClinicForClerkOrg(orgId, { name: "⁦⁩", logoUrl: null });
+    expect(after.name).toBe("Vitest keeps its name");
+    expect(await logOf(clinic.id)).toEqual([]);
+  });
+
+  it("logs a rename and a new logo from Clerk, under Clerk, and nothing on an unchanged visit", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest log old", logoUrl: null });
+    createdClinicIds.push(clinic.id);
+
+    await upsertClinicForClerkOrg(orgId, { name: "Vitest log new\n", logoUrl: null });
+    expect(await logOf(clinic.id)).toEqual(['Changed in Clerk: name changed from "Vitest log old" to "Vitest log new".']);
+
+    // The same copy again, the way every later visit looks: nothing written.
+    await upsertClinicForClerkOrg(orgId, { name: "Vitest log new\n", logoUrl: null });
+    expect(await logOf(clinic.id)).toHaveLength(1);
+
+    await upsertClinicForClerkOrg(orgId, { name: "Vitest log new", logoUrl: "https://example.com/a.png" });
+    await upsertClinicForClerkOrg(orgId, { name: "Vitest log both", logoUrl: "https://example.com/b.png" });
+    // Compared as a set: two entries written in the same millisecond may list in either order.
+    const entries = await logOf(clinic.id);
+    expect(entries).toHaveLength(3);
+    expect(entries).toEqual(expect.arrayContaining([
+      'Changed in Clerk: name changed from "Vitest log new" to "Vitest log both"; a new logo replaced the old one.',
+      "Changed in Clerk: a logo was set.",
+      'Changed in Clerk: name changed from "Vitest log old" to "Vitest log new".',
+    ]));
+  });
+
+  it("logs a change once when two visits bring it at the same moment", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest race old", logoUrl: null });
+    createdClinicIds.push(clinic.id);
+    const details = { name: "Vitest race new", logoUrl: "https://example.com/race.png" };
+    const results = await Promise.all([1, 2, 3].map(() => upsertClinicForClerkOrg(orgId, details)));
+    for (const result of results) expect(result.name).toBe("Vitest race new");
+    expect(await logOf(clinic.id)).toHaveLength(1);
+  });
+
+  it("writes nothing after a rename made on /admin/branding, which logs its own entry", async () => {
+    const orgId = fakeOrgId();
+    const clinic = await upsertClinicForClerkOrg(orgId, { name: "Vitest branded old", logoUrl: null });
+    createdClinicIds.push(clinic.id);
+    // What /admin/branding does after renaming the Clerk organization.
+    await prisma.clinic.update({ where: { id: clinic.id }, data: { name: "Vitest branded new" } });
+    await upsertClinicForClerkOrg(orgId, { name: "Vitest branded new", logoUrl: null });
+    expect(await logOf(clinic.id)).toEqual([]);
   });
 });
 

@@ -3,7 +3,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, DAY_MS, MAX_LINK_DAYS, ShareTermsError } from "../expiry";
 import { prisma } from "./client";
 import { getSettings } from "./settings";
-import { createShare, deleteShareForClinic, getShareTerms, recordSharePlay } from "./shares";
+import { DISCLAIMER } from "../education-note";
+import { acceptShareDisclaimer, createShare, deleteShareForClinic, getShareTerms, recordSharePlay } from "./shares";
+import { playAfterTick } from "@/lib/testing/ticked-play";
 
 /**
  * The first-play expiry rule against the real test database.
@@ -127,7 +129,7 @@ describe("what a new link carries", () => {
 
     // And the older link's first play uses the ten it was promised, not the three that came later.
     const playedAt = addDays(T, 1);
-    expect(await recordSharePlay(older.code, playedAt)).toEqual({ recorded: true, firstPlay: true });
+    expect(await playAfterTick(older.code, playedAt)).toEqual({ recorded: true, firstPlay: true });
     expect((await read(older.code)).expiresAt.getTime()).toBe(playedAt.getTime() + 10 * DAY_MS);
   });
 
@@ -167,14 +169,14 @@ describe("a legacy link stays exactly as it was issued", () => {
     const { code } = await makeLegacy(clinic, video, expiresAt);
     expect((await read(code)).expiryPolicy).toBe("FIXED");
 
-    expect(await recordSharePlay(code, addDays(T, 1))).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(code, addDays(T, 1))).toEqual({ recorded: true, firstPlay: false });
     let row = await read(code);
     expect(row.viewCount).toBe(1);
     expect(row.expiresAt.getTime()).toBe(expiresAt.getTime());
     expect(row.firstPlayedAt).toBeNull();
     expect(row.daysAfterFirstPlay).toBeNull();
 
-    expect(await recordSharePlay(code, addDays(T, 2))).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(code, addDays(T, 2))).toEqual({ recorded: true, firstPlay: false });
     row = await read(code);
     expect(row.viewCount).toBe(2);
     expect(row.expiresAt.getTime()).toBe(expiresAt.getTime());
@@ -185,7 +187,7 @@ describe("a legacy link stays exactly as it was issued", () => {
     const expiresAt = addDays(T, 40);
     const { code } = await makeLegacy(clinic, video, expiresAt, 4);
 
-    expect(await recordSharePlay(code, T)).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(code, T)).toEqual({ recorded: true, firstPlay: false });
     const row = await read(code);
     expect(row.viewCount).toBe(5);
     expect(row.expiresAt.getTime()).toBe(expiresAt.getTime());
@@ -195,7 +197,7 @@ describe("a legacy link stays exactly as it was issued", () => {
   it("stops at its own date like any link: a play at or after it writes nothing", async () => {
     const expiresAt = addDays(T, 5);
     const { code } = await makeLegacy(clinic, video, expiresAt, 1);
-    expect(await recordSharePlay(code, expiresAt)).toEqual({ recorded: false, reason: "expired" });
+    expect(await playAfterTick(code, expiresAt)).toEqual({ recorded: false, reason: "expired" });
     expect((await read(code)).viewCount).toBe(1);
   });
 });
@@ -206,7 +208,7 @@ describe("the first play of a new link", () => {
     const days = (await read(share.code)).daysAfterFirstPlay!;
 
     const first = addDays(T, 2);
-    expect(await recordSharePlay(share.code, first)).toEqual({ recorded: true, firstPlay: true });
+    expect(await playAfterTick(share.code, first)).toEqual({ recorded: true, firstPlay: true });
     let row = await read(share.code);
     expect(row.firstPlayedAt?.getTime()).toBe(first.getTime());
     expect(row.expiresAt.getTime()).toBe(first.getTime() + days * DAY_MS);
@@ -214,7 +216,7 @@ describe("the first play of a new link", () => {
     expect(row.lastViewedAt?.getTime()).toBe(first.getTime());
 
     const second = addDays(first, 1);
-    expect(await recordSharePlay(share.code, second)).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(share.code, second)).toEqual({ recorded: true, firstPlay: false });
     row = await read(share.code);
     expect(row.firstPlayedAt?.getTime()).toBe(first.getTime());
     expect(row.expiresAt.getTime()).toBe(first.getTime() + days * DAY_MS);
@@ -229,7 +231,7 @@ describe("the first play of a new link", () => {
     const moved = addDays(T, 7);
     await prisma.share.update({ where: { id: share.id }, data: { firstPlayedAt: T, expiresAt: moved, viewCount: 0 } });
 
-    expect(await recordSharePlay(share.code, addDays(T, 1))).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(share.code, addDays(T, 1))).toEqual({ recorded: true, firstPlay: false });
     const row = await read(share.code);
     expect(row.expiresAt.getTime()).toBe(moved.getTime());
     expect(row.firstPlayedAt?.getTime()).toBe(T.getTime());
@@ -243,7 +245,7 @@ describe("the first play of a new link", () => {
       const days = (await read(share.code)).daysAfterFirstPlay!;
       const at = addDays(T, 1);
 
-      const results = await Promise.all([recordSharePlay(share.code, at), recordSharePlay(share.code, at), recordSharePlay(share.code, at)]);
+      const results = await Promise.all([playAfterTick(share.code, at), playAfterTick(share.code, at), playAfterTick(share.code, at)]);
 
       expect(results.every((r) => r.recorded)).toBe(true);
       expect(results.filter((r) => r.recorded && r.firstPlay)).toHaveLength(1);
@@ -261,7 +263,7 @@ describe("the first play of a new link", () => {
     await prisma.share.update({ where: { id: share.id }, data: { expiresAt: deadline } });
 
     const justBefore = new Date(deadline.getTime() - 1000);
-    expect(await recordSharePlay(share.code, justBefore)).toEqual({ recorded: true, firstPlay: true });
+    expect(await playAfterTick(share.code, justBefore)).toEqual({ recorded: true, firstPlay: true });
     const row = await read(share.code);
     expect(row.expiresAt.getTime()).toBe(justBefore.getTime() + days * DAY_MS);
     expect(row.expiresAt.getTime()).toBeGreaterThan(deadline.getTime());
@@ -272,7 +274,7 @@ describe("the first play of a new link", () => {
     const deadline = addDays(T, 1);
     await prisma.share.update({ where: { id: share.id }, data: { expiresAt: deadline } });
 
-    expect(await recordSharePlay(share.code, deadline)).toEqual({ recorded: false, reason: "expired" });
+    expect(await playAfterTick(share.code, deadline)).toEqual({ recorded: false, reason: "expired" });
     const row = await read(share.code);
     expect(row.viewCount).toBe(0);
     expect(row.firstPlayedAt).toBeNull();
@@ -284,8 +286,8 @@ describe("the first play of a new link", () => {
     const deadline = addDays(T, 1);
     await prisma.share.update({ where: { id: share.id }, data: { expiresAt: deadline } });
 
-    expect(await recordSharePlay(share.code, new Date(deadline.getTime() + 1))).toEqual({ recorded: false, reason: "expired" });
-    expect(await recordSharePlay(share.code, addDays(deadline, 30))).toEqual({ recorded: false, reason: "expired" });
+    expect(await playAfterTick(share.code, new Date(deadline.getTime() + 1))).toEqual({ recorded: false, reason: "expired" });
+    expect(await playAfterTick(share.code, addDays(deadline, 30))).toEqual({ recorded: false, reason: "expired" });
     const row = await read(share.code);
     expect(row.viewCount).toBe(0);
     expect(row.firstPlayedAt).toBeNull();
@@ -295,11 +297,11 @@ describe("the first play of a new link", () => {
   it("once the moved deadline has passed, the link is over: a play then writes nothing", async () => {
     const share = await createShare(clinic, video, { now: T });
     const days = (await read(share.code)).daysAfterFirstPlay!;
-    await recordSharePlay(share.code, T);
+    await playAfterTick(share.code, T);
     const moved = T.getTime() + days * DAY_MS;
 
-    expect(await recordSharePlay(share.code, new Date(moved - 1))).toEqual({ recorded: true, firstPlay: false });
-    expect(await recordSharePlay(share.code, new Date(moved))).toEqual({ recorded: false, reason: "expired" });
+    expect(await playAfterTick(share.code, new Date(moved - 1))).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(share.code, new Date(moved))).toEqual({ recorded: false, reason: "expired" });
     expect((await read(share.code)).viewCount).toBe(2);
   });
 });
@@ -310,22 +312,71 @@ describe("what cannot be claimed or counted at all", () => {
     const share = await createShare(clinic, ownVideo, { now: T });
     await prisma.video.update({ where: { id: ownVideo }, data: { isPublished: false } });
 
-    expect(await recordSharePlay(share.code, addDays(T, 1))).toEqual({ recorded: false, reason: "unpublished" });
+    expect(await playAfterTick(share.code, addDays(T, 1))).toEqual({ recorded: false, reason: "unpublished" });
     let row = await read(share.code);
     expect(row.viewCount).toBe(0);
     expect(row.firstPlayedAt).toBeNull();
 
     await prisma.video.update({ where: { id: ownVideo }, data: { isPublished: true } });
-    expect(await recordSharePlay(share.code, addDays(T, 1))).toEqual({ recorded: true, firstPlay: true });
+    expect(await playAfterTick(share.code, addDays(T, 1))).toEqual({ recorded: true, firstPlay: true });
     row = await read(share.code);
     expect(row.viewCount).toBe(1);
   });
 
   it("a code that does not exist, and a link that was cancelled", async () => {
-    expect(await recordSharePlay("nope00", T)).toEqual({ recorded: false, reason: "no-such-link" });
+    expect(await playAfterTick("nope00", T)).toEqual({ recorded: false, reason: "no-such-link" });
 
     const share = await createShare(clinic, video, { now: T });
     expect(await deleteShareForClinic(clinic, share.code)).toBe(true);
-    expect(await recordSharePlay(share.code, T)).toEqual({ recorded: false, reason: "no-such-link" });
+    expect(await playAfterTick(share.code, T)).toEqual({ recorded: false, reason: "no-such-link" });
+  });
+});
+
+describe("no tick, no clock", () => {
+  /** The tick's record, straight from the row. */
+  async function ticks(code: string) {
+    return prisma.share.findUniqueOrThrow({ where: { code }, select: { disclaimerAcceptances: true, disclaimerFirstAcceptedAt: true } });
+  }
+
+  it("a new link whose box was never ticked: the first play writes nothing and the link keeps its unclaimed deadline", async () => {
+    const share = await createShare(clinic, video, { now: T });
+    const before = await read(share.code);
+
+    expect(await recordSharePlay(share.code, addDays(T, 1))).toEqual({ recorded: false, reason: "not-accepted" });
+    expect(await read(share.code)).toEqual(before);
+    expect(await ticks(share.code)).toEqual({ disclaimerAcceptances: 0, disclaimerFirstAcceptedAt: null });
+
+    // The control: once the box is ticked, the same play claims the first play as before.
+    expect((await acceptShareDisclaimer(share.code, DISCLAIMER.version, addDays(T, 2))).recorded).toBe(true);
+    expect(await recordSharePlay(share.code, addDays(T, 2))).toEqual({ recorded: true, firstPlay: true });
+    const after = await read(share.code);
+    expect(after.firstPlayedAt?.getTime()).toBe(addDays(T, 2).getTime());
+    expect(after.expiresAt.getTime()).toBe(addDays(T, 2).getTime() + after.daysAfterFirstPlay! * DAY_MS);
+    expect(after.viewCount).toBe(1);
+  });
+
+  it("three unticked first plays at once write nothing at all", async () => {
+    const share = await createShare(clinic, video, { now: T });
+    const before = await read(share.code);
+    const at = addDays(T, 1);
+    const results = await Promise.all([recordSharePlay(share.code, at), recordSharePlay(share.code, at), recordSharePlay(share.code, at)]);
+    expect(results.every((r) => !r.recorded && r.reason === "not-accepted")).toBe(true);
+    expect(await read(share.code)).toEqual(before);
+  });
+
+  it("a legacy link is counted as before, ticked or not: its date never moves anyway", async () => {
+    const expiresAt = addDays(T, 40);
+    const { code } = await makeLegacy(clinic, video, expiresAt);
+    expect(await recordSharePlay(code, T)).toEqual({ recorded: true, firstPlay: false });
+    const row = await read(code);
+    expect(row.viewCount).toBe(1);
+    expect(row.expiresAt.getTime()).toBe(expiresAt.getTime());
+  });
+
+  it("a link that has been played goes on counting plays, ticked again or not", async () => {
+    const share = await createShare(clinic, video, { now: T });
+    expect(await playAfterTick(share.code, T)).toEqual({ recorded: true, firstPlay: true });
+    expect(await recordSharePlay(share.code, addDays(T, 1))).toEqual({ recorded: true, firstPlay: false });
+    expect((await read(share.code)).viewCount).toBe(2);
   });
 });

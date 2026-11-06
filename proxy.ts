@@ -108,9 +108,18 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
 
 // Which requests the middleware runs for. This is Clerk's recommended matcher:
 // every page and API route, but not Next.js internals or static files.
+//
+// One change from Clerk's version (audit run 2, November 2026): the "$" after
+// the list of file endings. Without it, a path that merely CONTAINED ".png"
+// or ".css" somewhere (/admin/x.png/anything) counted as a static file and
+// skipped the middleware, and with it the sign-in redirect. Now only a path
+// that ENDS in one of those endings is skipped, which is what a static file
+// is. The pages still check who is signed in themselves either way (see the
+// top of this file); this keeps the convenience layer honest.
+// lib/proxy-matcher.test.ts checks which paths are matched.
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)$).*)",
     "/(api|trpc)(.*)",
     "/__clerk/(.*)",
   ],

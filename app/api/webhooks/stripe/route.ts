@@ -1,4 +1,5 @@
 import { handleStripeEvent } from "@/lib/billing-events";
+import { judgeContentLength, MAX_STRIPE_WEBHOOK_BYTES } from "@/lib/body-size";
 import { StripeConfigError, getWebhookSecret, verifyWebhook } from "@/lib/stripe";
 
 /**
@@ -15,6 +16,8 @@ import { StripeConfigError, getWebhookSecret, verifyWebhook } from "@/lib/stripe
  *
  *   200   finished (done, a repeat of something done, or nothing to do).
  *         Stripe stops sending it.
+ *   413   the body says it is bigger than any notification (1 MiB);
+ *         refused before it is read.
  *   400   not from Stripe, or unreadable. Stripe does not get a second try
  *         that could succeed, which is right: the request was bad.
  *   500   the work failed (Stripe or the database was unreachable, say).
@@ -42,6 +45,13 @@ function answer(status: number, word: string) {
 }
 
 export async function POST(request: Request) {
+  // A body that says it is bigger than any real notification is refused
+  // before a byte of it is read (lib/body-size.ts, 1 MiB). 413 tells the
+  // sender why; Stripe's own notifications are far smaller and never see it.
+  const size = judgeContentLength(request.headers.get("content-length"), MAX_STRIPE_WEBHOOK_BYTES);
+  if (size === "too-large") return answer(413, "too large");
+  if (size === "malformed") return answer(400, "bad request");
+
   let secret: string;
   try {
     secret = getWebhookSecret();

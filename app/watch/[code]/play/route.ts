@@ -36,7 +36,10 @@ import { usesProtectedPlayback } from "@/lib/video";
  *
  *   200 {"recorded": true, "playback"?: {...}}   counted
  *   200 {"recorded": false}                      not counted: the link is
- *                                                unknown, over or taken down
+ *                                                unknown, over or taken down, or,
+ *                                                for a first play, the box was
+ *                                                never ticked on it (nothing is
+ *                                                written: no tick, no clock)
  *   400 {"recorded": false}                      not a link's code
  *   500 {"recorded": false}                      a failure on our side
  *

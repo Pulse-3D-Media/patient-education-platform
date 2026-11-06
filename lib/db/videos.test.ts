@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { accessFromClinic } from "../access";
 import { prisma } from "./client";
-import { createShare, getShareByCode, recordSharePlay } from "./shares";
+import { createShare, getShareByCode } from "./shares";
+import { playAfterTick } from "@/lib/testing/ticked-play";
 import {
   countPublishedVideosByCategory,
   countPublishedVideosByKind,
@@ -169,19 +170,19 @@ describe("unpublishing a video", () => {
     const share = await createShare(clinicId, video.id);
 
     // Published: the patient page plays it and a view counts.
-    await recordSharePlay(share.code);
+    await playAfterTick(share.code);
     expect((await getShareByCode(share.code))?.viewCount).toBe(1);
 
     // Unpublished on /pulse/videos: the same link now reads as not available, and a view does not count.
     await updateVideo(video.id, { ...input({ category: "HIP" }), title: video.title, isPublished: false });
     const takenDown = await getShareByCode(share.code);
     expect(takenDown?.video.isPublished).toBe(false);
-    await recordSharePlay(share.code);
+    await playAfterTick(share.code);
     expect((await getShareByCode(share.code))?.viewCount).toBe(1);
 
     // Published again: the old link works again.
     await updateVideo(video.id, { ...input({ category: "HIP" }), title: video.title, isPublished: true });
-    await recordSharePlay(share.code);
+    await playAfterTick(share.code);
     expect((await getShareByCode(share.code))?.viewCount).toBe(2);
   });
 });

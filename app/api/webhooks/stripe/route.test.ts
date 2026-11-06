@@ -92,3 +92,38 @@ describe("POST /api/webhooks/stripe", () => {
     expect(log).toHaveBeenCalled();
   });
 });
+
+describe("the size of the body", () => {
+  /** A request that says it is `length` bytes, with its reading watched. */
+  function sized(length: string) {
+    const req = request(BODY, sign(BODY));
+    const withLength = new Request(req.url, { method: "POST", body: BODY, headers: { ...Object.fromEntries(req.headers), "content-length": length } });
+    const read = vi.spyOn(withLength, "text");
+    return { req: withLength, read };
+  }
+
+  it("refuses a body that says it is over 1 MiB with 413, before reading it or checking anything", async () => {
+    const { req, read } = sized(String(1024 * 1024 + 1));
+    const response = await POST(req);
+    expect(response.status).toBe(413);
+    expect(await response.text()).toBe("too large");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(read).not.toHaveBeenCalled();
+    expect(handleStripeEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Content-Length that is not a number with 400, before reading the body", async () => {
+    const { req, read } = sized("lots");
+    expect((await POST(req)).status).toBe(400);
+    expect(read).not.toHaveBeenCalled();
+    expect(handleStripeEvent).not.toHaveBeenCalled();
+  });
+
+  it("reads and hands on a real-sized notification as before (the control)", async () => {
+    const { req, read } = sized(String(Buffer.byteLength(BODY)));
+    expect(req.headers.get("content-length")).toBe(String(Buffer.byteLength(BODY)));
+    expect((await POST(req)).status).toBe(200);
+    expect(read).toHaveBeenCalledOnce();
+    expect(handleStripeEvent).toHaveBeenCalledTimes(1);
+  });
+});

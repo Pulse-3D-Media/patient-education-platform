@@ -127,8 +127,12 @@ describe("POST /watch/<code>/accept", () => {
     const expired = await createShare(clinic, fileVideo);
     await prisma.share.update({ where: { code: expired.code }, data: { expiresAt: new Date(Date.now() - 1000) } });
 
-    const paused = await createShare(clinic, fileVideo, { now: new Date(Date.now() - 30 * 86_400_000) });
-    expect((await recordSharePlay(paused.code, new Date(Date.now() - 30 * 86_400_000))).recorded).toBe(true);
+    // Ticked and played 30 days ago (a first play needs a tick), so it has paused since.
+    const longAgo = new Date(Date.now() - 30 * 86_400_000);
+    const paused = await createShare(clinic, fileVideo, { now: longAgo });
+    await prisma.share.update({ where: { code: paused.code }, data: { disclaimerFirstAcceptedAt: longAgo, disclaimerAcceptances: 1 } });
+    expect((await recordSharePlay(paused.code, longAgo)).recorded).toBe(true);
+    const ticksBefore = new Map([[paused.code, 1]]);
 
     const hiddenVideo = await prisma.video.create({
       data: { title: "Vitest accept hidden video", category: "KNEE", videoUrl: "https://example.com/hidden.mp4", isPublished: true },
@@ -146,8 +150,10 @@ describe("POST /watch/<code>/accept", () => {
     }
     for (const code of [expired.code, paused.code, hidden.code]) {
       const row = await record(code);
-      expect(row.disclaimerAcceptances).toBe(0);
-      expect(row.disclaimerFirstAcceptedAt).toBeNull();
+      // Nothing new written: the paused link keeps the one tick it had before it paused.
+      expect(row.disclaimerAcceptances).toBe(ticksBefore.get(code) ?? 0);
+      if (code === paused.code) expect(row.disclaimerFirstAcceptedAt).toEqual(longAgo);
+      else expect(row.disclaimerFirstAcceptedAt).toBeNull();
     }
   });
 
@@ -216,5 +222,23 @@ describe("POST /watch/<code>/accept", () => {
 
   it("has no GET or HEAD: opening the address never records a tick", () => {
     expect(Object.keys(route)).toEqual(["POST"]);
+  });
+});
+
+describe("a code that cannot be one", () => {
+  /** Post with a body whose reading is watched, to prove the code is judged first. */
+  async function postWatched(code: string) {
+    const request = new Request(`http://localhost/watch/${encodeURIComponent(code)}/accept`, { method: "POST", body: JSON.stringify({ version: V }) });
+    const read = vi.spyOn(request, "json");
+    const response = await route.POST(request, { params: Promise.resolve({ code }) } as never);
+    return { status: response.status, bodyRead: read.mock.calls.length > 0 };
+  }
+
+  it("is refused with a 400 before the body is read", async () => {
+    for (const bad of ["has space", "<script>", "x".repeat(40), "abc'--", ""]) {
+      expect(await postWatched(bad), bad).toEqual({ status: 400, bodyRead: false });
+    }
+    // The control: a code of the right shape does read the body.
+    expect((await postWatched("zzunknown1")).bodyRead).toBe(true);
   });
 });

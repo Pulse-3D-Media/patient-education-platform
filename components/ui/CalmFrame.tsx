@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { LOGO_URL } from "@/lib/brand";
+import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { patientTheme, themeVars } from "@/lib/branding";
 
 /**
@@ -32,8 +32,8 @@ export function CalmFrame({ icon, heading, body, children }: { icon: ReactNode; 
         <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
         <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">{body}</p>
         {children}
-        {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-        <img src={LOGO_URL} alt="Pulse 3D" className="mt-12 h-6 w-auto" />
+        {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+        <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="mt-12 h-8 w-auto" />
       </div>
     </main>
   );

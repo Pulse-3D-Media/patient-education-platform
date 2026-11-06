@@ -1,7 +1,7 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { CreateOrganization, OrganizationList } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
-import { LOGO_URL } from "@/lib/brand";
+import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { askClerk } from "@/lib/clerk-timeout";
 import { getCurrentClinic } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
@@ -56,8 +56,8 @@ export default async function OnboardingPage() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-[#e4ebf3] px-4 py-10">
-      {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-      <img src={LOGO_URL} alt="Pulse 3D" className="h-9 w-auto" />
+      {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+      <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="h-12 w-auto" />
 
       <div className="max-w-md text-center">
         <h1 className="text-2xl font-semibold text-black sm:text-3xl">

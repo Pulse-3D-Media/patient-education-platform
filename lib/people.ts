@@ -1,3 +1,4 @@
+import "server-only";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { SignInUnavailableError, askClerk } from "./clerk-timeout";
 import { TimeoutError } from "./timeout";

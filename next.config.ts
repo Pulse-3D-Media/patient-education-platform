@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   // so keep it that way.
   agentRules: false,
 
+  // No "X-Powered-By: Next.js" header on our responses. It tells a stranger
+  // what the site is built with and helps nobody who uses it.
+  poweredByHeader: false,
+
   // The security headers, on every response. What each one does, and why the
   // full content policy only reports for now, is in lib/security-headers.ts.
   // Worked out when the deployment is built, from settings that are fixed for

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { knownOrigins, pickTrustedOrigin } from "./trusted-origin";
+import { clerkRedirectOrigins, knownOrigins, pickTrustedOrigin } from "./trusted-origin";
 
 /**
  * Which address Stripe may send a person back to. Pure: every host and
@@ -61,5 +61,28 @@ describe("pickTrustedOrigin", () => {
     ]);
     expect(pickTrustedOrigin("app.example.com", env)).toBe("https://app.example.com");
     expect(pickTrustedOrigin("plain.example.com", env)).toBe("https://app.example.com");
+  });
+});
+
+describe("clerkRedirectOrigins", () => {
+  it("is this deployment's own addresses, as Vercel and APP_ORIGINS name them, and nothing from a request", () => {
+    expect(clerkRedirectOrigins(PREVIEW)).toEqual([
+      "https://app-git-billing-checkout-team.vercel.app",
+      "https://app-abc123-team.vercel.app",
+      "https://app.vercel.app",
+    ]);
+    expect(clerkRedirectOrigins({ ...PREVIEW, APP_ORIGINS: "https://learn.example.com" })[0]).toBe("https://learn.example.com");
+  });
+
+  it("never names a whole domain or a wildcard on Vercel, so other sites under the root domain are not let in", () => {
+    for (const origin of clerkRedirectOrigins({ ...PREVIEW, APP_ORIGINS: "https://learn.example.com, http://insecure.example.com, https://*.example.com" })) {
+      expect(origin).not.toContain("*");
+      expect(origin.startsWith("https://")).toBe(true);
+    }
+  });
+
+  it("is never empty (Clerk would read empty as unset and go back to its wide default): localhost where nothing is known", () => {
+    expect(clerkRedirectOrigins({})).toEqual(["http://localhost:*", "http://127.0.0.1:*"]);
+    expect(clerkRedirectOrigins({ VERCEL: "1", VERCEL_URL: "not a host!" })).toEqual(["http://localhost:*", "http://127.0.0.1:*"]);
   });
 });

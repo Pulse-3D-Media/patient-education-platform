@@ -62,6 +62,31 @@ export function knownOrigins(env: OriginEnv): string[] {
   return [...new Set(origins)];
 }
 
+/** What a developer's computer may be reached on, for clerkRedirectOrigins() when nothing else is known. */
+const LOCAL_ORIGINS = ["http://localhost:*", "http://127.0.0.1:*"];
+
+/**
+ * The addresses Clerk may send a person on to after signing in or up
+ * (ClerkProvider's allowedRedirectOrigins, in StaffClerkProvider).
+ *
+ * Left unset, Clerk allows our own address AND every address on the same
+ * root domain as our Clerk instance (pulse3dmedia.com and anything under it,
+ * the marketing site included), which is wider than any sign-in needs. So
+ * Clerk is handed this deployment's own addresses only. Clerk always allows
+ * the address the page is on as well, so a preview, whose address changes
+ * with every push, still returns to itself.
+ *
+ * Never empty: Clerk treats an empty list as "unset" and goes back to its
+ * wide default. Where no address is known (a developer's computer), the list
+ * is localhost, which is still only this computer.
+ */
+export function clerkRedirectOrigins(env: OriginEnv): string[] {
+  // Clerk reads "*" as "anything here", so a wildcard typed into APP_ORIGINS
+  // is left out rather than handed on: only exact addresses.
+  const known = knownOrigins(env).filter((origin) => !origin.includes("*"));
+  return known.length > 0 ? known : LOCAL_ORIGINS;
+}
+
 /** True for localhost or 127.0.0.1, with or without a port. */
 function isLocalHost(host: string): boolean {
   return /^(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(host);

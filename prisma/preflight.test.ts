@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { checkScriptTarget, PRODUCTION_FLAG } from "./preflight";
+import { checkScriptTarget, databaseKind, PRODUCTION_FLAG } from "./preflight";
 
 /**
  * The operator scripts' production check, with made-up connection strings
@@ -163,5 +163,21 @@ describe("the operator scripts", () => {
     for (const command of commands) {
       expect(command).not.toMatch(/migrate\s+(dev|reset|deploy)|db\s+push/);
     }
+  });
+});
+
+describe("databaseKind (also asked by checkoutIsOpen in lib/stripe.ts)", () => {
+  it("names production, pooled or direct, and a database that is clearly not production", () => {
+    expect(databaseKind({ DATABASE_URL: prodPooled, PRODUCTION_DATABASE_HOST: prodHost })).toBe("production");
+    expect(databaseKind({ DATABASE_URL: prodDirect, PRODUCTION_DATABASE_HOST: prodHost })).toBe("production");
+    expect(databaseKind({ DATABASE_URL: prodPooled, PRODUCTION_DATABASE_HOST: prodDirect })).toBe("production");
+    expect(databaseKind({ DATABASE_URL: testPooled, PRODUCTION_DATABASE_HOST: prodHost })).toBe("not-production");
+  });
+
+  it("says unknown whenever either side cannot be read, and gives back nothing but the word", () => {
+    expect(databaseKind({ DATABASE_URL: testPooled })).toBe("unknown");
+    expect(databaseKind({ DATABASE_URL: testPooled, PRODUCTION_DATABASE_HOST: " " })).toBe("unknown");
+    expect(databaseKind({ PRODUCTION_DATABASE_HOST: prodHost })).toBe("unknown");
+    expect(databaseKind({ DATABASE_URL: "not a url", PRODUCTION_DATABASE_HOST: prodHost })).toBe("unknown");
   });
 });

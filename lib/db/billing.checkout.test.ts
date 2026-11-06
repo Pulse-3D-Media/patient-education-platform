@@ -106,6 +106,22 @@ describe("acceptPlanForCheckout", () => {
     expect(await prisma.billingPlan.findUniqueOrThrow({ where: { id: first.planId }, select: { surgeonSeats: true, totalCents: true } })).toEqual({ surgeonSeats: 3, totalCents: 26700 });
   });
 
+  it("a full-library attempt is never reused for an ordinary plan of the same categories, or the other way round", async () => {
+    const clinicId = await makeClinic("full library");
+    const ordinary = await acceptPlanForCheckout(clinicId, planInput());
+    const full = await acceptPlanForCheckout(clinicId, planInput({ fullLibrary: true }));
+    expect(full).toMatchObject({ reused: false });
+    expect(full.planId).not.toBe(ordinary.planId);
+    expect(await prisma.billingPlan.findUniqueOrThrow({ where: { id: full.planId }, select: { fullLibrary: true } })).toEqual({ fullLibrary: true });
+
+    // The same full-library plan again is the same attempt; then ordinary again is a new one.
+    expect(await acceptPlanForCheckout(clinicId, planInput({ fullLibrary: true }))).toMatchObject({ planId: full.planId, reused: true });
+    const ordinaryAgain = await acceptPlanForCheckout(clinicId, planInput());
+    expect(ordinaryAgain.reused).toBe(false);
+    expect(new Set([ordinary.planId, full.planId, ordinaryAgain.planId]).size).toBe(3);
+    expect((await getCheckoutFacts(clinicId))?.facts.pendingPlanId).toBe(ordinaryAgain.planId);
+  });
+
   it("an attempt near the end of its payment page's life is not reused, and forceNew never reuses", async () => {
     const clinicId = await makeClinic("stale");
     const first = await acceptPlanForCheckout(clinicId, planInput());

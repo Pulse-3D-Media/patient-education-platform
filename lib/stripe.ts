@@ -1,3 +1,4 @@
+import "server-only";
 import Stripe from "stripe";
 import type { SubscriptionSnapshot } from "./billing-state";
 import { STRIPE_INVOICE_PREFIX, STRIPE_PORTAL_PREFIX } from "./stripe-pages";

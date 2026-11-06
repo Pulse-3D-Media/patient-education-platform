@@ -66,6 +66,26 @@ export type ClerkOrgDetails = {
   creatorClerkUserId?: string | null;
 };
 
+/** A clinic as an operator script lists it: its id and the Clerk organization it is linked to, if any. */
+export type NamedClinic = { id: string; clerkOrgId: string | null };
+
+/**
+ * Every clinic whose name is exactly `name` (same capitals, same spaces), at
+ * most `limit` of them, oldest first. For `npm run db:seed` only, through
+ * prisma/seed-clinic.ts. A name is NOT an identity: it is copied from the
+ * clinic's Clerk organization, which anyone making an organization can name
+ * as they like, so a caller must never treat a match as "the" clinic without
+ * showing which organization it belongs to.
+ */
+export async function listClinicsNamed(name: string, limit: number): Promise<NamedClinic[]> {
+  return prisma.clinic.findMany({
+    where: { name },
+    select: { id: true, clerkOrgId: true },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: limit,
+  });
+}
+
 /**
  * The clinic linked to one Clerk organization, or null if no clinic exists
  * for that organization yet. clerkOrgId is unique, so at most one clinic can

@@ -42,3 +42,12 @@ next-env.d.ts
 
 # keep the example env file so the repo documents which keys it needs
 !.env.example
+
+# keys, certificates and credential files, never committed (rule 7)
+*.key
+*.p12
+*.pfx
+credentials.json
+
+# Claude Code settings for one computer only
+.claude/settings.local.json

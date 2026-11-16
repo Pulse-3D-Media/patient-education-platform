@@ -88,8 +88,15 @@ beforeAll(async () => {
   });
   videoId = video.id;
   createdVideoIds.push(video.id);
-  code = (await shares.createShare(clinicId, videoId)).code;
+  code = await tickedLink();
 });
+
+/** A link on which the patient ticked the "for education only" box, as every real player has before its first play. */
+async function tickedLink(madeAt?: Date) {
+  const made = (await shares.createShare(clinicId, videoId, madeAt ? { now: madeAt } : {})).code;
+  expect((await shares.acceptShareDisclaimer(made, DISCLAIMER.version, madeAt)).recorded).toBe(true);
+  return made;
+}
 
 beforeEach(() => {
   vi.mocked(renewalEmail.notifyClinicOfRenewalRequest).mockClear();
@@ -126,7 +133,7 @@ describe("POST /watch/<code>/play", () => {
   });
 
   it("moves the deadline once when three first plays arrive at the same moment", async () => {
-    const fresh = (await shares.createShare(clinicId, videoId)).code;
+    const fresh = await tickedLink();
     const answers = await Promise.all([recordPlay(fresh), recordPlay(fresh), recordPlay(fresh)]);
     expect(answers).toEqual([{ recorded: true }, { recorded: true }, { recorded: true }]);
     const row = await prisma.share.findUniqueOrThrow({ where: { code: fresh }, select: { viewCount: true, firstPlayedAt: true, expiresAt: true } });
@@ -192,8 +199,11 @@ describe("a link whose video streams from Mux", () => {
 
   it("never hands out an address, by a first play or a refresh, on a link where the box was never ticked", async () => {
     const share = await shares.createShare(clinicId, muxVideoId);
-    // The play is still counted; no video comes back with it.
-    expect(await recordPlay(share.code)).toEqual({ recorded: true });
+    // A first play without a recorded tick is not counted and does not start
+    // the link's days (lib/db/shares.ts, recordSharePlay), and no video comes back.
+    expect(await recordPlay(share.code)).toEqual({ recorded: false });
+    const row = await prisma.share.findUniqueOrThrow({ where: { code: share.code }, select: { viewCount: true, firstPlayedAt: true } });
+    expect(row).toEqual({ viewCount: 0, firstPlayedAt: null });
     expect(await refreshPlayback(share.code)).toEqual({ ok: false, reason: "ended" });
   });
 
@@ -212,8 +222,8 @@ describe("a link whose video streams from Mux", () => {
 
     expect(await recordPlay(share.code)).toEqual({ recorded: true });
     // The CDN video from the top of this file: counted, nothing handed back.
-    const cdn = await shares.createShare(clinicId, videoId);
-    expect(await recordPlay(cdn.code)).toEqual({ recorded: true });
+    const cdn = await tickedLink();
+    expect(await recordPlay(cdn)).toEqual({ recorded: true });
   });
 
   it("hands out no grant with a first play when the video is taken down, or the link runs out, between the play and the grant", async () => {
@@ -295,9 +305,9 @@ describe("POST /watch/<code>/ask", () => {
   /** A link made and played 20 days ago with ten days after the first play, so it paused 10 days ago. */
   async function pausedLink() {
     const madeAt = addDays(new Date(), -20);
-    const share = await shares.createShare(clinicId, videoId, { now: madeAt });
-    expect(await shares.recordSharePlay(share.code, madeAt)).toEqual({ recorded: true, firstPlay: true });
-    return share.code;
+    const paused = await tickedLink(madeAt);
+    expect(await shares.recordSharePlay(paused, madeAt)).toEqual({ recorded: true, firstPlay: true });
+    return paused;
   }
 
   it("records the request on the link first, then tells the clinic with the address built from a trusted origin", async () => {

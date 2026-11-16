@@ -1,5 +1,5 @@
 import { SignIn } from "@clerk/nextjs";
-import { LOGO_URL } from "@/lib/brand";
+import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 
 /**
  * The sign-in page, at /sign-in, built from Clerk's prebuilt component.
@@ -20,8 +20,8 @@ import { LOGO_URL } from "@/lib/brand";
 export default function SignInPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-[#e4ebf3] px-4 py-10">
-      {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-      <img src={LOGO_URL} alt="Pulse 3D" className="h-9 w-auto" />
+      {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+      <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="h-12 w-auto" />
       <SignIn path="/sign-in" />
       <p className="max-w-sm text-center text-sm text-[#667085]">
         Staff sign-in for the Pulse 3D Patient Education Library. Patients do not need an account:

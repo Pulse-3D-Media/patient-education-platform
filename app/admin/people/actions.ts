@@ -3,7 +3,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getCurrentClinicId } from "@/lib/clinic";
+import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getClinicIdForRemoval, getCurrentClinicId } from "@/lib/clinic";
 import { isClinicAdmin } from "@/lib/roles";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
 import {
@@ -26,7 +26,9 @@ import {
  *
  * Every one is for office admins only, checked on the server first thing,
  * and only while the clinic is open: nobody is invited, and nothing here is
- * changed, before the clinic has paid. The clinic is the signed-in admin's
+ * changed, before the clinic has paid. The one exception is Remove, which
+ * also works while the clinic is closed (paused, unpaid, ended), so an admin
+ * who has left can still be taken out: removing only takes access away. The clinic is the signed-in admin's
  * own, found on the server; who is asking comes from the session. The only
  * things the browser sends are which person or invitation, and what to do.
  * lib/seat-changes.ts then checks with Clerk that the person really is in
@@ -45,12 +47,13 @@ const NOT_OPEN = "Your clinic is not open yet. Choose a plan on the Billing page
 const FAILED = "That could not be saved just now. Nothing was changed. Try again in a moment.";
 
 /** Who is asking and which clinic, or the sentence that says why not. */
-async function asAdmin(): Promise<{ clinicId: string; actor: Actor } | { error: string }> {
+async function asAdmin(options: { evenIfClosed?: boolean } = {}): Promise<{ clinicId: string; actor: Actor } | { error: string }> {
   if (!(await isClinicAdmin())) return { error: NOT_ADMIN };
   const { userId } = await auth();
   if (!userId) return { error: NOT_ADMIN };
-  // Null for a clinic that is not open: the People page offers nothing then either.
-  const clinicId = await getCurrentClinicId();
+  // Null for a clinic that is not open: the People page offers nothing then either, except Remove
+  // (evenIfClosed, removePersonAction only), which getClinicIdForRemoval() in lib/clinic.ts allows while closed.
+  const clinicId = options.evenIfClosed ? await getClinicIdForRemoval() : await getCurrentClinicId();
   if (!clinicId) return { error: NOT_OPEN };
   // The session token can be up to a minute old: ask Clerk itself that this person is still an admin
   // here (confirmAdminWithClerk in lib/clinic.ts). Its answer carries their name for the log, which
@@ -61,9 +64,9 @@ async function asAdmin(): Promise<{ clinicId: string; actor: Actor } | { error: 
 }
 
 /** Run one change, turn its outcome into what the page shows, and refresh the page on success. */
-async function run(change: (who: { clinicId: string; actor: Actor }) => Promise<Outcome>): Promise<ActionResult> {
+async function run(change: (who: { clinicId: string; actor: Actor }) => Promise<Outcome>, options: { evenIfClosed?: boolean } = {}): Promise<ActionResult> {
   try {
-    const who = await asAdmin();
+    const who = await asAdmin(options);
     if ("error" in who) return { error: who.error };
     const outcome = await change(who);
     if (!outcome.ok) return { error: outcome.message };
@@ -95,7 +98,8 @@ export async function setAdminAction(userId: unknown, on: unknown): Promise<Acti
 }
 
 export async function removePersonAction(userId: unknown): Promise<ActionResult> {
-  return run(({ clinicId, actor }) => removePerson({ clinicId, targetUserId: userId, actor }));
+  // The one People action that works while the clinic is closed (see the top of this file).
+  return run(({ clinicId, actor }) => removePerson({ clinicId, targetUserId: userId, actor }), { evenIfClosed: true });
 }
 
 export async function giveSeatAction(userId: unknown): Promise<ActionResult> {

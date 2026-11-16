@@ -40,8 +40,10 @@ import { isShareCodeShape } from "@/lib/share-link";
  */
 export async function POST(request: Request, { params }: RouteContext<"/watch/[code]/accept">) {
   const { code } = await params;
-  const body = (await request.json().catch(() => null)) as { version?: unknown } | null;
+  // The code is checked before the body is read, so a request for an address
+  // that cannot be a code costs nothing more than its answer (audit run 2).
   if (!isShareCodeShape(code)) return answer(null, 400);
+  const body = (await request.json().catch(() => null)) as { version?: unknown } | null;
   const version = judgeAcceptedVersion(body?.version);
   if (version === "malformed") return answer(null, 400);
   if (version === "stale") return answer(null, 409);

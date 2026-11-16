@@ -1,4 +1,5 @@
 import { OwnerChangeRefusedError, setClinicOwner } from "./db/clinics";
+import { withAdminChangeLock } from "./db/admin-change-lock";
 import { addClinicNote } from "./db/notes";
 import {
   applySeatCheck,
@@ -75,6 +76,15 @@ import { effectiveSenderName, parseNameChoice } from "./sender-name";
  *   Removing        1. remove in Clerk; 2. let the seat go. If 2 fails, the
  *                   check sees they have left and lets it go.
  *   Admin on/off    one write to Clerk. Seats are not touched.
+ *                   Removing and admin on/off take turns per clinic: their
+ *                   checks (is the asker still an admin? would this leave no
+ *                   admin?) and their Clerk write run under the clinic's
+ *                   admin-change lock (lib/db/admin-change-lock.ts), so two
+ *                   admins acting on each other at once cannot leave the
+ *                   clinic with none. It is the one lock held across a call
+ *                   to Clerk, and only other admin changes wait for it.
+ *   Owner by staff  1. admin on in Clerk if needed; 2. the owner here. If 2
+ *                   fails after 1, the answer says admin was switched on.
  *   Giving a seat   one write here, under the lock. Clerk is not touched.
  *   Name patients   one write here (on the seat), under the lock, after Clerk
  *   see             has confirmed the person is in the clinic. An admin sets
@@ -128,6 +138,42 @@ async function memberOf(orgId: string, userId: string): Promise<Person | "not-a-
   } catch (error) {
     logFailure("could not read the person from Clerk", error);
     return null;
+  }
+}
+
+type Refusal = { ok: false; message: string };
+
+/**
+ * Asked again under the admin-change lock, right before the write: is the person asking STILL an admin here?
+ * The action asked Clerk too (confirmAdminWithClerk), but before waiting for the lock; another admin may have
+ * switched their admin off or removed them in the meantime. Null means yes.
+ */
+async function actorStillAdmin(orgId: string, actor: Actor): Promise<Refusal | null> {
+  const me = await memberOf(orgId, actor.userId);
+  if (me === null) return { ok: false, message: NOT_SAVED };
+  if (me === "not-a-member" || me.role !== "admin") {
+    return { ok: false, message: "You are no longer an admin of this clinic, so nothing was changed. Another admin may have just changed that." };
+  }
+  return null;
+}
+
+/**
+ * Run an admin change's checks and its Clerk write under the clinic's admin-change lock
+ * (lib/db/admin-change-lock.ts). `work` calls startWrite() right before it writes to Clerk, so that if
+ * the lock itself fails afterwards (the database dropped, or its time ran out) the answer is honest:
+ * "we cannot be sure" once a write was under way, "nothing was changed" before.
+ */
+async function underAdminLock<T extends { ok: true }>(clinicId: string, work: (startWrite: () => void) => Promise<T | Refusal>): Promise<T | Refusal> {
+  let writing = false;
+  try {
+    return await withAdminChangeLock(clinicId, () =>
+      work(() => {
+        writing = true;
+      }),
+    );
+  } catch (error) {
+    logFailure("an admin change could not be finished under its lock", error);
+    return { ok: false, message: writing ? MAYBE_SAVED : NOT_SAVED };
   }
 }
 
@@ -241,33 +287,45 @@ export async function setAdmin(args: { clinicId: string; targetUserId: unknown; 
   const clinic = await clinicFor(args.clinicId);
   if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
   const targetUserId = typeof args.targetUserId === "string" ? args.targetUserId : "";
-
-  const member = await memberOf(clinic.orgId, targetUserId);
-  if (member === null) return { ok: false, message: NOT_SAVED };
-  if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
-
   const role: Role = args.admin ? "admin" : "member";
-  if (member.role === role) return { ok: true };
 
-  if (!args.admin) {
-    if (member.userId === clinic.ownerClerkUserId) {
-      return { ok: false, message: "The account owner always has admin. To switch it off, make someone else the account owner first." };
+  // Checked and written one admin change at a time per clinic (lib/db/admin-change-lock.ts), so two admins
+  // switching each other off at the same moment cannot both pass the checks and leave the clinic with none.
+  const result = await underAdminLock<{ ok: true; changed: Person | null }>(args.clinicId, async (startWrite) => {
+    const refusal = await actorStillAdmin(clinic.orgId, args.actor);
+    if (refusal) return refusal;
+
+    const member = await memberOf(clinic.orgId, targetUserId);
+    if (member === null) return { ok: false, message: NOT_SAVED };
+    if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
+    if (member.role === role) return { ok: true, changed: null };
+
+    if (!args.admin) {
+      if (member.userId === clinic.ownerClerkUserId) {
+        return { ok: false, message: "The account owner always has admin. To switch it off, make someone else the account owner first." };
+      }
+      try {
+        const admins = (await listPeople(clinic.orgId)).filter((person) => person.role === "admin");
+        if (admins.length <= 1) return { ok: false, message: "Your clinic needs at least one admin. Switch admin on for someone else first." };
+      } catch (error) {
+        logFailure("could not count the clinic's admins", error);
+        return { ok: false, message: NOT_SAVED };
+      }
     }
+
+    startWrite();
     try {
-      const admins = (await listPeople(clinic.orgId)).filter((person) => person.role === "admin");
-      if (admins.length <= 1) return { ok: false, message: "Your clinic needs at least one admin. Switch admin on for someone else first." };
+      await setRoleInClerk(clinic.orgId, member.userId, role);
     } catch (error) {
-      logFailure("could not count the clinic's admins", error);
-      return { ok: false, message: NOT_SAVED };
+      logFailure("Clerk did not change the role", error);
+      return { ok: false, message: failedWrite(error) };
     }
-  }
+    return { ok: true, changed: member };
+  });
+  if (!result.ok) return result;
+  const member = result.changed;
+  if (!member) return { ok: true };
 
-  try {
-    await setRoleInClerk(clinic.orgId, member.userId, role);
-  } catch (error) {
-    logFailure("Clerk did not change the role", error);
-    return { ok: false, message: failedWrite(error) };
-  }
   await addClinicNote(args.clinicId, {
     kind: "STATUS",
     authorName: byAdmin(args.actor),
@@ -282,20 +340,31 @@ export async function removePerson(args: { clinicId: string; targetUserId: unkno
   if (!clinic) return { ok: false, message: "Your clinic could not be found. Sign in again and try once more." };
   const targetUserId = typeof args.targetUserId === "string" ? args.targetUserId : "";
 
-  const member = await memberOf(clinic.orgId, targetUserId);
-  if (member === null) return { ok: false, message: NOT_SAVED };
-  if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
-  if (member.userId === clinic.ownerClerkUserId) {
-    return { ok: false, message: "The account owner cannot be removed. Make someone else the account owner first." };
-  }
-  if (member.userId === args.actor.userId) return { ok: false, message: "You cannot remove yourself here. Ask another admin to do it." };
+  // One admin change at a time per clinic, like setAdmin: two admins removing each other at the same moment
+  // cannot both get through. The second waits, then finds it is no longer in the clinic and is refused.
+  const result = await underAdminLock(args.clinicId, async (startWrite) => {
+    const refusal = await actorStillAdmin(clinic.orgId, args.actor);
+    if (refusal) return refusal;
 
-  try {
-    await removeFromClerk(clinic.orgId, member.userId);
-  } catch (error) {
-    logFailure("Clerk did not remove the person", error);
-    return { ok: false, message: failedWrite(error) };
-  }
+    const member = await memberOf(clinic.orgId, targetUserId);
+    if (member === null) return { ok: false, message: NOT_SAVED };
+    if (member === "not-a-member") return { ok: false, message: NOT_IN_CLINIC };
+    if (member.userId === clinic.ownerClerkUserId) {
+      return { ok: false, message: "The account owner cannot be removed. Make someone else the account owner first." };
+    }
+    if (member.userId === args.actor.userId) return { ok: false, message: "You cannot remove yourself here. Ask another admin to do it." };
+
+    startWrite();
+    try {
+      await removeFromClerk(clinic.orgId, member.userId);
+    } catch (error) {
+      logFailure("Clerk did not remove the person", error);
+      return { ok: false, message: failedWrite(error) };
+    }
+    return { ok: true, member };
+  });
+  if (!result.ok) return result;
+  const { member } = result;
 
   const authorName = byAdmin(args.actor);
   try {
@@ -309,6 +378,23 @@ export async function removePerson(args: { clinicId: string; targetUserId: unkno
     logFailure("a removed person's seat could not be let go; the next check does it", error);
   }
   return { ok: true, message: `${member.name} was removed from your clinic.` };
+}
+
+/**
+ * Who could be removed from a clinic that is NOT open, for the People page's closed view: everyone in the
+ * clinic's organization but the account owner and the person looking. Only read from Clerk; no seat is
+ * checked or changed here (the full People page and its seat check come back once the clinic is open).
+ * Null when Clerk could not be read.
+ */
+export async function listRemovablePeople(clinicId: string, viewerUserId: string | null): Promise<Person[] | null> {
+  const clinic = await clinicFor(clinicId);
+  if (!clinic) return [];
+  try {
+    return (await listPeople(clinic.orgId)).filter((person) => person.userId !== clinic.ownerClerkUserId && person.userId !== viewerUserId);
+  } catch (error) {
+    logFailure("could not read the clinic's people for the closed People page", error);
+    return null;
+  }
 }
 
 /**
@@ -491,31 +577,50 @@ export async function setOwnerByStaff(args: { clinicId: string; toUserId: unknow
   if (member === null) return { ok: false, message: "Could not reach Clerk to check that person. Nothing was changed. Try again in a moment." };
   if (member === "not-a-member") return { ok: false, message: "That person is not a member of this clinic." };
 
+  // Two steps: admin on in Clerk (when needed), then the owner on our row. If the second fails after the
+  // first went through, the answer says so: "nothing was changed" would not be true.
+  let madeAdmin = false;
   if (member.role !== "admin") {
     try {
       await setRoleInClerk(clinic.orgId, member.userId, "admin");
     } catch (error) {
       logFailure("Clerk did not make the new owner an admin", error);
+      // A timeout means Clerk may still switch it on after we stopped waiting (failedWrite's MAYBE_SAVED).
+      if (isClerkTimeout(error)) return { ok: false, message: MAYBE_SAVED };
       return { ok: false, message: "Could not switch admin on for that person in Clerk. Nothing was changed. Try again in a moment." };
     }
+    madeAdmin = true;
     await addClinicNote(args.clinicId, { kind: "STATUS", authorName: args.staffName, body: `Admin switched on for ${member.name}, to make them the account owner.` }).catch(
       (error) => logFailure("a role change could not be written to the log", error),
     );
   }
 
-  // The old owner, if still in the clinic, gets the new owner's seat the same way as in a handoff.
-  let oldOwnerName: string | null = null;
-  if (clinic.ownerClerkUserId && clinic.ownerClerkUserId !== member.userId) {
-    const old = await memberOf(clinic.orgId, clinic.ownerClerkUserId);
-    oldOwnerName = typeof old === "object" && old !== null ? old.name : null;
+  let logged = false;
+  try {
+    // The old owner, if still in the clinic, gets the new owner's seat the same way as in a handoff.
+    let oldOwnerName: string | null = null;
+    if (clinic.ownerClerkUserId && clinic.ownerClerkUserId !== member.userId) {
+      const old = await memberOf(clinic.orgId, clinic.ownerClerkUserId);
+      oldOwnerName = typeof old === "object" && old !== null ? old.name : null;
+    }
+    const saved = await setClinicOwner(
+      args.clinicId,
+      member.userId,
+      { newOwnerName: member.name, oldOwnerName, how: "set by Pulse 3D staff" },
+      args.staffName,
+      { oldOwnerStays: oldOwnerName !== null },
+    );
+    logged = Boolean(saved.logged);
+  } catch (error) {
+    logFailure("the account owner could not be set", error);
+    const why = error instanceof OwnerChangeRefusedError ? `${error.message} ` : "";
+    return {
+      ok: false,
+      message: madeAdmin
+        ? `Admin was switched on for ${member.name} in Clerk, but they could not be made the account owner just now. ${why}They stay an admin. Try again in a moment.`
+        : `${why || "That could not be saved just now. "}Nothing was changed. Try again in a moment.`,
+    };
   }
-  const { logged } = await setClinicOwner(
-    args.clinicId,
-    member.userId,
-    { newOwnerName: member.name, oldOwnerName, how: "set by Pulse 3D staff" },
-    args.staffName,
-    { oldOwnerStays: oldOwnerName !== null },
-  );
   await checkSeats(args.clinicId).catch((error) => logFailure("the seats could not be checked after an owner change", error));
   return { ok: true, message: logged ? `${member.name} is now the account owner.` : `${member.name} was already the account owner.` };
 }

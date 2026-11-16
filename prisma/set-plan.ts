@@ -6,9 +6,11 @@
  *   npm run db:set-plan -- <clinicId> --categories KNEE,HIP --seats 3
  *   npm run db:set-plan -- <clinicId> --categories none --seats 0
  *
- * Categories are the enum values in prisma/schema.prisma (SPINE,
- * COMPLEX_SPINE, KNEE, SHOULDER, HIP, FOOT_ANKLE), or "all", or "none".
- * Seats is a whole number, 0 or more.
+ * Categories are their keys as /pulse/videos lists them (SPINE,
+ * COMPLEX_SPINE, KNEE, SHOULDER, HIP, FOOT_ANKLE, and any added since),
+ * comma separated, or "all", or "none". An empty value is refused: to take
+ * every category away, write "none". Seats is a whole number written as
+ * plain digits, 0 or more ("0x10" or "1e2" is refused). See prisma/plan-args.ts.
  *
  * Lowering the seats below the number of people who hold one is refused,
  * the same as on /pulse. To do it on purpose, add --allow-fewer-seats:
@@ -26,42 +28,17 @@
  * sanctioned way to change a plan by hand (never in the Neon console). It
  * prints what it changed and refuses to run with missing or odd arguments.
  */
-import { unknownCategories, type Category } from "../lib/categories";
 import { getCategoryList } from "../lib/db/category-config";
 import { prisma } from "../lib/db/client";
 import { PlanSeatsRefusedError, setClinicPlan } from "../lib/db/clinics";
 import { errorKind } from "../lib/error-kind";
+import { readPlanCategories, readPlanSeats } from "./plan-args";
 import { preflight } from "./preflight";
 
 function usage(): never {
   console.error("Usage: npm run db:set-plan -- <clinicId> --categories <all|none|A,B,C> --seats <number> [--allow-fewer-seats] [--production]");
   console.error("Categories: their keys as /pulse/videos lists them (KNEE, FOOT_ANKLE ...), comma separated, or all, or none.");
   process.exit(1);
-}
-
-/** Turn "all", "none" or "KNEE,HIP" into a list of categories, or print usage and stop. */
-function parseCategories(value: string, known: Category[]): Category[] {
-  const text = value.trim().toUpperCase();
-  if (text === "ALL") return known;
-  if (text === "NONE" || text === "") return [];
-
-  const names = text.split(",").map((name) => name.trim()).filter(Boolean);
-  const unknown = unknownCategories(known.map((value) => ({ value })), names);
-  if (unknown.length > 0) {
-    console.error(`Not a category: ${unknown.join(", ")}. The categories are: ${known.join(", ")}.`);
-    usage();
-  }
-  return names as Category[];
-}
-
-/** A whole number, 0 or more, or print usage and stop. */
-function parseSeats(value: string): number {
-  const seats = Number(value.trim());
-  if (!Number.isInteger(seats) || seats < 0) {
-    console.error(`Seats must be a whole number, 0 or more. Got "${value}".`);
-    usage();
-  }
-  return seats;
 }
 
 async function main() {
@@ -79,8 +56,18 @@ async function main() {
 
   // The categories that exist are the CategoryConfig rows (since K2 a category is text, so it is checked here).
   const known = (await getCategoryList()).map((entry) => entry.value);
-  const categories = parseCategories(categoriesValue, known);
-  const seats = parseSeats(seatsValue);
+  const categoriesRead = readPlanCategories(categoriesValue, known);
+  if (!categoriesRead.ok) {
+    console.error(categoriesRead.reason);
+    usage();
+  }
+  const seatsRead = readPlanSeats(seatsValue);
+  if (!seatsRead.ok) {
+    console.error(seatsRead.reason);
+    usage();
+  }
+  const categories = categoriesRead.categories;
+  const seats = seatsRead.seats;
 
   const before = await prisma.clinic.findUnique({
     where: { id: clinicId },

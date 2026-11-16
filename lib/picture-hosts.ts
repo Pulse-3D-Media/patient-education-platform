@@ -12,8 +12,9 @@
  *
  * What is on it, found by reading the testing database and the code in
  * October 2026 (Prompt S):
- *   - the Webflow CDN: the Pulse logo, the starting category pictures, the
- *     finished animations' files and any poster stills cut from them;
+ *   - the Webflow CDN: the starting category pictures, the finished
+ *     animations' files and any poster stills cut from them (the Pulse logo
+ *     lived there too until November 2026; it is now a file of our own);
  *   - img.clerk.com: every logo a clinic uploads on /admin/branding (it goes
  *     to the clinic's Clerk organization, and Clerk serves it from there),
  *     and the staff's own pictures in Clerk's account menu;

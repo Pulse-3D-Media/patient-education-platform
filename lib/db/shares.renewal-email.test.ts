@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { addDays, DAY_MS, RENEWAL_EMAILS_PER_DAY } from "../expiry";
 import { prisma } from "./client";
-import { createShare, recordSharePlay, requestShareRenewal } from "./shares";
+import { createShare, requestShareRenewal } from "./shares";
+import { playAfterTick } from "@/lib/testing/ticked-play";
 
 /**
  * The limit on "ask my clinic" emails (Prompt M): at most ten per clinic per
@@ -59,7 +60,7 @@ async function pausedLinks(clinicId: string, count: number) {
   const codes: string[] = [];
   for (let i = 0; i < count; i++) {
     const share = await createShare(clinicId, video, { now: T });
-    expect(await recordSharePlay(share.code, T)).toEqual({ recorded: true, firstPlay: true });
+    expect(await playAfterTick(share.code, T)).toEqual({ recorded: true, firstPlay: true });
     codes.push(share.code);
   }
   return codes;

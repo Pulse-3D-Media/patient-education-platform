@@ -20,10 +20,18 @@
 # check cannot confirm the migration really ran. It makes forgetting impossible,
 # not lying.
 #
+# The workflow runs MAIN's copy of this file, never the pull request's, so a
+# change to it only takes effect once it has been merged. A pull request that
+# edits it is still judged by the rule as it is on main.
+#
 # It is handed three values by the workflow:
 #   BASE_SHA   the commit on main the pull request is compared with
 #   HEAD_SHA   the newest commit on the pull request's branch
 #   HAS_LABEL  "true" when the pull request has the production-migrated label
+#              right now, read from GitHub just before this runs. After a push
+#              that changes the migrations, the workflow has already taken an
+#              old label off, so this is "false" until Evan migrates again and
+#              puts it back.
 #
 # It can also be run by hand from a checkout with full history, for example:
 #   BASE_SHA=main HEAD_SHA=HEAD HAS_LABEL=false bash .github/scripts/check-migrations.sh

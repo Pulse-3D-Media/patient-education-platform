@@ -14,7 +14,8 @@
     "db:seed-placeholders": "tsx --conditions=react-server --env-file=.env prisma/seed-placeholders.ts",
     "db:link-clinic": "tsx --conditions=react-server --env-file=.env prisma/link-clinic.ts",
     "db:set-status": "tsx --conditions=react-server --env-file=.env prisma/set-status.ts",
-    "db:set-plan": "tsx --conditions=react-server --env-file=.env prisma/set-plan.ts"
+    "db:set-plan": "tsx --conditions=react-server --env-file=.env prisma/set-plan.ts",
+    "db:scrub-note-codes": "tsx --conditions=react-server --env-file=.env prisma/scrub-note-codes.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.2",

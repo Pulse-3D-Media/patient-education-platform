@@ -21,6 +21,7 @@ import { effectiveQrDailyCap, utcDayStart } from "../qr-code";
 import { isClerkUserId } from "../seats";
 import { effectiveSenderName } from "../sender-name";
 import { isAcceptedShareCode, SHARE_CODE_LENGTH } from "../share-link";
+import { linkNoteName } from "../renewal-note";
 import { SETTINGS_DEFAULTS } from "../settings-defaults";
 import { getClinicAccess, lockClinicAccess, lockQrCodeForIssue, lockSenderSeat, lockShareForRenewal, lockVideoFacts } from "./access";
 import { prisma } from "./client";
@@ -982,10 +983,8 @@ export async function renewShareForClinic(clinicId: string, shareId: string, act
       data: {
         clinicId,
         kind: "STATUS",
-        // The link is named by its video and its row id, never its code: the
-        // code is what plays the video, and this log is kept for good (the
-        // renewal email and /admin/reactivate avoid the code for the same reason).
-        body: `A link for ${share.videoTitle} (link id ${share.id}) turned back on: renewal ${renewalsUsed} of ${allowed}. It works until ${dayWords(expiresAt)}.`,
+        // The link is named by its video and its row id, never its code (lib/renewal-note.ts).
+        body: `${linkNoteName(share.videoTitle, share.id)} turned back on: renewal ${renewalsUsed} of ${allowed}. It works until ${dayWords(expiresAt)}.`,
         authorName: `${actorName} (clinic admin)`,
       },
       select: { id: true },

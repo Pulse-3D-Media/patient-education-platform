@@ -36,7 +36,7 @@ const id = () => randomBytes(6).toString("hex");
 const user = () => `user_vitest${id()}`;
 
 /** A clinic whose owner is an admin, plus these other people. */
-async function makeClinic(surgeonSeats: number, status: "ACTIVE" | "PENDING" | "PAUSED", others: Parameters<typeof fakeClerk.addOrg>[2] = []) {
+async function makeClinic(surgeonSeats: number, status: "ACTIVE" | "PENDING" | "PAUSED" | "CANCELED", others: Parameters<typeof fakeClerk.addOrg>[2] = []) {
   const orgId = `org_test_${id()}`;
   const owner = user();
   const clinic = await prisma.clinic.create({
@@ -85,6 +85,41 @@ describe("who may use the People actions", () => {
       expect((await inviteAction("new@example.test", "member")).error).toContain("Choose a plan on the Billing page first");
       expect(fakeClerk.invitations(orgId)).toEqual([]);
       expect(await listSeatHolds(clinicId)).toEqual([]);
+    }
+  });
+
+  it("removing someone works while the clinic is closed, and nothing else does", async () => {
+    for (const status of ["PENDING", "PAUSED", "CANCELED"] as const) {
+      const [leftAdmin, member] = [user(), user()];
+      const { clinicId, orgId, owner } = await makeClinic(3, status, [
+        { userId: leftAdmin, role: "org:admin" },
+        { userId: member },
+      ]);
+      await reserveSeat(clinicId, leftAdmin);
+      fakeClerk.signIn(owner, orgId);
+
+      // Everything else still needs an open clinic, and writes nothing.
+      expect((await setAdminAction(member, true)).error).toContain("Choose a plan on the Billing page first");
+      expect((await giveSeatAction(member)).error).toContain("Choose a plan on the Billing page first");
+      expect((await handOffOwnerAction(leftAdmin)).error).toContain("Choose a plan on the Billing page first");
+      expect((await setPatientNameAction(leftAdmin, { name: "Ann Admin", credential: "MD" })).error).toContain("Choose a plan on the Billing page first");
+      expect(fakeClerk.writes).toEqual([]);
+
+      // The departed admin can be taken out, and their seat is let go.
+      expect((await removePersonAction(leftAdmin)).error).toBeUndefined();
+      expect(fakeClerk.roleOf(orgId, leftAdmin)).toBeUndefined();
+      expect(await listSeatRows(clinicId)).toEqual([]);
+
+      // The usual guards hold while closed too: never the owner, never yourself, never another clinic's person.
+      expect((await removePersonAction(owner)).error).toContain("account owner cannot be removed");
+      const outsider = await makeClinic(1, "ACTIVE", [{ userId: user() }]);
+      expect((await removePersonAction(outsider.owner)).error).toBe("That person is not in your clinic.");
+
+      // A plain member of the closed clinic still cannot remove anyone.
+      fakeClerk.signIn(member, orgId);
+      expect((await removePersonAction(owner)).error).toBe("Only your clinic's office admins can change this.");
+      expect(fakeClerk.roleOf(orgId, owner)).toBe("org:admin");
+      fakeClerk.reset();
     }
   });
 

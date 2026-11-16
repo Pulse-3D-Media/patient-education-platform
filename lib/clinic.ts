@@ -201,7 +201,7 @@ export async function getCurrentClinicId(): Promise<string | null> {
  * a clinic that is not open: Billing is the page a closed clinic's admin
  * comes to in order to fix things. So this checks that the person is an
  * office admin and deliberately does NOT check clinicIsOpen(). Nothing but
- * the actions under app/admin/billing may use it; everything else uses
+ * the actions under app/admin/billing (and getClinicIdForRemoval below) may use it; everything else uses
  * getCurrentClinicId() above, which stays as strict as it was.
  *
  * Null means: signed out, no active organization, or not an admin.
@@ -213,6 +213,22 @@ export async function getBillingClinicId(): Promise<string | null> {
 
   const clinic = (await getClinicByClerkOrgId(orgId)) ?? (await getCurrentClinic());
   return clinic?.id ?? null;
+}
+
+/**
+ * The id of the current clinic for REMOVING SOMEONE from it, which, like
+ * billing, has to work for a clinic that is not open: an admin who has left
+ * a paused, ended or unpaid clinic would otherwise keep their admin access
+ * (Billing included, which works while closed) with nobody able to take it
+ * away. Removing someone only ever takes access away, so allowing it while
+ * closed loosens nothing. Admin only, and deliberately no clinicIsOpen().
+ *
+ * Nothing but removePersonAction in app/admin/people/actions.ts may use it.
+ * Every other People action (invite, admin on or off, seats, names, the
+ * handoff) still uses getCurrentClinicId() and still needs an open clinic.
+ */
+export async function getClinicIdForRemoval(): Promise<string | null> {
+  return getBillingClinicId();
 }
 
 /** What confirmAdminWithClerk() answers. `name` is the person's name as Clerk has it now, for the clinic log. */

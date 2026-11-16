@@ -37,8 +37,10 @@ describe("isAllowedPictureUrl", () => {
     }
   });
 
-  it("covers every picture the code itself ships: the Pulse logo and the starting category pictures", () => {
-    expect(isAllowedPictureUrl(LOGO_URL)).toBe(true);
+  it("covers every picture the code itself ships: the Pulse logo (our own address) and the starting category pictures", () => {
+    // The logo is a file of our own, which the content policy's 'self' allows; it is not an outside address.
+    expect(LOGO_URL.startsWith("/")).toBe(true);
+    expect(LOGO_URL.startsWith("//")).toBe(false);
     for (const category of CATEGORY_DEFAULTS) expect(isAllowedPictureUrl(category.image), category.value).toBe(true);
   });
 

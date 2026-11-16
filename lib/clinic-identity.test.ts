@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLINIC_NAME_HIDDEN,
   CLINIC_NAME_MAX,
   checkLogoBytes,
   checkLogoSize,
@@ -7,6 +8,7 @@ import {
   LOGO_MISSING,
   LOGO_TOO_LARGE,
   LOGO_WRONG_KIND,
+  nameFromClerk,
   readClinicName,
   sniffLogoKind,
 } from "./clinic-identity";
@@ -88,5 +90,63 @@ describe("a clinic name", () => {
     expect(readClinicName("   ")).toEqual({ error: "The clinic needs a name." });
     expect(readClinicName("Wasatch\nOrthopedics")).toEqual({ error: "Keep the clinic name on one line." });
     expect(readClinicName("Wasatch\tOrthopedics")).toEqual({ error: "Keep the clinic name on one line." });
+  });
+});
+
+describe("hidden characters in a clinic name", () => {
+  // Zero-width characters, and the marks and overrides that change the
+  // direction text is drawn in. Written as escapes so the test reads plainly.
+  const HIDDEN = ["\u200b", "\u200c", "\u200d", "\u2060", "\ufeff", "\u00ad", "\u200e", "\u200f", "\u061c", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069"];
+
+  it.each(HIDDEN)("refuses a name with %j in it", (hidden) => {
+    expect(readClinicName(`Wasatch${hidden} Orthopedics`)).toEqual({ error: CLINIC_NAME_HIDDEN });
+    expect(readClinicName(`${hidden}Wasatch Orthopedics`)).toEqual({ error: CLINIC_NAME_HIDDEN });
+  });
+
+  it("refuses a name made only of hidden characters, and one with spaces around them", () => {
+    expect(readClinicName("\u200b\u200b")).toEqual({ error: CLINIC_NAME_HIDDEN });
+    expect(readClinicName(" \u202e \u2066 ")).toEqual({ error: CLINIC_NAME_HIDDEN });
+  });
+
+  it("refuses the wider control characters too", () => {
+    expect(readClinicName("Wasatch\u0085Orthopedics")).toEqual({ error: "Keep the clinic name on one line." });
+  });
+
+  it("still takes a name in another alphabet, an accent, an ampersand or a full-width letter", () => {
+    expect(readClinicName("Clínica Ortopédica")).toEqual({ name: "Clínica Ortopédica" });
+    expect(readClinicName("مركز العظام")).toEqual({ name: "مركز العظام" });
+    expect(readClinicName("Foot & Ankle Center")).toEqual({ name: "Foot & Ankle Center" });
+  });
+});
+
+describe("the name kept from Clerk's copy", () => {
+  it("keeps an ordinary name exactly", () => {
+    expect(nameFromClerk("Wasatch Orthopedics")).toBe("Wasatch Orthopedics");
+  });
+
+  it("cleans instead of refusing, so a clinic keeps a name", () => {
+    expect(nameFromClerk("  Wasatch\nOrthopedics\t ")).toBe("Wasatch Orthopedics");
+    expect(nameFromClerk("Wasatch\u200b Ortho\u202epedics")).toBe("Wasatch Orthopedics");
+    expect(nameFromClerk("\n=HYPERLINK(1)")).toBe("=HYPERLINK(1)");
+    expect(nameFromClerk("Wasatch    Orthopedics")).toBe("Wasatch Orthopedics");
+  });
+
+  it("cuts a long name to the limit, never in the middle of a character", () => {
+    expect(nameFromClerk("a".repeat(CLINIC_NAME_MAX + 20))).toBe("a".repeat(CLINIC_NAME_MAX));
+    const emoji = "a".repeat(CLINIC_NAME_MAX - 1) + "\u{1F9B4}";
+    expect(nameFromClerk(emoji)).toBe("a".repeat(CLINIC_NAME_MAX - 1));
+  });
+
+  it("says null when nothing usable is left", () => {
+    expect(nameFromClerk("")).toBeNull();
+    expect(nameFromClerk("   ")).toBeNull();
+    expect(nameFromClerk("\u200b\u202e\n")).toBeNull();
+  });
+
+  it("always gives a name the admin's rename would accept", () => {
+    for (const raw of ["\u0000x", "x\u007fy", "\u2066a\u2069", " a ".repeat(80), "a\u00ad".repeat(60)]) {
+      const name = nameFromClerk(raw);
+      if (name !== null) expect(readClinicName(name)).toEqual({ name });
+    }
   });
 });

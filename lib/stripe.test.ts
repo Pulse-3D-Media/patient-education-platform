@@ -261,22 +261,53 @@ describe("snapshotFromSubscription", () => {
 
 describe("checkoutIsOpen: test-mode checkout is never offered on the production deployment", () => {
   const key = "sk_test_made_up_for_vitest";
+  // Made-up hosts only. The "production" one stands in for PRODUCTION_DATABASE_HOST.
+  const PROD_HOST = "ep-madeup-prod-123456.us-east-2.aws.neon.tech";
+  const prodUrl = "postgresql://user:pw@ep-madeup-prod-123456-pooler.us-east-2.aws.neon.tech/db?sslmode=require";
+  const testUrl = "postgresql://user:pw@ep-madeup-test-654321-pooler.us-east-2.aws.neon.tech/db?sslmode=require";
+  /** A computer running against a database that is clearly not production. */
+  const notProd = { DATABASE_URL: testUrl, PRODUCTION_DATABASE_HOST: PROD_HOST };
 
   it("is off unless BILLING_CHECKOUT is exactly test", () => {
-    expect(checkoutIsOpen({ STRIPE_SECRET_KEY: key })).toBe(false);
-    for (const value of ["", "on", "true", "1", "TEST", "live"]) expect(checkoutIsOpen({ BILLING_CHECKOUT: value, STRIPE_SECRET_KEY: key })).toBe(false);
-    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key })).toBe(true);
+    expect(checkoutIsOpen({ ...notProd, STRIPE_SECRET_KEY: key })).toBe(false);
+    for (const value of ["", "on", "true", "1", "TEST", "live"]) expect(checkoutIsOpen({ ...notProd, BILLING_CHECKOUT: value, STRIPE_SECRET_KEY: key })).toBe(false);
+    expect(checkoutIsOpen({ ...notProd, BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key })).toBe(true);
   });
 
   it("needs a test key: no key, or a live key, keeps it shut", () => {
-    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test" })).toBe(false);
-    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: "sk_live_made_up_for_vitest" })).toBe(false);
+    expect(checkoutIsOpen({ ...notProd, BILLING_CHECKOUT: "test" })).toBe(false);
+    expect(checkoutIsOpen({ ...notProd, BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: "sk_live_made_up_for_vitest" })).toBe(false);
   });
 
   it("stays shut on Vercel's production deployment even when the switch was set there by mistake", () => {
+    expect(checkoutIsOpen({ ...notProd, BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "production" })).toBe(false);
+    expect(checkoutIsOpen({ ...notProd, BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "preview" })).toBe(true);
+    expect(checkoutIsOpen({ ...notProd, BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "development" })).toBe(true);
+    // Production with no database settings at all is still shut.
     expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "production" })).toBe(false);
-    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "preview" })).toBe(true);
-    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, VERCEL_ENV: "development" })).toBe(true);
+  });
+
+  it("stays shut when the database is production's, pooled or direct, however the host is written", () => {
+    const on = { BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, PRODUCTION_DATABASE_HOST: PROD_HOST };
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: prodUrl })).toBe(false);
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: "postgresql://user:pw@ep-madeup-prod-123456.us-east-2.aws.neon.tech:5432/db" })).toBe(false);
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: "postgresql://user:pw@EP-MADEUP-PROD-123456.us-east-2.aws.neon.tech./db" })).toBe(false);
+    // Even on a preview: a preview pointed at production by mistake is refused when it can tell.
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: prodUrl, VERCEL_ENV: "preview" })).toBe(false);
+  });
+
+  it("fails closed on a computer that cannot tell its database from production", () => {
+    const on = { BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key };
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: testUrl })).toBe(false); // no PRODUCTION_DATABASE_HOST
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: testUrl, PRODUCTION_DATABASE_HOST: "  " })).toBe(false);
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: testUrl, PRODUCTION_DATABASE_HOST: "not a host at all" })).toBe(false);
+    expect(checkoutIsOpen({ ...on, PRODUCTION_DATABASE_HOST: PROD_HOST })).toBe(false); // no DATABASE_URL
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: "nonsense", PRODUCTION_DATABASE_HOST: PROD_HOST })).toBe(false);
+    expect(checkoutIsOpen({ ...on, DATABASE_URL: testUrl, VERCEL_ENV: "development" })).toBe(false);
+  });
+
+  it("stays open on a Vercel preview, which has no PRODUCTION_DATABASE_HOST to compare with", () => {
+    expect(checkoutIsOpen({ BILLING_CHECKOUT: "test", STRIPE_SECRET_KEY: key, DATABASE_URL: testUrl, VERCEL_ENV: "preview" })).toBe(true);
   });
 });
 

@@ -6,7 +6,7 @@ import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getSeatSummary } from "@/lib/db/seats";
 import { ROLE_WORDS } from "@/lib/role-names";
-import { checkSeats } from "@/lib/seat-changes";
+import { checkSeats, listRemovablePeople } from "@/lib/seat-changes";
 import { seatCountWords, seatsFullMessage } from "@/lib/seats";
 import { AdminFrame } from "../AdminFrame";
 import { AdminSwitch, InviteForm, OwnerHandoff, PatientNameEditor, RemoveButton, RevokeButton, SeatButton } from "./PeopleControls";
@@ -63,8 +63,12 @@ export default async function PeoplePage() {
   }
 
   // Nobody is invited before the clinic is paid for. The frame and its
-  // navigation stay, so Billing is one tap away.
+  // navigation stay, so Billing is one tap away. Removing someone is the one
+  // thing that still works while closed (removePersonAction), so a departed
+  // admin can be taken out of a paused or unpaid clinic.
   if (!clinicIsOpen(clinic)) {
+    const { userId: viewerId } = await auth();
+    const removable = await listRemovablePeople(clinic.id, viewerId ?? null);
     return (
       <AdminFrame clinic={clinic} title="People">
         <div className="mt-8 max-w-2xl rounded-2xl border border-line bg-surface p-6">
@@ -77,6 +81,36 @@ export default async function PeoplePage() {
             .
           </p>
         </div>
+
+        {removable === null ? (
+          <p role="alert" className="mt-6 max-w-2xl text-ink-soft">
+            We could not read your clinic&apos;s people just now. Reload this page in a moment.
+          </p>
+        ) : (
+          removable.length > 0 && (
+            <section aria-labelledby="remove-heading" className="mt-10 max-w-2xl">
+              <h2 id="remove-heading" className="text-lg font-semibold">
+                Remove someone who has left
+              </h2>
+              <p className="mt-1 text-ink-soft">
+                While your clinic is closed, removing someone is the one change you can make here. Everything else comes back once your plan is paid for.
+              </p>
+              <ul className="mt-3 flex flex-col gap-3">
+                {removable.map((person) => (
+                  <li key={person.userId} className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{person.name}</p>
+                      <p className="truncate text-sm text-ink-muted">
+                        {person.email} · {ROLE_WORDS[person.role]}
+                      </p>
+                    </div>
+                    <RemoveButton userId={person.userId} name={person.name} holdsSeat={false} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )
+        )}
       </AdminFrame>
     );
   }

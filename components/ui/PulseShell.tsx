@@ -4,7 +4,7 @@ import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { LOGO_URL } from "@/lib/brand";
+import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 
 /**
  * The frame around every page of the Pulse 3D master dashboard (/pulse).
@@ -36,8 +36,8 @@ export function PulseShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen flex-col bg-black text-white">
       <header className="sticky top-0 z-30 flex h-12 items-center gap-3 border-b border-white/10 bg-black px-3 sm:px-4">
         <Link href="/pulse" className="flex items-center" aria-label="Pulse 3D, clinics">
-          {/* eslint-disable-next-line @next/next/no-img-element -- small static logo from the CDN */}
-          <img src={LOGO_URL} alt="Pulse 3D" className="h-7 w-auto" />
+          {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
+          <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="h-9 w-auto" />
         </Link>
         <span className="rounded-md bg-[#2a829b]/20 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-[#5fb8d4]">
           Staff

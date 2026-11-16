@@ -563,7 +563,7 @@ export async function getShareByCode(code: string) {
 /** What recordSharePlay() did: counted the play (and whether it was the link's first), or why it wrote nothing. */
 export type PlayRecord =
   | { recorded: true; firstPlay: boolean }
-  | { recorded: false; reason: "no-such-link" | "expired" | "unpublished" };
+  | { recorded: false; reason: "no-such-link" | "expired" | "unpublished" | "not-accepted" };
 
 /** The fields recordSharePlay reads before it writes. */
 const PLAY_FIELDS = {
@@ -571,10 +571,18 @@ const PLAY_FIELDS = {
   expiresAt: true,
   firstPlayedAt: true,
   daysAfterFirstPlay: true,
+  disclaimerFirstAcceptedAt: true,
   video: { select: { isPublished: true } },
 } as const;
 
-type PlayFacts = { expiryPolicy: "FIXED" | "FIRST_PLAY"; expiresAt: Date; firstPlayedAt: Date | null; daysAfterFirstPlay: number | null; video: { isPublished: boolean } };
+type PlayFacts = {
+  expiryPolicy: "FIXED" | "FIRST_PLAY";
+  expiresAt: Date;
+  firstPlayedAt: Date | null;
+  daysAfterFirstPlay: number | null;
+  disclaimerFirstAcceptedAt: Date | null;
+  video: { isPublished: boolean };
+};
 
 /** Why a play cannot be counted, in the order the patient page checks: missing, expired, taken down. Null when it can. */
 function whyNotWorking(share: PlayFacts | null, now: Date): PlayRecord | null {
@@ -617,6 +625,19 @@ const EXPIRED_MEANWHILE: PlayRecord = { recorded: false, reason: "expired" };
  * A legacy link (expiryPolicy FIXED, every link made before this rule)
  * takes the counting path only. Its date was set when it was made and
  * stays where it is, played or not.
+ *
+ * NO TICK, NO CLOCK (audit run 2, November 2026). A first-play link whose
+ * "for education only" box has never been ticked (disclaimerFirstAcceptedAt
+ * empty) has its first play refused, with nothing written: the real player
+ * only gets the video after a recorded tick (POST /watch/<code>/accept), so
+ * a play start on such a link can only be a request made by hand, and it
+ * must not be able to start the link's days running before the patient has
+ * even seen the box. The tick is read in the same read as everything else,
+ * and the claim's WHERE asks for it again, so this adds no query. A link a
+ * printed QR code hands out is written with its tick already on it
+ * (issueShareFromQrCode), so its first play is claimed as before. Once a
+ * link has been played, later plays are counted with or without a tick, as
+ * before: the clock has already started.
  */
 export async function recordSharePlay(code: string, now: Date = new Date()): Promise<PlayRecord> {
   if (!isAcceptedShareCode(code)) return { recorded: false, reason: "no-such-link" };
@@ -630,9 +651,14 @@ export async function recordSharePlay(code: string, now: Date = new Date()): Pro
   // the write runs.
   const stillWorking = { code, expiresAt: { gt: now }, video: { isPublished: true } };
 
+  // An unplayed first-play link with no recorded tick: nothing is written (see above).
+  if (canClaimFirstPlay(share) && share.disclaimerFirstAcceptedAt === null) {
+    return { recorded: false, reason: "not-accepted" };
+  }
+
   if (canClaimFirstPlay(share)) {
     const claimed = await prisma.share.updateMany({
-      where: { ...stillWorking, expiryPolicy: "FIRST_PLAY", firstPlayedAt: null },
+      where: { ...stillWorking, expiryPolicy: "FIRST_PLAY", firstPlayedAt: null, disclaimerFirstAcceptedAt: { not: null } },
       data: { firstPlayedAt: now, expiresAt: expiryAfterFirstPlay(share, now), viewCount: { increment: 1 }, lastViewedAt: now },
     });
     if (claimed.count === 1) return { recorded: true, firstPlay: true };

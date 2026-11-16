@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import * as shares from "@/lib/db/shares";
+import { DISCLAIMER } from "@/lib/education-note";
 import { addDays } from "@/lib/expiry";
 import { fakeClerk } from "@/lib/testing/fake-clerk";
 import { reactivateLinkAction } from "./actions";
@@ -44,6 +45,8 @@ let videoId = "";
 async function makePausedLink(clinicId: string) {
   const madeAt = addDays(new Date(), -20);
   const share = await shares.createShare(clinicId, videoId, { now: madeAt });
+  // Ticked, then played, as a real player does (a first play needs a tick).
+  expect((await shares.acceptShareDisclaimer(share.code, DISCLAIMER.version, madeAt)).recorded).toBe(true);
   expect(await shares.recordSharePlay(share.code, madeAt)).toEqual({ recorded: true, firstPlay: true });
   return share.code;
 }

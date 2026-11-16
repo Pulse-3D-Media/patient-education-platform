@@ -7,12 +7,12 @@ import {
   acceptShareDisclaimer,
   getShareByCode,
   listRecentSharesForClinic,
-  recordSharePlay,
   requestShareRenewal,
   SenderRefusedError,
   ShareRefusedError,
   summarizeSharesForClinic,
 } from "./shares";
+import { playAfterTick } from "@/lib/testing/ticked-play";
 
 /**
  * The share table against the real test database: the two reads the admin
@@ -227,7 +227,7 @@ describe("a link already issued outlives the plan change that would stop a new o
     await prisma.clinic.update({ where: { id: clinic }, data: { categories: [] } });
 
     // The patient page looks the link up by its code and counts a play, plan or no plan.
-    await recordSharePlay(issued.code);
+    await playAfterTick(issued.code);
     const after = await getShareByCode(issued.code);
     expect(after?.id).toBe(issued.id);
     expect(after?.viewCount).toBe(1);
@@ -243,7 +243,7 @@ describe("a link already issued outlives the plan change that would stop a new o
 
     await prisma.clinic.update({ where: { id: clinic }, data: { status: "PAUSED" } });
 
-    await recordSharePlay(issued.code);
+    await playAfterTick(issued.code);
     expect((await getShareByCode(issued.code))?.viewCount).toBe(1);
     await expectRefused(clinic, publishedVideo, "clinic-closed");
   });
@@ -257,7 +257,7 @@ describe("a link already issued outlives the plan change that would stop a new o
     await prisma.video.update({ where: { id: video }, data: { isPublished: false } });
 
     // The patient page shows the "not available" page for this link and a play is not counted.
-    await recordSharePlay(issued.code);
+    await playAfterTick(issued.code);
     const after = await getShareByCode(issued.code);
     expect(after?.video.isPublished).toBe(false);
     expect(after?.viewCount).toBe(0);
@@ -377,7 +377,7 @@ describe("link codes", () => {
       createdShareIds.push(legacy.id);
 
       expect(await getShareByCode(code)).toBeNull();
-      expect(await recordSharePlay(code)).toEqual({ recorded: false, reason: "no-such-link" });
+      expect(await playAfterTick(code)).toEqual({ recorded: false, reason: "no-such-link" });
       expect(await acceptShareDisclaimer(code, "v1")).toEqual({ recorded: false });
       expect(await requestShareRenewal(code)).toEqual({ kind: "refused", reason: "no-such-link" });
 
@@ -400,7 +400,7 @@ describe("link codes", () => {
     createdShareIds.push(share.id);
 
     expect((await getShareByCode(code))?.id).toBe(share.id);
-    expect(await recordSharePlay(code)).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(code)).toEqual({ recorded: true, firstPlay: false });
     expect((await acceptShareDisclaimer(code, "v1")).recorded).toBe(true);
     expect((await getShareByCode(code))?.viewCount).toBe(1);
   });

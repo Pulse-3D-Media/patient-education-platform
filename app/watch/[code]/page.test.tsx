@@ -201,6 +201,24 @@ describe("the tap-to-call button", () => {
     expect(html).toContain("--brand-accent:#1e5668");
   });
 
+  it("answers a code of the wrong shape with the not-found page before anything is looked up", async () => {
+    const lookup = vi.spyOn(prisma.share, "findUnique");
+    try {
+      for (const junk of ["has space", "<script>", "x".repeat(21), "abc'--", "", "short1"]) {
+        const html = await render(junk);
+        expect(html, junk).toContain("We couldn&#x27;t find this link");
+        expect(html, junk).not.toContain("tel:");
+      }
+      expect(lookup).not.toHaveBeenCalled();
+
+      // The control: a code of the right shape is looked up, once, and is not found.
+      expect(await render("nosuchcode")).toContain("We couldn&#x27;t find this link");
+      expect(lookup).toHaveBeenCalledOnce();
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
   it("draws the same not-found page for a short old six-character code, even on a working link, with nothing about the clinic or the video", async () => {
     const clinic = await makeClinic({ phone: "8015550123" });
     const short = randomBytes(3).toString("hex");

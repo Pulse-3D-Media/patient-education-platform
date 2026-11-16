@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, DAY_MS, renewalState } from "../expiry";
 import { prisma } from "./client";
 import { getSettings } from "./settings";
-import { createShare, listRenewalRequestsForClinic, recordSharePlay, renewShareForClinic, requestShareRenewal, ShareRefusedError } from "./shares";
+import { createShare, listRenewalRequestsForClinic, renewShareForClinic, requestShareRenewal, ShareRefusedError } from "./shares";
+import { playAfterTick } from "@/lib/testing/ticked-play";
 
 /**
  * Pausing and reactivation against the real test database.
@@ -57,7 +58,7 @@ async function makeVideo(isPublished = true) {
 /** A link made at T and first played at T, so it works until T + 10 days and has paused from then on. */
 async function makePlayed(clinicId: string, videoId: string, playedAt: Date = T) {
   const share = await createShare(clinicId, videoId, { now: T });
-  expect(await recordSharePlay(share.code, playedAt)).toEqual({ recorded: true, firstPlay: true });
+  expect(await playAfterTick(share.code, playedAt)).toEqual({ recorded: true, firstPlay: true });
   return share.code;
 }
 
@@ -104,8 +105,8 @@ describe("when a played link runs out", () => {
   it("plays on day 9, and on day 11 it has paused: no play is counted, and it can be asked about", async () => {
     const code = await makePlayed(clinic, video);
 
-    expect(await recordSharePlay(code, addDays(T, 9))).toEqual({ recorded: true, firstPlay: false });
-    expect(await recordSharePlay(code, addDays(T, 11))).toEqual({ recorded: false, reason: "expired" });
+    expect(await playAfterTick(code, addDays(T, 9))).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(code, addDays(T, 11))).toEqual({ recorded: false, reason: "expired" });
 
     const row = await read(code);
     expect(renewalState(row, max, addDays(T, 9))).toEqual({ kind: "working" });
@@ -228,7 +229,7 @@ describe("the clinic turning a link back on", () => {
     expect(notes.at(-1)?.body).toContain(`renewal 1 of ${max}`);
 
     // Plays count again, and the deadline stays where the renewal put it.
-    expect(await recordSharePlay(code, addDays(T, 13))).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(code, addDays(T, 13))).toEqual({ recorded: true, firstPlay: false });
     expect((await read(code)).expiresAt).toEqual(addDays(T, 22));
   });
 
@@ -240,7 +241,7 @@ describe("the clinic turning a link back on", () => {
       expect(outcome).toMatchObject({ ok: true, renewalsUsed: renewal, renewalsLeft: max - renewal, expiresAt: addDays(clock, 10) });
       if (renewal === max) expect(outcome.message).toContain("That was its last renewal.");
       // It works again until then, and has paused (or finished) the day after.
-      expect(await recordSharePlay(code, addDays(clock, 9))).toEqual({ recorded: true, firstPlay: false });
+      expect(await playAfterTick(code, addDays(clock, 9))).toEqual({ recorded: true, firstPlay: false });
       clock = addDays(clock, 11);
     }
 
@@ -376,7 +377,7 @@ describe("the clinic turning a link back on follows the plan", () => {
     const v = await makeVideo();
     const code = await makePlayed(c, v);
     await prisma.clinic.update({ where: { id: c }, data: { categories: [] } });
-    expect(await recordSharePlay(code, addDays(T, 9))).toEqual({ recorded: true, firstPlay: false });
+    expect(await playAfterTick(code, addDays(T, 9))).toEqual({ recorded: true, firstPlay: false });
     expect((await read(code)).expiresAt).toEqual(addDays(T, 10));
   });
 });
@@ -386,7 +387,7 @@ describe("a legacy link", () => {
     const code = await makeLegacy(clinic, video, addDays(T, -1));
     const before = await read(code);
 
-    expect(await recordSharePlay(code, T)).toEqual({ recorded: false, reason: "expired" });
+    expect(await playAfterTick(code, T)).toEqual({ recorded: false, reason: "expired" });
     expect(renewalState(before, max, T)).toEqual({ kind: "finished", reason: "legacy" });
     expect(await requestShareRenewal(code, T)).toEqual({ kind: "refused", reason: "not-paused" });
     expect((await renewShareForClinic(clinic, await idOf(code), "Pat Lee", T)).ok).toBe(false);

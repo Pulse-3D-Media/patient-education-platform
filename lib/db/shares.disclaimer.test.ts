@@ -110,11 +110,13 @@ describe("acceptShareDisclaimer", () => {
 
   it("works on a played link that is still working, and records nothing once it has paused", async () => {
     const { code } = await createShare(clinic, video, { now: T });
+    // Ticked, then played, as a real player does (a first play needs a tick).
+    expect((await acceptShareDisclaimer(code, V, T)).recorded).toBe(true);
     expect(await recordSharePlay(code, T)).toEqual({ recorded: true, firstPlay: true });
     // Played at T with 10 days: working on day 9, paused on day 11.
     expect((await acceptShareDisclaimer(code, V, addDays(T, 9))).recorded).toBe(true);
     expect(await acceptShareDisclaimer(code, V, addDays(T, 11))).toEqual({ recorded: false });
-    expect((await readRecord(code)).disclaimerAcceptances).toBe(1);
+    expect((await readRecord(code)).disclaimerAcceptances).toBe(2);
   });
 
   it("records nothing on an expired, taken-down or unknown link, and hands nothing back", async () => {

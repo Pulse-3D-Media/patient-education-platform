@@ -154,7 +154,7 @@ describe("the operator scripts", () => {
       const source = readFileSync(file, "utf8");
       const check = source.indexOf("preflight()");
       expect(check, `${file} must call preflight()`).toBeGreaterThan(-1);
-      const firstQuery = source.search(/\bprisma\.\w+\.|\b(linkClinicToClerkOrg|setClinicPlan|setClinicStatusByStaff)\(/);
+      const firstQuery = source.search(/\bprisma\.\w+\.|\b(linkClinicToClerkOrg|setClinicPlan|setClinicStatusByStaff|getCategoryList|findSeedClinic|listClinicsNamed)\(/);
       expect(firstQuery, `${file} must call preflight() before it touches the database`).toBeGreaterThan(check);
     }
   });

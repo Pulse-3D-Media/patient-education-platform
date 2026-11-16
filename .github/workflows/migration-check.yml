@@ -6,6 +6,31 @@
 # request with no migration passes straight away. The rule itself, and why it
 # exists, are in .github/scripts/check-migrations.sh.
 #
+# Three jobs, in this order:
+#
+#   1. "Did this push change the migrations?" (read only). Only on a new push
+#      to the pull request. It compares the pull request's migration files
+#      before the push with after it.
+#   2. "Clear an old production-migrated label". The ONLY job allowed to
+#      change the pull request (it may take a label off, nothing else; it never
+#      looks at the pull request's code). When job 1 says the push changed the
+#      migrations, or could not tell, it takes the label off: production was
+#      migrated for the old migrations, not for the new ones, so Evan has to
+#      migrate again and put the label back (CLAUDE.md, rule 3, step 4).
+#   3. "Production migration", the check itself (read only). It waits for job
+#      2, reads the labels the pull request has NOW (from GitHub, not from the
+#      moment the run started, so a label job 2 just took off counts as gone),
+#      and runs the rule from MAIN's copy of check-migrations.sh, never the
+#      pull request's, so a pull request cannot loosen the rule it is judged
+#      by.
+#
+# What this cannot do: on a pull request, GitHub runs the pull request's own
+# copy of THIS file. A pull request that edits this file can change what runs.
+# Any change under .github/ is plain to see in the pull request, which is
+# where that is caught. (The alternative trigger that runs main's copy of this
+# file would also hand the pull request's run a token that can write, which is
+# worse.)
+#
 # This is a separate workflow from checks.yml on purpose: it has to run again
 # every time a label changes, and the build should not.
 
@@ -17,36 +42,158 @@ on:
     # The usual three (opened, new commits pushed, reopened), plus labels.
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
-# Read the code, nothing else. No secrets are used here.
-permissions:
-  contents: read
+# Nothing by default. Each job below says what it may do. No secrets are used
+# anywhere in this file.
+permissions: {}
 
-# When a newer run starts for the same pull request (a label added straight
-# after a push, say), stop the older one: only the newest answer counts.
-concurrency:
-  group: migration-check-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# There is no "stop the older run" setting here, on purpose: a run for a push
+# that has to take the label off must never be stopped by a run for a label
+# change that came straight after it. Every run finishes, and the newest run's
+# answer is the one the pull request shows. (Job 2 below does take turns, and
+# GitHub keeps only one job waiting in that line: three events within a few
+# seconds could still slip one past. The push's own run then fails.)
 
 jobs:
+  look:
+    name: Did this push change the migrations?
+    # Only a new push has a "before" and an "after" to compare.
+    if: github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      # "false" when the push left the migrations exactly as they were. Anything
+      # else, including this job failing, means the label is taken off.
+      changed: ${{ steps.compare.outputs.changed }}
+    steps:
+      - name: Get the code, with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compare the migrations before and after the push
+        id: compare
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+        # For each side, list what the pull request changes under
+        # prisma/migrations/ compared with main, with each file's exact content
+        # id (--raw). The same list before and after means this push did not
+        # touch the migrations: a push that only rebases onto a newer main, or
+        # changes other files, keeps the label. A different list, or a commit
+        # that can no longer be found (a force push can do that), takes it off.
+        run: |
+          set -uo pipefail
+          migrations() {
+            git diff --raw --no-renames --no-abbrev "${BASE_SHA}...$1" -- prisma/migrations/
+          }
+          if before=$(migrations "$BEFORE_SHA") && after=$(migrations "$AFTER_SHA"); then
+            if [ "$before" = "$after" ]; then
+              echo "This push did not change the migrations."
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "This push changed the migrations."
+          else
+            echo "Could not compare the migrations before and after this push, so they count as changed."
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+  forget:
+    name: Clear an old production-migrated label
+    needs: look
+    # Run whatever happened to job 1 (skipped, passed or failed), so the check
+    # always waits for this job.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Runs for the same pull request take turns here, so a check started by a
+    # label change waits until an earlier push's job has taken the label off.
+    concurrency:
+      group: migration-label-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      # Taking a label off a pull request. Nothing else.
+      pull-requests: write
+    steps:
+      - name: Take the label off if the migrations changed
+        # Job 1 ran (this is a push) and did not say "unchanged".
+        if: needs.look.result != 'skipped' && needs.look.outputs.changed != 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          labels=$(gh api "repos/${REPO}/issues/${PR}/labels" --paginate --jq '.[].name')
+          if printf '%s\n' "$labels" | grep -qx 'production-migrated'; then
+            gh api -X DELETE "repos/${REPO}/issues/${PR}/labels/production-migrated" > /dev/null
+            echo "::warning title=Label taken off::This push changed the migrations, so the production-migrated label was taken off. Migrate production again, then put the label back."
+          else
+            echo "The pull request does not have the production-migrated label. Nothing to take off."
+          fi
+
   migration:
     # This name is what appears on the pull request, and what is picked when
     # the check is made required in GitHub's ruleset.
     name: Production migration
+    needs: [look, forget]
+    # Always run, so a failure above shows as this check failing, never as
+    # this check being skipped.
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # Reading the pull request's labels as they are now.
+      pull-requests: read
     steps:
-      - name: Get the code, with its history
+      - name: Make sure an old label was dealt with
+        if: needs.forget.result != 'success'
+        run: |
+          echo "::error title=Label check did not finish::Could not make sure an old production-migrated label was taken off after this push. Run the checks again."
+          exit 1
+
+      - name: Get the pull request's code, with its history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The whole history, so the branch can be compared with main.
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Get main's copy of the rule
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit on main this pull request is compared with, into a
+          # folder of its own. Only the scripts folder is fetched.
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: main-copy
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Read the labels the pull request has now
+        id: labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          labels=$(gh api "repos/${REPO}/issues/${PR}/labels" --paginate --jq '.[].name')
+          if printf '%s\n' "$labels" | grep -qx 'production-migrated'; then
+            echo "has_label=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_label=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check for a migration and the production-migrated label
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # "true" or "false". Worked out by GitHub from the pull request's
-          # labels at the moment this run started.
-          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'production-migrated') }}
-        run: bash .github/scripts/check-migrations.sh
+          # "true" or "false", read from GitHub just now.
+          HAS_LABEL: ${{ steps.labels.outputs.has_label }}
+        # Main's copy of the script, run against the pull request's history.
+        run: bash main-copy/.github/scripts/check-migrations.sh

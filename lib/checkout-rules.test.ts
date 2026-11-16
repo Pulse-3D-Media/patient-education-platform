@@ -77,6 +77,14 @@ describe("samePlanShape", () => {
     expect(samePlanShape(plan, { ...plan, categories: ["KNEE", "SPINE"] })).toBe(false);
     expect(samePlanShape(plan, { ...plan, entitledCategories: ["KNEE", "HIP", "SPINE"] })).toBe(false);
   });
+
+  it("tells a full-library plan from an ordinary plan of the same categories", () => {
+    expect(samePlanShape(plan, { ...plan, fullLibrary: true })).toBe(false);
+    expect(samePlanShape({ ...plan, fullLibrary: true }, plan)).toBe(false);
+    expect(samePlanShape({ ...plan, fullLibrary: true }, { ...plan, fullLibrary: true })).toBe(true);
+    // Left out means false, as on every plan written before the column existed.
+    expect(samePlanShape(plan, { ...plan, fullLibrary: false })).toBe(true);
+  });
 });
 
 describe("attemptIsReusable and sessionExpiresAt", () => {

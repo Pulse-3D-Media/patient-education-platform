@@ -23,9 +23,27 @@ export const STRIPE_CHECKOUT_PREFIX = "https://checkout.stripe.com/";
  * Stripe's payment page. Anything else is null and the browser stays put:
  * the server already checks the address, and this is the browser checking
  * again, as BillingButtons.tsx does for Stripe's other two pages.
+ *
+ * An address holding a tab or a line break anywhere is refused too. A
+ * browser deletes those characters before it reads an address, so "/", a
+ * tab, then "/evil.example" would be read as "//evil.example": another site.
  */
 export function checkoutDestination(address: string): { kind: "here"; path: string } | { kind: "stripe"; url: string } | null {
+  if (HAS_TAB_OR_LINE_BREAK.test(address)) return null;
   if (address.startsWith("/") && !address.startsWith("//") && !address.startsWith("/\\")) return { kind: "here", path: address };
   if (address.startsWith(STRIPE_CHECKOUT_PREFIX)) return { kind: "stripe", url: address };
   return null;
+}
+
+/** The characters a browser silently deletes from an address before reading it. */
+const HAS_TAB_OR_LINE_BREAK = /[\t\n\r]/;
+
+/**
+ * Stripe's page for paying one invoice, or null. What the plan change form
+ * checks before it draws "Pay on Stripe's page": the server already checks
+ * the address, and this is the browser checking again, as its siblings do.
+ */
+export function stripeInvoicePage(address: string | null | undefined): string | null {
+  if (!address || HAS_TAB_OR_LINE_BREAK.test(address)) return null;
+  return address.startsWith(STRIPE_INVOICE_PREFIX) ? address : null;
 }

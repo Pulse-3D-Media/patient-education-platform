@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { databaseKind } from "../prisma/preflight";
 import type { SubscriptionSnapshot } from "./billing-state";
 import { STRIPE_INVOICE_PREFIX, STRIPE_PORTAL_PREFIX } from "./stripe-pages";
 
@@ -284,6 +285,17 @@ export const fetchSubscriptionSnapshot: FetchSubscription = async (subscriptionI
  *   3. this is NOT Vercel's production deployment, whatever (1) says. Vercel
  *      sets VERCEL_ENV itself; a value pasted into the Production settings
  *      by mistake cannot open checkout there.
+ *   4. the database is NOT the production one. A computer running the app
+ *      with the main checkout's .env (which is production's) plus a test key
+ *      and the switch would otherwise sell test-card plans against real
+ *      clinics. The database is compared with PRODUCTION_DATABASE_HOST the way
+ *      the operator scripts compare it (databaseKind() in prisma/preflight.ts),
+ *      and it fails closed: on a computer, a database that cannot be told
+ *      apart from production (the line missing or unreadable) keeps checkout
+ *      shut. A Vercel preview is the one place that cannot compare, because
+ *      PRODUCTION_DATABASE_HOST is not one of Vercel's settings; there the
+ *      Preview settings point at the testing database, so a preview stays
+ *      open unless the host is set and matches.
  *
  * Opening checkout to real customers is part of going live: a deliberate,
  * reviewed change to this function, together with the live keys.
@@ -292,6 +304,9 @@ export function checkoutIsOpen(env: Record<string, string | undefined> = process
   if (env.BILLING_CHECKOUT !== "test") return false;
   if (!isTestSecretKey(env.STRIPE_SECRET_KEY)) return false;
   if (env.VERCEL_ENV === "production") return false;
+  const database = databaseKind(env);
+  if (database === "production") return false;
+  if (database === "unknown" && env.VERCEL_ENV !== "preview") return false;
   return true;
 }
 

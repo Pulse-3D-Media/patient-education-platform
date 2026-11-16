@@ -1,0 +1,24 @@
+# Dependabot: once a month, GitHub opens ONE pull request that brings the
+# actions our workflows use (checkout, setup-node) up to their newest
+# versions, keeping them pinned to exact commits as they are now.
+#
+# GitHub Actions only, on purpose. Routine version bumps of the app's own npm
+# packages are not wanted (CLAUDE.md, rule 6: dependencies are not changed
+# casually). Security alerts and security fixes for packages are a repository
+# setting Evan turns on in GitHub, not something this file does.
+#
+# A pull request from Dependabot is reviewed and merged like any other.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    # At most two open at a time, so they never pile up.
+    open-pull-requests-limit: 2
+    # Every action that needs an update goes into the same pull request.
+    groups:
+      github-actions:
+        patterns:
+          - "*"

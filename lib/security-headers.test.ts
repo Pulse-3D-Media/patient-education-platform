@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clerkFrontendOrigin, contentSecurityPolicy, COOP_ENFORCED, CSP_ENFORCED, securityHeaders } from "./security-headers";
+import { checkClerkKeyForBuild, clerkFrontendOrigin, contentSecurityPolicy, COOP_ENFORCED, CSP_ENFORCED, MISSING_CLERK_KEY_MESSAGE, securityHeaders } from "./security-headers";
 
 /**
  * The headers every response carries. Made-up Clerk keys only: a key is
@@ -29,6 +29,34 @@ describe("clerkFrontendOrigin", () => {
     for (const key of [undefined, "", "sk_test_abc", "pk_test_", "pk_test_!!!", `pk_test_${Buffer.from("no-dollar.example.com").toString("base64")}`,madeUpKey("evil.com; script-src *"), madeUpKey("localhost")]) {
       expect(clerkFrontendOrigin(key)).toBe("https://*.clerk.accounts.dev");
     }
+  });
+});
+
+describe("checkClerkKeyForBuild", () => {
+  const damaged = [undefined, "", "pk_test_", "pk_test_!!!", madeUpKey("localhost")];
+
+  it("stops a production build on Vercel when the key is missing or cannot be read, naming the setting and never the value", () => {
+    for (const key of damaged) {
+      expect(() => checkClerkKeyForBuild({ clerkPublishableKey: key, vercelEnv: "production" })).toThrow(MISSING_CLERK_KEY_MESSAGE);
+      expect(() => securityHeaders({ clerkPublishableKey: key, vercelEnv: "production" })).toThrow(MISSING_CLERK_KEY_MESSAGE);
+    }
+    expect(MISSING_CLERK_KEY_MESSAGE).toContain("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
+    expect(MISSING_CLERK_KEY_MESSAGE).not.toContain("pk_");
+  });
+
+  it("lets a production build with a readable key through, development or live", () => {
+    expect(() => checkClerkKeyForBuild({ clerkPublishableKey: KEY, vercelEnv: "production" })).not.toThrow();
+    expect(() => checkClerkKeyForBuild({ clerkPublishableKey: madeUpKey("clerk.example.com", "live"), vercelEnv: "production" })).not.toThrow();
+  });
+
+  it("leaves a preview, a developer's computer and the GitHub check (no settings at all) building with the fallback", () => {
+    for (const key of damaged) {
+      expect(() => checkClerkKeyForBuild({ clerkPublishableKey: key, vercelEnv: "preview" })).not.toThrow();
+      expect(() => checkClerkKeyForBuild({ clerkPublishableKey: key, vercelEnv: "development" })).not.toThrow();
+      expect(() => checkClerkKeyForBuild({ clerkPublishableKey: key })).not.toThrow();
+      expect(() => securityHeaders({ clerkPublishableKey: key, dev: true })).not.toThrow();
+    }
+    expect(directive(byName(securityHeaders({}))["Content-Security-Policy"], "script-src")).toContain("https://*.clerk.accounts.dev");
   });
 });
 

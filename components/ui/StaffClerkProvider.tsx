@@ -1,5 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { ReactNode } from "react";
+import { clerkRedirectOrigins } from "@/lib/trusted-origin";
 
 /**
  * Clerk's provider, with our settings, for the staff side of the app.
@@ -58,6 +59,13 @@ export function StaffClerkProvider({
       // proxy.ts asked for still returns to its page.
       signUpFallbackRedirectUrl="/onboarding"
       signInFallbackRedirectUrl="/onboarding"
+      // The only addresses Clerk may send someone on to after signing in or
+      // up: this deployment's own (and the page's own address, which Clerk
+      // always allows, so a preview returns to itself). Left unset, Clerk
+      // would also allow every address under our Clerk instance's root
+      // domain. Read from the settings Vercel gives the deployment, never
+      // from the request. See clerkRedirectOrigins() in lib/trusted-origin.ts.
+      allowedRedirectOrigins={clerkRedirectOrigins(process.env)}
       appearance={{
         variables: {
           colorPrimary: accent,

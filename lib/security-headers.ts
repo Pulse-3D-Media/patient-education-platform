@@ -175,7 +175,27 @@ export function contentSecurityPolicy(settings: SecurityHeaderSettings): string 
     .join("; ");
 }
 
+/** The plain sentence a production build stops with when the Clerk key cannot be read. Names the setting, never its value. */
+export const MISSING_CLERK_KEY_MESSAGE =
+  "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is missing or cannot be read, so the content policy would let in every Clerk development instance. Set it in Vercel (Production) and build again.";
+
+/**
+ * Stops a PRODUCTION build on Vercel when the Clerk key is missing or
+ * unreadable. Without it the policy falls back to every Clerk development
+ * instance (CLERK_FALLBACK), which is far wider than our own Clerk address,
+ * and staff sign-in would not work anyway. A preview, a developer's computer
+ * and the GitHub check (which builds with no settings at all, and no
+ * VERCEL_ENV) keep the fallback, so they still build.
+ */
+export function checkClerkKeyForBuild(settings: SecurityHeaderSettings): void {
+  if (settings.vercelEnv !== "production") return;
+  if (clerkFrontendOrigin(settings.clerkPublishableKey) === CLERK_FALLBACK) {
+    throw new Error(MISSING_CLERK_KEY_MESSAGE);
+  }
+}
+
 export function securityHeaders(settings: SecurityHeaderSettings): Header[] {
+  checkClerkKeyForBuild(settings);
   const full = contentSecurityPolicy(settings);
   return [
     CSP_ENFORCED

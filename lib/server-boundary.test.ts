@@ -59,6 +59,12 @@ describe("browser code and the database", () => {
     expect(text.trimStart().startsWith('import "server-only";')).toBe(true);
   });
 
+  it("the files that hold Stripe's, Resend's and Clerk's server keys start with the server-only guard too", () => {
+    for (const path of ["lib/stripe.ts", "lib/email.ts", "lib/people.ts"]) {
+      expect(readFileSync(path, "utf8").trimStart().startsWith('import "server-only";'), path).toBe(true);
+    }
+  });
+
   it("every file in lib/db that touches Prisma goes through that client", () => {
     for (const path of sourceFiles("lib/db")) {
       const text = readFileSync(path, "utf8");

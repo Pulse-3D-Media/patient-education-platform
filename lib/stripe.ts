@@ -1,3 +1,4 @@
+import "server-only";
 import Stripe from "stripe";
 import { databaseKind } from "../prisma/preflight";
 import type { SubscriptionSnapshot } from "./billing-state";

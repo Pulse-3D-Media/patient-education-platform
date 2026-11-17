@@ -41,3 +41,23 @@ export const PLACEHOLDER_BADGE = `${PLACEHOLDER_BASE} rounded-md px-2 py-0.5 tex
 
 /** The chip that rests over the picture in the player. */
 export const PLACEHOLDER_CHIP = `${PLACEHOLDER_BASE} rounded-full px-3 py-1 text-sm shadow-[0_2px_10px_rgba(0,0,0,.5)]`;
+
+/**
+ * The keyboard's focus ring on anything laid over a video's picture (the
+ * players' round buttons, and their progress bar): a white ring with a dark
+ * band around it, so it can be seen over a white frame and a black one alike
+ * (white on the near-black #12202a is 16:1; each of the two is at least 3:1
+ * against whatever is behind it). Shown for the keyboard only, never for a tap.
+ */
+export const PLAYER_FOCUS =
+  "focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-0 focus-visible:outline-white focus-visible:shadow-[0_0_0_6px_#12202a]";
+
+/**
+ * The same ring for a whole player that has the keyboard's focus (after the
+ * first play, focus sits on the player so space and the arrows reach it). An
+ * outline is drawn above the video, so it shows; the dark band inside it is
+ * a layer of its own for the same reason. The player's box must be
+ * positioned (relative or absolute) for the band to sit on it.
+ */
+export const PLAYER_BOX_FOCUS =
+  "focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-3px] focus-visible:outline-white focus-visible:after:pointer-events-none focus-visible:after:absolute focus-visible:after:inset-[3px] focus-visible:after:z-30 focus-visible:after:rounded-[inherit] focus-visible:after:shadow-[inset_0_0_0_3px_#12202a] focus-visible:after:content-['']";

@@ -5,8 +5,8 @@ import { currentChapterIndex, type Chapter } from "@/lib/chapters";
 import { formatDuration } from "@/lib/format";
 import { ClinicMark } from "./ClinicMark";
 import { ExitFullscreenIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, ReplayIcon, SkipBackIcon, SkipForwardIcon, VolumeIcon } from "./icons";
-import { SKIP_SECONDS } from "./player-rules";
-import { PLACEHOLDER_CHIP } from "./styles";
+import { SKIP_SECONDS, seekValueText } from "./player-rules";
+import { PLACEHOLDER_CHIP, PLAYER_FOCUS } from "./styles";
 import type { PlayerControls } from "./usePlayerControls";
 
 /**
@@ -176,8 +176,9 @@ export function PlayerOverlay({
             </span>
           </div>
 
-          {/* A thin drawn track and thumb, with an invisible range input over it for dragging (taller than it looks, so a finger finds it). */}
-          <div className="relative mx-2.5 flex h-7 items-center">
+          {/* A thin drawn track and thumb, with an invisible range input over it for dragging (taller than it looks, so a finger finds it).
+              The input itself cannot be seen, so when the keyboard is on it the whole bar gets the player's focus ring. */}
+          <div className="relative mx-2.5 flex h-7 items-center rounded-md has-[input:focus-visible]:outline-solid has-[input:focus-visible]:outline-[3px] has-[input:focus-visible]:outline-white has-[input:focus-visible]:shadow-[0_0_0_6px_#12202a]">
             <div className="h-1 w-full rounded-full bg-white/30">
               <div className="h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
             </div>
@@ -199,6 +200,8 @@ export function PlayerOverlay({
               value={controls.time}
               onChange={(event) => controls.seekTo(Number(event.target.value))}
               aria-label="Seek"
+              // Read out as words ("1 minute 5 seconds of 4 minutes 12 seconds"), never a bare number of seconds.
+              aria-valuetext={seekValueText(controls.time, controls.duration)}
               className={`${controls.showing ? "pointer-events-auto" : "pointer-events-none"} absolute inset-0 h-full w-full cursor-pointer opacity-0`}
             />
           </div>
@@ -240,7 +243,7 @@ function Control({ live, onClick, label, size, children }: { live: boolean; onCl
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`${live ? "pointer-events-auto" : "pointer-events-none"} flex shrink-0 items-center justify-center rounded-full text-white drop-shadow-[0_1px_3px_rgba(0,0,0,.6)] transition hover:bg-white/15 active:bg-white/25 ${size}`}
+      className={`${live ? "pointer-events-auto" : "pointer-events-none"} flex shrink-0 items-center justify-center rounded-full text-white drop-shadow-[0_1px_3px_rgba(0,0,0,.6)] transition hover:bg-white/15 active:bg-white/25 ${PLAYER_FOCUS} ${size}`}
     >
       {children}
     </button>

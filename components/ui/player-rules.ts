@@ -66,3 +66,28 @@ export function logoShape(width: number, height: number): LogoShape {
   if (ratio < 0.8) return "tall";
   return "round";
 }
+
+/**
+ * A length of time in words, for a screen reader: "1 minute 5 seconds",
+ * "4 minutes", "45 seconds", "1 hour 2 minutes 3 seconds". Whole seconds,
+ * rounded down, as the player's own "1:05" is. Nothing, or a number that is
+ * not a time, reads as "0 seconds".
+ */
+export function spokenTime(seconds: number): string {
+  const whole = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  const part = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const parts = [h > 0 ? part(h, "hour") : "", m > 0 ? part(m, "minute") : "", s > 0 ? part(s, "second") : ""].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : "0 seconds";
+}
+
+/**
+ * What a screen reader says for the progress bar, instead of a bare number
+ * of seconds: "1 minute 5 seconds of 4 minutes 12 seconds". Before the
+ * video's length is known, just where it is.
+ */
+export function seekValueText(time: number, duration: number): string {
+  return Number.isFinite(duration) && duration > 0 ? `${spokenTime(time)} of ${spokenTime(duration)}` : spokenTime(time);
+}

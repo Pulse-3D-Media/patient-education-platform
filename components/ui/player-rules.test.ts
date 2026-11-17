@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HIDE_AFTER_MS, SKIP_SECONDS, clinicInitials, logoShape, pictureTapAction } from "./player-rules";
+import { HIDE_AFTER_MS, SKIP_SECONDS, clinicInitials, logoShape, pictureTapAction, seekValueText, spokenTime } from "./player-rules";
 
 /**
  * The rules both players share (player-rules.ts), with plain values. That a
@@ -71,5 +71,26 @@ describe("how a clinic's logo is shown in the mark, by its own shape", () => {
     expect(logoShape(0, 0)).toBe("round");
     expect(logoShape(300, 0)).toBe("round");
     expect(logoShape(Number.NaN, 100)).toBe("round");
+  });
+});
+
+describe("the progress bar's words for a screen reader", () => {
+  it("reads a time as words, never a bare number of seconds", () => {
+    expect(spokenTime(0)).toBe("0 seconds");
+    expect(spokenTime(1)).toBe("1 second");
+    expect(spokenTime(45.9)).toBe("45 seconds");
+    expect(spokenTime(60)).toBe("1 minute");
+    expect(spokenTime(65)).toBe("1 minute 5 seconds");
+    expect(spokenTime(252)).toBe("4 minutes 12 seconds");
+    expect(spokenTime(3723)).toBe("1 hour 2 minutes 3 seconds");
+    expect(spokenTime(Number.NaN)).toBe("0 seconds");
+    expect(spokenTime(-4)).toBe("0 seconds");
+  });
+
+  it("says where the video is out of how long it is, or just where it is before the length is known", () => {
+    expect(seekValueText(65, 252)).toBe("1 minute 5 seconds of 4 minutes 12 seconds");
+    expect(seekValueText(0, 110)).toBe("0 seconds of 1 minute 50 seconds");
+    expect(seekValueText(12, 0)).toBe("12 seconds");
+    expect(seekValueText(12, Number.NaN)).toBe("12 seconds");
   });
 });

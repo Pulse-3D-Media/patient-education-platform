@@ -14,6 +14,8 @@ import { issueLink, newVisitKey } from "@/app/q/[code]/issue-link";
 import { acceptDisclaimer } from "../accept-disclaimer";
 import { recordPlay, refreshPlayback } from "../patient-calls";
 import { CallNumber } from "./CallButton";
+import { playerAnnouncement } from "./player-announcement";
+import { PLAYER_BOX_FOCUS } from "@/components/ui/styles";
 
 /**
  * The patient's player: the "for education only" box, then the video with
@@ -183,6 +185,10 @@ export function WatchPlayer({
   const frame = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const retryButton = useRef<HTMLButtonElement>(null);
+  /** The Try again under the box, when the tick's answer did not get through. */
+  const acceptRetryButton = useRef<HTMLButtonElement>(null);
+  /** The first sentence of the "expired" or "not available" panel, which takes the focus when the controls it had go away. */
+  const stoppedHeading = useRef<HTMLParagraphElement>(null);
   const counted = useRef(false);
   const slowTimer = useRef<number | undefined>(undefined);
   /** Where to pick up after Try again. */
@@ -259,6 +265,23 @@ export function WatchPlayer({
   useEffect(() => {
     if (failed) retryButton.current?.focus({ preventScroll: true });
   }, [failed]);
+  // The link's time ran out, or a printed code cannot hand out a link: the controls (and the focus with them, for
+  // someone using the keyboard or a screen reader) are gone. Put the focus on the panel's first sentence, the one
+  // thing left to read, rather than letting it drop to the top of the page.
+  useEffect(() => {
+    if (!(ended || unavailable)) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body || !active.isConnected || frame.current?.contains(active)) {
+      stoppedHeading.current?.focus({ preventScroll: true });
+    }
+  }, [ended, unavailable]);
+  // The tick's answer did not get through. The focus is on Play (where the tick put it), which can do nothing now:
+  // move it to Try again, just above.
+  useEffect(() => {
+    if (!acceptTrouble) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body || active === playButton.current) acceptRetryButton.current?.focus({ preventScroll: true });
+  }, [acceptTrouble]);
 
   const clearSlow = useCallback(() => {
     window.clearTimeout(slowTimer.current);
@@ -315,7 +338,9 @@ export function WatchPlayer({
   /** Play was tapped before it could start: take the patient to the box instead. */
   function pointToBox() {
     tickBox.current?.focus();
-    tickBox.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    // A smooth scroll only for someone whose phone has not asked for less motion.
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    tickBox.current?.scrollIntoView({ block: "nearest", behavior: still ? "auto" : "smooth" });
   }
 
   /**
@@ -462,7 +487,8 @@ export function WatchPlayer({
                 onChange={onTick}
                 className="mt-0.5 h-7 w-7 shrink-0 cursor-pointer accent-[#12333f] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
               />
-              <span className="text-[20px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
+              {/* min-w-0 and break-words: at 200% zoom on a phone a long word wraps inside the box instead of being cut off at its edge. */}
+              <span className="min-w-0 break-words text-[20px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
             </label>
           </div>
         </div>
@@ -470,9 +496,12 @@ export function WatchPlayer({
       {/* No answer got through: said calmly where the box was, with one way to try again. */}
       {acceptTrouble && (
         <div className="mb-4 rounded-2xl border-2 border-[#e3e7eb] bg-white px-4 py-3">
-          <div role="alert" className="flex flex-col items-start gap-2">
+          {/* Not announced from here: the player's one status region, at the end, says it (a region that appears already
+              filled is skipped by many screen readers). */}
+          <div className="flex flex-col items-start gap-2">
             <p className="text-[17px] leading-[1.45] text-[#3a4c56]">We couldn&apos;t get the video ready. Check your connection, then try again.</p>
             <button
+              ref={acceptRetryButton}
               type="button"
               onClick={() => void accept()}
               className="flex h-12 shrink-0 items-center rounded-full bg-[#12333f] px-7 text-[17px] font-semibold text-white transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
@@ -499,6 +528,9 @@ export function WatchPlayer({
           onKeyDown={controls.onKey}
           onMouseMove={started ? controls.reveal : undefined}
           onMouseLeave={controls.hide}
+          // Focus on the player or one of its buttons brings the controls back and keeps them up (usePlayerControls).
+          onFocus={controls.onFocusIn}
+          onBlur={controls.onFocusOut}
           style={stopped ? undefined : ({ "--picture-ratio": ratio } as CSSProperties)}
           className={
             stopped
@@ -511,7 +543,7 @@ export function WatchPlayer({
                 "relative flex min-w-0 flex-col rounded-[18px] bg-[#12202a] outline-none"
               : // "picture-area" lets the overlay find the picture inside the box (app/globals.css). This is also what goes
                 // full screen, so the clinic's mark and the controls come with it.
-                "picture-area absolute inset-0 bg-black outline-none"
+                `picture-area absolute inset-0 bg-black outline-none ${PLAYER_BOX_FOCUS}`
           }
         >
           <video
@@ -554,11 +586,6 @@ export function WatchPlayer({
               loading={started && loading}
             />
           )}
-          {/* Said once, in words, for a screen reader: the first wait after Play. Later waits are drawn only (the spinner), so
-              a reader is not interrupted at every pause to buffer; a long one still gets the "still loading" sentence. */}
-          <p role="status" className="sr-only">
-            {started && loading && !everPlayed && !stopped ? "Loading the video." : ""}
-          </p>
 
           {!started && !stopped && (
             // The keyboard focus ring is drawn just inside the edge, because the
@@ -576,7 +603,7 @@ export function WatchPlayer({
               aria-label={`Play ${title}`}
               aria-disabled={ready ? undefined : true}
               aria-describedby={ready ? undefined : `${tickId}-why`}
-              className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
+              className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-white focus-visible:shadow-[inset_0_0_0_7px_#12202a]"
             >
               <span
                 data-play-pill=""
@@ -612,8 +639,8 @@ export function WatchPlayer({
                   need, and "shrink-0" on the two controls means they keep their full 48px whatever else happens.
                   The same panel says, in the expired page's words, that the link's time ran out while the page was open;
                   there is no Try again then, because nothing is renewed once access has ended. */}
-              <div role="alert" className="relative flex flex-1 flex-col items-center justify-center gap-3 px-5 py-6 text-center">
-                <p className="text-[20px] leading-[1.35] font-semibold text-white">
+              <div className="relative flex flex-1 flex-col items-center justify-center gap-3 px-5 py-6 text-center">
+                <p ref={stoppedHeading} tabIndex={-1} className="text-[20px] leading-[1.35] font-semibold text-white outline-none">
                   {unavailable ? "This video isn't available right now." : ended ? "This link has expired." : "The video did not load."}
                 </p>
                 <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">
@@ -651,6 +678,13 @@ export function WatchPlayer({
           )}
         </div>
       </div>
+
+      {/* The player's one status region for a screen reader (see player-announcement.ts): always on the page, outside the
+          player (so nothing that hides the player hides it), and only its words change. Polite: it waits for the reader
+          to finish what it is saying. Said once, in words: the first wait after Play; later waits are drawn only. */}
+      <p role="status" className="sr-only" data-player-status="">
+        {playerAnnouncement({ ticked, ready, started, loading, everPlayed, failed, ended, unavailable, acceptTrouble, clinicName })}
+      </p>
     </div>
   );
 }

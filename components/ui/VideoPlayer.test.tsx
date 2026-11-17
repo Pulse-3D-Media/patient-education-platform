@@ -38,6 +38,8 @@ function renderPlaying(overrides: Partial<PlayerControls> = {}, chapters: Chapte
     showing: true,
     reveal: noop,
     hide: noop,
+    onFocusIn: noop,
+    onFocusOut: noop,
     togglePlay: noop,
     seekBy: noop,
     seekTo: noop,
@@ -103,7 +105,7 @@ describe("the clinic's mark on the library's player", () => {
   it("lays the overlay over the picture inside the video's box, and fills whatever box the page gives it", () => {
     const html = render();
 
-    expect(html).toMatch(/^<div tabindex="0" role="group" aria-label="Total Knee Replacement, video player" class="flex h-full min-h-0 w-full flex-1 /);
+    expect(html).toMatch(/^<div tabindex="0" role="group" aria-label="Total Knee Replacement, video player" class="relative flex h-full min-h-0 w-full flex-1 /);
     // The video's box is measured (picture-area) and carries the video's shape, 16:9 until the file says.
     expect(html).toMatch(/<div class="picture-area relative min-h-0 flex-1" style="--picture-ratio:1.777/);
     const area = html.slice(html.indexOf("picture-area"));
@@ -298,5 +300,29 @@ describe("the loading spinner (patient player)", () => {
     const html = renderPlaying({}, [], { placeholder: true });
     expect(html).toContain('<span class="@xl:hidden">Placeholder</span>');
     expect(html).toContain('<span class="hidden @xl:inline">Placeholder animation</span>');
+  });
+});
+
+describe("the controls for the keyboard and a screen reader (2026-11-16)", () => {
+  it("reads the progress bar as words, out of the video's length", () => {
+    const html = renderPlaying({ time: 65, duration: 252 });
+    expect(html).toMatch(/<input[^>]*aria-label="Seek"[^>]*aria-valuetext="1 minute 5 seconds of 4 minutes 12 seconds"/);
+  });
+
+  it("draws a focus ring on every round button and around the progress bar, white with a dark band so it shows over any frame", () => {
+    const html = renderPlaying();
+    const buttonClasses = [...html.matchAll(/<button[^>]*class="([^"]+)"/g)].map(([, c]) => c);
+    expect(buttonClasses.length).toBeGreaterThan(0);
+    for (const c of buttonClasses) {
+      expect(c).toContain("focus-visible:outline-white");
+      expect(c).toContain("focus-visible:shadow-[0_0_0_6px_#12202a]");
+    }
+    // The bar's input is invisible, so the bar around it carries the ring when the keyboard is on it.
+    expect(html).toMatch(/class="[^"]*has-\[input:focus-visible\]:outline-white[^"]*"/);
+  });
+
+  it("gives the library's player a visible focus ring of its own, and hears focus arriving and leaving", () => {
+    const html = render();
+    expect(html).toMatch(/role="group"[^>]*class="[^"]*focus-visible:outline-white[^"]*"/);
   });
 });

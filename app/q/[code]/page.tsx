@@ -118,6 +118,7 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
       deadline={terms ? { kind: "after-first-play", days: terms.daysAfterFirstPlay } : null}
       now={now}
       early={early}
+      share="once-own-link"
       player={
         <WatchPlayer
           poster={poster}

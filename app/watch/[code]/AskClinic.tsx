@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { requestReactivation } from "../patient-calls";
 import { CallButton } from "./CallButton";
 
@@ -21,12 +21,26 @@ import { CallButton } from "./CallButton";
  * If the tap does not go through (the connection dropped, say), a calm line
  * asks them to try again, and the page is refreshed so that a link the
  * clinic has just turned back on shows the video instead.
+ *
+ * FOR A SCREEN READER. The button disappears after the tap, with the focus
+ * on it; the focus moves to the new heading ("Your clinic has been asked"),
+ * so the reader says where things stand and nothing is lost. One status
+ * region is always here and only its words change (a region that appears
+ * already filled is skipped by many screen readers): it says the clinic was
+ * asked, or that the tap did not go through. A page opened already asked
+ * says nothing of its own: the heading is read like any page.
  */
 export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyAsked: boolean; call: { href: string; label: string } | null }) {
   const router = useRouter();
   const [asked, setAsked] = useState(alreadyAsked);
   const [trouble, setTrouble] = useState(false);
   const [pending, startTransition] = useTransition();
+  /** The tap on this page load went through: the focus goes to the new heading (not on a page opened already asked). */
+  const [justAsked, setJustAsked] = useState(false);
+  const askedHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (justAsked) askedHeading.current?.focus({ preventScroll: true });
+  }, [justAsked]);
 
   function ask() {
     setTrouble(false);
@@ -34,6 +48,7 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
       const result = await requestReactivation(code);
       if (result.asked) {
         setAsked(true);
+        setJustAsked(true);
       } else {
         setTrouble(true);
         router.refresh();
@@ -41,10 +56,20 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
     });
   }
 
+  // Always on the page, in both states below; only its words change.
+  const status = (
+    <p role="status" className="sr-only">
+      {justAsked ? "Your clinic has been asked. Try this same link again in a day or so." : trouble ? "That did not go through. Please try again in a moment." : ""}
+    </p>
+  );
+
   if (asked) {
     return (
       <>
-        <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">Your clinic has been asked</h1>
+        {status}
+        <h1 ref={askedHeading} tabIndex={-1} className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em] outline-none">
+          Your clinic has been asked
+        </h1>
         <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">Try this same link again in a day or so.</p>
         {call && (
           <>
@@ -58,6 +83,7 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
 
   return (
     <>
+      {status}
       <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">This link has paused</h1>
       <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">Tap below to ask your clinic to turn it back on.</p>
       <button
@@ -68,8 +94,9 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
       >
         {pending ? "Asking..." : "Ask my clinic"}
       </button>
+      {/* Seen here; heard through the status region above. */}
       {trouble && (
-        <p role="status" className="mt-4 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">
+        <p className="mt-4 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">
           That did not go through. Please try again in a moment.
         </p>
       )}

@@ -19,7 +19,9 @@ import { HIDE_AFTER_MS, SKIP_SECONDS, pictureTapAction } from "./player-rules";
  * started. While it plays they fade away HIDE_AFTER_MS after the last touch
  * or mouse movement, and at once when the mouse leaves the player; any touch
  * or movement brings them back (Vimeo's behaviour, agreed at the 2026-10-15
- * huddle).
+ * huddle). While the keyboard's focus is on the player or one of its
+ * buttons they stay up, and focus arriving brings them back, so nobody using
+ * Tab or a phone's screen reader lands on a button they cannot see.
  *
  * FULL SCREEN puts `box` (the whole player, the clinic's mark and our
  * controls with it) full screen wherever the browser can do that for part
@@ -50,20 +52,48 @@ export function usePlayerControls({
   const [visible, setVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const hideTimer = useRef<number | undefined>(undefined);
+  /**
+   * The keyboard's focus (or a screen reader's) is on the player or one of its
+   * buttons. While it is, the controls stay up: a faded button that can still
+   * be reached with Tab, or by swiping on a phone's screen reader, must never
+   * be invisible while it is the one in use.
+   */
+  const focusInside = useRef(false);
 
-  /** Show the controls, then hide them again after a pause if the video is still playing. */
+  /** Show the controls, then hide them again after a pause if the video is still playing (and focus is not inside). */
   const reveal = () => {
     setVisible(true);
     window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
-      if (video.current && !video.current.paused) setVisible(false);
+      if (video.current && !video.current.paused && !focusInside.current) setVisible(false);
     }, HIDE_AFTER_MS);
   };
 
-  /** Hide the controls now, if the video is playing (a paused video keeps them up). */
+  /** Hide the controls now, if the video is playing (a paused video keeps them up) and focus is not inside. */
   const hide = () => {
     window.clearTimeout(hideTimer.current);
-    if (video.current && !video.current.paused) setVisible(false);
+    if (video.current && !video.current.paused && !focusInside.current) setVisible(false);
+  };
+
+  /**
+   * Focus came onto the player or one of its buttons (React's onFocus hears it from anything inside): bring the
+   * controls back and keep them. Only focus the browser would draw a ring for (the keyboard, or a screen reader moving
+   * the focus): a finger's tap also focuses a button on Android, and the player moves the focus onto itself after Play,
+   * and neither of those must stop the controls fading as usual.
+   */
+  const onFocusIn = (event: React.FocusEvent) => {
+    if (!isKeyboardFocus(event.target)) return;
+    focusInside.current = true;
+    setVisible(true);
+    window.clearTimeout(hideTimer.current);
+  };
+
+  /** Focus left the player altogether (not just moved from one of its buttons to another): fade as usual from now. */
+  const onFocusOut = (event: React.FocusEvent) => {
+    const next = event.relatedTarget as Node | null;
+    if (next && event.currentTarget.contains(next)) return;
+    focusInside.current = false;
+    reveal();
   };
 
   /** The video started playing: the controls show, then fade (an effect event, so the listeners below need not be added again on every draw). */
@@ -171,8 +201,12 @@ export function usePlayerControls({
       if (event.key === " " && event.target !== event.currentTarget) return;
       event.preventDefault();
       togglePlay();
-    } else if (event.key === "ArrowRight") seekBy(SKIP_SECONDS);
-    else if (event.key === "ArrowLeft") seekBy(-SKIP_SECONDS);
+    } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      // Ten seconds, from the player or from the progress bar alike (the bar's own step is a tenth of a second, and
+      // without this the page would also scroll sideways).
+      event.preventDefault();
+      seekBy(event.key === "ArrowRight" ? SKIP_SECONDS : -SKIP_SECONDS);
+    }
     else if (event.key === "m") toggleMute();
     else if (event.key === "f") fullscreenOnOff();
   };
@@ -188,6 +222,10 @@ export function usePlayerControls({
     showing: visible || !playing,
     reveal,
     hide,
+    /** For the player's outer box: onFocus. */
+    onFocusIn,
+    /** For the player's outer box: onBlur. */
+    onFocusOut,
     togglePlay,
     seekBy,
     seekTo,
@@ -199,3 +237,12 @@ export function usePlayerControls({
 }
 
 export type PlayerControls = ReturnType<typeof usePlayerControls>;
+
+/** The browser would draw a focus ring here (:focus-visible). A browser too old to know the question answers no. */
+function isKeyboardFocus(target: EventTarget | null): boolean {
+  try {
+    return target instanceof Element && target.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}

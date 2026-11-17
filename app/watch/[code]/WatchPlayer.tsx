@@ -605,9 +605,10 @@ export function WatchPlayer({
               aria-describedby={ready ? undefined : `${tickId}-why`}
               className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-white focus-visible:shadow-[inset_0_0_0_7px_#12202a]"
             >
+              {/* The words may wrap to a second line (and the pill stays inside the player) at 200% zoom on a phone; at normal size they fit on one. */}
               <span
                 data-play-pill=""
-                className={`flex h-14 items-center gap-3 rounded-full bg-white py-2 pl-2 pr-5 shadow-[0_8px_28px_rgba(0,0,0,.38)] transition @xl:h-16 @xl:pr-6 ${
+                className={`flex h-14 max-w-[calc(100%-1rem)] items-center gap-3 rounded-full bg-white py-2 pl-2 pr-5 shadow-[0_8px_28px_rgba(0,0,0,.38)] transition @xl:h-16 @xl:pr-6 ${
                   ready ? "group-active:scale-95" : ""
                 }`}
               >
@@ -621,7 +622,7 @@ export function WatchPlayer({
                     <PlayIcon className="ml-0.5 h-5 w-5 @xl:h-6 @xl:w-6" />
                   )}
                 </span>
-                <span id={`${tickId}-why`} className="whitespace-nowrap text-[16px] font-semibold text-[#12333f] @xl:text-[17px]">
+                <span id={`${tickId}-why`} className="min-w-0 text-[16px] leading-tight font-semibold text-[#12333f] @xl:text-[17px]">
                   {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
                 </span>
               </span>

@@ -302,6 +302,59 @@ describe("unavailable, Try again and closing", () => {
     expect(hls.instances[2].source).toBe("https://stream.mux.com/b.m3u8?token=t-b");
   });
 
+  it("Try again that the server cannot answer brings the calm panel back, rather than a frozen picture", async () => {
+    // Nothing usable on the element yet: the first attach showed the panel, Try again hid it, and the server is still unreachable.
+    const refresh = vi.fn(async (): Promise<PlaybackSource> => ({ kind: "unavailable" }));
+    const first = make(fakeElement(), { refresh });
+    await first.loader.attach({ kind: "unavailable" });
+    expect(first.hooks.onFailure).toHaveBeenCalledTimes(1);
+    await first.loader.reload(0);
+    expect(first.hooks.onFailure).toHaveBeenCalledTimes(2);
+
+    // A stream whose token has run out, and a refresh that cannot get a new one.
+    const second = make(fakeElement(), { refresh });
+    await second.loader.attach(stream("a", NOW + 10_000));
+    vi.setSystemTime(NOW + 20_000);
+    await second.loader.reload(5);
+    expect(second.hooks.onFailure).toHaveBeenCalledOnce();
+
+    // The same refresh failing in the background, with the token still good, just tries again later and says nothing.
+    const third = make(fakeElement(), { refresh });
+    await third.loader.attach(stream("a"));
+    await third.loader.refreshNow();
+    expect(third.hooks.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("tells the player when a fresh address went on, so a panel left up by an earlier failure can go", async () => {
+    const onRecovered = vi.fn();
+    const refresh = vi.fn(async () => stream("b"));
+    const { loader } = make(fakeElement(), { refresh, onRecovered });
+    await loader.attach(stream("a"));
+    expect(onRecovered).not.toHaveBeenCalled();
+    await loader.refreshNow();
+    expect(onRecovered).toHaveBeenCalledOnce();
+  });
+
+  it("coming back to the page asks for a fresh address only when the token has run out or is about to", async () => {
+    const refresh = vi.fn(async () => stream("b", NOW + 10 * TOKEN_LIFETIME_MS));
+    const { loader, hls } = make(fakeElement(), { refresh });
+    await loader.attach(stream("a"));
+    await loader.refreshIfStale();
+    expect(refresh).not.toHaveBeenCalled();
+
+    // The phone slept: no timer fired while the tab was hidden, and the token ran out.
+    vi.setSystemTime(NOW + TOKEN_LIFETIME_MS + 1);
+    await loader.refreshIfStale();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(hls.instances.at(-1)?.source).toBe("https://stream.mux.com/b.m3u8?token=t-b");
+
+    // A plain file has no token: nothing to ask.
+    const file = make(fakeElement(), { refresh: vi.fn() });
+    await file.loader.attach({ kind: "file", src: "https://example.com/a.mp4" });
+    await file.loader.refreshIfStale();
+    expect(file.hooks.refresh).not.toHaveBeenCalled();
+  });
+
   it("closing takes hls.js down, stops the timers, and ignores a late answer", async () => {
     const element = fakeElement();
     let answer: (value: PlaybackSource) => void = () => {};

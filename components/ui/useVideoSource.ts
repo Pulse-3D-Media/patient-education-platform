@@ -16,6 +16,8 @@ import { SourceLoader, type LoaderHooks } from "./video-source-loader";
  *   - the player's callbacks are read fresh each time they are needed, so
  *     the loader always calls the latest ones;
  *   - `reload(startAt)` is what Try again calls;
+ *   - when the page comes back into view, a stream whose token has run out
+ *     (or is about to) is renewed at once (the loader's refreshIfStale);
  *   - `null` means "nothing to play yet": no loader is made and the element
  *     is left empty. The patient page starts there, because it hands out the
  *     video only after the "for education only" box is ticked.
@@ -37,6 +39,16 @@ export function useVideoSource(videoRef: RefObject<HTMLVideoElement | null>, sou
       if (loader.current === made) loader.current = null;
     };
   }, [source, videoRef]);
+
+  // Coming back to the page (a phone woken up, a tab brought forward): a signed address whose token ran out while
+  // nobody was looking is renewed now rather than at the next tap. The loader asks only when it is due.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loader.current?.refreshIfStale();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   const reload = useCallback((startAt: number) => loader.current?.reload(startAt) ?? Promise.resolve(), []);
   return { reload };

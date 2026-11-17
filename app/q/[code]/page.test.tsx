@@ -103,6 +103,19 @@ describe("a live printed code", () => {
     expect(await prisma.share.count({ where: { clinicId: clinic.id } })).toBe(0);
   });
 
+  it("carries the placeholder mark into the player for a sample animation, and not for a finished one", async () => {
+    const { code } = await setUp();
+    expect(await render(code)).not.toContain("Placeholder animation");
+    await prisma.video.update({ where: { id: video }, data: { isPlaceholder: true } });
+    try {
+      const html = await render(code);
+      expect(html).toContain("Placeholder animation");
+      expect(html.indexOf("Placeholder animation")).toBeGreaterThan(html.indexOf("video player"));
+    } finally {
+      await prisma.video.update({ where: { id: video }, data: { isPlaceholder: false } });
+    }
+  });
+
   it("names only the clinic once the surgeon holds no seat", async () => {
     const { clinic, surgeon, code } = await setUp();
     await prisma.seatAllocation.deleteMany({ where: { clinicId: clinic.id, clerkUserId: surgeon } });

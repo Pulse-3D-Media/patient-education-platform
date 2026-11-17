@@ -61,12 +61,12 @@ export function PatientViewer({
 }) {
   const length = describeDuration(video.durationSeconds);
   return (
-    <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
+    <main className={`flex min-h-dvh flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
       <BrandBand />
       {video.isPlaceholder && <PlaceholderBar />}
 
-      {/* 46px at the top keeps the first line clear of a phone's notch and status bar. When the placeholder bar is there, it carries that clearance instead. */}
-      <div className={`mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-10 sm:px-8 ${video.isPlaceholder ? "pt-6" : "pt-[46px]"}`}>
+      {/* On a phone the page sits inside the browser, under its own address bar, so only a little room is left at the top (more of the player shows before the patient scrolls; a Samsung S22 had the video below the fold). From 640px wide, 46px as before. When the placeholder bar is there, it carries the room at the top instead. */}
+      <div className={`mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-10 sm:px-8 ${video.isPlaceholder ? "pt-4 sm:pt-6" : "pt-5 sm:pt-[46px]"}`}>
         {/* The logo's row is a fixed 44px tall whether the picture loads, loads late, or never loads, so nothing under it moves. */}
         {look.logoUrl && (
           <div className="mb-3">
@@ -162,7 +162,7 @@ export function Unavailable({
   children?: ReactNode;
 }) {
   return (
-    <main className={`flex min-h-screen flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
+    <main className={`flex min-h-dvh flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
       <BrandBand />
       <div className="flex flex-1 flex-col items-center justify-center px-8 pb-10 pt-[46px] text-center">
         <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#eef1f4] text-[#52616a]">{icon}</div>
@@ -188,11 +188,12 @@ export function Unavailable({
  * text, and #5a3d00 on #fff3d6 measures 9.1:1 against a 4.5:1 floor. Amber,
  * not red, because nothing has gone wrong.
  *
- * It carries the 46px notch clearance itself, so the page below drops its own.
+ * It carries the room at the top of the page itself (16px on a phone, 46px
+ * from 640px wide), so the page below drops its own.
  */
 function PlaceholderBar() {
   return (
-    <div role="note" className="border-b-2 border-[#e2a12a] bg-[#fff3d6] px-6 pb-3.5 pt-[46px] sm:px-8">
+    <div role="note" className="border-b-2 border-[#e2a12a] bg-[#fff3d6] px-6 pb-3.5 pt-4 sm:px-8 sm:pt-[46px]">
       <p className="mx-auto max-w-2xl text-[16px] leading-[1.45] text-[#5a3d00]">
         <strong className="font-bold">Placeholder.</strong> This plays a sample animation, not this procedure.
       </p>

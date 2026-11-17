@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { ClinicMark, pictureRatio } from "@/components/ui/ClinicMark";
-import { PlayerOverlay } from "@/components/ui/PlayerOverlay";
+import { PlayerOverlay, Spinner } from "@/components/ui/PlayerOverlay";
 import { usePlayerControls } from "@/components/ui/usePlayerControls";
 import { useVideoSource } from "@/components/ui/useVideoSource";
 import { PhoneIcon, PlayIcon } from "@/components/ui/icons";
 import { DISCLAIMER } from "@/lib/education-note";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
-import type { PlaybackSource } from "@/lib/playback-source";
+import { grantIsUsable, stillToShow, type PlaybackSource } from "@/lib/playback-source";
 import { issueLink, newVisitKey } from "@/app/q/[code]/issue-link";
 import { acceptDisclaimer } from "../accept-disclaimer";
 import { recordPlay, refreshPlayback } from "../patient-calls";
@@ -117,9 +117,17 @@ import { CallNumber } from "./CallButton";
  * again). The first real play may move the link's deadline (recordPlay); the
  * answer then carries a grant for the new deadline, which replaces the one
  * the tick brought, so the stream never stops short of the time the link
- * now has. When the link's time runs out while the page is open the player
- * says so in the same calm words as the expired page, with the clinic's
- * number, and renews nothing.
+ * now has (unless that grant's own token ran out while it waited, when the
+ * server is asked instead). When the page comes back into view after the
+ * phone slept, a token that has run out is renewed straight away. When the
+ * link's time runs out while the page is open nothing is renewed, and the
+ * page is loaded again (once) so the server draws the right calm page:
+ * paused with Ask my clinic, finished, or not available.
+ *
+ * WHILE IT LOADS: a small spinner in the Play button while the video is
+ * fetched after the tick, then over the picture whenever the video waits
+ * for data, until frames show. The "still loading" sentence still comes at
+ * SLOW_AFTER_MS.
  *
  * ON A PRINTED QR CODE'S PAGE (/q/<code>: `qrCode` set, no `code` yet) there
  * is no patient link until the patient taps Play. The tap does two things at
@@ -146,7 +154,10 @@ export function WatchPlayer({
   senderName,
   call,
   qrCode,
+  placeholder = false,
 }: {
+  /** A sample animation standing in for the named procedure: the amber chip stays on the player, full screen included. */
+  placeholder?: boolean;
   /** A still for the video's box before the box is ticked (a signed Mux still, or the poster staff set), or null. Never a playable address. */
   poster: string | null;
   title: string;
@@ -189,6 +200,12 @@ export function WatchPlayer({
   /** The link's time ran out while the page was open (a stream's token was not renewed). Said calmly, with no Try again. */
   const [ended, setEnded] = useState(false);
   const [slow, setSlow] = useState(false);
+  /** The video is waiting for data right now (just after Play, or buffering): the spinner shows until frames do. */
+  const [loading, setLoading] = useState(false);
+  /** Frames have shown at least once on this page load: from then on a wait is drawn, never announced again. */
+  const [everPlayed, setEverPlayed] = useState(false);
+  /** The page has been asked to load again because access ended; never asked twice in one page load. */
+  const reloadedForEnd = useRef(false);
   /** A printed code that cannot hand out a link right now (retired, or the clinic cannot show this video). Said calmly, with no Try again. */
   const [unavailable, setUnavailable] = useState(false);
   /** The patient link this page plays for: the one in the address, or, on a printed code's page, the one the first tap got. */
@@ -209,7 +226,8 @@ export function WatchPlayer({
     refresh: async () => {
       const ready = pendingGrant.current;
       pendingGrant.current = null;
-      if (ready) return ready;
+      // A grant saved from the first play is used only while its own token works; a page left open for hours asks the server.
+      if (grantIsUsable(ready, Date.now())) return ready;
       const linkCode = await ensureCode();
       if (!linkCode) return { kind: "unavailable" };
       const answer = await refreshPlayback(linkCode);
@@ -217,8 +235,19 @@ export function WatchPlayer({
     },
     onEnded: () => {
       clearSlow();
+      setLoading(false);
       setEnded(true);
+      // The server would now draw a different page for this link: paused (with Ask my clinic), finished, or not
+      // available. Load the page again so the patient sees the right one; the panel above says "expired" meanwhile.
+      // Once per page load only, and a new page starts with the box unticked and nothing playing, so this needs a
+      // tick and a Play tap before it could ever happen again: it cannot loop by itself.
+      if (!reloadedForEnd.current) {
+        reloadedForEnd.current = true;
+        window.location.reload();
+      }
     },
+    // A fresh address went on after a failure (a refresh in the background, or Try again): the picture comes back.
+    onRecovered: () => setFailed(false),
   });
   useEffect(() => {
     if (failed) retryButton.current?.focus({ preventScroll: true });
@@ -228,6 +257,12 @@ export function WatchPlayer({
     window.clearTimeout(slowTimer.current);
     setSlow(false);
   }, []);
+
+  /** Frames are showing again, or nothing is going to show: no spinner, no "still loading". */
+  const doneWaiting = useCallback(() => {
+    clearSlow();
+    setLoading(false);
+  }, [clearSlow]);
 
   useEffect(() => () => window.clearTimeout(slowTimer.current), []);
 
@@ -294,7 +329,7 @@ export function WatchPlayer({
         }
         if (answer.kind === "unavailable") {
           video.current?.pause();
-          clearSlow();
+          doneWaiting();
           setUnavailable(true);
           return null;
         }
@@ -330,7 +365,7 @@ export function WatchPlayer({
     // Keep the furthest point reached: a second failure, straight after Try again, reports 0 and must not wipe it.
     const point = resumePoint(video.current?.currentTime);
     if (point > 0) resumeAt.current = point;
-    clearSlow();
+    doneWaiting();
     setFailed(true);
   }
 
@@ -346,6 +381,9 @@ export function WatchPlayer({
   /** Play was asked for: hand the patient our controls. */
   function onPlay() {
     setStarted(true);
+    // Until the first frames arrive, the spinner says the tap was heard (the Play button is about to go).
+    const element = video.current;
+    if (element && element.readyState < 3) setLoading(true);
     // The Play button is about to disappear. If it had the keyboard's focus, that focus would be dropped on the
     // floor; put it on the player instead, so the next key press (space to pause, the arrows to seek) reaches the
     // controls. A tap on a phone shows no focus ring, so nothing changes for touch.
@@ -356,7 +394,8 @@ export function WatchPlayer({
 
   /** Frames are actually showing: count the play start, once per page load. */
   function onPlaying() {
-    clearSlow();
+    doneWaiting();
+    setEverPlayed(true);
     if (counted.current) return;
     counted.current = true;
     // Recorded in the background, one attempt. If it does not get through,
@@ -372,6 +411,7 @@ export function WatchPlayer({
 
   /** The video has run out of data and is waiting for more. Say so only if it goes on for a while. */
   function onWaiting() {
+    setLoading(true);
     window.clearTimeout(slowTimer.current);
     slowTimer.current = window.setTimeout(() => setSlow(true), SLOW_AFTER_MS);
   }
@@ -402,7 +442,7 @@ export function WatchPlayer({
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="mb-4 rounded-2xl border-2 border-[#c9c3b6] bg-white px-4 py-3">
+          <div className="mb-4 rounded-2xl border-2 border-[#e3e7eb] bg-white px-4 py-3">
             <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3.5 py-1">
               <input
                 ref={tickBox}
@@ -419,7 +459,7 @@ export function WatchPlayer({
       </div>
       {/* No answer got through: said calmly where the box was, with one way to try again. */}
       {acceptTrouble && (
-        <div className="mb-4 rounded-2xl border-2 border-[#c9c3b6] bg-white px-4 py-3">
+        <div className="mb-4 rounded-2xl border-2 border-[#e3e7eb] bg-white px-4 py-3">
           <div role="alert" className="flex flex-col items-start gap-2">
             <p className="text-[17px] leading-[1.45] text-[#3a4c56]">We couldn&apos;t get the video ready. Check your connection, then try again.</p>
             <button
@@ -470,7 +510,7 @@ export function WatchPlayer({
             // goes on here and the browser starts fetching at once (useVideoSource leaves it be); a stream is put on by
             // the hook. The still stays until the first frame replaces it.
             src={source?.kind === "file" ? source.src : undefined}
-            poster={source?.kind === "stream" ? source.poster : (poster ?? undefined)}
+            poster={stillToShow(poster, source)}
             preload="auto"
             playsInline
             controlsList="nodownload"
@@ -479,7 +519,8 @@ export function WatchPlayer({
             onPlay={onPlay}
             onPlaying={onPlaying}
             onWaiting={onWaiting}
-            onCanPlay={clearSlow}
+            onCanPlay={doneWaiting}
+            onPause={doneWaiting}
             onLoadedMetadata={onLoadedMetadata}
             onError={fail}
             aria-label={title}
@@ -497,10 +538,17 @@ export function WatchPlayer({
               clinicName={clinicName}
               logoUrl={logoUrl}
               senderName={senderName}
+              placeholder={placeholder}
               showControls={started}
               slow={slow}
+              loading={started && loading}
             />
           )}
+          {/* Said once, in words, for a screen reader: the first wait after Play. Later waits are drawn only (the spinner), so
+              a reader is not interrupted at every pause to buffer; a long one still gets the "still loading" sentence. */}
+          <p role="status" className="sr-only">
+            {started && loading && !everPlayed && !stopped ? "Loading the video." : ""}
+          </p>
 
           {!started && !stopped && (
             // The keyboard focus ring is drawn just inside the edge, because the
@@ -523,7 +571,12 @@ export function WatchPlayer({
                   ready ? "text-[#12333f] active:scale-95" : "text-[#9aa5ac] opacity-70"
                 }`}
               >
-                <PlayIcon className="ml-1 h-8 w-8 @xl:h-10 @xl:w-10" />
+                {/* Ticked and the video is on its way: a turning ring in place of the triangle (its line says why in words). */}
+                {ticked && !ready && !acceptTrouble ? (
+                  <Spinner tone="dark" className="h-10 w-10 @xl:h-12 @xl:w-12" />
+                ) : (
+                  <PlayIcon className="ml-1 h-8 w-8 @xl:h-10 @xl:w-10" />
+                )}
               </span>
               <span id={`${tickId}-why`} className="rounded-full bg-white px-4 py-1.5 text-[16px] font-semibold text-[#12333f] @xl:py-2 @xl:text-[17px] shadow-[0_4px_16px_rgba(0,0,0,.3)]">
                 {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}

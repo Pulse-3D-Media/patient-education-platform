@@ -58,14 +58,19 @@ function buttons(html: string): string[] {
 }
 
 describe("the clinic's mark on the library's player", () => {
-  it("someone holding a seat: the clinic's logo, the title, and their name as patients see it", () => {
+  it("someone holding a seat: the clinic's logo and their name as patients see it (the watch page writes the title under the player)", () => {
     const senderName = libraryStripName({ displayName: "Dr. Jane Smith, DO" }, "Dr. Jane Smith");
     const html = render({ logoUrl: "https://example.com/summit-square.png", senderName });
 
     expect(html).toContain("data-video-strip");
     expect(html).toContain('src="https://example.com/summit-square.png"');
-    expect(html).toMatch(/class="video-chip [^"]*">Total Knee Replacement</);
     expect(html).toMatch(/class="video-chip [^"]*">Dr\. Jane Smith, DO</);
+    expect(html).not.toMatch(/class="video-chip [^"]*">Total Knee Replacement</);
+  });
+
+  it("puts the title back on the picture in full screen, where the page's own title is out of sight", () => {
+    expect(renderPlaying({ fullscreen: true })).toMatch(/class="video-chip [^"]*">Total Knee Replacement</);
+    expect(renderPlaying({ fullscreen: false })).not.toMatch(/class="video-chip [^"]*">Total Knee Replacement</);
   });
 
   it("someone holding a seat that nobody named: 'Dr. First Last' from Clerk", () => {
@@ -134,9 +139,11 @@ describe("opening paused (decided by Evan on 2026-10-15)", () => {
     expect(html).not.toContain("my favorites");
   });
 
-  it("makes the big Play button at least 48px to tap", () => {
+  it("makes the big Play button one white pill, at least 48px tall, with a round play button and the word Play", () => {
     const html = render();
-    expect(html).toMatch(/<span class="flex h-16 w-16 items-center justify-center rounded-full bg-white/);
+    expect(html).toMatch(/<span data-play-pill="" class="flex h-14 items-center [^"]*rounded-full bg-white/);
+    expect(html).toMatch(/<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-\[#12333f\] text-white/);
+    expect(html).toMatch(/text-\[16px\] font-semibold[^"]*">Play<\/span>/);
   });
 });
 
@@ -152,7 +159,7 @@ describe("the controls once it plays, laid out the way Vimeo does it", () => {
   it("shows the middle buttons only on a screen with no mouse, and the bottom play button only with one", () => {
     const html = renderPlaying();
 
-    expect(html).toMatch(/<div class="[^"]*flex items-center justify-center gap-5 [^"]*computer:hidden[^"]*"><button[^>]*aria-label="Back 10 seconds"/);
+    expect(html).toMatch(/<div class="[^"]*flex items-center justify-center gap-7 [^"]*computer:hidden[^"]*"><button[^>]*aria-label="Back 10 seconds"/);
     expect(html).toMatch(/<span class="hidden computer:flex"><button[^>]*aria-label="Pause"/);
   });
 
@@ -160,7 +167,7 @@ describe("the controls once it plays, laid out the way Vimeo does it", () => {
     // Found on 2026-10-29: the fade took taps of its own and sat on top of Pause and the ten-second buttons, so a tap
     // on any of them only hid the controls. Only the fade's buttons and the progress bar may take a tap.
     const html = renderPlaying();
-    const fade = html.match(/<div class="([^"]*bg-gradient-to-t[^"]*)"/)?.[1] ?? "";
+    const fade = html.match(/<div class="(video-scrim[^"]*)"/)?.[1] ?? "";
 
     expect(fade).toMatch(/\bpointer-events-none\b/);
     expect(html).toMatch(/<input[^>]*aria-label="Seek"[^>]*class="pointer-events-auto /);
@@ -173,8 +180,18 @@ describe("the controls once it plays, laid out the way Vimeo does it", () => {
 
     expect(sizes.length).toBe(6);
     for (const { label, cls } of sizes) {
-      expect(cls, label).toMatch(/\bh-(11|12|14|16) w-(11|12|14|16)\b/);
+      expect(cls, label).toMatch(/\bh-(11|12|13|14|16) w-(11|12|13|14|16)\b/);
     }
+  });
+
+  it("keeps the middle buttons small on a phone (44px, the play button 52px) and the fade behind the bottom row short", () => {
+    const html = renderPlaying();
+    expect(html).toMatch(/aria-label="Back 10 seconds"[^>]*class="[^"]*\bh-11 w-11 bg-black\/45\b/);
+    expect(html).toMatch(/aria-label="Pause"[^>]*class="[^"]*\bh-13 w-13 bg-black\/50\b/);
+    expect(html).toMatch(/aria-label="Forward 10 seconds"[^>]*class="[^"]*\bh-11 w-11 bg-black\/45\b/);
+    // The old fade reached 40px above the row (pt-10) and was 75% black; now 12px (pt-3), on .video-scrim.
+    expect(html).toMatch(/<div class="video-scrim pointer-events-none absolute inset-x-0 bottom-0 [^"]*\bpt-3\b/);
+    expect(html).not.toContain("from-black/75");
   });
 
   it("has no volume slider, no separate 'Start over' and no title band of its own", () => {

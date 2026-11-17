@@ -452,8 +452,8 @@ export function WatchPlayer({
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="mb-4 rounded-2xl border-2 border-[#e3e7eb] bg-white px-4 py-3">
-            <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3.5 py-1">
+          <div className="mb-3 rounded-2xl border-2 border-[#e3e7eb] bg-white px-3.5 py-2 sm:mb-4 sm:px-4 sm:py-3">
+            <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3 py-1 sm:gap-3.5">
               <input
                 ref={tickBox}
                 id={tickId}
@@ -563,10 +563,12 @@ export function WatchPlayer({
           {!started && !stopped && (
             // The keyboard focus ring is drawn just inside the edge, because the
             // rounded card clips anything drawn outside it.
-            // Visibly not ready until the box is ticked and the video has arrived: the circle is dimmed and its line
-            // says why. Not `disabled`, so a tap still does something useful: it takes the patient to the box.
-            // On a phone the box is only about 184px tall, so the button sits low (anchored to the bottom) and a little
-            // smaller, clear of the clinic's mark in the top left; on a wider player it is in the middle, a little low.
+            // One white pill in the middle of the picture: a round play button and, beside it, what to do. Small enough to sit
+            // clear of the clinic's mark even on a phone's 184px-tall picture (player refresh, November 2026; it was a big
+            // circle with a second pill under it, which covered most of a phone's picture).
+            // Visibly not ready until the box is ticked and the video has arrived: the round part is greyed and the words
+            // say why (always dark and readable). Not `disabled`, so a tap still does something useful: it takes the
+            // patient to the box.
             <button
               ref={playButton}
               type="button"
@@ -574,22 +576,27 @@ export function WatchPlayer({
               aria-label={`Play ${title}`}
               aria-disabled={ready ? undefined : true}
               aria-describedby={ready ? undefined : `${tickId}-why`}
-              className="absolute inset-0 z-20 flex flex-col items-center justify-end gap-2 pb-3 @xl:justify-center @xl:gap-4 @xl:pb-0 @xl:pt-12 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
+              className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
             >
               <span
-                className={`flex h-16 w-16 items-center justify-center rounded-full bg-white @xl:h-20 @xl:w-20 shadow-[0_10px_34px_rgba(0,0,0,.4)] transition ${
-                  ready ? "text-[#12333f] active:scale-95" : "text-[#9aa5ac] opacity-70"
+                data-play-pill=""
+                className={`flex h-14 items-center gap-3 rounded-full bg-white py-2 pl-2 pr-5 shadow-[0_8px_28px_rgba(0,0,0,.38)] transition @xl:h-16 @xl:pr-6 ${
+                  ready ? "group-active:scale-95" : ""
                 }`}
               >
-                {/* Ticked and the video is on its way: a turning ring in place of the triangle (its line says why in words). */}
-                {ticked && !ready && !acceptTrouble ? (
-                  <Spinner tone="dark" className="h-10 w-10 @xl:h-12 @xl:w-12" />
-                ) : (
-                  <PlayIcon className="ml-1 h-8 w-8 @xl:h-10 @xl:w-10" />
-                )}
-              </span>
-              <span id={`${tickId}-why`} className="rounded-full bg-white px-4 py-1.5 text-[16px] font-semibold text-[#12333f] @xl:py-2 @xl:text-[17px] shadow-[0_4px_16px_rgba(0,0,0,.3)]">
-                {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
+                <span
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full @xl:h-12 @xl:w-12 ${ready ? "bg-[#12333f] text-white" : "bg-[#e3e7eb] text-[#7d8a92]"}`}
+                >
+                  {/* Ticked and the video is on its way: a turning ring in place of the triangle (the words say why). */}
+                  {ticked && !ready && !acceptTrouble ? (
+                    <Spinner tone="dark" className="h-6 w-6 @xl:h-7 @xl:w-7" />
+                  ) : (
+                    <PlayIcon className="ml-0.5 h-5 w-5 @xl:h-6 @xl:w-6" />
+                  )}
+                </span>
+                <span id={`${tickId}-why`} className="whitespace-nowrap text-[16px] font-semibold text-[#12333f] @xl:text-[17px]">
+                  {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
+                </span>
               </span>
             </button>
           )}
@@ -598,7 +605,7 @@ export function WatchPlayer({
             <>
               {/* No picture while the video will not load: the clinic's mark is a row of its own above the panel. */}
               <div className="px-3 pt-3">
-                <ClinicMark logoUrl={logoUrl} name={clinicName} title={title} senderName={senderName} />
+                <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} />
               </div>
               {/* Calm, like the expired page: no red, and never the word "error". Announced to a screen reader when it appears.
                   It is part of the page's flow (not laid over the video's box), so it is as tall as its words and buttons

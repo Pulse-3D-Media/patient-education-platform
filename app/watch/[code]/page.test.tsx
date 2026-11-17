@@ -111,7 +111,8 @@ describe("a clinic with its own branding", () => {
     const clinic = await makeClinic({ logoUrl: "https://example.com/slow.png" });
     const html = await render(await makeShare(clinic.id, videoId));
 
-    expect(html).toContain("h-11 w-[220px]");
+    // 36px tall on a phone, 44px from 640px wide.
+    expect(html).toContain("h-9 w-[180px] max-w-full sm:h-11 sm:w-[220px]");
     // The picture starts invisible; only the browser, once it has loaded, shows it.
     expect(html).toMatch(/<img[^>]*src="https:\/\/example\.com\/slow\.png"[^>]*opacity-0/);
   });
@@ -140,7 +141,7 @@ describe("a clinic that set nothing", () => {
 
     expect(html).toContain("--brand-accent:#1e5668");
     expect(html).not.toMatch(/font-(merriweather|open-sans|source-sans|montserrat|nunito-sans)/);
-    expect(html).not.toContain("h-11 w-[220px]");
+    expect(html).not.toContain("w-[180px]");
     expect(html).toContain(`From ${clinic.name}`);
   });
 });
@@ -566,14 +567,14 @@ describe("the clinic and the doctor on the video", () => {
     return html.slice(start, html.indexOf("</div>", start));
   }
 
-  it("is on the picture, top left, from before the first play: the logo, the title and the surgeon's name alone", async () => {
+  it("is on the picture, top left, from before the first play: the logo and the surgeon's name alone (the title is written above the player)", async () => {
     const clinic = await makeClinic({ name: "Vitest Strip Orthopedics", logoUrl: "https://example.com/strip-white.png" });
     const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO"));
     const strip = stripOf(html);
 
     expect(strip).toContain('src="https://example.com/strip-white.png"');
     expect(strip).toContain(">Dr. Jane Smith, DO<");
-    expect(strip).toContain(">Vitest Total Knee Replacement<");
+    expect(strip).not.toContain(">Vitest Total Knee Replacement<");
     expect(strip).not.toContain("Sent by");
     // Inside the video's 16:9 box, in the box over the picture (picture-fit), after the video itself.
     expect(html).toContain("padding-top:56.25%");
@@ -625,7 +626,8 @@ describe("who sent the link", () => {
       select: { code: true },
     });
     const html = await render(share.code);
-    expect(html).toContain('<span class="block">Dr. Jane Smith</span><span class="block">Vitest Summit Orthopedics</span>');
+    // Two lines; on a phone held sideways one, with a dot between that only shows there.
+    expect(html).toContain('<span class="block short-landscape:inline">Dr. Jane Smith</span><span class="block short-landscape:inline"><span aria-hidden="true" class="hidden px-1.5 short-landscape:inline">·</span>Vitest Summit Orthopedics</span>');
     expect(html).not.toContain("Sent by");
     // It comes before the procedure's name, as "who sent me this" always has.
     expect(html.indexOf("Dr. Jane Smith")).toBeLessThan(html.indexOf("Vitest Total Knee Replacement"));

@@ -75,12 +75,22 @@ export function PatientViewer({
       <BrandBand />
       {video.isPlaceholder && <PlaceholderBar />}
 
-      {/* On a phone the page sits inside the browser, under its own address bar, so only a little room is left at the top (more of the player shows before the patient scrolls; a Samsung S22 had the video below the fold). From 640px wide, 46px as before. When the placeholder bar is there, it carries the room at the top instead. */}
-      <div className={`mx-auto flex w-full max-w-2xl flex-1 flex-col px-6 pb-10 sm:px-8 ${video.isPlaceholder ? "pt-4 sm:pt-6" : "pt-5 sm:pt-[46px]"}`}>
-        {/* The logo's row is a fixed 44px tall whether the picture loads, loads late, or never loads, so nothing under it moves. */}
+      {/* On a phone the page sits inside the browser, under its own address bar, so only a little room is left at the top
+          and at the sides (16px), and the heading is a little smaller: on a 360 by 800 phone the player and its Play
+          button are in view before the box is ticked (a Samsung S22 had the video below the fold). From 640px wide, the
+          roomier page as before. With a phone on its side (short-landscape, app/globals.css) the logo and the line
+          under the title step aside, the doctor and the clinic share one line, and the player is no taller than the
+          screen, so the video is in view without scrolling past a screen of heading. When the placeholder bar is there,
+          it carries the room at the top instead. */}
+      <div
+        className={`mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-10 sm:px-8 short-landscape:max-w-[calc((100dvh-4.5rem)*16/9+2rem)] short-landscape:px-4! ${
+          video.isPlaceholder ? "pt-3 sm:pt-6 short-landscape:pt-2!" : "pt-4 sm:pt-[46px] short-landscape:pt-3!"
+        }`}
+      >
+        {/* The logo's row is a fixed height (36px on a phone, 44px wider) whether the picture loads, loads late, or never loads, so nothing under it moves. */}
         {look.logoUrl && (
-          <div className="mb-3">
-            <ClinicLogo src={look.logoUrl} name={clinicName} boxClassName="h-11 w-[220px] max-w-full" fallback="blank" />
+          <div className="mb-2.5 sm:mb-3 short-landscape:hidden">
+            <ClinicLogo src={look.logoUrl} name={clinicName} boxClassName="h-9 w-[180px] max-w-full sm:h-11 sm:w-[220px]" fallback="blank" />
           </div>
         )}
 
@@ -88,13 +98,19 @@ export function PatientViewer({
             "Dr. Jane Smith, DO" with "Summit Orthopedics" on the line under it, or "From Summit Orthopedics" when no surgeon is named. */}
         <p className="text-[15px] font-semibold tracking-[.01em] break-words text-[#46555e]">
           {senderLines(senderName, clinicName).map((line, i) => (
-            <span key={i} className="block">
+            <span key={i} className="block short-landscape:inline">
+              {/* Sideways, the two lines become one: "Dr. Jane Smith, DO · Summit Orthopedics". */}
+              {i > 0 && (
+                <span aria-hidden="true" className="hidden px-1.5 short-landscape:inline">
+                  ·
+                </span>
+              )}
               {line}
             </span>
           ))}
         </p>
-        <h1 className="mt-1.5 text-[29px] leading-[1.15] font-bold tracking-[-.022em]">{video.title}</h1>
-        <p className="mt-2.5 text-[20px] leading-[1.5] text-[#3a4c56]">Your surgeon shared this so you can see what happens during your operation.</p>
+        <h1 className="mt-1 text-[26px] leading-[1.15] font-bold tracking-[-.022em] sm:mt-1.5 sm:text-[29px] short-landscape:text-[22px]!">{video.title}</h1>
+        <p className="mt-2 text-[20px] leading-[1.5] text-[#3a4c56] sm:mt-2.5 short-landscape:hidden">Your surgeon shared this so you can see what happens during your operation.</p>
 
         {/* Said only when the time left cannot hold one whole viewing and the first play will not add any: honest, calm, and the number to call. */}
         {endsSoon && (
@@ -103,7 +119,8 @@ export function PatientViewer({
           </p>
         )}
 
-        <div className="mt-6">{player}</div>
+        {/* Sideways on a phone, the whole column is no wider than keeps the video's 16:9 picture inside the screen's height (above). */}
+        <div className="mt-4 sm:mt-6 short-landscape:mt-3!">{player}</div>
 
         {/* "About 2 minutes", so nobody has to decide whether they have time to start it. */}
         {length && (
@@ -198,12 +215,13 @@ export function Unavailable({
  * text, and #5a3d00 on #fff3d6 measures 9.1:1 against a 4.5:1 floor. Amber,
  * not red, because nothing has gone wrong.
  *
- * It carries the room at the top of the page itself (16px on a phone, 46px
- * from 640px wide), so the page below drops its own.
+ * It carries the room at the top of the page itself (12px on a phone, 46px
+ * from 640px wide, 12px again on a phone held sideways), so the page below
+ * drops its own.
  */
 function PlaceholderBar() {
   return (
-    <div role="note" className="border-b-2 border-[#e2a12a] bg-[#fff3d6] px-6 pb-3.5 pt-4 sm:px-8 sm:pt-[46px]">
+    <div role="note" className="border-b-2 border-[#e2a12a] bg-[#fff3d6] px-4 pb-3 pt-3 sm:px-8 sm:pb-3.5 sm:pt-[46px] short-landscape:pt-3!">
       <p className="mx-auto max-w-2xl text-[16px] leading-[1.45] text-[#5a3d00]">
         <strong className="font-bold">Placeholder.</strong> This plays a sample animation, not this procedure.
       </p>

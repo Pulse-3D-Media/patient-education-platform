@@ -33,7 +33,7 @@ npm run dev
 
 `.env.example` lists the variables you need: two Neon connection strings, two Clerk keys, and two Stripe values (test mode only; the app runs without them, and refuses a live key). Real values never go in this repository.
 
-`npm test` runs the tests against a separate Neon branch (see the Tests section of `CLAUDE.md`).
+`npm test` runs the tests against a separate test database: a local PostgreSQL copy for everyday runs, or the Neon `testing` branch (see `docs/areas/tests.md`). Never production: the test setup refuses it.
 
 ## Conventions
 

@@ -31,17 +31,36 @@ describe("SenderNameForm", () => {
     expect(html).toContain("Patients will see: <span");
     expect(html).toContain("Dr. Jane Smith, DO</span>");
     // Read back exactly, so no "choose the credential" note.
-    expect(html).not.toContain("Choose the credential and save");
+    expect(html).not.toContain("Choose a title, or None, and save");
     // The typed-credential box only appears for Other.
     expect(html).not.toContain('id="t-other"');
   });
 
-  it("opens on the Dr. First Last default with the name filled in and NO credential chosen for them", () => {
+  it("opens on the bare-name default (since 2026-11-16) as None, which is what patients see, with no credential given", () => {
+    const html = form("Jane Smith");
+    expect(html).toContain('value="Jane Smith"');
+    expect(selected(html)).toBe("none");
+    expect(html).not.toContain("Choose a title, or None, and save");
+    expect(html).toContain("Patients will see: <span");
+    // "Choose..." is only offered while nothing is chosen.
+    expect(html).not.toContain("Choose...");
+  });
+
+  it("opens on an old Dr. First Last name (typed with Dr. in Clerk) with the name filled in and NO title chosen for them", () => {
     const html = form("Dr. Jane Smith");
     expect(html).toContain('value="Jane Smith"');
     expect(selected(html)).toBe("");
-    expect(html).toContain("Patients see “Dr. Jane Smith” now. Choose the credential and save to set it.");
+    expect(html).toContain("Choose...");
+    expect(html).toContain("Patients see “Dr. Jane Smith” now. Choose a title, or None, and save to set it.");
     expect(html).not.toContain("Patients will see:");
+  });
+
+  it("says the title is optional, explains Dr. and Staff, and offers Staff", () => {
+    const html = form("Jane Smith");
+    expect(html).toContain("Title (optional)");
+    expect(html).toContain("MD, DO and DPM add &ldquo;Dr.&rdquo; in front. Staff is for office staff. None shows just the name.".replace(/&ldquo;|&rdquo;/g, (m) => (m === "&ldquo;" ? "“" : "”")));
+    expect(html).toContain('<option value="Staff">Staff (office staff)</option>');
+    expect(html).toContain('aria-describedby="t-credential-help"');
   });
 
   it("shows the typed credential box for Other, filled in", () => {

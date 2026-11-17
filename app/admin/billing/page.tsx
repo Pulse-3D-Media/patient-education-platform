@@ -446,6 +446,22 @@ function OfferSection({
     );
   }
 
+  if (offer.kind === "closed" && !managed) {
+    // Choosing a plan is not open on this deployment (production today), or the plans could not be read. Either way the next
+    // step is Pulse 3D, so the card says so and gives the way there, instead of a heading with nothing to do (audit C1, 2026-11-16).
+    return (
+      <section aria-labelledby="next-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
+        <h2 id="next-heading" className="text-lg font-semibold">
+          Getting your clinic open
+        </h2>
+        <p className="mt-2 text-ink-soft">{offer.message}</p>
+        <a href={PULSE_CONTACT_URL} className={`mt-5 ${PRIMARY_BUTTON}`}>
+          Schedule a call with Pulse 3D
+        </a>
+      </section>
+    );
+  }
+
   const { heading, body } =
     managed || offer.kind === "managed"
       ? {

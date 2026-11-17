@@ -254,11 +254,17 @@ describe("/admin/billing: who is offered the plan picker", () => {
     expect(shut).toContain("not open yet");
     expect(shut).toContain("Get in touch with Pulse 3D and we will turn yours on.");
     expect(shut).not.toContain("Continue to payment");
+    // Not a dead end (audit C1): a plain heading and the way to Pulse 3D, never the old "Coming here" with nothing to do.
+    expect(shut).toContain("Getting your clinic open");
+    expect(shut).not.toContain("Coming here");
+    expect(shut).toContain('href="https://www.pulse3dmedia.com/schedulecall"');
+    expect(shut).toContain(">Schedule a call with Pulse 3D</a>");
 
     vi.mocked(checkoutIsOpen).mockReturnValue(true);
     vi.mocked(getActivePricing).mockResolvedValue({ source: { kind: "estimate" }, config: DEFAULT_PRICING_CONFIG });
     const noPrices = await renderBilling();
     expect(noPrices).toContain("not open yet");
+    expect(noPrices).toContain(">Schedule a call with Pulse 3D</a>");
     expect(noPrices).not.toContain("Continue to payment");
   });
 

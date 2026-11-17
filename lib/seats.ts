@@ -8,7 +8,9 @@
  *   The ACCOUNT OWNER   One person per clinic: whoever created it, until they
  *                       hand it to someone else. Always an admin. The only
  *                       person who does not need a seat, and who may still
- *                       take one (a solo surgeon buys one seat and takes it).
+ *                       take one. A solo owner is given one automatically
+ *                       when the clinic opens (ownerAutoSeatDue() below,
+ *                       decided by the user on 2026-11-16).
  *   Everyone else       Holds one of the seats the clinic pays for
  *                       (Clinic.surgeonSeats). There is no free "staff" kind
  *                       any more. Whether someone is an admin is a separate
@@ -184,6 +186,84 @@ export function checkSeatReduction(inUse: number, newSeats: number): SeatReducti
 export function overAllocatedWords(summary: SeatSummary): string | null {
   if (summary.overBy === 0) return null;
   return `${plural(summary.inUse, "seat is", "seats are")} taken, ${summary.overBy} more than the ${summary.seats} the plan now pays for. Nobody was removed and no charge was changed; nobody else can be given a seat until that is settled.`;
+}
+
+// ---------------------------------------------------------------------------
+// A solo owner is seated when the clinic opens
+// ---------------------------------------------------------------------------
+
+/**
+ * The first words of the log entry written when the account owner is given a
+ * seat on their own. The rule below looks for an entry starting with these
+ * words to tell that it has already done its one job at this clinic, so
+ * they are never reworded.
+ */
+export const OWNER_AUTO_SEAT_WORDS = "The account owner was given a seat when the clinic opened";
+
+/** The full log entry: the fixed words, then the count. */
+export function ownerAutoSeatNote(summary: SeatSummary): string {
+  return `${OWNER_AUTO_SEAT_WORDS}, because nobody else holds or is invited to one. Now ${seatCountWords(summary)}.`;
+}
+
+/**
+ * Should the account owner be given a seat automatically, right now?
+ * (Decided by the user on 2026-11-16: a solo owner is seated automatically.)
+ *
+ * Before this, an owner who bought one seat for themselves still had to find
+ * "Take a seat" on the People page, and the library sent them to "ask your
+ * clinic's office admin", who was themselves. So, at the moment a clinic
+ * BECOMES OPEN WITH SEATS (its first confirmed payment, or Pulse staff
+ * opening it or setting its plan), the owner is given a seat when ALL of
+ * these are true:
+ *
+ *   - the clinic was not open with at least one seat a moment ago, and is now;
+ *   - it has an account owner;
+ *   - nobody holds a seat and no invitation holds one (so the owner holds
+ *     none either, and a seat is free: the plan has at least one);
+ *   - this has never been done at this clinic before (its log has no entry
+ *     starting with OWNER_AUTO_SEAT_WORDS). So an owner who later gives the
+ *     seat up is never seated again by this; they take one themselves if
+ *     they want it back.
+ *
+ * Asked only under the clinic's row lock, with counts read under that lock,
+ * so two openings at the same moment seat the owner once.
+ */
+export function ownerAutoSeatDue(facts: {
+  wasOpenWithSeats: boolean;
+  isOpenWithSeats: boolean;
+  ownerClerkUserId: string | null;
+  seated: number;
+  invited: number;
+  doneBefore: boolean;
+}): boolean {
+  return (
+    !facts.wasOpenWithSeats &&
+    facts.isOpenWithSeats &&
+    isClerkUserId(facts.ownerClerkUserId) &&
+    facts.seated === 0 &&
+    facts.invited === 0 &&
+    !facts.doneBefore
+  );
+}
+
+/**
+ * What the library says to someone without a seat, under the videos:
+ *
+ *   "take"    the account owner, with a seat free: a Take a seat button.
+ *   "people"  an office admin (the owner too, when no seat is free): a link
+ *             to the People page, where seats are given. They ARE the
+ *             office admin, so "ask your office admin" would send them in
+ *             a circle.
+ *   "ask"     anyone else: ask the clinic's office admin.
+ *
+ * Only words and a button; giving the seat is checked on the server.
+ */
+export type NoSeatHelp = "take" | "people" | "ask";
+
+export function noSeatHelp(person: { isOwner: boolean; isAdmin: boolean; seatFree: boolean }): NoSeatHelp {
+  if (person.isOwner && person.seatFree) return "take";
+  if (person.isAdmin || person.isOwner) return "people";
+  return "ask";
 }
 
 // ---------------------------------------------------------------------------

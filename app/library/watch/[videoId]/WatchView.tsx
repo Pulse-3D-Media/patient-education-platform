@@ -12,6 +12,7 @@ import { refreshPlaybackAction } from "../../[category]/actions";
 import { recordLibraryPlayAction } from "../../actions";
 import { useLibrary } from "../../LibraryBrowser";
 import type { LibraryItem } from "../../library-item";
+import { NoSeatNote } from "../../NoSeatNote";
 import { Thumbnail } from "../../VideoCard";
 
 /** The video's category, as the channel line under the title shows it. */
@@ -169,11 +170,7 @@ export function WatchView({
             </button>
           )}
         </div>
-        {!library.send && (
-          <p className="mt-3 max-w-2xl text-base text-ink-soft">
-            Sending a video to a patient needs a surgeon seat: ask your clinic&apos;s office admin if you should have one.
-          </p>
-        )}
+        {!library.send && <NoSeatNote help={library.seatHelp} className="mt-3" />}
       </div>
 
       {/* The right column: beside the video, scrolling on its own, when the screen is wide and sideways; under it otherwise.

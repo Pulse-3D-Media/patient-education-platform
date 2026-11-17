@@ -1,6 +1,6 @@
 /**
- * The name a patient sees on a link: "Dr. Jane Smith, DO", with the
- * clinic's name on the line under it. Pure: no database, no Clerk, safe for the browser, so the
+ * The name a patient sees on a link: "Jane Smith", or "Dr. Jane Smith, DO"
+ * once a title is chosen, with the clinic's name on the line under it. Pure: no database, no Clerk, safe for the browser, so the
  * name editor (on People, and in the library's Send panel) and the server
  * that saves it check names the same way.
  *
@@ -8,18 +8,27 @@
  *   1. the name chosen for that person (stored on their seat,
  *      SeatAllocation.displayName), set by an office admin on /admin/people
  *      or by the person themselves from the library's Send panel;
- *   2. "Dr. " and their first and last name from Clerk, for someone nobody
- *      has chosen a name for yet;
+ *   2. their first and last name from Clerk, as they are ("Jane Smith"),
+ *      for someone nobody has chosen a name for yet. Until 2026-11-16 this
+ *      was "Dr. Jane Smith"; the bare name was decided by the user on
+ *      2026-11-16, because not everyone holding a seat is a doctor. A name
+ *      typed in Clerk that already starts with "Dr" stays as typed. Names
+ *      already chosen, and names already copied onto links, were not
+ *      rewritten;
  *   3. nothing, when Clerk has no name for them either. The link then says
  *      only which clinic sent it, as links always did. Their email address
  *      is never used: it is not a name, and patients have no need of it.
  *
  * HOW A CHOSEN NAME IS MADE (decided by Evan on 2026-10-02): a name box that
- * holds only the name, and a credential from a short list. MD, DO and DPM
- * also put "Dr." in front; the others do not:
+ * holds only the name, and an optional title from a short list. MD, DO and
+ * DPM also put "Dr." in front; the others do not:
  *
  *   MD, DO, DPM   "Dr. Jane Smith, DO"
  *   PA-C, NP      "Jane Smith, PA-C"
+ *   Staff         "Jane Smith, Staff"  (office staff; added 2026-11-16 by the
+ *                                      user's decision. Shown after the name,
+ *                                      not left off, so a saved Staff reads
+ *                                      back as Staff and not as None)
  *   Other         "Jane Smith, LAc"   (a short credential typed in, no "Dr.")
  *   None          "Jane Smith"
  *
@@ -40,7 +49,7 @@ export type Sender = {
   userId: string;
   /** Their name for the office: "Jane Smith", or their email when Clerk has no name. Never shown to patients. */
   name: string;
-  /** What patients will see: the name chosen for them, else "Dr. First Last", else null (the link then names only the clinic). */
+  /** What patients will see: the name chosen for them, else "First Last" from Clerk, else null (the link then names only the clinic). */
   patientName: string | null;
 };
 
@@ -51,7 +60,7 @@ export const MAX_DISPLAY_NAME = 80;
 export const MAX_OTHER_CREDENTIAL = 12;
 
 /** The credentials in the list, in the order the dropdown shows them. */
-export const CREDENTIALS = ["MD", "DO", "DPM", "PA-C", "NP"] as const;
+export const CREDENTIALS = ["MD", "DO", "DPM", "PA-C", "NP", "Staff"] as const;
 export type Credential = (typeof CREDENTIALS)[number];
 
 /** What the dropdown can hold: a listed credential, Other, None, or "" for nothing chosen yet. */
@@ -67,6 +76,7 @@ export const CREDENTIAL_CHOICES: { value: Exclude<CredentialPick, "">; label: st
   { value: "DPM", label: "DPM (adds Dr.)" },
   { value: "PA-C", label: "PA-C" },
   { value: "NP", label: "NP" },
+  { value: "Staff", label: "Staff (office staff)" },
   { value: "other", label: "Other (type it)" },
   { value: "none", label: "None" },
 ];
@@ -80,8 +90,9 @@ export function addsDoctor(credential: CredentialPick): boolean {
 }
 
 /**
- * "Dr. Jane Smith" from a first and a last name, or null when both are empty.
- * A first name that already starts with "Dr" is not given a second one.
+ * "Jane Smith" from a first and a last name, as they are in Clerk, or null
+ * when both are empty. No "Dr." is added (decided by the user on
+ * 2026-11-16); one typed in Clerk ("Dr. Jane") stays as typed.
  */
 export function defaultSenderName(firstName: string | null | undefined, lastName: string | null | undefined): string | null {
   const full = [firstName, lastName]
@@ -89,8 +100,7 @@ export function defaultSenderName(firstName: string | null | undefined, lastName
     .filter(Boolean)
     .join(" ");
   if (!full) return null;
-  const name = /^dr\.?(\s|$)/i.test(full) ? full : `Dr. ${full}`;
-  return name.slice(0, MAX_DISPLAY_NAME);
+  return full.slice(0, MAX_DISPLAY_NAME);
 }
 
 /**
@@ -126,7 +136,7 @@ export function parseNameChoice(value: unknown): { ok: true; choice: NameChoice;
 
   const credential = sent.credential;
   if (typeof credential !== "string" || !CREDENTIAL_CHOICES.some((choice) => choice.value === credential)) {
-    return { ok: false, message: "Choose a credential, or None." };
+    return { ok: false, message: "Choose a title, or None for just the name." };
   }
 
   let other = "";
@@ -148,8 +158,9 @@ export function parseNameChoice(value: unknown): { ok: true; choice: NameChoice;
 /**
  * Stored words back into the choice that made them, for the editor to open
  * on. `exact` is true when saving that choice gives back exactly these words.
- * It is false for a name nobody has chosen yet (the "Dr. First Last"
- * default, which has no credential) and for a name typed before the
+ * A bare name ("Jane Smith", the default since 2026-11-16) reads as None,
+ * exactly. It is false for "Dr." with no credential after it (the old
+ * default, or a Clerk name typed with "Dr") and for a name typed before the
  * credential list existed; the editor then opens on its best reading, with
  * the credential left to choose where it cannot tell.
  */

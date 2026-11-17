@@ -16,7 +16,7 @@ import { checkSeatReduction, overAllocatedWords, seatSummary } from "../seats";
 import { readClinicLocked } from "./clinic-lock";
 import { getCategoryList } from "./category-config";
 import { prisma } from "./client";
-import { countSeatsInUseIn } from "./seats";
+import { countSeatsInUseIn, seatSoloOwnerIfDue } from "./seats";
 import { readSettingsIn } from "./settings";
 
 /**
@@ -632,7 +632,7 @@ export type ReconcileResult = {
 };
 
 /** What the locked read asks for about the clinic. */
-const RECONCILE_CLINIC = { id: true, status: true, graceEndsAt: true, staffAccess: true, managedByPulse: true, categories: true } as const;
+const RECONCILE_CLINIC = { id: true, status: true, graceEndsAt: true, staffAccess: true, managedByPulse: true, categories: true, surgeonSeats: true } as const;
 
 const STATUS_WORDS: Record<ClinicStatus, string> = {
   PENDING: "Pending",
@@ -850,6 +850,12 @@ export async function reconcileSubscription(args: {
         select: { id: true },
       });
     }
+
+    // 5. A clinic that has just opened with seats (a first confirmed payment,
+    //    or a recovery) seats its owner when nobody else holds or is invited
+    //    to a seat (ownerAutoSeatDue() in lib/seats.ts). Same lock, same
+    //    transaction, its own log entry.
+    await seatSoloOwnerIfDue(tx, clinicId, clinic, now);
 
     const words = entries.length > 0 ? entries.join(" ") : recordChanged ? "Dates updated from Stripe." : "Checked against Stripe. Nothing had changed.";
     const outcome = strangePlan

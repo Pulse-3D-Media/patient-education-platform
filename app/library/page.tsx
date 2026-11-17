@@ -107,7 +107,20 @@ export default async function LibraryPage() {
     <main className="py-6">
       {/* No headline on the page (Evan, 2026-10-15): the pills say where you are. A screen reader still gets one. */}
       <h1 className="sr-only">My Procedure Library</h1>
-      {mine.length === 0 && <p className="mb-5 px-5 text-base text-ink-soft sm:px-8">Your clinic&apos;s plan has no categories yet.</p>}
+      {mine.length === 0 && (
+        <p className="mb-5 px-5 text-base text-ink-soft sm:px-8">
+          Your clinic&apos;s plan has no categories yet.
+          {/* An office admin is the one who can change that, so they get the way there. A member only reads the line. */}
+          {clinic.isAdmin && (
+            <>
+              {" "}
+              <Link href="/admin/billing" className="font-medium text-brand-bright underline underline-offset-2 hover:text-ink">
+                Go to Billing
+              </Link>
+            </>
+          )}
+        </p>
+      )}
 
       {mine.length > 0 && (
         <>

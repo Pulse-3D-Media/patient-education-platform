@@ -17,14 +17,14 @@ import {
 /** The name rules in lib/sender-name.ts, with plain values. No database, no Clerk. */
 
 describe("defaultSenderName", () => {
-  it("is 'Dr. First Last' from the two names", () => {
-    expect(defaultSenderName("Jane", "Smith")).toBe("Dr. Jane Smith");
-    expect(defaultSenderName("  Jane ", " Smith  ")).toBe("Dr. Jane Smith");
+  it("is the bare 'First Last' from the two names, with no Dr. added (decided by the user on 2026-11-16)", () => {
+    expect(defaultSenderName("Jane", "Smith")).toBe("Jane Smith");
+    expect(defaultSenderName("  Jane ", " Smith  ")).toBe("Jane Smith");
   });
 
   it("uses whichever name there is when one is missing", () => {
-    expect(defaultSenderName("Jane", null)).toBe("Dr. Jane");
-    expect(defaultSenderName(undefined, "Smith")).toBe("Dr. Smith");
+    expect(defaultSenderName("Jane", null)).toBe("Jane");
+    expect(defaultSenderName(undefined, "Smith")).toBe("Smith");
   });
 
   it("is null when Clerk has no name at all, never an email or an empty 'Dr.'", () => {
@@ -32,11 +32,14 @@ describe("defaultSenderName", () => {
     expect(defaultSenderName("", "   ")).toBeNull();
   });
 
-  it("does not add a second 'Dr.'", () => {
+  it("keeps a name typed in Clerk with Dr. exactly as typed, and adds nothing to any other", () => {
     expect(defaultSenderName("Dr. Jane", "Smith")).toBe("Dr. Jane Smith");
     expect(defaultSenderName("dr", "Smith")).toBe("dr Smith");
-    // A name that only starts with the letters is still a name.
-    expect(defaultSenderName("Drew", "Barry")).toBe("Dr. Drew Barry");
+    expect(defaultSenderName("Drew", "Barry")).toBe("Drew Barry");
+  });
+
+  it("reads back as None, exactly, so the editor opens on what patients see", () => {
+    expect(readSenderName(defaultSenderName("Jane", "Smith"))).toEqual({ choice: { name: "Jane Smith", credential: "none", other: "" }, exact: true });
   });
 
   it("is never longer than the limit", () => {
@@ -62,7 +65,12 @@ describe("parseNameChoice and buildSenderName: a name and a credential make the 
   it("adds no Dr. for PA-C and NP", () => {
     expect(words(pick("Jane Smith", "PA-C"))).toBe("Jane Smith, PA-C");
     expect(words(pick("Jane Smith", "NP"))).toBe("Jane Smith, NP");
-    expect(["PA-C", "NP", "other", "none", ""].some((credential) => addsDoctor(credential as CredentialPick))).toBe(false);
+    expect(["PA-C", "NP", "Staff", "other", "none", ""].some((credential) => addsDoctor(credential as CredentialPick))).toBe(false);
+  });
+
+  it("puts Staff after the name, with no Dr. (for office staff, added 2026-11-16)", () => {
+    expect(words(pick("Jane Smith", "Staff"))).toBe("Jane Smith, Staff");
+    expect(words(pick("Jane Smith", "other", "staff"))).toBe("refused: Staff is in the list. Choose it there.");
   });
 
   it("puts a typed Other credential after the name, with no Dr.", () => {
@@ -77,8 +85,8 @@ describe("parseNameChoice and buildSenderName: a name and a credential make the 
   });
 
   it("offers every credential in the list, nothing picked in advance", () => {
-    expect(CREDENTIAL_CHOICES.map((choice) => choice.value)).toEqual(["MD", "DO", "DPM", "PA-C", "NP", "other", "none"]);
-    expect(CREDENTIALS).toEqual(["MD", "DO", "DPM", "PA-C", "NP"]);
+    expect(CREDENTIAL_CHOICES.map((choice) => choice.value)).toEqual(["MD", "DO", "DPM", "PA-C", "NP", "Staff", "other", "none"]);
+    expect(CREDENTIALS).toEqual(["MD", "DO", "DPM", "PA-C", "NP", "Staff"]);
   });
 
   it("tidies spaces, line breaks and control characters, and keeps names of any language", () => {
@@ -106,8 +114,8 @@ describe("parseNameChoice and buildSenderName: a name and a credential make the 
   });
 
   it("refuses a credential that is not in the list, or none chosen", () => {
-    for (const credential of ["", "md", "PhD", "Dr", "<b>"]) expect(words(pick("Jane Smith", credential)), credential).toBe("refused: Choose a credential, or None.");
-    expect(words({ name: "Jane Smith" })).toBe("refused: Choose a credential, or None.");
+    for (const credential of ["", "md", "PhD", "Dr", "<b>", "staff"]) expect(words(pick("Jane Smith", credential)), credential).toBe("refused: Choose a title, or None for just the name.");
+    expect(words({ name: "Jane Smith" })).toBe("refused: Choose a title, or None for just the name.");
   });
 
   it("checks an Other credential: letters and hyphens, a few characters, and not one already in the list", () => {
@@ -138,6 +146,7 @@ describe("readSenderName: stored words back into the choice that made them", () 
     { name: "Jane Smith", credential: "DPM", other: "" },
     { name: "Jane Smith", credential: "PA-C", other: "" },
     { name: "Jane Smith", credential: "NP", other: "" },
+    { name: "Jane Smith", credential: "Staff", other: "" },
     { name: "Jane Smith", credential: "other", other: "LAc" },
     { name: "Jane Smith", credential: "other", other: "Jr" },
     { name: "Jane Smith", credential: "none", other: "" },
@@ -154,7 +163,7 @@ describe("readSenderName: stored words back into the choice that made them", () 
     }
   });
 
-  it("reads the Dr. First Last default as the name with the credential still to choose", () => {
+  it("reads the old Dr. First Last default (still on names typed with Dr. in Clerk) as the name with the title still to choose", () => {
     expect(readSenderName("Dr. Jane Smith")).toEqual({ choice: { name: "Jane Smith", credential: "", other: "" }, exact: false });
   });
 
@@ -177,9 +186,11 @@ describe("readSenderName: stored words back into the choice that made them", () 
 
 describe("effectiveSenderName and senderLines", () => {
   it("prefers the typed name, then the default, then nothing", () => {
-    expect(effectiveSenderName("Jane Smith, PA-C", "Dr. Jane Smith")).toBe("Jane Smith, PA-C");
-    expect(effectiveSenderName(null, "Dr. Jane Smith")).toBe("Dr. Jane Smith");
-    expect(effectiveSenderName("", "Dr. Jane Smith")).toBe("Dr. Jane Smith");
+    expect(effectiveSenderName("Jane Smith, PA-C", "Jane Smith")).toBe("Jane Smith, PA-C");
+    expect(effectiveSenderName(null, "Jane Smith")).toBe("Jane Smith");
+    expect(effectiveSenderName("", "Jane Smith")).toBe("Jane Smith");
+    // A name chosen before 2026-11-16 is kept exactly as it was saved.
+    expect(effectiveSenderName("Dr. Jane Smith, DO", "Jane Smith")).toBe("Dr. Jane Smith, DO");
     expect(effectiveSenderName(null, null)).toBeNull();
   });
 

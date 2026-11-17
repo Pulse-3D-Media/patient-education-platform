@@ -224,7 +224,7 @@ describe("the watch page for a video the clinic may use", () => {
       expect(html).not.toContain("needs a surgeon seat");
       expect(html).toMatch(new RegExp(`aria-pressed="true"[^>]*aria-label="Remove ${title("watched")} from my favorites"`));
       // The player's mark carries their name as patients see it.
-      expect(html).toContain(">Dr. Jane Smith<");
+      expect(html).toContain(">Jane Smith<");
       // No number about plays or hearts anywhere.
       expect(html).not.toMatch(/\b\d+ (plays?|views?|favorites?)\b/i);
     } finally {

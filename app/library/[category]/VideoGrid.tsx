@@ -1,6 +1,7 @@
 "use client";
 
 import { useLibrary } from "../LibraryBrowser";
+import { NoSeatNote } from "../NoSeatNote";
 import type { LibraryItem } from "../library-item";
 import { VideoCard } from "../VideoCard";
 
@@ -16,15 +17,11 @@ import { VideoCard } from "../VideoCard";
  * A page only renders this when there is at least one video.
  */
 export function VideoGrid({ videos }: { videos: LibraryItem[] }) {
-  const { send } = useLibrary();
+  const { send, seatHelp } = useLibrary();
 
   return (
     <>
-      {!send && (
-        <p className="mb-5 max-w-2xl text-base text-ink-soft">
-          Play any video here. Sending one to a patient needs a surgeon seat: ask your clinic&apos;s office admin if you should have one.
-        </p>
-      )}
+      {!send && <NoSeatNote help={seatHelp} lead="Play any video here." className="mb-5" />}
       <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2 2xl:grid-cols-3">
         {videos.map((video) => (
           <li key={video.id}>

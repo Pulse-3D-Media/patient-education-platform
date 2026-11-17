@@ -117,6 +117,25 @@ export function signedPlaylistUrl(playbackId: string, expiresAt: Date, env: MuxE
   return `${MUX_STREAM_ORIGIN}/${playbackId}.m3u8?token=${signPlaybackToken(playbackId, "video", expiresAt, {}, env)}`;
 }
 
+/**
+ * The signed address of one caption track's text (a WebVTT file: each line
+ * of narration with the moment it is said), for Pulse staff to read through
+ * before patients rely on it. Mux serves it at
+ * stream.mux.com/{playback id}/text/{track id}.vtt, and for a signed playback
+ * id it takes the same token as the video itself (audience "v", which Mux's
+ * secure playback guide says covers subtitles and closed captions too).
+ * Only the video's page on /pulse ever draws one, and it is never logged.
+ */
+export function signedCaptionUrl(playbackId: string, trackId: string, expiresAt: Date, env: MuxEnv = process.env): string {
+  if (!isMuxTrackIdShape(trackId)) throw new Error("Not a Mux track id.");
+  return `${MUX_STREAM_ORIGIN}/${playbackId}/text/${trackId}.vtt?token=${signPlaybackToken(playbackId, "video", expiresAt, {}, env)}`;
+}
+
+/** A Mux track id: letters and digits only, so it can go in an address as it is. */
+export function isMuxTrackIdShape(value: string): boolean {
+  return /^[A-Za-z0-9]{1,128}$/.test(value);
+}
+
 /** The signed address of one still from the video, at `time` seconds, `width` pixels across. */
 export function signedThumbnailUrl(playbackId: string, expiresAt: Date, options: ThumbnailOptions = { time: 1, width: 640 }, env: MuxEnv = process.env): string {
   return `${MUX_IMAGE_ORIGIN}/${playbackId}/thumbnail.jpg?token=${signPlaybackToken(playbackId, "thumbnail", expiresAt, options, env)}`;
@@ -235,6 +254,20 @@ export const UPLOAD_VIDEO_QUALITY = "basic";
  */
 export const UPLOAD_TIMEOUT_SECONDS = 2 * 60 * 60;
 
+/**
+ * The captions every new upload asks Mux to make: English, written by Mux's
+ * speech-to-text from the narration once the video is ready ("generated
+ * subtitles"), on the track named plainly "English", which is what the
+ * player's captions and the Mux dashboard show. Decided by Evan on
+ * 2026-11-16: Mux's generated captions, reviewed by a person, one CC button.
+ * Mux's guide "Add auto-generated captions to your videos and use
+ * transcripts" documents the setting; it costs nothing extra (Mux's pricing
+ * page: included in encoding and storage). Other languages are not asked for.
+ */
+export const CAPTION_LANGUAGE = "en";
+export const CAPTION_TRACK_NAME = "English";
+const GENERATED_CAPTIONS = [{ language_code: CAPTION_LANGUAGE, name: CAPTION_TRACK_NAME }];
+
 /** How long to wait for Mux's API. A staff member is waiting on the page. */
 const API_TIMEOUT_MS = 10_000;
 
@@ -257,7 +290,15 @@ export type AssetFacts = {
   durationSeconds: number | null;
   /** The direct upload the asset came from, when it came from one. */
   uploadId: string | null;
+  /** The asset's sound track, which captions are made from. Null when it has none (or Mux has not said yet). */
+  audioTrackId: string | null;
+  /** The asset's caption tracks (Mux calls them "text" tracks of the "subtitles" kind), oldest first. */
+  captionTracks: CaptionTrackFacts[];
 };
+
+/** One caption track on an asset. `generated` is true when Mux made it from the narration rather than a file someone gave it. */
+export type CaptionTrackStatus = "preparing" | "ready" | "errored";
+export type CaptionTrackFacts = { id: string; status: CaptionTrackStatus; languageCode: string; name: string; generated: boolean };
 
 /**
  * Everything the upload flow asks of Mux. The real one is below; the tests
@@ -269,13 +310,20 @@ export type MuxUploadGateway = {
    * Ask Mux for a one-time upload address. The asset it will make gets the
    * SIGNED policy, UPLOAD_VIDEO_QUALITY, and a name: the video's title and
    * its id, so the asset reads as the video in the Mux dashboard and can be
-   * matched to its row. Nothing else.
+   * matched to its row, and generated English captions (CAPTION_LANGUAGE).
+   * Nothing else.
    */
   createUpload(input: { corsOrigin: string; title: string; externalId: string }): Promise<{ id: string; url: string }>;
   getUpload(uploadId: string): Promise<UploadFacts | null>;
   getAsset(assetId: string): Promise<AssetFacts | null>;
   /** Cancel an upload whose file has not arrived. Mux refuses once an asset exists; the caller then looks at the upload instead. */
   cancelUpload(uploadId: string): Promise<void>;
+  /**
+   * Ask Mux to make English captions for an asset that already exists, from
+   * its sound track (Mux's "Generate track subtitles" call). Mux answers at
+   * once with the new track "preparing"; the words follow a few minutes later.
+   */
+  generateCaptions(assetId: string, audioTrackId: string): Promise<void>;
 };
 
 /** Mux answered, but not with success. Carries the status only, never the body. */
@@ -341,7 +389,26 @@ function readAsset(data: Record<string, unknown>): AssetFacts {
   const known: AssetStatus[] = ["preparing", "ready", "errored"];
   const ids = Array.isArray(data.playback_ids) ? data.playback_ids : [];
   const duration = typeof data.duration === "number" && Number.isFinite(data.duration) && data.duration > 0 ? Math.round(data.duration) : null;
+  const tracks = (Array.isArray(data.tracks) ? data.tracks : []).filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object");
+  const audio = tracks.find((track) => track.type === "audio" && text(track.id));
+  const captionStatuses: CaptionTrackStatus[] = ["preparing", "ready", "errored"];
+  const captionTracks = tracks
+    .filter((track) => track.type === "text" && track.text_type === "subtitles" && text(track.id))
+    .map((track) => {
+      const status = text(track.status);
+      return {
+        id: text(track.id) ?? "",
+        // A status Mux adds later reads as "preparing": the page then says "being made", which offers nothing new to press.
+        status: captionStatuses.includes(status as CaptionTrackStatus) ? (status as CaptionTrackStatus) : ("preparing" as const),
+        languageCode: text(track.language_code) ?? "",
+        name: text(track.name) ?? "",
+        // Mux marks a track it wrote itself with text_source "generated_vod" (or "generated_live..." for live streams).
+        generated: (text(track.text_source) ?? "").startsWith("generated"),
+      };
+    });
   return {
+    audioTrackId: audio ? text(audio.id) : null,
+    captionTracks,
     id: text(data.id) ?? "",
     status: known.includes(status as AssetStatus) ? (status as AssetStatus) : "preparing",
     playbackIds: ids
@@ -364,14 +431,17 @@ export function makeMuxUploadGateway(options: { env?: MuxEnv; fetch?: typeof fet
         {
           cors_origin: corsOrigin,
           timeout: UPLOAD_TIMEOUT_SECONDS,
-          // The SIGNED policy, the chosen quality and the video's name (Mux
-          // allows 512 characters for the title and 128 for the reference),
-          // and nothing else: no MP4 downloads (static renditions), no Mux
-          // Data, no captions.
+          // The SIGNED policy, the chosen quality, the video's name (Mux
+          // allows 512 characters for the title and 128 for the reference)
+          // and generated English captions (asked for on the file's own
+          // input, as Mux documents it for a direct upload: the uploaded file
+          // is the one input, so it carries no address of its own), and
+          // nothing else: no MP4 downloads (static renditions), no Mux Data.
           new_asset_settings: {
             playback_policies: ["signed"],
             video_quality: UPLOAD_VIDEO_QUALITY,
             meta: { title: title.slice(0, 512), external_id: externalId.slice(0, 128) },
+            inputs: [{ generated_subtitles: GENERATED_CAPTIONS }],
           },
         },
         env,
@@ -392,6 +462,15 @@ export function makeMuxUploadGateway(options: { env?: MuxEnv; fetch?: typeof fet
     },
     async cancelUpload(uploadId) {
       await muxApi("PUT", `/video/v1/uploads/${encodeURIComponent(uploadId)}/cancel`, undefined, env, ask);
+    },
+    async generateCaptions(assetId, audioTrackId) {
+      await muxApi(
+        "POST",
+        `/video/v1/assets/${encodeURIComponent(assetId)}/tracks/${encodeURIComponent(audioTrackId)}/generate-subtitles`,
+        { generated_subtitles: GENERATED_CAPTIONS },
+        env,
+        ask,
+      );
     },
   };
 }

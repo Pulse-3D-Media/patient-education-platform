@@ -6,10 +6,12 @@ import { getCategoryList } from "@/lib/db/category-config";
 import { readStoredChapters } from "@/lib/chapters";
 import { getVideoForPulse } from "@/lib/db/videos";
 import { muxUploadsAreConfigured } from "@/lib/mux";
+import { readCaptionState } from "@/lib/mux-captions";
 import { parseUploadState } from "@/lib/mux-upload";
 import { requirePulseStaff } from "@/lib/pulse";
 import { describeVideoSource } from "@/lib/video";
 import { formatDate } from "../../ui";
+import { CaptionsCard } from "../CaptionsCard";
 import { MuxUploader } from "../MuxUploader";
 import { VideoForm } from "../VideoForm";
 
@@ -32,6 +34,8 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
   const justAdded = (await searchParams).added === "1";
   const list = await getCategoryList();
   const category = labelOf(list, video.category);
+  // Where its captions stand, asked of Mux now (never stored). Mux being down is a state of its own; the page draws as usual.
+  const captions = await readCaptionState(video);
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -74,6 +78,11 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
             inFlight={video.muxUploadId !== null}
             source={describeVideoSource(video)}
           />
+        </div>
+
+        {/* Captions: where they stand at Mux, Add captions, and the text for a Pulse staff member to read through. */}
+        <div className="mb-5">
+          <CaptionsCard videoId={video.id} state={captions} />
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">

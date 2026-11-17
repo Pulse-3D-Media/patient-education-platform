@@ -125,8 +125,9 @@ For each video, recorded here with the date and who checked:
   the controls are there; the first frame arrives quickly on cellular;
 - its library card shows a picture (the chosen poster, or the signed still),
   and the player opens and plays;
-- its text tracks, if the asset has any, show through the browser's own
-  caption control;
+- its English captions (asked for by the upload, or with Add captions on the
+  video's page) have been read through by a Pulse staff member, and show
+  with the player's CC button on a phone and a computer;
 - a token refresh has been seen to work (leave the player open past an hour,
   or shorten `TOKEN_LIFETIME_MS` on a preview) without the video stopping;
 - the Webflow website has been checked for the file's address and either does

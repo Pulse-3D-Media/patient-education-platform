@@ -1,4 +1,5 @@
 import { refreshDelayMs, tokenHasExpired, tokenRunsOutSoon, type PlaybackSource } from "@/lib/playback-source";
+import { applyNativeCaptions, captionTracksOf, pickCaptionTrack } from "./captions";
 
 /**
  * Puts a PlaybackSource (lib/playback-source.ts) onto a <video> element and
@@ -72,6 +73,15 @@ export type LoaderEnvironment = {
   now?: () => number;
   /** Whether this browser plays HLS by itself (and well). Decided in the browser, never on the server. */
   prefersNativeHls?: (element: HTMLVideoElement) => boolean;
+  /** Captions (captions.ts): whether the viewer has CC on, and where to say whether the video has a caption track at all. */
+  captions?: CaptionHooks;
+};
+
+export type CaptionHooks = {
+  /** CC is on. Asked each time a stream goes on, so the choice carries across a swap to a fresh address. */
+  wanted: () => boolean;
+  /** The video on the element has a caption track (true) or not (false). Only a stream can; a file never does. */
+  onAvailable: (available: boolean) => void;
 };
 
 /** How soon to try again after a refresh that failed for a passing reason. */
@@ -160,6 +170,8 @@ export class SourceLoader {
     this.dropHls();
     this.current = next;
     clearTimeout(this.refreshTimer);
+    // A file (or nothing) has no caption track: no CC button. A stream says for itself once its playlist is read.
+    if (next.kind !== "stream") this.env.captions?.onAvailable(false);
 
     if (next.kind === "unavailable") {
       this.env.getHooks().onFailure();
@@ -179,6 +191,7 @@ export class SourceLoader {
 
     this.scheduleRefresh(next.expiresAt);
     if ((this.env.prefersNativeHls ?? browserPrefersNativeHls)(element)) {
+      this.watchNativeCaptions(element);
       element.src = next.src;
       element.load();
       if (startAt > 0) seekWhenReady(element, startAt);
@@ -198,6 +211,7 @@ export class SourceLoader {
     if (!Hls.isSupported()) {
       // No MediaSource here after all. The browser's own HLS, if it claims any, is the last resort; otherwise nothing can play a stream.
       if (element.canPlayType("application/vnd.apple.mpegurl")) {
+        this.watchNativeCaptions(element);
         element.src = next.src;
         element.load();
         if (startAt > 0) seekWhenReady(element, startAt);
@@ -215,6 +229,24 @@ export class SourceLoader {
       // hls.js has already retried what it retries. The kind only, never the address.
       console.warn("Video stream failed:", data.type, data.details);
       if (this.hls === instance) this.env.getHooks().onFailure();
+    });
+    // Captions through hls.js's own subtitle track API. The playlist says whether there are any; once hls.js has the
+    // track list, the one to load is chosen (or none, while CC is off: hls.js could otherwise pick one marked default).
+    // subtitleDisplay off means hls.js loads the words onto a "hidden" text track on the element and the overlay draws them.
+    instance.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+      if (this.hls === instance) this.env.captions?.onAvailable(data.subtitleTracks.length > 0);
+    });
+    instance.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+      if (this.hls === instance) this.applyHlsCaptions(instance);
+    });
+    // hls.js can change the track by itself afterwards: a fresh instance on the same element finds the text track the
+    // last one left, and, seeing it off while it attaches, switches to "none" (seen in Chrome on a swap to a fresh
+    // address). Whenever its choice and the viewer's differ, the viewer's is put back, a moment later so hls.js has
+    // finished its own step first. Once they agree nothing more happens, so the two never take turns.
+    instance.on(Hls.Events.SUBTITLE_TRACK_SWITCH, () => {
+      setTimeout(() => {
+        if (this.hls === instance && !this.dead) this.applyHlsCaptions(instance);
+      }, 0);
     });
     instance.loadSource(next.src);
     instance.attachMedia(element);
@@ -301,6 +333,21 @@ export class SourceLoader {
     }
   }
 
+  /**
+   * CC was pressed: put the viewer's choice (captions.wanted()) on whatever is
+   * playing. With hls.js, its subtitle track API; with the browser's own HLS,
+   * the element's text tracks. The overlay draws the words either way.
+   */
+  applyCaptions(): void {
+    if (this.dead) return;
+    if (this.hls) {
+      this.applyHlsCaptions(this.hls);
+      return;
+    }
+    const element = this.env.getElement();
+    if (element && this.nativeCaptions) applyNativeCaptions(element, this.wantsCaptions(), this.systemPlayer);
+  }
+
   /** Take everything down: the hls.js instance and its listeners, and the timers. Nothing answers after this. */
   destroy(): void {
     this.dead = true;
@@ -312,9 +359,70 @@ export class SourceLoader {
     return (this.env.now ?? Date.now)();
   }
 
+  private wantsCaptions(): boolean {
+    return this.env.captions?.wanted() ?? false;
+  }
+
+  /** hls.js: the English track (or the first) while CC is on, none while it is off. The words go on a "hidden" track. */
+  private applyHlsCaptions(instance: HlsInstance): void {
+    instance.subtitleDisplay = false;
+    const languages = (instance.subtitleTracks ?? []).map((track) => ({ language: track.lang ?? "" }));
+    const chosen = this.wantsCaptions() ? pickCaptionTrack(languages) : null;
+    const index = chosen ? languages.indexOf(chosen) : -1;
+    if (instance.subtitleTrack !== index) instance.subtitleTrack = index;
+  }
+
+  /** The browser's own HLS is on the element: listening to its text tracks (null when it is not). */
+  private nativeCaptions: (() => void) | null = null;
+  /** An iPhone's own full-screen player is up: the phone draws the captions there (captions.ts). */
+  private systemPlayer = false;
+
+  /**
+   * The browser's own HLS (Safari): the stream's caption tracks appear on the
+   * element's textTracks once it has read the playlist, and are replaced when
+   * a fresh address goes on. Each time the list changes, say whether there are
+   * any, and put the viewer's choice on the new ones, so CC stays as it was
+   * across a swap.
+   */
+  private watchNativeCaptions(element: HTMLVideoElement): void {
+    this.stopNativeCaptions();
+    const tracks = element.textTracks;
+    const update = () => {
+      if (this.dead) return;
+      this.env.captions?.onAvailable(captionTracksOf(element).length > 0);
+      applyNativeCaptions(element, this.wantsCaptions(), this.systemPlayer);
+    };
+    const enterSystemPlayer = () => {
+      this.systemPlayer = true;
+      update();
+    };
+    const leaveSystemPlayer = () => {
+      this.systemPlayer = false;
+      update();
+    };
+    tracks?.addEventListener?.("addtrack", update);
+    tracks?.addEventListener?.("removetrack", update);
+    element.addEventListener("webkitbeginfullscreen", enterSystemPlayer);
+    element.addEventListener("webkitendfullscreen", leaveSystemPlayer);
+    this.nativeCaptions = () => {
+      tracks?.removeEventListener?.("addtrack", update);
+      tracks?.removeEventListener?.("removetrack", update);
+      element.removeEventListener("webkitbeginfullscreen", enterSystemPlayer);
+      element.removeEventListener("webkitendfullscreen", leaveSystemPlayer);
+    };
+    update();
+  }
+
+  private stopNativeCaptions(): void {
+    this.nativeCaptions?.();
+    this.nativeCaptions = null;
+  }
+
   private dropHls(): void {
     this.hls?.destroy();
     this.hls = null;
+    // Whichever engine was on, its caption listeners go with it (attach() starts the right ones again).
+    this.stopNativeCaptions();
   }
 
   private scheduleRefresh(expiresAt: number): void {

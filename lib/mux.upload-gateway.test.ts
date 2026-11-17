@@ -6,6 +6,8 @@ import {
   UPLOAD_TIMEOUT_SECONDS,
   UPLOAD_VIDEO_QUALITY,
   WEBHOOK_TOLERANCE_SECONDS,
+  CAPTION_LANGUAGE,
+  CAPTION_TRACK_NAME,
   getMuxWebhookSecret,
   makeMuxUploadGateway,
   muxUploadsAreConfigured,
@@ -49,7 +51,7 @@ describe("muxUploadsAreConfigured", () => {
 });
 
 describe("the upload gateway", () => {
-  it("asks Mux for an upload with the SIGNED policy, the chosen quality, the deployment's origin and nothing else, signed in with the token", async () => {
+  it("asks Mux for an upload with the SIGNED policy, the chosen quality, generated English captions, the deployment's origin and nothing else, signed in with the token", async () => {
     const { ask, calls } = fakeFetch([{ status: 201, body: { data: { id: "UploadAbc12345", url: "https://storage.googleapis.com/bucket/one-time", status: "waiting" } } }]);
     const gateway = makeMuxUploadGateway({ env: ENV, fetch: ask });
 
@@ -72,17 +74,40 @@ describe("the upload gateway", () => {
         video_quality: UPLOAD_VIDEO_QUALITY,
         // The video's title and id, so the asset reads as the video in the Mux dashboard.
         meta: { title: "Total Knee Replacement", external_id: "clz0000000000000000000000" },
+        // Mux writes English captions from the narration, on a track named plainly "English" (Mux's auto-generated captions guide).
+        inputs: [{ generated_subtitles: [{ language_code: "en", name: "English" }] }],
       },
     });
     expect(UPLOAD_VIDEO_QUALITY).toBe("basic");
-    // No MP4 downloads, no captions, no public policy, however the settings are spelt.
-    expect(JSON.stringify(body)).not.toMatch(/static_renditions|mp4_support|generate_subtitles|public/);
+    // No MP4 downloads, no public policy, however the settings are spelt, and captions in English only.
+    expect(JSON.stringify(body)).not.toMatch(/static_renditions|mp4_support|public/);
+    expect(CAPTION_LANGUAGE).toBe("en");
+    expect(CAPTION_TRACK_NAME).toBe("English");
   });
 
   it("reads an upload and an asset the way Mux spells them, and answers null for an id Mux does not know", async () => {
     const { ask, calls } = fakeFetch([
       { status: 200, body: { data: { id: "UploadAbc12345", status: "asset_created", asset_id: "AssetAbc12345" } } },
-      { status: 200, body: { data: { id: "AssetAbc12345", status: "ready", duration: 125.4, upload_id: "UploadAbc12345", playback_ids: [{ id: "Pub00000001", policy: "public" }, { id: "Sig00000001", policy: "signed" }] } } },
+      {
+        status: 200,
+        body: {
+          data: {
+            id: "AssetAbc12345",
+            status: "ready",
+            duration: 125.4,
+            upload_id: "UploadAbc12345",
+            playback_ids: [{ id: "Pub00000001", policy: "public" }, { id: "Sig00000001", policy: "signed" }],
+            // As Mux spells an asset's tracks: the picture, the sound, and two caption tracks (one written by Mux, one uploaded).
+            tracks: [
+              { type: "video", id: "Vid0001", max_width: 1920 },
+              { type: "audio", id: "Aud0001", max_channels: 2 },
+              { type: "text", text_type: "subtitles", text_source: "generated_vod", id: "Txt0001", language_code: "en", name: "English", status: "ready" },
+              { type: "text", text_type: "subtitles", text_source: "uploaded", id: "Txt0002", language_code: "en", name: "English (corrected)", status: "something_new" },
+              { type: "text", text_type: "subtitles", id: "" },
+            ],
+          },
+        },
+      },
       { status: 404, body: { error: { type: "not_found", messages: ["Not found"] } } },
       { status: 404 },
     ]);
@@ -94,6 +119,12 @@ describe("the upload gateway", () => {
       status: "ready",
       durationSeconds: 125,
       uploadId: "UploadAbc12345",
+      audioTrackId: "Aud0001",
+      captionTracks: [
+        { id: "Txt0001", status: "ready", languageCode: "en", name: "English", generated: true },
+        // A status Mux adds later reads as "preparing", which offers nothing new to press.
+        { id: "Txt0002", status: "preparing", languageCode: "en", name: "English (corrected)", generated: false },
+      ],
       playbackIds: [
         { id: "Pub00000001", policy: "public" },
         { id: "Sig00000001", policy: "signed" },
@@ -117,7 +148,7 @@ describe("the upload gateway", () => {
     ]);
     const gateway = makeMuxUploadGateway({ env: ENV, fetch: ask });
     expect(await gateway.getUpload("UploadAbc12345")).toEqual({ id: "UploadAbc12345", status: "waiting", assetId: null });
-    expect(await gateway.getAsset("AssetAbc12345")).toEqual({ id: "AssetAbc12345", status: "preparing", durationSeconds: null, uploadId: null, playbackIds: [] });
+    expect(await gateway.getAsset("AssetAbc12345")).toEqual({ id: "AssetAbc12345", status: "preparing", durationSeconds: null, uploadId: null, playbackIds: [], audioTrackId: null, captionTracks: [] });
   });
 
   it("cancels with a PUT to the cancel address, and throws the status (never the body) when Mux refuses anything", async () => {
@@ -131,6 +162,17 @@ describe("the upload gateway", () => {
     expect(refused).toBeInstanceOf(MuxApiError);
     expect((refused as MuxApiError).status).toBe(400);
     expect((refused as Error).message).not.toContain("secret-looking");
+  });
+
+  it("asks Mux to make English captions for an existing asset from its sound track, as Mux documents it", async () => {
+    const { ask, calls } = fakeFetch([{ status: 201, body: { data: [{ type: "text", text_type: "subtitles", status: "preparing", name: "English", language_code: "en", id: "Txt0001" }] } }, { status: 400 }]);
+    const gateway = makeMuxUploadGateway({ env: ENV, fetch: ask });
+    await gateway.generateCaptions("AssetAbc12345", "Aud0001");
+    expect(calls[0].url).toBe("https://api.mux.com/video/v1/assets/AssetAbc12345/tracks/Aud0001/generate-subtitles");
+    expect(calls[0].init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ generated_subtitles: [{ language_code: "en", name: "English" }] });
+    // A refusal is its status, never its body.
+    await expect(gateway.generateCaptions("AssetAbc12345", "Aud0001")).rejects.toMatchObject({ name: "MuxApiError", status: 400 });
   });
 
   it("refuses to call Mux at all without the token", async () => {

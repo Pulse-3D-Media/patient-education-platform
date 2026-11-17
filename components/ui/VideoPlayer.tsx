@@ -139,7 +139,7 @@ export function VideoPlayer({
 
   const controls = usePlayerControls({ video: vid, box, enabled: !stopped, onPlayFailure: () => fail() });
 
-  const { reload } = useVideoSource(vid, source, {
+  const { reload, captions } = useVideoSource(vid, source, {
     onFailure: () => fail(),
     refresh,
     onEnded: () => {
@@ -251,6 +251,7 @@ export function VideoPlayer({
           senderName={senderName}
           placeholder={placeholder}
           chapters={chapters}
+          captions={captions}
           // Before the first play only the clinic's mark is drawn; the big Play button below is the one thing to press.
           showControls={started && !stopped}
           slow={slow && !stopped}

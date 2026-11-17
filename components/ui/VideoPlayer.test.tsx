@@ -26,7 +26,7 @@ function render(props: Partial<Parameters<typeof VideoPlayer>[0]> = {}): string 
 }
 
 /** The overlay as it is once the video is playing and the controls are up. */
-function renderPlaying(overrides: Partial<PlayerControls> = {}, chapters: Chapter[] = []): string {
+function renderPlaying(overrides: Partial<PlayerControls> = {}, chapters: Chapter[] = [], extra: { loading?: boolean; slow?: boolean; placeholder?: boolean } = {}): string {
   const noop = () => {};
   const controls = {
     playing: true,
@@ -48,7 +48,7 @@ function renderPlaying(overrides: Partial<PlayerControls> = {}, chapters: Chapte
     ...overrides,
   } as PlayerControls;
   return renderToStaticMarkup(
-    <PlayerOverlay controls={controls} title="Total Knee Replacement" clinicName="Summit Orthopedics" logoUrl={null} senderName={null} showControls slow={false} chapters={chapters} />,
+    <PlayerOverlay controls={controls} title="Total Knee Replacement" clinicName="Summit Orthopedics" logoUrl={null} senderName={null} showControls slow={false} chapters={chapters} {...extra} />,
   );
 }
 
@@ -89,7 +89,10 @@ describe("the clinic's mark on the library's player", () => {
     const html = render({ placeholder: true, senderName: "Dr. Jane Smith, DO" });
 
     expect(html.match(/Placeholder animation/g)).toHaveLength(1);
-    expect(html).toMatch(/<div class="flex shrink-0 items-center gap-2"><span class="[^"]*bg-\[#f3b94d\][^"]*">Placeholder animation<\/span>/);
+    // The short word on a narrow player, the full words on a wide one (both in the page; the width decides which shows).
+    expect(html).toMatch(
+      /<div class="flex shrink-0 items-center gap-2"><span class="[^"]*bg-\[#f3b94d\][^"]*"><span class="@xl:hidden">Placeholder<\/span><span class="hidden @xl:inline">Placeholder animation<\/span><\/span>/,
+    );
   });
 
   it("lays the overlay over the picture inside the video's box, and fills whatever box the page gives it", () => {
@@ -254,5 +257,29 @@ describe("libraryStripName", () => {
     expect(libraryStripName({ displayName: null }, null)).toBeNull();
     expect(libraryStripName(null, "Dr. Jane Smith")).toBeNull();
     expect(libraryStripName(null, null)).toBeNull();
+  });
+});
+
+describe("the loading spinner (patient player)", () => {
+  it("is drawn in the middle while the video waits for data, in place of the middle buttons, hidden from screen readers", () => {
+    const html = renderPlaying({}, [], { loading: true });
+    expect(html).toContain("data-spinner");
+    expect(html).toMatch(/<span data-spinner="" aria-hidden="true"/);
+    expect(html).toContain("motion-safe:animate-spin");
+    expect(buttons(html)).not.toContain("Back 10 seconds");
+    expect(buttons(html)).toContain("Full screen");
+  });
+
+  it("is not drawn otherwise, and gives way to the 'still loading' sentence after a while", () => {
+    expect(renderPlaying()).not.toContain("data-spinner");
+    const slow = renderPlaying({}, [], { loading: true, slow: true });
+    expect(slow).not.toContain("data-spinner");
+    expect(slow).toContain("Still loading.");
+  });
+
+  it("keeps the placeholder chip short on a narrow player and in full words on a wide one", () => {
+    const html = renderPlaying({}, [], { placeholder: true });
+    expect(html).toContain('<span class="@xl:hidden">Placeholder</span>');
+    expect(html).toContain('<span class="hidden @xl:inline">Placeholder animation</span>');
   });
 });

@@ -25,7 +25,7 @@ import { patientTheme, themeVars } from "@/lib/branding";
 export function CalmFrame({ icon, heading, body, children }: { icon: ReactNode; heading: string; body: string; children?: ReactNode }) {
   const style = themeVars(patientTheme(null)) as CSSProperties;
   return (
-    <main className="flex min-h-screen flex-col bg-white text-[#12202a]" style={style}>
+    <main className="flex min-h-dvh flex-col bg-white text-[#12202a]" style={style}>
       <div aria-hidden="true" className="h-1.5 shrink-0 bg-brand" />
       <div className="flex flex-1 flex-col items-center justify-center px-8 pb-10 pt-[46px] text-center">
         <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#eef1f4] text-[#52616a]">{icon}</div>

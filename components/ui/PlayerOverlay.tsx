@@ -46,6 +46,7 @@ export function PlayerOverlay({
   placeholder = false,
   showControls,
   slow,
+  loading = false,
   topRight = null,
   chapters = [],
 }: {
@@ -60,6 +61,12 @@ export function PlayerOverlay({
   showControls: boolean;
   /** The video has been waiting for data a while: "still loading" in the middle, in place of the middle buttons. */
   slow: boolean;
+  /**
+   * The video is waiting for data right now (just after Play, or buffering): a small spinner in the middle, in place
+   * of the middle buttons, until frames show again. Drawn only, never announced (the player says it once, in words, on
+   * its own); the "still loading" sentence still takes over after a while. The patient player only, for now.
+   */
+  loading?: boolean;
   /** One of the player's own buttons for the top right (the library's Close). Fades with the controls. */
   topRight?: ReactNode;
   /** The video's chapters, sorted by time. Empty for none (always, on the patient page). */
@@ -88,7 +95,13 @@ export function PlayerOverlay({
           <ClinicMark logoUrl={logoUrl} name={clinicName} title={title} senderName={senderName} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {placeholder && <span className={PLACEHOLDER_CHIP}>Placeholder animation</span>}
+          {/* On a narrow player (a phone) the short word, so the clinic's mark beside it keeps room for the title. */}
+          {placeholder && (
+            <span className={PLACEHOLDER_CHIP}>
+              <span className="@xl:hidden">Placeholder</span>
+              <span className="hidden @xl:inline">Placeholder animation</span>
+            </span>
+          )}
           {topRight && <div className={`transition-opacity duration-300 ${controls.showing ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>{topRight}</div>}
         </div>
       </div>
@@ -105,8 +118,15 @@ export function PlayerOverlay({
         {slow ? "Still loading. A slow connection can take a little longer." : ""}
       </p>
 
+      {/* Waiting for data, before the "still loading" sentence: a calm spinner, centred on the picture. */}
+      {loading && !slow && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <Spinner className="h-14 w-14 @xl:h-16 @xl:w-16" />
+        </div>
+      )}
+
       {/* The middle, on a screen with no mouse: back 10 seconds, play or pause, forward 10 seconds. */}
-      {showControls && !slow && (
+      {showControls && !slow && !loading && (
         <div className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-5 transition-opacity duration-300 computer:hidden @xl:gap-10 ${fade}`}>
           <Control live={controls.showing} onClick={() => controls.seekBy(-SKIP_SECONDS)} label="Back 10 seconds" size="h-12 w-12 bg-black/40 @xl:h-14 @xl:w-14">
             <SkipBackIcon className="h-7 w-7 @xl:h-8 @xl:w-8" />
@@ -179,6 +199,25 @@ export function PlayerOverlay({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A small, calm "loading" ring: a soft dark circle (so it reads over a white
+ * frame) with a white arc that turns slowly. For someone whose phone asks
+ * for less motion it does not turn: the still arc says the same thing.
+ * Hidden from screen readers; the player says "Loading" in words instead.
+ */
+export function Spinner({ className = "", tone = "light" }: { className?: string; tone?: "light" | "dark" }) {
+  // "light": white on a soft dark circle, over the picture. "dark": the Pulse ink with no circle, inside the white Play button.
+  const ink = tone === "light" ? "white" : "#12333f";
+  return (
+    <span data-spinner="" aria-hidden="true" className={`flex items-center justify-center rounded-full ${tone === "light" ? "bg-black/45" : ""} ${className}`}>
+      <svg viewBox="0 0 24 24" className={`${tone === "light" ? "h-1/2 w-1/2" : "h-full w-full"} motion-safe:animate-spin [animation-duration:1.1s]`} fill="none">
+        <circle cx="12" cy="12" r="9.5" stroke={ink} strokeOpacity=".25" strokeWidth="2.5" />
+        <path d="M12 2.5a9.5 9.5 0 0 1 9.5 9.5" stroke={ink} strokeWidth="2.5" strokeLinecap="round" />
+      </svg>
+    </span>
   );
 }
 

@@ -7,7 +7,10 @@ import {
   isPlaybackIdShape,
   refreshDelayMs,
   tokenExpiry,
+  grantIsUsable,
+  stillToShow,
   tokenHasExpired,
+  tokenRunsOutSoon,
   windowCoversVideo,
 } from "./playback-source";
 
@@ -100,5 +103,32 @@ describe("isPlaybackIdShape", () => {
     expect(isPlaybackIdShape("has space00")).toBe(false);
     expect(isPlaybackIdShape("id?token=abc")).toBe(false);
     expect(isPlaybackIdShape("")).toBe(false);
+  });
+});
+
+describe("what the patient's player keeps from the server's answers", () => {
+  const NOW = 1_800_000_000_000;
+  const live = { kind: "stream", src: "https://stream.mux.com/a.m3u8?token=t", poster: "https://image.mux.com/a/thumbnail.jpg?token=p2", expiresAt: NOW + 60_000 } as const;
+
+  it("uses a grant saved from the first play only while its own token still works", () => {
+    expect(grantIsUsable(live, NOW)).toBe(true);
+    expect(grantIsUsable({ ...live, expiresAt: NOW }, NOW)).toBe(false);
+    expect(grantIsUsable({ ...live, expiresAt: NOW - 1 }, NOW)).toBe(false);
+    expect(grantIsUsable({ kind: "file", src: "https://example.com/a.mp4" }, NOW)).toBe(true);
+    expect(grantIsUsable(null, NOW)).toBe(false);
+  });
+
+  it("says a token is about to run out from the refresh lead on, and once it has", () => {
+    expect(tokenRunsOutSoon(NOW + REFRESH_LEAD_MS + 1, NOW)).toBe(false);
+    expect(tokenRunsOutSoon(NOW + REFRESH_LEAD_MS, NOW)).toBe(true);
+    expect(tokenRunsOutSoon(NOW - 5, NOW)).toBe(true);
+  });
+
+  it("keeps the still the page already drew, and only falls back to the answer's own when the page had none", () => {
+    expect(stillToShow("https://image.mux.com/a/thumbnail.jpg?token=p1", live)).toBe("https://image.mux.com/a/thumbnail.jpg?token=p1");
+    expect(stillToShow(null, live)).toBe("https://image.mux.com/a/thumbnail.jpg?token=p2");
+    expect(stillToShow("https://example.com/still.jpg", null)).toBe("https://example.com/still.jpg");
+    expect(stillToShow(null, { kind: "file", src: "https://example.com/a.mp4" })).toBeUndefined();
+    expect(stillToShow(null, null)).toBeUndefined();
   });
 });

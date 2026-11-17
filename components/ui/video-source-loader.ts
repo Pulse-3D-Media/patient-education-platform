@@ -1,4 +1,4 @@
-import { refreshDelayMs, tokenHasExpired, type PlaybackSource } from "@/lib/playback-source";
+import { refreshDelayMs, tokenHasExpired, tokenRunsOutSoon, type PlaybackSource } from "@/lib/playback-source";
 
 /**
  * Puts a PlaybackSource (lib/playback-source.ts) onto a <video> element and
@@ -56,6 +56,8 @@ export type LoaderHooks = {
   refresh?: () => Promise<PlaybackSource | null>;
   /** Access has ended for good: the player says so calmly. Nothing is renewed after this. */
   onEnded?: () => void;
+  /** A fresh address from the server went on the element: a panel an earlier failure left up can go. */
+  onRecovered?: () => void;
 };
 
 /** What the loader needs from its surroundings. The two optional ones are for the tests, which hand in a stand-in library and a clock. */
@@ -175,8 +177,14 @@ export class SourceLoader {
     if (resume) element.play().catch(() => {});
   }
 
-  /** Ask the server for a fresh grant and swap to it where the video is. Resolves false when access has ended. */
-  async refreshNow(): Promise<boolean> {
+  /**
+   * Ask the server for a fresh grant and swap to it where the video is.
+   * Resolves false when access has ended. `fromTryAgain` is set by Try again
+   * (reload): the player has already hidden its panel then, so a server that
+   * cannot answer, with no token left to play on, must bring the panel back.
+   * Otherwise the patient is left with a frozen picture and no words.
+   */
+  async refreshNow(fromTryAgain = false): Promise<boolean> {
     const ask = this.env.getHooks().refresh;
     if (!ask) return false;
     let fresh: PlaybackSource | null;
@@ -197,6 +205,9 @@ export class SourceLoader {
       const on = this.current;
       if (on.kind === "stream" && !tokenHasExpired(on.expiresAt, this.now())) {
         this.refreshTimer = setTimeout(() => void this.refreshNow(), RETRY_REFRESH_MS);
+      } else if (fromTryAgain) {
+        // Nothing left to play on and nothing new: the calm panel comes back, with Try again on it.
+        this.env.getHooks().onFailure();
       }
       return true;
     }
@@ -204,7 +215,23 @@ export class SourceLoader {
     const at = element ? element.currentTime : 0;
     const resume = element ? !element.paused && !element.ended : false;
     await this.attach(fresh, at, resume);
+    if (!this.dead && this.current === fresh) this.env.getHooks().onRecovered?.();
     return true;
+  }
+
+  /**
+   * The page has come back into view. A phone that slept, or a tab left in
+   * the background, may not run timers, so the refresh due before the token
+   * ran out may never have happened. Ask now if the token has run out or is
+   * about to; otherwise the timer already set is enough. The server decides,
+   * as always.
+   */
+  async refreshIfStale(): Promise<void> {
+    const on = this.current;
+    if (this.dead || on.kind !== "stream" || !this.env.getHooks().refresh) return;
+    if (!tokenRunsOutSoon(on.expiresAt, this.now())) return;
+    clearTimeout(this.refreshTimer);
+    await this.refreshNow();
   }
 
   /**
@@ -216,7 +243,7 @@ export class SourceLoader {
     const on = this.current;
     const stale = on.kind === "unavailable" || (on.kind === "stream" && tokenHasExpired(on.expiresAt, this.now()));
     if (stale && this.env.getHooks().refresh) {
-      await this.refreshNow();
+      await this.refreshNow(true);
       return;
     }
     await this.attach(on, startAt, true);

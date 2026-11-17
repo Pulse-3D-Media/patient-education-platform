@@ -117,6 +117,34 @@ export function tokenHasExpired(expiresAt: number, now: number): boolean {
   return expiresAt <= now;
 }
 
+/** True when a token runs out within the refresh lead (or already has): time to ask for a fresh one. Used when a page comes back into view, since timers do not run while a phone sleeps. */
+export function tokenRunsOutSoon(expiresAt: number, now: number): boolean {
+  return expiresAt - now <= REFRESH_LEAD_MS;
+}
+
+/**
+ * Can a grant the player saved for later still be used? A stream's token
+ * may have run out while it waited (a page left open for hours), and an
+ * address with a dead token plays nothing, so it is dropped and the server
+ * is asked instead. A file has no token. Null is nothing saved.
+ */
+export function grantIsUsable(grant: PlaybackSource | null, now: number): grant is PlaybackSource {
+  if (!grant) return false;
+  return grant.kind !== "stream" || !tokenHasExpired(grant.expiresAt, now);
+}
+
+/**
+ * The still for the patient player's box. The page already signed one when
+ * it was drawn, and the browser already has it; the answer to the tick
+ * carries another, with a different token, which the browser would fetch
+ * all over again. So the page's still is kept, and the answer's is used
+ * only when the page had none. Never a playable address.
+ */
+export function stillToShow(pagePoster: string | null, source: PlaybackSource | null): string | undefined {
+  if (pagePoster) return pagePoster;
+  return source?.kind === "stream" ? source.poster : undefined;
+}
+
 /**
  * A Mux playback id as Mux hands them out: letters, digits and a few plain
  * symbols, never a slash or a space. Checked before a staff member's typed

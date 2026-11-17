@@ -8,7 +8,7 @@ import { getClinicAccess } from "@/lib/db/access";
 import { getQrCodeByCode } from "@/lib/db/qr-codes";
 import { getShareTerms } from "@/lib/db/shares";
 import { ShareTermsError, type ShareTerms } from "@/lib/expiry";
-import { posterForVideo } from "@/lib/playback-auth";
+import { earlyConnectionsFor, posterForVideo } from "@/lib/playback-auth";
 import { isQrCodeShape } from "@/lib/qr-code";
 
 /**
@@ -106,6 +106,7 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
   // above, made again), so the Play tap can start it at once.
   const now = new Date();
   const poster = posterForVideo(qr.video, now, null);
+  const early = earlyConnectionsFor(qr.video);
 
   return (
     <PatientViewer
@@ -116,11 +117,13 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
       endsSoon={false}
       deadline={terms ? { kind: "after-first-play", days: terms.daysAfterFirstPlay } : null}
       now={now}
+      early={early}
       player={
         <WatchPlayer
           poster={poster}
           title={qr.video.title}
           placeholder={qr.video.isPlaceholder}
+          stream={early.stream}
           code={null}
           qrCode={qr.code}
           clinicName={qr.clinic.name}

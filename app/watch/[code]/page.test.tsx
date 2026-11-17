@@ -452,6 +452,14 @@ describe("the 'for education only' box before the video", () => {
     expect(html).not.toContain("stream.mux.com");
   });
 
+  it("opens the connection to the file's host early, with the bare host and never the file's address", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+
+    expect(html.match(/<link[^>]*rel="preconnect"[^>]*>/g)).toEqual(['<link rel="preconnect" href="https://example.com"/>']);
+    expect(html).not.toContain("vitest.mp4");
+  });
+
   it("shows the poster staff set on the video's box until then, a picture and nothing that plays", async () => {
     const clinic = await makeClinic({});
     const withPoster = await prisma.video.create({
@@ -767,6 +775,22 @@ describe("a video that has moved to Mux", () => {
     expect(html).toContain('controlsList="nodownload"');
     expect(html).toContain("I understand this video is for education only.");
     expect(html).not.toMatch(/stops working in a few minutes/);
+  });
+
+  it("opens the connections to Mux's hosts early, as bare hosts: no playlist, no token, no CDN copy", async () => {
+    Object.assign(process.env, MUX_ENV);
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, muxVideoId));
+
+    expect(html.match(/<link[^>]*rel="preconnect"[^>]*>/g)).toEqual([
+      '<link rel="preconnect" href="https://stream.mux.com"/>',
+      '<link rel="preconnect" href="https://stream.mux.com" crossorigin="anonymous"/>',
+      '<link rel="preconnect" href="https://image.mux.com"/>',
+    ]);
+    // The playlist and its token come only from the accept route, after the tick.
+    expect(html).not.toContain(".m3u8");
+    expect(html).not.toContain(`stream.mux.com/${playbackId}`);
+    expect(html).not.toContain("example.com");
   });
 
   it("shows the calm did-not-load panel, and never the CDN file, when Mux is not configured on this deployment", async () => {

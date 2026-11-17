@@ -5,6 +5,7 @@ import { ClinicMark, pictureRatio } from "@/components/ui/ClinicMark";
 import { PlayerOverlay, Spinner } from "@/components/ui/PlayerOverlay";
 import { usePlayerControls } from "@/components/ui/usePlayerControls";
 import { useVideoSource } from "@/components/ui/useVideoSource";
+import { warmUpStreamLibrary } from "@/components/ui/video-source-loader";
 import { PhoneIcon, PlayIcon } from "@/components/ui/icons";
 import { DISCLAIMER } from "@/lib/education-note";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
@@ -155,7 +156,13 @@ export function WatchPlayer({
   call,
   qrCode,
   placeholder = false,
+  stream = false,
 }: {
+  /**
+   * The video will be a Mux stream (earlyConnectionsFor in lib/playback-auth.ts). A yes or no, never an address:
+   * it only lets the tick start fetching the streaming library at the same time as its own request.
+   */
+  stream?: boolean;
   /** A sample animation standing in for the named procedure: the amber chip stays on the player, full screen included. */
   placeholder?: boolean;
   /** A still for the video's box before the box is ticked (a signed Mux still, or the poster staff set), or null. Never a playable address. */
@@ -276,6 +283,9 @@ export function WatchPlayer({
     setTicked(true);
     // The box is about to disappear with the focus in it; put the focus on Play, where the next step is.
     playButton.current?.focus({ preventScroll: true });
+    // A stream on a browser that plays it through hls.js: start fetching the library now, while the tick's own
+    // request is on its way, rather than one after the other. Nothing for a plain file, nothing on Safari.
+    if (stream) warmUpStreamLibrary(video.current);
     if (!source) void accept();
   }
 

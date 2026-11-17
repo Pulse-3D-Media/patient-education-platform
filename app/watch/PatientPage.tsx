@@ -5,6 +5,7 @@ import { CalendarIcon, ClockIcon } from "@/components/ui/icons";
 import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { afterFirstPlaySentence, type PatientDeadline } from "@/lib/expiry";
 import { describeDuration } from "@/lib/format";
+import type { EarlyConnections } from "@/lib/playback-auth";
 import { senderLines } from "@/lib/sender-name";
 import { CallButton } from "./[code]/CallButton";
 import { LinkDeadline } from "./LinkDeadline";
@@ -45,6 +46,7 @@ export function PatientViewer({
   deadline,
   now,
   player,
+  early,
 }: {
   look: Look;
   clinicName: string;
@@ -58,10 +60,18 @@ export function PatientViewer({
   /** The server's clock when the page was drawn: only decides whether a date's year is written. */
   now: Date;
   player: ReactNode;
+  /** The hosts the video will come from, for early-connection hints (earlyConnectionsFor in lib/playback-auth.ts). Host names only. */
+  early: EarlyConnections;
 }) {
   const length = describeDuration(video.durationSeconds);
   return (
     <main className={`flex min-h-dvh flex-col bg-white text-[#12202a] ${look.fontClass}`} style={look.style}>
+      {/* Open the connection to where the video will come from while the patient reads and ticks the box, so the
+          tick's answer is not followed by a fresh look-up and handshake. React moves these into the page's head.
+          A host name only: nothing here says which video, and nothing here plays. */}
+      {early.origins.map(({ origin, anonymous }) => (
+        <link key={`${origin}${anonymous ? " anonymous" : ""}`} rel="preconnect" href={origin} crossOrigin={anonymous ? "anonymous" : undefined} />
+      ))}
       <BrandBand />
       {video.isPlaceholder && <PlaceholderBar />}
 

@@ -1,15 +1,14 @@
 # Automatic checks on every pull request to main: install, lint, type check
-# and a production build. The same commands a person runs before saying a
-# change is done (CLAUDE.md, "Before you say it is done"), minus the tests.
+# and a production build (the "Lint, types and build" job), and the full test
+# suite (the "Tests" job). The same commands a person runs before saying a
+# change is done (CLAUDE.md, "Before you say it is done").
 #
 # No secrets. The build needs no database, no Clerk key and no Stripe key to
-# compile, so none is given. If a later change makes it need a value, give it
-# a clearly fake one here, never a real key: this repository is public
+# compile, so none is given. The tests get a database of their own: an empty
+# PostgreSQL started inside GitHub's machine for this one run and thrown away
+# afterwards, with a made-up password. If a later change needs a value, give
+# it a clearly fake one here, never a real key: this repository is public
 # (CLAUDE.md, rule 7).
-#
-# The tests (npm test) do not run here yet: they need the Neon testing
-# database, and its connection string is not stored in GitHub. See "Automatic
-# checks" in CLAUDE.md for what adding it would take.
 
 name: Checks
 
@@ -65,3 +64,92 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  tests:
+    # This name is what appears on the pull request, and what is picked when
+    # the check is made required in GitHub's ruleset. Keep it as it is.
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # A throwaway PostgreSQL 18 (the version Neon runs), started for this run
+    # only. It is empty: the migrations below build its tables, and every test
+    # makes the rows it needs. It is reachable from this job and nowhere else,
+    # and it is deleted when the job ends.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          # Made up for this throwaway database. Not a secret: nothing but
+          # this one job can reach it, and it exists for minutes.
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-throwaway-password
+          POSTGRES_DB: pulse_ci
+          # The tests expect the database to run on UTC, as Neon does
+          # (CLAUDE.md, "The local test database").
+          TZ: UTC
+          PGTZ: UTC
+        # Wait until the database answers before the steps start.
+        options: >-
+          --health-cmd "pg_isready -U ci -d pulse_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+        ports:
+          - 5432:5432
+
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      # The throwaway database above. vitest.setup.ts points every test at it.
+      TEST_DATABASE_URL: postgresql://ci:ci-throwaway-password@localhost:5432/pulse_ci
+      # The test guard (vitest.guard.ts) refuses to run unless it has a
+      # production address to compare the test database with, and they differ.
+      # There is no production database here, and no real address of one: this
+      # machine holds no secret and has no way to reach our databases. So the
+      # guard is given an address that cannot exist (".invalid" is a name the
+      # internet reserves so that it never resolves). The guard is not changed
+      # or switched off, but be honest about what that means: compared with an
+      # address that cannot exist, its check passes without proving anything.
+      # What keeps production safe here is something else: the test address
+      # above is written in this file and points at this machine, and this
+      # machine has no production address or password at all, so nothing on it
+      # could reach production even if it tried. That is why a fake address is
+      # acceptable here and only here. Never copy it to a real computer's .env,
+      # where the real production address is what the guard must compare with.
+      DATABASE_URL: postgresql://none:none@production-database.invalid:5432/none
+      DIRECT_URL: postgresql://none:none@production-database.invalid:5432/none
+
+    steps:
+      - name: Get the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Generate the database client
+        run: npx prisma generate
+
+      - name: Set the test database to UTC
+        # The same setting the local test database has (CLAUDE.md, "The local
+        # test database"). Without it, times written by hand-written queries
+        # come out hours off and tests fail.
+        run: psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "ALTER DATABASE pulse_ci SET timezone TO 'UTC';"
+
+      - name: Build the tables (apply every migration)
+        # Only for this step, Prisma's two addresses point at the throwaway
+        # database, so the migrations land there and nowhere else.
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          DIRECT_URL: ${{ env.TEST_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Run the tests
+        run: npm test

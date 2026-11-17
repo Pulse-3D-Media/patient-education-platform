@@ -27,7 +27,7 @@ Next.js (App Router) and TypeScript on Vercel, Postgres on Neon, Prisma for data
 ```bash
 npm install
 cp .env.example .env     # then fill in the values
-npx prisma migrate dev   # set up the database tables
+npx prisma migrate deploy   # build the tables, on a development or test database only (never production; see rule 3 in CLAUDE.md)
 npm run dev
 ```
 

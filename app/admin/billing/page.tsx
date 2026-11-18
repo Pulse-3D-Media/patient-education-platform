@@ -367,11 +367,15 @@ function OfferSection({
         </h2>
         <p className="mt-2 text-ink-soft">
           Stripe has not confirmed it yet, so your clinic is not open and a new plan cannot be started until it settles. A bank payment can take a few days to clear. If
-          the payment is never completed, Stripe drops it within about a day, and you can choose a plan here again.
+          the payment failed or was never completed, Stripe drops it 23 hours after checkout started. Press Check with Stripe after that, and you can choose a plan
+          here again.
         </p>
-        <Link href="/admin/billing/return" className={`mt-5 ${PRIMARY_BUTTON}`}>
-          Check on your payment
-        </Link>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <Link href="/admin/billing/return" className={PRIMARY_BUTTON}>
+            Check on your payment
+          </Link>
+          <CheckWithStripeButton />
+        </div>
       </section>
     );
   }

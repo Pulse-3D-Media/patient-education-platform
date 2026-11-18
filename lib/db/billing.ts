@@ -5,14 +5,17 @@ import {
   NO_BILLING,
   SELF_SERVE_REFUSALS,
   decideBilling,
+  decideGone,
   effectiveAccess,
   sameBillingFacts,
   selfServeEligibility,
+  type BillingDecision,
   type BillingFacts,
   type SubscriptionSnapshot,
 } from "../billing-state";
-import { attemptIsReusable, samePlanShape } from "../checkout-rules";
+import { CLOCK_SLACK_MINUTES, SESSION_MINUTES, attemptIsReusable, samePlanShape } from "../checkout-rules";
 import { checkSeatReduction, overAllocatedWords, seatSummary } from "../seats";
+import { BILLING_SYNC_LOCK, PLAN_CHANGE_LOCK, takeNamedBillingLock } from "./billing-locks";
 import { readClinicLocked } from "./clinic-lock";
 import { getCategoryList } from "./category-config";
 import { prisma } from "./client";
@@ -34,7 +37,13 @@ import { readSettingsIn } from "./settings";
  * therefore happen one after the other, never at once, and each reads what
  * the one before it wrote.
  *
- * Inside that lock the code asks Stripe where the subscription stands NOW
+ * NO ROW LOCK IS EVER HELD WHILE STRIPE IS BEING ASKED (audit finding E1):
+ * a look at Stripe holds the clinic's billing sync lock instead (a named lock
+ * only other looks at Stripe wait for, lib/db/billing-locks.ts), asks, and
+ * only then takes the row lock for the write. So a slow Stripe never holds
+ * up a link being made for the clinic.
+ *
+ * The code asks Stripe where the subscription stands NOW
  * and applies that (decideBilling in lib/billing-state.ts), rather than
  * applying what the notification said. So it does not matter in what order
  * notifications arrive, how late, or how many times: whichever is handled
@@ -449,12 +458,31 @@ export async function acceptPlanForChange(
 /** What an admin is told when the plan was changed by someone else between drawing the page and pressing the button. */
 export const PLAN_MOVED_MESSAGE = "Your plan changed a moment ago. Reload this page and check it before changing anything.";
 
-/** Longer than TX_OPTIONS: a plan change asks Stripe two or three things while the lock is held, each bounded at eight seconds. */
-const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+/** Longer than TX_OPTIONS: a plan change asks Stripe two or three things while the lock is held, each bounded at eight seconds (one retry). */
+const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 45_000 } as const;
 
 /**
- * Run one clinic's plan change while holding the clinic's row lock, so two
- * plan changes for one clinic (two tabs, a double click, two admins) happen
+ * After this long since the plan change began (counting any wait for the
+ * lock), no NEW Stripe write is started (audit finding E7). That leaves at
+ * least 20 seconds of the 45-second transaction, more than one Stripe call
+ * is allowed (eight seconds, once retried), so a write that is started is
+ * expected to finish before the database lets the lock go. A Stripe call
+ * that hangs past its own time limit is the one case this cannot cover.
+ */
+export const PLAN_CHANGE_WRITE_CUTOFF_MS = 25_000;
+
+/** Thrown when a plan change ran so long that it stopped rather than start another Stripe write. Nothing more was asked of Stripe. */
+export class PlanChangeOverrunError extends Error {
+  constructor() {
+    super("Billing: a plan change took too long, so it stopped before asking Stripe to change anything more.");
+    this.name = "PlanChangeOverrunError";
+  }
+}
+
+/**
+ * Run one clinic's plan change while holding the clinic's plan change lock
+ * (a named lock, lib/db/billing-locks.ts; not the row lock, so links are
+ * never held up by a slow Stripe), so two plan changes for one clinic (two tabs, a double click, two admins) happen
  * one after the other, never at once. The second one starts by asking Stripe
  * where the subscription stands, and sees what the first one did.
  *
@@ -463,11 +491,30 @@ const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
  * because the change is applied from what Stripe says (reconcileSubscription),
  * by the caller straight afterwards and by Stripe's own notification.
  */
-export async function withPlanChangeLock<T>(clinicId: string, work: () => Promise<T>): Promise<T> {
+export async function withPlanChangeLock<T>(
+  clinicId: string,
+  work: (ensureHeld: () => void) => Promise<T>,
+  options: { writeCutoffMs?: number } = {},
+): Promise<T> {
+  // The clock starts BEFORE the transaction does. The database lets the lock go when the
+  // transaction's own time runs out (CHANGE_TX_OPTIONS), and that time counts from the start,
+  // including any wait behind another plan change. Timing from here, a little earlier than the
+  // transaction's start, means the cutoff can only be reached sooner than it needs to be, never later.
+  const startedAt = Date.now();
+  const cutoff = options.writeCutoffMs ?? PLAN_CHANGE_WRITE_CUTOFF_MS;
+  // A named lock only other plan changes at this clinic wait for (lib/db/billing-locks.ts), so a
+  // slow Stripe here never holds up a link, a seat or a staff change (audit finding E1).
   return prisma.$transaction(async (tx) => {
-    const clinic = await readClinicLocked(tx, clinicId, { id: true });
+    const clinic = await tx.clinic.findUnique({ where: { id: clinicId }, select: { id: true } });
     if (!clinic) throw new BillingRefusedError("That clinic no longer exists.");
-    return work();
+    await takeNamedBillingLock(tx, PLAN_CHANGE_LOCK, clinicId);
+    // `work` calls ensureHeld() before each Stripe write: past the cutoff it throws instead, so a change
+    // that overran (by waiting for the lock, or by slow Stripe calls) stops rather than starting a write
+    // the database might let go of the lock in the middle of.
+    const ensureHeld = () => {
+      if (Date.now() - startedAt > cutoff) throw new PlanChangeOverrunError();
+    };
+    return work(ensureHeld);
   }, CHANGE_TX_OPTIONS);
 }
 
@@ -629,6 +676,25 @@ export type ReconcileResult = {
   outcome: string;
   /** How many log entries were written: 1 when something a person cares about changed, 0 otherwise. */
   logged: number;
+  /**
+   * Set only by the look at Stripe that read a paying clinic's subscription as
+   * gone and ended it (ACTIVE or PAST_DUE to CANCELED, audit finding E3). It is
+   * decided inside the transaction that made the change, under the billing
+   * sync lock, so exactly one look sees it per ending, however many overlap:
+   * the next one finds the record already ended. The caller emails Pulse
+   * staff once it has committed (lib/billing-gone-alert.ts).
+   */
+  goneClosure?: GoneClosure;
+};
+
+/** Which clinic a vanished subscription just ended, for the email to Pulse staff. Names and the new status only. */
+export type GoneClosure = {
+  clinicId: string;
+  clinicName: string;
+  /** The clinic's status after the change (normally Canceled; unchanged for a clinic Pulse manages). */
+  clinicStatus: ClinicStatus;
+  /** When the change was made, for the email's idempotency key. */
+  at: Date;
 };
 
 /** What the locked read asks for about the clinic. */
@@ -642,15 +708,53 @@ const STATUS_WORDS: Record<ClinicStatus, string> = {
   CANCELED: "Canceled",
 };
 
+/** Thrown when a look at Stripe could not be finished because the record kept changing under it. Retried like any failure. */
+export class BillingBusyError extends Error {
+  constructor() {
+    super("Billing: the clinic's billing record kept changing while Stripe was being asked.");
+    this.name = "BillingBusyError";
+  }
+}
+
+/**
+ * How long one look at Stripe may hold the sync lock: up to two Stripe calls
+ * (each bounded at eight seconds, with one retry, see lib/stripe.ts), then a
+ * write of a few milliseconds. A second look at the same clinic waits inside
+ * this time too.
+ */
+const SYNC_TX_OPTIONS = { maxWait: 10_000, timeout: 45_000 } as const;
+
+/** How many times one look starts again when the record's subscription or customer changed while Stripe was being asked. */
+export const RECONCILE_TRIES = 3;
+
+/** Says "ask Stripe again": the record changed under the answer. */
+const STALE = Symbol("stale");
+
 /**
  * Bring one clinic's billing, and its access, into line with what Stripe
  * says about one subscription right now. See the top of this file for why
  * it is shaped this way.
  *
+ * The order inside, and why (audit finding E1, 2026-11-16):
+ *
+ *   1. Take the clinic's billing SYNC lock (lib/db/billing-locks.ts), a named
+ *      lock nothing but another look at Stripe for this clinic waits for. Two
+ *      looks therefore still happen one after the other.
+ *   2. Ask Stripe, holding NO row lock, so a surgeon's Send or a patient's
+ *      Play at this clinic is never held up by a slow Stripe.
+ *   3. Take the clinic's row lock (the lock every change to a clinic takes),
+ *      and check that the record still expects the same subscription and the
+ *      same customer it did when Stripe was asked. If not (a row written
+ *      around the app, say), nothing is written from that answer: the attempt
+ *      ends having written nothing (its transaction commits empty, letting
+ *      both locks go) and Stripe is asked again, at most RECONCILE_TRIES times.
+ *   4. Decide and write, in one transaction: the record, the plan, the
+ *      status, one log entry and the notification's "finished" mark.
+ *
  *   fetchSubscription   how to ask Stripe (lib/stripe.ts in the app; a
- *                       stand-in in the tests). Called INSIDE the lock, so
- *                       what it returns cannot be older than what any
- *                       earlier transaction applied.
+ *                       stand-in in the tests). Called under the sync lock,
+ *                       so what it returns cannot be older than what any
+ *                       earlier look applied.
  *   eventId             the BillingEvent row this work is for, when there
  *                       is one. It is marked finished in the SAME
  *                       transaction as the changes, so "finished" can never
@@ -658,6 +762,12 @@ const STATUS_WORDS: Record<ClinicStatus, string> = {
  *                       dies first, everything rolls back, the row is still
  *                       unfinished, and Stripe's next delivery does the work.
  *   now                 the server's clock, a parameter for the tests.
+ *
+ * A subscription Stripe no longer has at all (deleted, or a test-mode one a
+ * different Stripe key cannot see) is its own outcome when it is the one this
+ * clinic expects: the record says it has ended (decideGone in
+ * lib/billing-state.ts), logged, and flagged for a person, rather than the
+ * record freezing as it was (audit finding E3).
  *
  * Throws when Stripe or the database fails; the caller records the failure
  * and answers Stripe with an error so it sends the notification again.
@@ -669,11 +779,25 @@ export async function reconcileSubscription(args: {
   eventId?: string;
   now?: Date;
 }): Promise<ReconcileResult> {
+  for (let attempt = 1; attempt <= RECONCILE_TRIES; attempt += 1) {
+    const result = await reconcileOnce(args);
+    if (result !== STALE) return result;
+  }
+  throw new BillingBusyError();
+}
+
+async function reconcileOnce(args: {
+  clinicId: string;
+  subscriptionId: string;
+  fetchSubscription: (subscriptionId: string) => Promise<SubscriptionSnapshot | null>;
+  eventId?: string;
+  now?: Date;
+}): Promise<ReconcileResult | typeof STALE> {
   const { clinicId, subscriptionId, fetchSubscription, eventId } = args;
 
   return prisma.$transaction(async (tx) => {
-    const clinic = await readClinicLocked(tx, clinicId, RECONCILE_CLINIC);
-    if (!clinic) throw new Error("Billing: the clinic for a known Stripe customer has gone.");
+    // 1. Only one look at Stripe per clinic at a time. Nothing else waits for this lock.
+    await takeNamedBillingLock(tx, BILLING_SYNC_LOCK, clinicId);
 
     // Another attempt at the same notification may have finished while this
     // one waited for the lock. Then there is nothing left to do.
@@ -681,6 +805,16 @@ export async function reconcileSubscription(args: {
       const event = await tx.billingEvent.findUnique({ where: { id: eventId }, select: { status: true, outcome: true } });
       if (event && isFinished(event.status)) return { kind: "already-done", outcome: event.outcome ?? "", logged: 0 };
     }
+
+    // 2. Ask Stripe, with no row lock held.
+    const before = await readBillingFacts(tx, clinicId);
+    const snap = await fetchSubscription(subscriptionId);
+
+    // 3. Now the row lock, for the write only.
+    const clinic = await readClinicLocked(tx, clinicId, RECONCILE_CLINIC);
+    if (!clinic) throw new Error("Billing: the clinic for a known Stripe customer has gone.");
+    const current = await readBillingFacts(tx, clinicId);
+    if (current.stripeSubscriptionId !== before.stripeSubscriptionId || current.stripeCustomerId !== before.stripeCustomerId) return STALE;
 
     const now = args.now ?? new Date();
     const finish = async (status: "PROCESSED" | "IGNORED", outcome: string) => {
@@ -692,12 +826,25 @@ export async function reconcileSubscription(args: {
       });
     };
 
-    const current = await readBillingFacts(tx, clinicId);
-    const snap = await fetchSubscription(subscriptionId);
     if (!snap) {
-      const outcome = "Stripe has no such subscription in test mode. Nothing was changed.";
-      await finish("IGNORED", outcome);
-      return { kind: "ignored", outcome, logged: 0 };
+      if (subscriptionId !== current.stripeSubscriptionId) {
+        const outcome = "Stripe has no such subscription in test mode. Nothing was changed.";
+        await finish("IGNORED", outcome);
+        return { kind: "ignored", outcome, logged: 0 };
+      }
+      // The very subscription this clinic expects is gone from Stripe.
+      const gone = decideGone(current);
+      if (gone.kind === "ignored") {
+        await finish("IGNORED", gone.reason);
+        return { kind: "ignored", outcome: gone.reason, logged: 0 };
+      }
+      const applied = await applyDecision(tx, { clinicId, clinic, current, decision: gone, now, finish, strangePlan: false, needsLook: GONE_LOOK });
+      // A paying clinic just ended: Pulse staff get one email about it, sent by
+      // the caller after this commits. A first payment that never finished
+      // (INCOMPLETE) ends quietly; it was never open.
+      if (current.status !== "ACTIVE" && current.status !== "PAST_DUE") return applied;
+      const after = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true, status: true } });
+      return { ...applied, goneClosure: { clinicId, clinicName: after.name, clinicStatus: after.status, at: now } };
     }
 
     // The plans Stripe names for a plan change (the one the subscription is
@@ -735,6 +882,37 @@ export async function reconcileSubscription(args: {
       return { kind: "ignored", outcome, logged: 0 };
     }
 
+    return applyDecision(tx, { clinicId, clinic, current, decision, now, finish, strangePlan, needsLook: null });
+  }, SYNC_TX_OPTIONS);
+}
+
+/** A subscription that is gone from Stripe is flagged with these words, so a person checks Stripe and, if so, uses the reset on the clinic's /pulse page. */
+const GONE_LOOK =
+  "Stripe no longer has this clinic's subscription (it was deleted, or the Stripe key in use cannot see it), so the record now says it has ended. Check Stripe; if it really is gone, use Reset billing on the clinic's page so the clinic can choose a plan again.";
+
+type ClinicForReconcile = Prisma.ClinicGetPayload<{ select: typeof RECONCILE_CLINIC }>;
+
+/**
+ * Write one decision: the record, the plan, the status and one log entry,
+ * then mark the notification finished. Runs inside the reconcile's
+ * transaction, with the clinic's row lock already held.
+ */
+async function applyDecision(
+  tx: Prisma.TransactionClient,
+  args: {
+    clinicId: string;
+    clinic: ClinicForReconcile;
+    current: BillingFacts;
+    decision: Extract<BillingDecision, { kind: "apply" }>;
+    now: Date;
+    finish: (status: "PROCESSED" | "IGNORED", outcome: string) => Promise<void>;
+    strangePlan: boolean;
+    /** Words for "Needs a look", when this outcome must be flagged whatever else it says. */
+    needsLook: string | null;
+  },
+): Promise<ReconcileResult> {
+  const { clinicId, clinic, current, decision, now, finish, strangePlan, needsLook } = args;
+  {
     const { next, activatePlanId } = decision;
     const entries = [...decision.entries];
 
@@ -861,7 +1039,131 @@ export async function reconcileSubscription(args: {
     const outcome = strangePlan
       ? `${NEEDS_LOOK}The subscription in Stripe names a plan this app did not make for this clinic, so that part was not acted on. Check its price and schedule in Stripe. ${words}`
       : words;
-    await finish("PROCESSED", outcome);
-    return { kind: "processed", outcome, logged: entries.length > 0 ? 1 : 0 };
-  }, TX_OPTIONS);
+    await finish("PROCESSED", needsLook ? `${NEEDS_LOOK}${needsLook} ${outcome}` : outcome);
+    return { kind: "processed", outcome: needsLook ? `${NEEDS_LOOK}${needsLook} ${outcome}` : outcome, logged: entries.length > 0 ? 1 : 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The staff reset, for a clinic whose subscription Stripe no longer has
+// ---------------------------------------------------------------------------
+
+/**
+ * What Stripe says about a clinic's recorded ids, for the reset. "live" (a
+ * subscription that has not ended) and "checkout-open" (a payment page that
+ * can still be paid) both refuse it.
+ */
+export type StripeIdsCheck = "live" | "checkout-open" | "gone";
+
+/** What the reset tells the staff member when Stripe still knows a live subscription. */
+export const RESET_REFUSED_LIVE =
+  "Stripe still has a live subscription for this clinic, so nothing was reset. Cancel it in Stripe first if it should end, then try again.";
+
+/**
+ * What the reset tells the staff member while a payment page could still be
+ * paid. Clearing the customer then would strand that payment: Stripe's
+ * notification would name a customer no clinic has any more, and be ignored,
+ * so the clinic would have paid with no access.
+ */
+export const RESET_REFUSED_CHECKOUT =
+  "The clinic's admin has a payment page open, or opened one in the last hour, so nothing was reset. A payment page closes an hour after it was made: try again after that.";
+
+/** A checkout attempt this recent may still have a payment page that can be paid. */
+function checkoutMayBeOpen(attemptCreatedAt: Date, now: Date): boolean {
+  return now.getTime() - attemptCreatedAt.getTime() < (SESSION_MINUTES + CLOCK_SLACK_MINUTES) * 60_000;
+}
+
+/**
+ * Clear the Stripe ids on a clinic whose subscription Stripe says is gone
+ * (audit finding E3). Pulse staff only (the action calls requirePulseStaff()
+ * first); logged under the staff member's name.
+ *
+ * When it is needed: Stripe's test data was deleted, or the clinic paid in
+ * test mode and the app has moved to a different Stripe key. AT GO-LIVE THAT
+ * IS EVERY TEST-MODE CLINIC: a live key cannot see a single test-mode
+ * customer or subscription. Without the reset such a clinic is stuck, because
+ * a clinic's Stripe customer is set once and never replaced (setStripeCustomer).
+ *
+ *   1. The billing sync lock, so no look at Stripe for this clinic is half
+ *      way through (lib/db/billing-locks.ts). No row lock yet.
+ *   2. Stripe is asked (`checkStripe`, built from lib/stripe.ts by the
+ *      caller): is the recorded subscription, or any subscription on the
+ *      recorded customer, still alive, or does the customer have a payment
+ *      page open? If so, nothing is done.
+ *   3. The clinic's row lock, and the ids checked to be the very ones Stripe
+ *      was asked about, and no checkout attempt made within the hour (its
+ *      page might still be paid). Then, in one transaction: the ids, the waiting and
+ *      scheduled plans and the dates are cleared, the status becomes CANCELED
+ *      for a clinic that was ever paid for and NONE otherwise, access follows
+ *      the state table, and one log entry is written. The plan in force stays
+ *      as history; the plans themselves are never edited.
+ *
+ * Nothing in Stripe is changed by this, and nothing is charged or refunded.
+ * The clinic's admin then starts again with the plan picker, which makes a
+ * new Stripe customer.
+ */
+export async function resetVanishedStripeRecord(
+  clinicId: string,
+  args: { staffName: string; checkStripe: (ids: { customerId: string | null; subscriptionId: string | null }) => Promise<StripeIdsCheck>; now?: Date },
+): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  return prisma.$transaction(async (tx) => {
+    await takeNamedBillingLock(tx, BILLING_SYNC_LOCK, clinicId);
+    const before = await readBillingFacts(tx, clinicId);
+    if (!before.stripeCustomerId && !before.stripeSubscriptionId) return { ok: false, message: "This clinic has no Stripe ids on record, so there is nothing to reset." };
+
+    const verdict = await args.checkStripe({ customerId: before.stripeCustomerId, subscriptionId: before.stripeSubscriptionId });
+    if (verdict === "checkout-open") return { ok: false, message: RESET_REFUSED_CHECKOUT };
+    if (verdict !== "gone") return { ok: false, message: RESET_REFUSED_LIVE };
+
+    const clinic = await readClinicLocked(tx, clinicId, { id: true, status: true, graceEndsAt: true, staffAccess: true, managedByPulse: true });
+    if (!clinic) return { ok: false, message: "That clinic no longer exists." };
+    const current = await readBillingFacts(tx, clinicId);
+    if (current.stripeCustomerId !== before.stripeCustomerId || current.stripeSubscriptionId !== before.stripeSubscriptionId) {
+      return { ok: false, message: "The clinic's billing changed a moment ago. Reload the page and look again." };
+    }
+    // Our own record of a checkout attempt, checked under the row lock (checkout's own writes take
+    // it too): a page made in the last hour may still be paid, even one Stripe did not list a moment
+    // ago because it was being made at that very moment.
+    if (current.pendingPlanId) {
+      const attempt = await tx.billingPlan.findUnique({ where: { id: current.pendingPlanId }, select: { createdAt: true } });
+      if (attempt && checkoutMayBeOpen(attempt.createdAt, args.now ?? new Date())) return { ok: false, message: RESET_REFUSED_CHECKOUT };
+    }
+
+    const everPaid = current.status === "ACTIVE" || current.status === "PAST_DUE" || current.status === "CANCELED" || current.currentPlanId !== null;
+    const status = everPaid ? "CANCELED" : "NONE";
+    await tx.clinicBilling.update({
+      where: { clinicId },
+      data: {
+        status,
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        pendingPlanId: null,
+        currentPeriodEnd: null,
+        cancelAt: null,
+        paymentFailedAt: null,
+        graceEndsAt: null,
+        scheduledPlanId: null,
+        scheduledChangeAt: null,
+      },
+      select: { clinicId: true },
+    });
+
+    const access = effectiveAccess({ staffAccess: clinic.staffAccess, managedByPulse: clinic.managedByPulse, billingStatus: status, billingGraceEndsAt: null });
+    const words = [
+      `Billing reset by ${args.staffName}: Stripe no longer has this clinic's subscription or customer, so the Stripe ids on record were cleared.`,
+      "The clinic starts again with the plan picker. Nothing in Stripe was changed and nothing was charged or refunded.",
+    ];
+    const clinicData: Prisma.ClinicUncheckedUpdateInput = {};
+    if (access.status !== clinic.status) {
+      clinicData.status = access.status;
+      clinicData.statusChangedBy = args.staffName;
+      clinicData.statusChangedAt = new Date();
+      clinicData.statusReason = words[0].slice(0, 300);
+      words.push(`Status is now ${STATUS_WORDS[access.status]}.`);
+    }
+    if ((access.graceEndsAt?.getTime() ?? null) !== (clinic.graceEndsAt?.getTime() ?? null)) clinicData.graceEndsAt = access.graceEndsAt;
+    if (Object.keys(clinicData).length > 0) await tx.clinic.update({ where: { id: clinicId }, data: clinicData, select: { id: true } });
+    await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body: words.join(" "), authorName: args.staffName }, select: { id: true } });
+    return { ok: true, message: "Billing reset. The clinic's admin can choose a plan again on their Billing page." };
+  }, SYNC_TX_OPTIONS);
 }

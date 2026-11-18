@@ -47,6 +47,23 @@ export function isTestSecretKey(key: string | undefined): key is string {
   return typeof key === "string" && (key.startsWith("sk_test_") || key.startsWith("rk_test_"));
 }
 
+/**
+ * The Stripe API version every request is made with, pinned on purpose (audit
+ * finding E6, 2026-11-16). It is the version the installed "stripe" package
+ * was built for (node_modules/stripe/cjs/apiVersion.js, stripe 22.6.2).
+ *
+ * Why pin it: what Stripe does with a request (how a schedule is billed, what
+ * a subscription object looks like) follows the API version. Two settings in
+ * this file were found by testing against Stripe and must stay
+ * (`billing_cycle_anchor: "phase_start"` and `proration_behavior: "none"` on
+ * the schedule); a routine package update must not quietly move the version
+ * under them. lib/stripe.test.ts fails when this pin is removed, and when the
+ * package is updated to a version built for a different API version, so the
+ * change is made on purpose and the plan-change checks against Stripe test
+ * mode are run again.
+ */
+export const STRIPE_API_VERSION = "2026-08-26.dahlia" as const;
+
 let client: Stripe | null = null;
 
 /** The Stripe client, made on first use. Throws a StripeConfigError when the key is missing or is not a test key. */
@@ -56,9 +73,11 @@ export function getStripe(): Stripe {
   if (!key) throw new StripeConfigError("STRIPE_SECRET_KEY is not set.");
   if (!isTestSecretKey(key)) throw new StripeConfigError("STRIPE_SECRET_KEY is not a test key. This app only runs Stripe in test mode.");
   client = new Stripe(key, {
-    // Bounded, because the call happens while a clinic's row is locked (see
-    // reconcileSubscription in lib/db/billing.ts): a slow Stripe must fail
-    // the attempt, not hang it. Stripe sends the notification again.
+    apiVersion: STRIPE_API_VERSION,
+    // Bounded, because billing waits on the answer while it holds its named
+    // lock for the clinic (see reconcileSubscription in lib/db/billing.ts; no
+    // row lock is held across a Stripe call): a slow Stripe must fail the
+    // attempt, not hang it. Stripe sends the notification again.
     timeout: 8000,
     maxNetworkRetries: 1,
   });
@@ -460,7 +479,14 @@ export const stripeGateway: CheckoutGateway = {
   },
 
   async listOpenSessions(customerId) {
-    const page = await getStripe().checkout.sessions.list({ customer: customerId, status: "open", limit: 20 });
+    let page: Stripe.ApiList<Stripe.Checkout.Session>;
+    try {
+      page = await getStripe().checkout.sessions.list({ customer: customerId, status: "open", limit: 20 });
+    } catch (error) {
+      // A customer Stripe no longer has has no payment pages open (as in listSubscriptions below).
+      if (isStripeRequestError(error, "resource_missing")) return [];
+      throw error;
+    }
     return page.data.filter((session) => !session.livemode).map(sessionInfo);
   },
 
@@ -491,7 +517,15 @@ export const stripeGateway: CheckoutGateway = {
   },
 
   async listSubscriptions(customerId) {
-    const page = await getStripe().subscriptions.list({ customer: customerId, status: "all", limit: 20 });
+    let page: Stripe.ApiList<Stripe.Subscription>;
+    try {
+      page = await getStripe().subscriptions.list({ customer: customerId, status: "all", limit: 20 });
+    } catch (error) {
+      // A customer Stripe no longer has (test data deleted, or a key that cannot see it) has no
+      // subscriptions; it is not an error to retry for ever (audit finding E3).
+      if (error instanceof Stripe.errors.StripeInvalidRequestError && error.code === "resource_missing") return [];
+      throw error;
+    }
     return page.data
       .filter((subscription) => !subscription.livemode)
       .map((subscription) => {
@@ -500,6 +534,40 @@ export const stripeGateway: CheckoutGateway = {
       });
   },
 };
+
+/**
+ * For the staff reset (resetVanishedStripeRecord in lib/db/billing.ts): does
+ * Stripe still have a live subscription for these ids? "live" when the
+ * recorded subscription, or any subscription on the recorded customer, has
+ * neither ended nor expired; "checkout-open" when the customer has a payment
+ * page that can still be paid (clearing the customer would strand that
+ * payment); "gone" otherwise. Any failure to ask throws, so the reset never
+ * goes ahead on a guess.
+ */
+export async function checkStripeIds(
+  ids: { customerId: string | null; subscriptionId: string | null },
+  deps: {
+    fetchSubscription: FetchSubscription;
+    listSubscriptions: CheckoutGateway["listSubscriptions"];
+    listOpenSessions: CheckoutGateway["listOpenSessions"];
+  } = {
+    fetchSubscription: fetchSubscriptionSnapshot,
+    listSubscriptions: (customerId) => stripeGateway.listSubscriptions(customerId),
+    listOpenSessions: (customerId) => stripeGateway.listOpenSessions(customerId),
+  },
+): Promise<"live" | "checkout-open" | "gone"> {
+  const alive = (status: string) => status !== "canceled" && status !== "incomplete_expired";
+  if (ids.subscriptionId) {
+    const snapshot = await deps.fetchSubscription(ids.subscriptionId);
+    if (snapshot && alive(snapshot.status)) return "live";
+  }
+  if (ids.customerId) {
+    const subscriptions = await deps.listSubscriptions(ids.customerId);
+    if (subscriptions.some((subscription) => alive(subscription.status))) return "live";
+    if ((await deps.listOpenSessions(ids.customerId)).length > 0) return "checkout-open";
+  }
+  return "gone";
+}
 
 // ---------------------------------------------------------------------------
 // Plan changes, and Stripe's own billing page

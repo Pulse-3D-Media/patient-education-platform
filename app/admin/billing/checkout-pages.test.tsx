@@ -336,6 +336,10 @@ describe("/admin/billing: a first payment still under way", () => {
     expect(html).toContain("Your first payment is under way");
     expect(html).toContain("They open as soon as Stripe confirms your first payment.");
     expect(html).toContain('href="/admin/billing/return"');
+    // Audit finding E2: a first payment that failed after Stripe started the subscription. The admin always
+    // has a working action on this page itself, and is told how long Stripe takes to drop it.
+    expect(html).toContain("Check with Stripe");
+    expect(html).toContain("23 hours");
     expect(html).not.toContain("Continue to payment");
     expect(html).not.toContain("Get in touch with Pulse 3D and we will turn yours on.");
     expect(html).not.toContain("Card, invoices and cancelling");

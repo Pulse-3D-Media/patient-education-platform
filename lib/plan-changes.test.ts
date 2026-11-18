@@ -566,10 +566,10 @@ describe("one change at a time", () => {
     expect((await clinicOf(f.clinicId)).surgeonSeats).toBe(2);
   });
 
-  it("control: without the clinic's lock around the Stripe call, both changes reach Stripe", async () => {
+  it("control: without the plan change lock around the Stripe call, both changes reach Stripe", async () => {
     const f = await makePayingClinic("overlap control", { categories: ["KNEE"], seats: 1 });
     // Take the lock away for this test only, and let the plan row be written without it too.
-    const noLock = async <T,>(_clinicId: string, work: () => Promise<T>) => work();
+    const noLock = async <T,>(_clinicId: string, work: (ensureHeld?: () => void) => Promise<T>) => work();
     vi.mocked(billingDb.withPlanChangeLock).mockImplementation(noLock as typeof billingDb.withPlanChangeLock);
     try {
       const { secondReachedStripeFirst } = await overlap(f);

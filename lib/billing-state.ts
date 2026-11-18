@@ -537,6 +537,37 @@ function unsupported(status: string): BillingDecision {
   };
 }
 
+/**
+ * The subscription this clinic expects is gone from Stripe altogether (deleted,
+ * or a test-mode one the Stripe key in use cannot see; at go-live that is
+ * every test-mode clinic). Its own outcome, never a thrown error retried for
+ * ever (audit finding E3): a live one is read as ended, a first payment that
+ * never finished as never started, and anything already over stays as it is.
+ * The Stripe ids are kept as history; Pulse staff clear them with the reset.
+ */
+export function decideGone(current: BillingFacts): BillingDecision {
+  const cleared = { cancelAt: null, paymentFailedAt: null, graceEndsAt: null, scheduledPlanId: null, scheduledChangeAt: null };
+  if (current.status === "ACTIVE" || current.status === "PAST_DUE") {
+    return {
+      kind: "apply",
+      next: { ...current, ...cleared, status: "CANCELED", pendingPlanId: null },
+      entries: ["Stripe no longer has this clinic's subscription, so it is treated as ended."],
+      activatePlanId: null,
+      planChanged: false,
+    };
+  }
+  if (current.status === "INCOMPLETE") {
+    return {
+      kind: "apply",
+      next: { ...current, ...cleared, status: "NONE", stripeSubscriptionId: null, currentPeriodEnd: null },
+      entries: ["Stripe no longer has the subscription that was waiting for its first payment, so it did not start."],
+      activatePlanId: null,
+      planChanged: false,
+    };
+  }
+  return { kind: "ignored", reason: "Stripe no longer has this subscription, and the record already says it is over. Nothing was changed.", needsLook: false };
+}
+
 /** True when two records are the same in every field the rules write. */
 export function sameBillingFacts(a: BillingFacts, b: BillingFacts): boolean {
   const time = (date: Date | null) => date?.getTime() ?? null;

@@ -12,11 +12,15 @@ import {
   PULSE_STAFF_THEME,
   STAFF_GROUND,
   STAFF_LIGHT_GROUND,
+  VIDEO_BUTTON_ALPHA,
   VIDEO_CHIP_ALPHA,
+  VIDEO_SCRIM_TEXT_ALPHA,
   brandFontLabel,
   brandThemeLabel,
   contrastRatio,
+  videoButtonGround,
   videoChipGround,
+  videoScrimGround,
   darkGroundVars,
   parseBrandColor,
   parseBrandFont,
@@ -155,6 +159,36 @@ describe("the chips on the video", () => {
 
   it("is the number the CSS uses", () => {
     expect(VIDEO_CHIP_ALPHA).toBe(0.7);
+  });
+});
+
+describe("the fade behind the players' bottom row, and the middle buttons", () => {
+  // The time (white, 15px) sits on the fade: 4.5:1 over any frame. The middle buttons are white icons on dark circles:
+  // 3:1 (an icon's floor) over any frame. White is the hardest frame for both.
+  const greys = Array.from({ length: 52 }, (_, i) => `#${(i * 5).toString(16).padStart(2, "0").repeat(3)}`);
+  const css = readFileSync(path.join(process.cwd(), "app/globals.css"), "utf8").replace(/\r\n/g, "\n");
+
+  it("keeps the time's white words at 4.5:1 or better over every grey and the brightest colours", () => {
+    expect(videoScrimGround("#ffffff")).toBe("#737373");
+    for (const frame of [...greys, "#ffffff", "#ffff00", "#00ffff", "#ff00ff", "#00ff00"]) {
+      expect(contrastRatio("#ffffff", videoScrimGround(frame)), frame).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("keeps the middle buttons' white icons at 3:1 or better over every grey and the brightest colours", () => {
+    for (const frame of [...greys, "#ffffff", "#ffff00", "#00ffff", "#ff00ff", "#00ff00"]) {
+      expect(contrastRatio("#ffffff", videoButtonGround(frame)), frame).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("is the number the CSS and the overlay use", () => {
+    expect(VIDEO_SCRIM_TEXT_ALPHA).toBe(0.55);
+    expect(css).toContain(`rgb(0 0 0 / ${VIDEO_SCRIM_TEXT_ALPHA}) 75%`);
+    expect(VIDEO_BUTTON_ALPHA).toBe(0.45);
+    const overlay = readFileSync(path.join(process.cwd(), "components/ui/PlayerOverlay.tsx"), "utf8");
+    const alphas = [...overlay.matchAll(/bg-black\/(\d+) @xl:h-/g)].map(([, n]) => Number(n) / 100);
+    expect(alphas.length).toBe(3);
+    for (const alpha of alphas) expect(alpha).toBeGreaterThanOrEqual(VIDEO_BUTTON_ALPHA);
   });
 });
 

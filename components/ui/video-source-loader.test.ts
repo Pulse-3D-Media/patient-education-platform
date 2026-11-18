@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { REFRESH_LEAD_MS, TOKEN_LIFETIME_MS, type PlaybackSource } from "@/lib/playback-source";
-import { RETRY_REFRESH_MS, SourceLoader, type LoaderHooks } from "./video-source-loader";
+import { RETRY_REFRESH_MS, SourceLoader, hlsSettings, shareUntilFailure, warmUpStreamLibrary, type LoaderHooks } from "./video-source-loader";
 
 /**
  * The loader behind both players, with a stand-in <video> element, a
@@ -369,5 +369,49 @@ describe("unavailable, Try again and closing", () => {
     await settle();
     expect(hls.instances).toHaveLength(1);
     expect(hooks.onFailure).not.toHaveBeenCalled();
+  });
+});
+
+describe("getting a stream ready sooner", () => {
+  it("asks hls.js not to fetch a picture bigger than the player, which it measures again for full screen", async () => {
+    const { loader, hls } = make(fakeElement(), {});
+    await loader.attach(stream("a"));
+    expect(hls.instances[0].config).toEqual({ startPosition: -1, capLevelToPlayerSize: true });
+    expect(hlsSettings(37)).toEqual({ startPosition: 37, capLevelToPlayerSize: true });
+  });
+
+  it("starts fetching hls.js at the tick on a browser that needs it, and never on one that plays HLS itself", () => {
+    const load = vi.fn(() => Promise.resolve("hls"));
+    warmUpStreamLibrary(fakeElement(), { prefersNativeHls: () => false, load });
+    expect(load).toHaveBeenCalledTimes(1);
+
+    const safari = vi.fn(() => Promise.resolve("hls"));
+    warmUpStreamLibrary(fakeElement(true), { prefersNativeHls: () => true, load: safari });
+    warmUpStreamLibrary(null, { prefersNativeHls: () => false, load: safari });
+    expect(safari).not.toHaveBeenCalled();
+  });
+
+  it("an early fetch that failed is ignored, and the loader's own ask fetches again", async () => {
+    let tries = 0;
+    const shared = shareUntilFailure(() => {
+      tries++;
+      return tries === 1 ? Promise.reject(new Error("dropped")) : Promise.resolve("hls");
+    });
+    warmUpStreamLibrary(fakeElement(), { prefersNativeHls: () => false, load: shared });
+    await settle();
+    await expect(shared()).resolves.toBe("hls");
+    expect(tries).toBe(2);
+  });
+
+  it("shares one download between the early fetch and the loader's ask", async () => {
+    let tries = 0;
+    const shared = shareUntilFailure(() => {
+      tries++;
+      return Promise.resolve("hls");
+    });
+    warmUpStreamLibrary(fakeElement(), { prefersNativeHls: () => false, load: shared });
+    await expect(shared()).resolves.toBe("hls");
+    await expect(shared()).resolves.toBe("hls");
+    expect(tries).toBe(1);
   });
 });

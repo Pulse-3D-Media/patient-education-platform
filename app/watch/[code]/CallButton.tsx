@@ -21,12 +21,12 @@ export function CallButton({ call }: { call: { href: string; label: string } }) 
     <>
       <a
         href={call.href}
-        className="mt-7 flex min-h-14 items-center gap-3 rounded-full bg-brand px-8 text-[19px] font-semibold text-on-brand shadow-[0_6px_18px_-8px_rgba(18,32,42,.45)] transition active:scale-[0.98] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#12202a] computer:hidden"
+        className="mt-7 flex min-h-14 items-center gap-3 rounded-full bg-brand px-8 text-[17px] font-semibold text-on-brand shadow-[0_6px_18px_-8px_rgba(18,32,42,.45)] transition active:scale-[0.98] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#12202a] computer:hidden"
       >
         <PhoneIcon className="h-6 w-6 shrink-0" />
         Call {call.label}
       </a>
-      <CallNumber call={call} className="mt-7 text-[19px]" />
+      <CallNumber call={call} className="mt-7 text-[17px]" />
     </>
   );
 }

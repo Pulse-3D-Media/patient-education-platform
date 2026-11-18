@@ -2,7 +2,7 @@ import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "./db/client";
 import { createShare } from "./db/shares";
-import { playbackForLibraryVideo, playbackForShare, playbackForVideo } from "./playback-auth";
+import { earlyConnectionsFor, playbackForLibraryVideo, playbackForShare, playbackForVideo } from "./playback-auth";
 import { TOKEN_LIFETIME_MS } from "./playback-source";
 
 /**
@@ -85,6 +85,37 @@ function expiryOf(url: string): number {
   const token = new URL(url).searchParams.get("token")!;
   return (JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8")) as { exp: number }).exp * 1000;
 }
+
+describe("earlyConnectionsFor: what the patient page may say before the tick", () => {
+  it("a video on Mux: Mux's hosts, the stream host both ways, and that it will be a stream; never the playback id", () => {
+    configureMux(true);
+    const early = earlyConnectionsFor({ videoUrl: "https://cdn.example.test/knee.mp4", muxPlaybackId: "AbcDef123", durationSeconds: 120 });
+    expect(early).toEqual({
+      origins: [
+        { origin: "https://stream.mux.com", anonymous: false },
+        { origin: "https://stream.mux.com", anonymous: true },
+        { origin: "https://image.mux.com", anonymous: false },
+      ],
+      stream: true,
+    });
+    expect(JSON.stringify(early)).not.toMatch(/AbcDef123|knee|cdn\.example/);
+  });
+
+  it("a video on Mux where Mux cannot sign here: nothing, because it will not play", () => {
+    configureMux(false);
+    expect(earlyConnectionsFor({ videoUrl: "https://cdn.example.test/knee.mp4", muxPlaybackId: "AbcDef123", durationSeconds: 120 })).toEqual({ origins: [], stream: false });
+  });
+
+  it("a plain file: the CDN's bare host, never its path; an address that is not https, or not an address, gives nothing", () => {
+    expect(earlyConnectionsFor({ videoUrl: "https://cdn.example.test/folder/knee.mp4?x=1", muxPlaybackId: null, durationSeconds: 120 })).toEqual({
+      origins: [{ origin: "https://cdn.example.test", anonymous: false }],
+      stream: false,
+    });
+    expect(earlyConnectionsFor({ videoUrl: "http://cdn.example.test/knee.mp4", muxPlaybackId: null, durationSeconds: 1 }).origins).toEqual([]);
+    expect(earlyConnectionsFor({ videoUrl: "not an address", muxPlaybackId: null, durationSeconds: 1 }).origins).toEqual([]);
+    expect(earlyConnectionsFor({ videoUrl: null, muxPlaybackId: null, durationSeconds: 1 }).origins).toEqual([]);
+  });
+});
 
 describe("playbackForVideo", () => {
   const cdn = { videoUrl: "https://example.com/a.mp4", muxPlaybackId: null, durationSeconds: 110 };

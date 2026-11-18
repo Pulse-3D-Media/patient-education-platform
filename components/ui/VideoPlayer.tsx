@@ -254,18 +254,21 @@ export function VideoPlayer({
         />
 
         {!started && !stopped && (
-          // The page opens paused. On a phone the box is short, so the button sits low, clear of the clinic's mark in
-          // the top left; on a wider player it is in the middle, a little low. The same look as the patient's Play.
+          // The page opens paused: one plain white circle with the triangle in the middle of the picture, no words on
+          // screen, the same look as the patient's Play (Evan, 2026-11-17). Its name for a screen reader is the label.
+          // Small enough to sit clear of the clinic's mark on a phone's short picture.
           <button
             type="button"
             onClick={controls.togglePlay}
             aria-label={`Play ${title}`}
-            className="group absolute inset-0 z-20 flex flex-col items-center justify-end gap-2 pb-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-white sm:justify-center sm:gap-3 sm:pb-0 sm:pt-12"
+            className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-white"
           >
-            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-[#12333f] shadow-[0_10px_34px_rgba(0,0,0,.4)] transition group-hover:scale-105 group-active:scale-95 sm:h-20 sm:w-20">
-              <PlayIcon className="ml-1 h-8 w-8 sm:h-10 sm:w-10" />
+            <span
+              data-play-circle=""
+              className="flex h-[60px] w-[60px] items-center justify-center rounded-full bg-white text-[#12333f] shadow-[0_8px_28px_rgba(0,0,0,.38)] transition group-hover:scale-105 group-active:scale-95 @xl:h-[72px] @xl:w-[72px]"
+            >
+              <PlayIcon className="ml-1 h-7 w-7 @xl:h-8 @xl:w-8" />
             </span>
-            <span className="rounded-full bg-white px-4 py-1.5 text-[16px] font-semibold text-[#12333f] shadow-[0_4px_16px_rgba(0,0,0,.3)] sm:text-[17px]">Play</span>
           </button>
         )}
 

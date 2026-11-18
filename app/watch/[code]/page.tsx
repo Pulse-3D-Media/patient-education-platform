@@ -4,7 +4,7 @@ import { ClockIcon, PauseIcon, SearchIcon } from "@/components/ui/icons";
 import { getSettings } from "@/lib/db/settings";
 import { getShareByCode } from "@/lib/db/shares";
 import { canRequestRenewal, isExpired, patientDeadline, renewalState } from "@/lib/expiry";
-import { posterForVideo } from "@/lib/playback-auth";
+import { earlyConnectionsFor, posterForVideo } from "@/lib/playback-auth";
 import { isAcceptedShareCode } from "@/lib/share-link";
 import { windowCoversVideo } from "@/lib/playback-source";
 import { AskClinic } from "./AskClinic";
@@ -150,6 +150,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
   // is told so in plain words rather than letting the video stop part-way
   // with no explanation.
   const poster = posterForVideo(share.video, now, share.expiresAt);
+  const early = earlyConnectionsFor(share.video);
   const willNotExtend = share.expiryPolicy !== "FIRST_PLAY" || share.firstPlayedAt !== null;
   const endsSoon = willNotExtend && !windowCoversVideo(now, share.expiresAt, share.video.durationSeconds);
 
@@ -162,11 +163,13 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
       endsSoon={endsSoon}
       deadline={patientDeadline(share, now)}
       now={now}
+      early={early}
       player={
         <WatchPlayer
           poster={poster}
           title={share.video.title}
           placeholder={share.video.isPlaceholder}
+          stream={early.stream}
           code={share.code}
           clinicName={share.clinic.name}
           logoUrl={look.logoUrl}

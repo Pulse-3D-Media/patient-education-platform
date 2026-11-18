@@ -1,5 +1,49 @@
 # The Vimeo-style players: device checks
 
+## The player refresh (November 2026): what to look at on a real phone
+
+What changed, after Evan's screenshots from a Samsung S22:
+
+- **The clinic's mark** is smaller: the logo in its round frame (cropped to the circle, as before) and the doctor's name
+  on one slim chip with slightly rounded corners. The video's title is no longer on the picture (the page writes it),
+  except in full screen.
+- **The controls cover less**: smaller middle buttons on a phone (still at least 44px to tap), and the dark fade at the
+  bottom is only as tall as the time, sound, full screen and progress bar.
+- **The big Play button** is a plain white circle with the triangle in the middle of the picture, with no words on
+  screen: dimmed before the tick, ready after. A screen reader still hears what to do.
+- **The patient page's first screen** is tighter on a phone (16px sides, every text one small step smaller, a little
+  more space between blocks, a smaller logo), so the player and its Play button are in view before the box is ticked. **Held sideways** (not full screen), the
+  logo and the sentence under the title step aside, the doctor and the clinic share one line, and the player is no
+  taller than the screen.
+
+Seen on Claude's computer (2026-11-16 and, after Evan's review, 2026-11-17; headless Edge with phone and tablet
+emulation, a local copy of the database with made-up clinics): 360 by 640, 360 by 800, 390 by 844, 800 by 360,
+768 by 1024 and 1280 by 800, before the tick, after it, playing and paused, a placeholder, a wide wordmark, a square
+logo and no logo, and the library's watch page in dark and light.
+**Not seen:** full screen (no browser here can enter it), Safari, and any real device on a real network.
+
+On each device, note the device, browser and version, network, and anything that looks wrong:
+
+1. **Android phone, Chrome (the Samsung S22), upright.** Open a patient link.
+   1. Without scrolling: the logo, the doctor and clinic, the title, the sentence, the box AND the whole player with
+      the Play circle should be on the screen (Chrome's own bars included).
+   2. On the player, top left: the round logo and the doctor's name on a chip with slightly rounded corners, and
+      nothing else; the animation's own title card is mostly clear of it.
+   3. Tick, tap Play. While the controls show: the three middle buttons are smaller than before, the dark fade sits
+      only behind the bottom row, and the time is easy to read over the white frames. Each button is easy to hit.
+   4. Full screen: the video's title comes back above the doctor's name; everything else as before.
+2. **The same phone, held sideways, NOT in full screen.** Reload the link: the doctor and clinic on one line, the
+   title, the box, then the player, which starts on the first screen. Tick: the box folds away and nearly all of the
+   player is in view without scrolling.
+3. **iPhone, Safari, upright and sideways.** As 1 and 2. Full screen hands the video to the iPhone's own player (no
+   mark, as before). Check the Play circle and the mark look the same as in the screenshots.
+4. **iPad, Safari, both ways round**, a patient link and the library's watch page: the larger mark (a 48px circle) and larger middle buttons; full screen keeps the mark, the title and our controls.
+5. **A clinic with a square logo, and one with none**: the round logo, or the initials, beside the doctor's name.
+6. **The library's watch page in a dark clinic and a light clinic**: the Play circle and the mark look the same in both; the
+   page around the player is unchanged.
+
+## Earlier checks (2026-10-15)
+
 What changed (the player-overlay PR, from the 2026-10-08 and 2026-10-15 huddles):
 
 - **Both players** (the patient's link and the surgeon's library) now use our own controls, laid out like Vimeo's,

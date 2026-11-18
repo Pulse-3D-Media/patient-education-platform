@@ -315,6 +315,18 @@ describe("the controls fade while the video plays, for the keyboard too (2026-11
     expect(up).not.toMatch(/class="[^"]*opacity-0[^"]*"><button/);
   });
 
+  it("keeps the group holding the keyboard's focus drawn while the rest fades, so the focused button's ring never disappears (2026-11-18)", () => {
+    const faded = renderPlaying({ showing: false });
+    const fading = [...faded.matchAll(/class="([^"]*transition-opacity[^"]*)"/g)].map(([, c]) => c);
+    expect(fading.length).toBeGreaterThan(0);
+    for (const c of fading) {
+      expect(c).toContain("opacity-0");
+      expect(c).toContain("has-[:focus-visible]:opacity-100");
+    }
+    // Up, nothing extra is needed.
+    expect(renderPlaying({ showing: true })).not.toContain("has-[:focus-visible]:opacity-100");
+  });
+
   it("asks for less motion: no fade animation, the controls simply go and come back", () => {
     const html = renderPlaying({ showing: false });
     const fading = [...html.matchAll(/class="([^"]*transition-opacity[^"]*)"/g)].map(([, c]) => c);

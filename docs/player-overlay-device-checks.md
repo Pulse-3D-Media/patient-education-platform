@@ -192,9 +192,11 @@ sheet, Safari, any real phone. Use a patient link made from `/admin/links` on th
       then "Save or share this link" (a ring). Space ticks the box; the focus is then on Play.
    2. Enter on Play: the video plays and the player has a ring around it. Tab moves through the controls, each with a
       ring, and the progress bar gets a ring around the whole bar. The arrow keys move ten seconds and do not scroll the
-      page. Leave the keys alone for about three seconds while it plays: the controls fade, even with the focus on one
-      of them. Press Enter: the controls come back and nothing else happens; press Enter again: that button acts. Tab
-      while they are faded: they come back and the focus moves on. Pause: they stay up.
+      page. Leave the keys alone for about three seconds while it plays: the controls fade, except the row holding
+      the focused button, which stays drawn with its ring (2026-11-18). Press Enter: that button acts at once. Tab
+      while they are faded: they come back and the focus moves on. Click the picture so the player itself has the
+      focus, wait for the fade, then press Space: the controls come back and nothing else happens; Space again pauses.
+      Pause: they stay up.
    3. "Save or share this link" on a computer without a share sheet: "Link copied." appears under it, and pasting
       into a new tab opens the same link.
    4. Turn JavaScript off (Chrome: Settings, Privacy and security, Site settings, JavaScript) and reload: a grey box

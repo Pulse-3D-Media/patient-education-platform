@@ -52,6 +52,13 @@ describe("a key pressed while the controls have faded over a playing video", () 
     expect(keyFirstPressWhileHidden("ArrowLeft", {})).toBe("show-only");
   });
 
+  it("a key on a button holding the keyboard's focus acts at once: that button stays in sight while the rest fades", () => {
+    for (const key of ["Enter", " ", "ArrowLeft", "m"]) {
+      expect(keyFirstPressWhileHidden(key, {}, true)).toBe("pass");
+      expect(keyFirstPressWhileHidden(key, {}, false)).toBe("show-only");
+    }
+  });
+
   it("the function keys pass (F5 reloads, F6 goes to the address bar)", () => {
     for (const key of ["F1", "F5", "F6", "F11", "F12", "F24"]) {
       expect(keyFirstPressWhileHidden(key)).toBe("pass");

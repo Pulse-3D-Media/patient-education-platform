@@ -359,7 +359,8 @@ export async function checkPayment(args: {
   const after = (await getCheckoutFacts(clinicId))?.facts.status ?? facts.status;
   const messages: Record<CheckPaymentResult["status"], string> = {
     ACTIVE: "Payment confirmed.",
-    INCOMPLETE: "Stripe has not confirmed the payment yet. Nothing has opened, and nothing will until it does.",
+    INCOMPLETE:
+      "Stripe has not confirmed the payment yet. Nothing has opened, and nothing will until it does. If the payment failed, Stripe drops it 23 hours after checkout started; check again after that and you can choose a plan again.",
     NONE: "Stripe has no confirmed payment for your clinic.",
     PAST_DUE: "Your last payment did not go through.",
     CANCELED: "That subscription has ended.",

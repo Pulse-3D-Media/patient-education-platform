@@ -50,6 +50,10 @@ export function AddCategoryForm({ nextOrder }: { nextOrder: number }) {
         It starts not for sale, and the library shows it as Coming soon until a video in it is published. A category is never
         deleted once added.
       </p>
+      <p className="rounded-lg border border-[#f3b94d]/40 bg-[#f3b94d]/10 px-4 py-3 text-sm text-[#f3b94d]">
+        While it is not for sale, the full library is off sale to new buyers. Switch it For sale in the panel above when it is ready, and the
+        full library is offered again. Plans already bought are not affected.
+      </p>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="new-label" className="mb-1 block text-sm font-medium text-[#bfbfbf]">

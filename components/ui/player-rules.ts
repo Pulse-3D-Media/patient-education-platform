@@ -26,6 +26,18 @@ export function pictureTapAction(pointerType: string, controlsShowing: boolean, 
 }
 
 /**
+ * A key pressed while the controls have faded over a playing video. Like the first tap on a faded picture on a phone,
+ * the first press only brings them back ("show-only"), so nobody presses a button they cannot see; the next press acts.
+ * The keys that only move the focus or hold a modifier ("pass") do what they always do: Tab moves on (and the focus
+ * arriving shows the controls), Escape still leaves full screen.
+ */
+export function keyFirstPressWhileHidden(key: string): "show-only" | "pass" {
+  return PASS_KEYS.has(key) ? "pass" : "show-only";
+}
+
+const PASS_KEYS = new Set(["Tab", "Shift", "Control", "Alt", "Meta", "Escape", "CapsLock"]);
+
+/**
  * The letters in the logo's circle when a clinic has no logo (or it does not
  * load): the first letter of its first two real words, "Summit Orthopedics"
  * is "SO", "The Knee Clinic" is "KC". Never empty: a name with no letters at

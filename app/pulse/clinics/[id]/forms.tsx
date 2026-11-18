@@ -8,7 +8,7 @@ import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { availabilityLabel, type CategoryAvailability } from "@/lib/categories";
 import { MAX_LINK_DAYS, MIN_LINK_DAYS } from "@/lib/expiry";
 import { NOTE_MAX_LENGTH, saveNoteDraft, type NoteOutcome } from "@/lib/note-form";
-import { addNoteAction, saveDetailsAction, setManagedAction, setOwnerAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
+import { addNoteAction, resetBillingAction, saveDetailsAction, setManagedAction, setOwnerAction, setPlanAction, setPracticeTypeAction, setStatusAction } from "../../actions";
 import { Outcome, SaveButton, useKeptForm } from "../../FormBits";
 
 /**
@@ -243,6 +243,37 @@ export function ManagedForm({ clinicId, managedByPulse }: { clinicId: string; ma
       </label>
       <div className="flex flex-wrap items-center gap-3">
         <SaveButton pending={pending} />
+        <Outcome state={state} />
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Reset billing on a clinic whose subscription Stripe no longer has. The
+ * server asks Stripe again and refuses while anything is still live there;
+ * the tick box is only so nobody presses it by accident.
+ */
+export function ResetBillingForm({ clinicId }: { clinicId: string }) {
+  const { state, pending, form } = useKeptForm(resetBillingAction);
+  return (
+    <form {...form} className="mt-5 flex flex-col gap-4 border-t border-white/10 pt-5">
+      <input type="hidden" name="clinicId" value={clinicId} />
+      <div>
+        <h3 className="text-[15px] font-semibold text-white">Reset billing</h3>
+        <p className="mt-1 text-sm text-[#bfbfbf]">
+          Only for a clinic whose subscription Stripe no longer has: Stripe&rsquo;s test data was deleted, or the app now uses a different
+          Stripe key (at go-live, every clinic that paid in test mode). It clears the Stripe ids here so the clinic&rsquo;s admin can choose a plan
+          again. It changes nothing in Stripe, charges and refunds nothing, and is refused while Stripe still has a live subscription for this
+          clinic. It is written in the log under your name.
+        </p>
+      </div>
+      <label className="flex min-h-12 cursor-pointer items-start gap-3">
+        <input type="checkbox" name="checkedStripe" value="yes" className="mt-1 h-5 w-5 accent-[#2a829b]" />
+        <span className="text-[15px]">I have checked Stripe, and this clinic&rsquo;s subscription is not there any more.</span>
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <SaveButton pending={pending} label="Reset billing" />
         <Outcome state={state} />
       </div>
     </form>

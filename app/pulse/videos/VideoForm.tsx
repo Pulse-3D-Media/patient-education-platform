@@ -2,14 +2,16 @@
 
 import type { Category } from "@/lib/categories";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { INPUT, LABEL, TEXTAREA } from "@/components/ui/styles";
 import { DEFAULT_CATEGORY_LIST } from "@/lib/categories";
 import { chaptersKey, chaptersToLines, parseChapterLines, type Chapter } from "@/lib/chapters";
 import { formatDuration, parseDuration } from "@/lib/format";
 import { ACCEPTED_UPLOAD_TYPES } from "@/lib/mux-upload";
-import { saveVideoAction } from "../actions";
+import { shownBoxesFor } from "@/lib/video-form-guard";
+import { countWorkingLinksAction, saveVideoAction } from "../actions";
 import { ChaptersEditor, type EditorLine } from "./ChaptersEditor";
+import { useConfirmedSubmit, type Question } from "../ConfirmPopup";
 import { Outcome, SaveButton, useKeptForm } from "../FormBits";
 import { describePhase, refuseFile, useMuxUpload } from "./useMuxUpload";
 
@@ -40,6 +42,18 @@ export const REPLACE_PLACEHOLDER_CONFIRM = "Links already sent will now play the
 /** The sentence a staff member confirms before clearing the Mux id of a video that has no CDN address to fall back to. */
 export const CLEAR_ONLY_SOURCE_CONFIRM =
   "This video has no CDN address. Clearing the Mux playback id leaves nothing to play, and it cannot be published until a file is uploaded. Clear it anyway?";
+
+/**
+ * The first sentence of the yes asked before a video is unpublished: how many
+ * links that stops right now (countWorkingLinksAction), or, when they could
+ * not be counted, that it stops all of them.
+ */
+export function unpublishSentence(count: number | null): string {
+  const after = "No new link can be made for it, and it leaves the library, until it is published again.";
+  if (count === null) return `This stops every link to this video that works right now (they could not be counted just now). ${after}`;
+  if (count === 0) return `No link to this video works right now, so none stops. ${after}`;
+  return `This stops ${count} ${count === 1 ? "link" : "links"} to this video that ${count === 1 ? "works" : "work"} right now: a patient who opens one sees "not available right now". ${after}`;
+}
 
 /**
  * The one form for adding and editing a video, saving through
@@ -111,30 +125,45 @@ export function VideoForm({
     setFileProblem(chosen ? refuseFile(chosen) : null);
   }
 
-  function confirmBeforeSend(event: FormEvent<HTMLFormElement>) {
-    const elements = event.currentTarget.elements;
-    // The chapters first, with the server's own rules and the length as typed: nothing to confirm if they would be refused.
-    if (video) {
-      const lengthBox = elements.namedItem("durationSeconds") as HTMLInputElement | null;
-      const checked = parseChapterLines(chapterLines, parseDuration(lengthBox?.value ?? "") ?? null);
-      setChapterProblem("error" in checked ? checked.error : null);
-      if ("error" in checked) {
-        event.preventDefault();
-        return;
-      }
-      sentChapters.current = chaptersKey(checked.chapters);
-    }
+  /**
+   * What to ask before the form is sent (see useConfirmedSubmit). The
+   * chapters are checked first, with the server's own rules and the length
+   * as typed: nothing to confirm if they would be refused. Then one popup
+   * holds every sentence that applies: unpublishing (with how many links it
+   * stops right now, asked of the server at this moment), a placeholder
+   * becoming the finished animation, and clearing the only file.
+   */
+  function ask(formElement: HTMLFormElement): Question | null | false | Promise<Question | null> {
+    if (!video) return null;
+    const elements = formElement.elements;
+    const lengthBox = elements.namedItem("durationSeconds") as HTMLInputElement | null;
+    const checked = parseChapterLines(chapterLines, parseDuration(lengthBox?.value ?? "") ?? null);
+    setChapterProblem("error" in checked ? checked.error : null);
+    if ("error" in checked) return false;
+    sentChapters.current = chaptersKey(checked.chapters);
+
+    const sentences: string[] = [];
     const placeholderBox = elements.namedItem("isPlaceholder") as HTMLInputElement | null;
-    if (video?.isPlaceholder && placeholderBox && !placeholderBox.checked && !window.confirm(REPLACE_PLACEHOLDER_CONFIRM)) {
-      event.preventDefault();
-      return;
-    }
+    if (video.isPlaceholder && placeholderBox && !placeholderBox.checked) sentences.push(REPLACE_PLACEHOLDER_CONFIRM);
     const muxBox = elements.namedItem("muxPlaybackId") as HTMLInputElement | null;
     const addressBox = elements.namedItem("videoUrl") as HTMLInputElement | null;
-    if (video?.muxPlaybackId && muxBox && !muxBox.value.trim() && addressBox && !addressBox.value.trim() && !window.confirm(CLEAR_ONLY_SOURCE_CONFIRM)) {
-      event.preventDefault();
+    if (video.muxPlaybackId && muxBox && !muxBox.value.trim() && addressBox && !addressBox.value.trim()) sentences.push(CLEAR_ONLY_SOURCE_CONFIRM);
+
+    const publishedBox = elements.namedItem("isPublished") as HTMLInputElement | null;
+    if (video.isPublished && publishedBox && !publishedBox.checked) {
+      // The count is asked for now, not when the page was drawn, so it says how many links stop at this moment.
+      return countWorkingLinksAction(video.id)
+        .catch(() => ({ error: "not counted" }))
+        .then((answer) => ({
+          title: "Unpublish this video?",
+          sentences: [unpublishSentence("count" in answer ? answer.count : null), ...sentences],
+          yes: "Yes, unpublish it",
+          danger: true,
+        }));
     }
+    return sentences.length > 0 ? { title: "Save this change?", sentences, yes: "Yes, save" } : null;
   }
+  const { onSubmit, popup } = useConfirmedSubmit(ask);
 
   const phaseLine = describePhase(phase);
   const addingWithFile = !video && file && !fileProblem;
@@ -191,9 +220,14 @@ export function VideoForm({
         </div>
       )}
 
-      <form {...form} onSubmit={confirmBeforeSend} className="flex flex-col gap-4">
+      <form {...form} onSubmit={onSubmit} className="flex flex-col gap-4">
         {video && <input type="hidden" name="id" value={video.id} />}
         {addingWithFile && <input type="hidden" name="uploadPending" value="1" />}
+        {/* What the form was SHOWING for the title, category, poster, notes, Published and Placeholder. The server keeps the
+            row's current value for any of them the staff member did not change, so a page left open cannot undo a colleague's
+            publish, unpublish or other save (lib/video-form-guard.ts). */}
+        {video &&
+          Object.entries(shownBoxesFor(video)).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
         {/* What the form was SHOWING for the three boxes an upload fills in. The server keeps the row's value for any of
             them the staff member did not change, so a form drawn before an upload finished cannot wipe what the upload wrote. */}
         {video && <input type="hidden" name="shownMuxPlaybackId" value={video.muxPlaybackId ?? ""} />}
@@ -306,6 +340,7 @@ export function VideoForm({
               <span className="block text-sm text-[#bfbfbf]">
                 Off takes it out of the library and the admin console, and every link already sent stops working until it is published again. A
                 video with no file yet cannot be published.
+                {video?.isPublished && " Unticking it asks for a yes first, saying how many links it stops."}
               </span>
             </span>
           </label>
@@ -329,10 +364,12 @@ export function VideoForm({
 
         {video && video.shareCount > 0 && (
           <p className="text-sm text-[#bfbfbf]">
-            {video.shareCount} {video.shareCount === 1 ? "link points" : "links point"} at this video. They keep working after a save and
-            play whatever it now says.
+            {video.shareCount} {video.shareCount === 1 ? "link has" : "links have"} been made for this video. A save keeps them pointing at
+            it, so a link that still works plays whatever the video now is. Unpublishing it stops every one of them until it is published
+            again.
           </p>
         )}
+        {popup}
 
         <div className="flex flex-wrap items-center gap-3">
           <SaveButton pending={pending || busy} label={video ? "Save video" : addingWithFile ? "Add video and upload" : "Add video"} />

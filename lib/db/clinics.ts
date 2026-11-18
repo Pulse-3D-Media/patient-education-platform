@@ -12,7 +12,7 @@ import { checkSeatReduction, isClerkUserId, overAllocatedWords, seatSummary } fr
 import { readBillingFacts } from "./billing";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
-import { countSeatsInUseIn } from "./seats";
+import { countSeatsInUseIn, seatSoloOwnerIfDue } from "./seats";
 
 /**
  * Queries for the Clinic table.
@@ -462,6 +462,11 @@ async function changeClinicWithLog(
 
     const clinic = await tx.clinic.update({ where: { id: clinicId }, data: values, select: PULSE_CLINIC_FIELDS });
     await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: changedBy }, select: { id: true } });
+    // A clinic Pulse staff have just opened, or given its first seats, seats
+    // its owner when nobody else holds or is invited to a seat (the rule is
+    // ownerAutoSeatDue() in lib/seats.ts). Under the same lock, in the same
+    // transaction; most changes are not an opening and it does nothing.
+    await seatSoloOwnerIfDue(tx, clinicId, before);
     return { clinic, logged: body };
   });
 }

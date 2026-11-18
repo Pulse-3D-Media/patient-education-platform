@@ -44,7 +44,7 @@ export type Person = {
   /** The seat hold their membership carries, when they accepted an invitation sent from our People page. See lib/seats.ts. */
   seatHoldId: string | null;
   /**
-   * "Dr. Jane Smith", from their first and last name in Clerk: what patients
+   * "Jane Smith", their first and last name in Clerk as they are (no "Dr." added since 2026-11-16): what patients
    * see on links they send unless an admin typed another name for them
    * (lib/sender-name.ts). Null when Clerk has no name; never their email.
    */

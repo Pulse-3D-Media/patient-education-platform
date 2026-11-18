@@ -3,7 +3,10 @@ import type { ClinicAccess, PublishedCounts } from "../access";
 import type { CategoryDetails } from "../categories";
 import { getCategoryList } from "./category-config";
 import type { Chapter } from "../chapters";
+import { hasPlayableSource } from "../video";
+import { keepUnchangedFields, type GuardedVideoValues, type ShownVideoValues } from "../video-form-guard";
 import { prisma } from "./client";
+import { lockVideoForEdit } from "./video-lock";
 
 /**
  * Queries for the Video table.
@@ -305,6 +308,72 @@ export async function createVideo(input: VideoInput) {
  */
 export async function updateVideo(id: string, input: VideoInput) {
   return prisma.video.update({ where: { id }, data: input });
+}
+
+/** A save from the video form that cannot be made as the row now stands. The message is a plain sentence for the staff member. */
+export class VideoSaveRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "VideoSaveRefusedError";
+  }
+}
+
+/** The guarded fields of a VideoInput (see lib/video-form-guard.ts). */
+function guardedPart(input: VideoInput): GuardedVideoValues {
+  return {
+    title: input.title,
+    category: input.category,
+    posterUrl: input.posterUrl,
+    notes: input.notes,
+    isPublished: input.isPublished,
+    isPlaceholder: input.isPlaceholder,
+  };
+}
+
+/**
+ * Save the video form from /pulse/videos/<id>, keeping a colleague's save
+ * that this form did not see. One transaction:
+ *
+ *   1. lock the row (lockVideoForEdit), so a second save waits for this one;
+ *   2. for each guarded field (title, category, poster, notes, Published,
+ *      Placeholder), keep the row's current value when the staff member left
+ *      it as their form showed it, and take theirs when they changed it
+ *      (keepUnchangedFields in lib/video-form-guard.ts);
+ *   3. refuse, writing nothing, a result that would be published with
+ *      nothing to play (possible only when a colleague published it while
+ *      this form cleared its file);
+ *   4. write.
+ *
+ * Answers what Published was before and after, so the action can record a
+ * publish or an unpublish under the staff member's name. Null for an
+ * unknown id.
+ */
+export async function updateVideoKeepingOthers(
+  id: string,
+  input: VideoInput,
+  shown: ShownVideoValues,
+): Promise<{ before: { isPublished: boolean }; after: { id: string; title: string; isPublished: boolean } } | null> {
+  return prisma.$transaction(async (tx) => {
+    const current = await lockVideoForEdit(tx, id);
+    if (!current) return null;
+    const data: VideoInput = { ...input, ...keepUnchangedFields(guardedPart(input), shown, current) };
+    if (data.isPublished && !hasPlayableSource(data)) {
+      throw new VideoSaveRefusedError("This video was published by someone else while your page was open, and this save would leave it with no file. Reload the page and look again.");
+    }
+    const after = await tx.video.update({ where: { id }, data, select: { id: true, title: true, isPublished: true } });
+    return { before: { isPublished: current.isPublished }, after };
+  });
+}
+
+/**
+ * How many links to this video work right now: not run out (expiresAt still
+ * ahead) and the video published. A paused link has run out, so it is not
+ * counted; nor is a finished one. One COUNT in the database, never a list
+ * and never a code. Shown before a staff member unpublishes the video,
+ * because unpublishing stops every one of them at once.
+ */
+export async function countWorkingLinksForVideo(videoId: string, now: Date = new Date()): Promise<number> {
+  return prisma.share.count({ where: { videoId, expiresAt: { gt: now }, video: { isPublished: true } } });
 }
 
 // ---------------------------------------------------------------------------

@@ -26,7 +26,7 @@ import { AdminSwitch, InviteForm, OwnerHandoff, PatientNameEditor, RemoveButton,
  *      they stand with a seat, and Remove. The owner's row cannot be switched
  *      to Member or removed; the owner decides whether to take a seat. A
  *      person holding a seat sends links to patients, so their row also
- *      says the name patients see ("Dr. Jane Smith"), with Change.
+ *      says the name patients see ("Jane Smith", or "Dr. Jane Smith, DO" once a title is chosen), with Change.
  *   3. Invite someone (holds a seat until accepted), and the open invitations
  *      with Revoke.
  *   4. For the owner: hand the account to another admin.

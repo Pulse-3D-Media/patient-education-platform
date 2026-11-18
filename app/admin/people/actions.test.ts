@@ -8,6 +8,7 @@ import {
   handOffOwnerAction,
   inviteAction,
   releaseMySeatAction,
+  takeMySeatAction,
   removePersonAction,
   revokeInvitationAction,
   setAdminAction,
@@ -216,6 +217,29 @@ describe("what an admin can do", () => {
     expect(await releaseMySeatAction()).toEqual({});
     expect(await handOffOwnerAction(other)).toMatchObject({ message: expect.stringContaining("is now the account owner") });
     expect((await prisma.clinic.findUnique({ where: { id: clinicId }, select: { ownerClerkUserId: true } }))?.ownerClerkUserId).toBe(other);
+  });
+
+  it("Take a seat, from the library: the signed-in admin takes a free seat for themselves, once, and a member cannot", async () => {
+    const [member, admin] = [user(), user()];
+    const { clinicId, orgId, owner } = await makeClinic(2, "ACTIVE", [{ userId: member }, { userId: admin, role: "org:admin" }]);
+
+    fakeClerk.signIn(member, orgId);
+    expect((await takeMySeatAction()).error).toBe("Only your clinic's office admins can change this.");
+
+    fakeClerk.signIn(owner, orgId);
+    expect(await takeMySeatAction()).toEqual({});
+    // A second tap, or a second tab, is harmless: still one seat.
+    expect(await takeMySeatAction()).toEqual({});
+    expect((await listSeatRows(clinicId)).map((row) => row.clerkUserId)).toEqual([owner]);
+
+    // The last seat goes to the other admin; then nobody else can take one.
+    fakeClerk.signIn(admin, orgId);
+    expect(await takeMySeatAction()).toEqual({});
+    fakeClerk.signIn(owner, orgId);
+    expect(await releaseMySeatAction()).toEqual({});
+    fakeClerk.signIn(member, orgId);
+    expect((await takeMySeatAction()).error).toBe("Only your clinic's office admins can change this.");
+    expect((await listSeatRows(clinicId)).map((row) => row.clerkUserId)).toEqual([admin]);
   });
 
   it("answers a failure in a plain sentence, with nothing changed", async () => {

@@ -94,27 +94,25 @@ describe("summarizeSharesForClinic", () => {
       expiringSoon: 1,
       notWorking: 1,
       madeRecently: 4,
-      playStarts: 14,
     });
   });
 
-  it("drops a cancelled link out of every number, play starts included, because cancelling deletes the row", async () => {
+  it("drops a deleted link out of every number", async () => {
     const clinic = await makeClinic("Vitest overview clinic cancel");
     const kept = await makeShare(clinic, publishedVideo, 60, 2);
     const cancelled = await makeShare(clinic, publishedVideo, 60, 5);
-    expect(await summarizeSharesForClinic(clinic)).toEqual({ working: 2, expiringSoon: 0, notWorking: 0, madeRecently: 2, playStarts: 7 });
+    expect(await summarizeSharesForClinic(clinic)).toEqual({ working: 2, expiringSoon: 0, notWorking: 0, madeRecently: 2 });
 
     expect(await deleteShareForClinic(clinic, cancelled.code)).toBe(true);
 
-    // The cancelled link's five play starts are gone with it: these are not lifetime totals.
-    expect(await summarizeSharesForClinic(clinic)).toEqual({ working: 1, expiringSoon: 0, notWorking: 0, madeRecently: 1, playStarts: 2 });
+    expect(await summarizeSharesForClinic(clinic)).toEqual({ working: 1, expiringSoon: 0, notWorking: 0, madeRecently: 1 });
     expect((await listRecentSharesForClinic(clinic, 5)).map((share) => share.id)).toEqual([kept.id]);
   });
 
   it("gives another clinic its own numbers, and an empty clinic zeros", async () => {
-    expect(await summarizeSharesForClinic(clinicB)).toEqual({ working: 1, expiringSoon: 0, notWorking: 0, madeRecently: 1, playStarts: 9 });
+    expect(await summarizeSharesForClinic(clinicB)).toEqual({ working: 1, expiringSoon: 0, notWorking: 0, madeRecently: 1 });
     const empty = await makeClinic("Vitest overview clinic empty");
-    expect(await summarizeSharesForClinic(empty)).toEqual({ working: 0, expiringSoon: 0, notWorking: 0, madeRecently: 0, playStarts: 0 });
+    expect(await summarizeSharesForClinic(empty)).toEqual({ working: 0, expiringSoon: 0, notWorking: 0, madeRecently: 0 });
   });
 });
 

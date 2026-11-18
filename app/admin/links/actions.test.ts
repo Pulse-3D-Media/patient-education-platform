@@ -155,13 +155,13 @@ describe("who may press Create link", () => {
 });
 
 describe("who the link is from", () => {
-  it("makes the link from the surgeon picked, with their id and 'Dr. First Last' copied onto it, in the admin's clinic", async () => {
+  it("makes the link from the surgeon picked, with their id and their bare name from Clerk copied onto it, in the admin's clinic", async () => {
     fakeClerk.signIn(adminA, orgActive);
     const result = await createLinkAction(videoId, surgeonA);
-    expect(result).toEqual({ ok: true, code: expect.stringMatching(/^[a-z0-9]{10}$/), senderName: "Dr. Jane Smith" });
+    expect(result).toEqual({ ok: true, code: expect.stringMatching(/^[a-z0-9]{10}$/), senderName: "Jane Smith" });
 
     const share = await shareOf((result as { code: string }).code);
-    expect(share).toMatchObject({ clinicId: clinicA, senderUserId: surgeonA, senderName: "Dr. Jane Smith" });
+    expect(share).toMatchObject({ clinicId: clinicA, senderUserId: surgeonA, senderName: "Jane Smith" });
     // Made under the first-play rule, with the days copied onto it; the button chose none of this.
     expect(share.expiryPolicy).toBe("FIRST_PLAY");
     expect(share.firstPlayedAt).toBeNull();
@@ -171,7 +171,7 @@ describe("who the link is from", () => {
   it("lets an admin who holds a seat send from themselves", async () => {
     fakeClerk.signIn(adminA, orgActive);
     const result = await createLinkAction(videoId, adminA);
-    expect(result).toMatchObject({ ok: true, senderName: "Dr. Pat Lee" });
+    expect(result).toMatchObject({ ok: true, senderName: "Pat Lee" });
   });
 
   it("uses the name typed on People, and a later change to it never changes a link already made", async () => {
@@ -200,7 +200,7 @@ describe("who the link is from", () => {
     const code = (kept as { code: string }).code;
     await prisma.seatAllocation.delete({ where: { clinicId_clerkUserId: { clinicId: clinicA, clerkUserId: surgeonA } } });
     try {
-      expect(await shareOf(code)).toMatchObject({ senderUserId: surgeonA, senderName: "Dr. Jane Smith" });
+      expect(await shareOf(code)).toMatchObject({ senderUserId: surgeonA, senderName: "Jane Smith" });
       // And no new link can be made from them.
       expect(await createLinkAction(videoId, surgeonA)).toMatchObject({ ok: false, error: expect.stringContaining("does not hold a seat") });
     } finally {

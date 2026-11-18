@@ -311,8 +311,11 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).toContain("Overview");
     expect(html).toContain("Needs a look");
     expect(html).toContain("Working right now");
-    expect(html).toContain("Play starts, current links");
-    expect(html).toContain("not counting links you have cancelled");
+    // No usage numbers for clinics (2026-10-08, and the play starts taken off on 2026-11-16), and no word of cancelling a link, which clinics cannot do.
+    expect(html).not.toContain("Play starts");
+    expect(html).not.toContain("play start");
+    expect(html).not.toContain("cancelled");
+    expect(html).toContain("Made in the last 30 days");
     expect(html).not.toContain("all links");
     for (const href of ["/admin/links", "/admin/people", "/admin/billing"]) expect(html).toContain(`href="${href}"`);
     // No Reports section, in the navigation or the cards: clinics get no reports (Van, 2026-10-08).
@@ -404,7 +407,9 @@ describe("an admin of an ACTIVE clinic", () => {
     const html = await render(AdminOverviewPage, "/admin");
     expect(html).toContain("if never played");
     expect(html).toContain("Not played yet");
-    expect(html).toContain("2 play starts");
+    // A played link says so in a word, never how many times.
+    expect(html).toContain("Played");
+    expect(html).not.toContain("2 play starts");
   });
 
   it("sees an estimate on Billing that is labelled as one", async () => {
@@ -624,7 +629,7 @@ describe("who a link is from, on People and on the pamphlet", () => {
       const html = await render(PeoplePage, "/admin/people");
       expect(html).toContain("Patients see: <span");
       expect(html).toContain("Jane Smith, PA-C");
-      expect(html).toContain("Dr. Vi Test");
+      expect(html).toContain("Vi Test</span>");
       expect(html).toContain("Change the name patients see for Jane Smith");
       // Clerk's organization panel is gone: its Members tab went around our seats and its General tab could delete the clinic.
       expect(html).not.toContain("Clinic name and logo");

@@ -15,6 +15,7 @@ import { playbackForLibraryVideo } from "@/lib/playback-auth";
 import { libraryStripName } from "@/lib/sender-name";
 import { toLibraryItems } from "../../items";
 import { LibraryBrowser } from "../../LibraryBrowser";
+import { seatHelpFor } from "../../seat-help";
 import { BackLink } from "./BackLink";
 import { WatchView } from "./WatchView";
 
@@ -87,7 +88,7 @@ export default async function WatchPage({ params }: PageProps<"/library/watch/[v
         <BackLink fallback={`/library/${category.slug}`} label="Back" />
       </div>
       {/* A key per video, so moving from one watch page to the next starts the hearts and the player afresh. */}
-      <LibraryBrowser key={video.id} heartedIds={heartedIds} canSend={seat !== null}>
+      <LibraryBrowser key={video.id} heartedIds={heartedIds} canSend={seat !== null} seatHelp={await seatHelpFor(clinic, seat)}>
         <WatchView
           video={item}
           category={{ label: category.label, slug: category.slug, image: category.image }}

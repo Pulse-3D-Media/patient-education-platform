@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import type { NoSeatHelp } from "@/lib/seats";
 import { sendShareAction, type SendResult } from "./[category]/actions";
 import { SendPanel } from "./[category]/SendPanel";
 import { setFavoriteAction, type FavoriteResult } from "./actions";
@@ -44,6 +45,8 @@ type Library = {
   send: ((item: LibraryItem) => void) | null;
   /** Make a link for this video and show its QR code large on the screen; null for someone without a seat. */
   showQr: ((item: LibraryItem) => void) | null;
+  /** For someone without a seat: which line to show instead of Send (NoSeatNote). */
+  seatHelp: NoSeatHelp;
 };
 
 const LibraryContext = createContext<Library | null>(null);
@@ -66,6 +69,7 @@ export function LibraryBrowser({
   favorites: initialFavorites = [],
   heartedIds = [],
   canSend,
+  seatHelp = "ask",
 }: {
   children: ReactNode;
   /** "My favorites" as the server read it, most recently hearted first. Only the home page shows the row. */
@@ -74,6 +78,8 @@ export function LibraryBrowser({
   heartedIds?: string[];
   /** True for someone holding a seat: they get Send (and, on the watch page, Show QR on screen). */
   canSend: boolean;
+  /** For someone without a seat: Take a seat (the owner, a seat free), a link to People (an admin), or ask an admin. From seatHelpFor() on the server. */
+  seatHelp?: NoSeatHelp;
 }) {
   const [favorites, setFavorites] = useState<LibraryItem[]>(initialFavorites);
   const [hearted, setHearted] = useState<Set<string>>(() => new Set([...initialFavorites.map((item) => item.id), ...heartedIds]));
@@ -170,6 +176,7 @@ export function LibraryBrowser({
     favorites,
     send: canSend ? (video) => makeLink(video, "send") : null,
     showQr: canSend ? (video) => makeLink(video, "qr") : null,
+    seatHelp,
   };
 
   return (

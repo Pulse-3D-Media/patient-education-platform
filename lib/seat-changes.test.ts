@@ -352,7 +352,7 @@ describe("the name patients see", () => {
   const choice = (name: string, credential: string, other = "") => ({ name, credential, other });
   const nameOf = async (clinicId: string, userId: string) => (await checkSeats(clinicId)).people.find((person) => person.userId === userId);
 
-  it("is Dr. First Last until someone chooses; an admin sets a name and credential for anyone seated, logged, and Clerk is never written", async () => {
+  it("is the bare First Last until someone chooses (since 2026-11-16); an admin sets a name and credential for anyone seated, logged, and Clerk is never written", async () => {
     const dr = user();
     const pa = user();
     const { clinicId, orgId, actor } = await makeClinic(3, [
@@ -362,7 +362,7 @@ describe("the name patients see", () => {
     await seatsDb.reserveSeat(clinicId, dr);
     await seatsDb.reserveSeat(clinicId, pa);
 
-    expect(await nameOf(clinicId, dr)).toMatchObject({ patientName: "Dr. Jane Smith", typedPatientName: null, defaultPatientName: "Dr. Jane Smith" });
+    expect(await nameOf(clinicId, dr)).toMatchObject({ patientName: "Jane Smith", typedPatientName: null, defaultPatientName: "Jane Smith" });
 
     expect(await setPatientName({ clinicId, targetUserId: dr, choice: choice("  Jane  Smith ", "DO"), actor })).toEqual({
       ok: true,
@@ -373,8 +373,8 @@ describe("the name patients see", () => {
     expect(await nameOf(clinicId, dr)).toMatchObject({ patientName: "Dr. Jane Smith, DO", typedPatientName: "Dr. Jane Smith, DO" });
     expect(await nameOf(clinicId, pa)).toMatchObject({ patientName: "Pat Lee, PA-C" });
     expect((await logOf(clinicId)).slice(-2)).toEqual([
-      `Olive Owner (clinic admin): Name patients see for Jane Smith changed from the default, "Dr. Jane Smith" to "Dr. Jane Smith, DO". Links already sent keep the old name.`,
-      `Olive Owner (clinic admin): Name patients see for Pat Lee changed from the default, "Dr. Pat Lee" to "Pat Lee, PA-C". Links already sent keep the old name.`,
+      `Olive Owner (clinic admin): Name patients see for Jane Smith changed from the default, "Jane Smith" to "Dr. Jane Smith, DO". Links already sent keep the old name.`,
+      `Olive Owner (clinic admin): Name patients see for Pat Lee changed from the default, "Pat Lee" to "Pat Lee, PA-C". Links already sent keep the old name.`,
     ]);
 
     // Saving the same choice again writes nothing.
@@ -404,14 +404,14 @@ describe("the name patients see", () => {
       name: "Jane Smith, LAc",
     });
     expect((await logOf(clinicId)).at(-1)).toBe(
-      `Jane Smith (surgeon): Name patients see for Jane Smith changed from the default, "Dr. Jane Smith" to "Jane Smith, LAc". Links already sent keep the old name.`,
+      `Jane Smith (surgeon): Name patients see for Jane Smith changed from the default, "Jane Smith" to "Jane Smith, LAc". Links already sent keep the old name.`,
     );
 
     // Someone else's id slipped into what was sent is not read: only the signed-in person's own seat changes.
     const forged = { ...choice("Hacked Name", "MD"), userId: colleague, targetUserId: colleague, clerkUserId: colleague };
     expect(await setOwnPatientName({ clinicId, choice: forged, actor: me })).toMatchObject({ ok: true, name: "Dr. Hacked Name, MD" });
     expect(await nameOf(clinicId, dr)).toMatchObject({ patientName: "Dr. Hacked Name, MD" });
-    expect(await nameOf(clinicId, colleague)).toMatchObject({ patientName: "Dr. Cole League", typedPatientName: null });
+    expect(await nameOf(clinicId, colleague)).toMatchObject({ patientName: "Cole League", typedPatientName: null });
   });
 
   it("refuses a bad choice, someone without a seat, and someone in another clinic, on both paths, changing nothing", async () => {
@@ -425,7 +425,7 @@ describe("the name patients see", () => {
     // The admin's path.
     expect(await setPatientName({ clinicId, targetUserId: dr, choice: choice("<b>Jane</b>", "MD"), actor })).toMatchObject({ ok: false, message: expect.stringContaining("letters") });
     expect(await setPatientName({ clinicId, targetUserId: dr, choice: choice("Dr. Jane Smith", "MD"), actor })).toMatchObject({ ok: false, message: expect.stringContaining('Leave "Dr." out') });
-    expect(await setPatientName({ clinicId, targetUserId: dr, choice: choice("Jane Smith", ""), actor })).toEqual({ ok: false, message: "Choose a credential, or None." });
+    expect(await setPatientName({ clinicId, targetUserId: dr, choice: choice("Jane Smith", ""), actor })).toEqual({ ok: false, message: "Choose a title, or None for just the name." });
     expect(await setPatientName({ clinicId, targetUserId: dr, choice: "Dr. Jane Smith, MD", actor })).toMatchObject({ ok: false });
     expect(await setPatientName({ clinicId, targetUserId: waiting, choice: choice("Wait Ing", "NP"), actor })).toMatchObject({
       ok: false,
@@ -438,7 +438,7 @@ describe("the name patients see", () => {
     });
 
     // The surgeon's own path.
-    expect(await setOwnPatientName({ clinicId, choice: choice("Jane", "PhD"), actor: { userId: dr, name: "Jane Smith" } })).toEqual({ ok: false, message: "Choose a credential, or None." });
+    expect(await setOwnPatientName({ clinicId, choice: choice("Jane", "PhD"), actor: { userId: dr, name: "Jane Smith" } })).toEqual({ ok: false, message: "Choose a title, or None for just the name." });
     expect(await setOwnPatientName({ clinicId, choice: choice("Wait Ing", "NP"), actor: { userId: waiting, name: "Wait Ing" } })).toEqual({
       ok: false,
       message: "Only people holding a seat send links, and you do not hold one right now. Ask your clinic's office admin.",

@@ -71,7 +71,7 @@ let finishedOnlyClinic = "";
 let placeholderId = "";
 let unpublishedId = "";
 
-/** A clinic, its organization in the stand-in, and one surgeon ("Dr. Jo <n>") who is a plain member holding a seat. */
+/** A clinic, its organization in the stand-in, and one surgeon ("Jo <n>" to patients) who is a plain member holding a seat. */
 async function makeClinic(name: string, clerkOrgId: string, data: { status?: "ACTIVE" | "PENDING"; categories?: ("KNEE" | "HIP")[]; showPlaceholders?: boolean }) {
   const surgeon = `user_surgeon${randomBytes(6).toString("hex")}`;
   surgeonOf.set(clerkOrgId, surgeon);
@@ -189,11 +189,11 @@ describe("sendShareAction", () => {
     expect(result.qrImage.startsWith("data:image/svg+xml")).toBe(true);
     expect(result.daysAfterFirstPlay).toBeGreaterThan(0);
     expect(new Date(result.unclaimedUntil).getTime()).toBeGreaterThan(Date.now());
-    expect(result.senderName).toBe("Dr. Jo Seated");
+    expect(result.senderName).toBe("Jo Seated");
 
     // From the signed-in surgeon automatically: the action takes nothing but a video id.
     const share = await prisma.share.findUnique({ where: { code: result.code }, select: { clinicId: true, videoId: true, senderUserId: true, senderName: true } });
-    expect(share).toEqual({ clinicId: kneeClinic, videoId: placeholderId, senderUserId: surgeonOf.get(orgKnee), senderName: "Dr. Jo Seated" });
+    expect(share).toEqual({ clinicId: kneeClinic, videoId: placeholderId, senderUserId: surgeonOf.get(orgKnee), senderName: "Jo Seated" });
   });
 
   it("refuses someone in the clinic who holds no seat, in plain words, and writes nothing", async () => {
@@ -362,7 +362,7 @@ describe("setMyPatientNameAction: a surgeon sets their own name for patients", (
       const note = await prisma.clinicNote.findFirst({ where: { clinicId: kneeClinic }, orderBy: { createdAt: "desc" }, select: { authorName: true, body: true } });
       expect(note).toEqual({
         authorName: "Jo Seated (surgeon)",
-        body: `Name patients see for Jo Seated changed from the default, "Dr. Jo Seated" to "Dr. Jo Seated, DO". Links already sent keep the old name.`,
+        body: `Name patients see for Jo Seated changed from the default, "Jo Seated" to "Dr. Jo Seated, DO". Links already sent keep the old name.`,
       });
 
       const sent = await sendShareAction(placeholderId);

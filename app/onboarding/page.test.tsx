@@ -18,7 +18,10 @@ import OnboardingPage from "./page";
 vi.mock("@clerk/nextjs/server", () => ({ auth: Object.assign(vi.fn(), { protect: vi.fn() }), clerkClient: vi.fn() }));
 vi.mock("@clerk/nextjs", () => ({
   CreateOrganization: () => <span data-testid="create-organization" />,
-  OrganizationList: () => <span data-testid="organization-list" />,
+  // The props that matter are written out, so a test can see the create button is hidden and where people go.
+  OrganizationList: (props: { appearance?: unknown; afterCreateOrganizationUrl?: string }) => (
+    <span data-testid="organization-list" data-appearance={JSON.stringify(props.appearance ?? null)} data-after-create={props.afterCreateOrganizationUrl} />
+  ),
 }));
 vi.mock("next/navigation", () => ({
   redirect: (to: string) => {
@@ -31,15 +34,18 @@ function clinic(status: ClinicStatus, who: { isOwner: boolean; isAdmin: boolean 
   return { id: "clinic_vitest", name: "Vitest clinic", status, graceEndsAt: null, ...who } as unknown as CurrentClinic;
 }
 
-function signedIn(orgId: string | null) {
+function signedIn(orgId: string | null, has: { memberships?: number; invitations?: number } = {}) {
   vi.mocked(auth.protect).mockResolvedValue({ userId: "user_vitest", orgId } as never);
   vi.mocked(clerkClient).mockResolvedValue({
     users: {
-      getOrganizationMembershipList: async () => ({ data: [], totalCount: 0 }),
-      getOrganizationInvitationList: async () => ({ data: [], totalCount: 0 }),
+      getOrganizationMembershipList: async () => ({ data: [], totalCount: has.memberships ?? 0 }),
+      getOrganizationInvitationList: async () => ({ data: [], totalCount: has.invitations ?? 0 }),
     },
   } as never);
 }
+
+/** The page as drawn, for someone with no active clinic, with what is in the address after "?". */
+const page = async (query: Record<string, string> = {}) => renderToStaticMarkup(await OnboardingPage({ searchParams: Promise.resolve(query) }));
 
 const where = async () => {
   try {
@@ -81,5 +87,50 @@ describe("/onboarding sends each person on", () => {
     const html = renderToStaticMarkup(await OnboardingPage());
     expect(html).toContain("Set up your clinic");
     expect(html).toContain('data-testid="create-organization"');
+    expect(html).not.toContain('data-testid="organization-list"');
+  });
+});
+
+/**
+ * An invited person used to see Clerk's list with "Create organization" beside
+ * the invitation, and the words "You can create a new one here too", and could
+ * make a second, empty clinic by accident (audit C4, 2026-11-16). Now someone
+ * with an invitation or a clinic sees only that; creating is behind one quiet
+ * link. Clerk's own list is a stand-in here, so what is proved is what this page
+ * asks of it: the real list's look, and that its create button really is gone,
+ * is a check on the preview with a real invitation.
+ */
+describe("/onboarding for someone with an invitation or a clinic", () => {
+  const hidden = JSON.stringify({ elements: { organizationListCreateOrganizationActionButton: { display: "none" } } });
+
+  for (const [who, has] of [
+    ["an invited person", { invitations: 1 }],
+    ["a member of a clinic with none active", { memberships: 1 }],
+    ["someone with both", { memberships: 1, invitations: 2 }],
+  ] as const) {
+    it(`shows ${who} only the list, with Clerk's create button hidden, and creating behind a quiet link`, async () => {
+      signedIn(null, has);
+      const html = await page();
+      expect(html).toContain("Join your clinic");
+      expect(html).toContain('data-testid="organization-list"');
+      expect(html).toContain(`data-appearance="${hidden.replace(/"/g, "&quot;")}"`);
+      expect(html).not.toContain('data-testid="create-organization"');
+      expect(html).not.toContain("You can create a new one here too");
+      expect(html).toContain('href="/onboarding?create=1"');
+      expect(html).toContain("Create a new one</a>");
+    });
+  }
+
+  it("shows the create form, on its own, to someone who followed the quiet link on purpose", async () => {
+    signedIn(null, { invitations: 1 });
+    const html = await page({ create: "1" });
+    expect(html).toContain("Set up your clinic");
+    expect(html).toContain('data-testid="create-organization"');
+    expect(html).not.toContain('data-testid="organization-list"');
+  });
+
+  it("reads only create=1 as asking: anything else still shows the list", async () => {
+    signedIn(null, { invitations: 1 });
+    for (const create of ["0", "yes", "", "1 "]) expect(await page({ create }), create).toContain('data-testid="organization-list"');
   });
 });

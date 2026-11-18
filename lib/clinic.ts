@@ -49,7 +49,7 @@ export type CurrentClinic = {
   /** Is this person an org:admin of the clinic? */
   isAdmin: boolean;
   /**
-   * "Dr. First Last" for the signed-in person, from the name Clerk already sent with their membership (no
+   * "First Last" (no "Dr." added) for the signed-in person, from the name Clerk already sent with their membership (no
    * extra call), or null when Clerk has none. What patients see on their links when nobody has chosen a name
    * for them; the library's player shows it on the strip (lib/sender-name.ts).
    */

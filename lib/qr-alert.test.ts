@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { qrDailyThreshold, type QrAlert } from "./qr-code";
 import { notifyPulseOfBusyQrCode, pulseLinksTab, qrAlertEmail, qrAlertKey } from "./qr-alert";
 
@@ -27,7 +27,7 @@ const ENV = { RESEND_API_KEY: "re_madeup_key", EMAIL_FROM: "Pulse 3D <alerts@exa
 const ALERT: QrAlert = { qrCodeId: "qr_row_madeup1", clinicId: "clinic_madeup1", threshold: "flag", issuedToday: 100, cap: 200, day: "2026-11-17" };
 const NAMES = { clinicName: "Vitest Bone & Joint", videoTitle: "Total Knee Replacement" };
 
-let errors: ReturnType<typeof vi.spyOn>;
+let errors: MockInstance<(...args: unknown[]) => void>;
 
 beforeEach(() => {
   errors = vi.spyOn(console, "error").mockImplementation(() => {});

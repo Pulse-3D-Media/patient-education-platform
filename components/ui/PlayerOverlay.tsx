@@ -208,8 +208,9 @@ export function PlayerOverlay({
               {captions?.available && (
                 <Control
                   live={controls.showing}
-                  // Like sound and full screen: the press also starts the controls' fade over again. On faded controls a key
-                  // press only brings them back first (usePlayerControls' onKey), the same as for every other button.
+                  // Like sound and full screen: the press also starts the controls' fade over again. The keyboard rules are the
+                  // other buttons' too (usePlayerControls' onKey): with the keyboard's focus on CC its row stays drawn while the
+                  // rest fades (KEEP_FOCUSED_GROUP) and a key on it acts at once.
                   onClick={() => {
                     captions.toggle();
                     controls.reveal();

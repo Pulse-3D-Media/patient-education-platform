@@ -259,7 +259,7 @@ export const UPLOAD_TIMEOUT_SECONDS = 2 * 60 * 60;
  * speech-to-text from the narration once the video is ready ("generated
  * subtitles"), on the track named plainly "English", which is what the
  * player's captions and the Mux dashboard show. Decided by Evan on
- * 2026-11-16: Mux's generated captions, reviewed by a person, one CC button.
+ * 2026-11-16: Mux's generated captions and one CC button; since 2026-11-18 no separate review step (the owner watches each video with captions on before publishing it).
  * Mux's guide "Add auto-generated captions to your videos and use
  * transcripts" documents the setting; it costs nothing extra (Mux's pricing
  * page: included in encoding and storage). Other languages are not asked for.

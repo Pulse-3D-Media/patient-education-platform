@@ -52,7 +52,7 @@ export function CaptionsCard({ videoId, state }: { videoId: string; state: Capti
         <div className="mt-4 rounded-xl border border-[#f3b94d]/40 bg-[#f3b94d]/10 px-4 py-3 text-[15px] text-white">
           <p>
             <strong className="font-medium">Read them through.</strong> Mux writes captions by machine from the narration, and it often gets
-            medical words wrong. Patients can already turn these on, so check them now.
+            medical words wrong. Patients can already turn these on, so watch the video through with captions on before you publish it.
           </p>
           {state.reviewUrl ? (
             <p className="mt-2">

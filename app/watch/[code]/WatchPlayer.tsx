@@ -467,7 +467,7 @@ export function WatchPlayer({
   return (
     <div>
       {/* The box. Large on purpose: the whole row is the tap target (at least 48px tall), the square itself is 28px, and the
-          words are the page's 20px body text. Once ticked it folds away (the grid row shrinks from its full height to
+          words are the page's 18px body text. Once ticked it folds away (the grid row shrinks from its full height to
           nothing, so the fold needs no measuring) and is taken out of reach of the keyboard and screen readers (inert). */}
       <div
         data-education-box=""
@@ -477,7 +477,7 @@ export function WatchPlayer({
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="mb-3 rounded-2xl border-2 border-[#e3e7eb] bg-white px-3.5 py-2 sm:mb-4 sm:px-4 sm:py-3">
+          <div className="mb-4 rounded-2xl border-2 border-[#e3e7eb] bg-white px-3.5 py-2 sm:mb-5 sm:px-4 sm:py-3">
             <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3 py-1 sm:gap-3.5">
               <input
                 ref={tickBox}
@@ -488,7 +488,7 @@ export function WatchPlayer({
                 className="mt-0.5 h-7 w-7 shrink-0 cursor-pointer accent-[#12333f] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
               />
               {/* min-w-0 and break-words: at 200% zoom on a phone a long word wraps inside the box instead of being cut off at its edge. */}
-              <span className="min-w-0 break-words text-[20px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
+              <span className="min-w-0 break-words text-[18px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
             </label>
           </div>
         </div>
@@ -499,12 +499,12 @@ export function WatchPlayer({
           {/* Not announced from here: the player's one status region, at the end, says it (a region that appears already
               filled is skipped by many screen readers). */}
           <div className="flex flex-col items-start gap-2">
-            <p className="text-[17px] leading-[1.45] text-[#3a4c56]">We couldn&apos;t get the video ready. Check your connection, then try again.</p>
+            <p className="text-[16px] leading-[1.45] text-[#3a4c56]">We couldn&apos;t get the video ready. Check your connection, then try again.</p>
             <button
               ref={acceptRetryButton}
               type="button"
               onClick={() => void accept()}
-              className="flex h-12 shrink-0 items-center rounded-full bg-[#12333f] px-7 text-[17px] font-semibold text-white transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
+              className="flex h-12 shrink-0 items-center rounded-full bg-[#12333f] px-7 text-[16px] font-semibold text-white transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
             >
               Try again
             </button>
@@ -590,12 +590,12 @@ export function WatchPlayer({
           {!started && !stopped && (
             // The keyboard focus ring is drawn just inside the edge, because the
             // rounded card clips anything drawn outside it.
-            // One white pill in the middle of the picture: a round play button and, beside it, what to do. Small enough to sit
-            // clear of the clinic's mark even on a phone's 184px-tall picture (player refresh, November 2026; it was a big
-            // circle with a second pill under it, which covered most of a phone's picture).
-            // Visibly not ready until the box is ticked and the video has arrived: the round part is greyed and the words
-            // say why (always dark and readable). Not `disabled`, so a tap still does something useful: it takes the
-            // patient to the box.
+            // One plain white circle with the triangle, in the middle of the picture, and no words on screen (Evan,
+            // 2026-11-17: "just the circle with the triangle"). Small enough to sit clear of the clinic's mark on a phone's
+            // 184px-tall picture. Visibly not ready until the box is ticked and the video has arrived: the circle is dimmed
+            // and the triangle grey. What to do is still said, to a screen reader only (the hidden line under it), and the
+            // box above says "Tick" on screen. Not `disabled`, so a tap still does something useful: it takes the patient
+            // to the box.
             <button
               ref={playButton}
               type="button"
@@ -605,26 +605,21 @@ export function WatchPlayer({
               aria-describedby={ready ? undefined : `${tickId}-why`}
               className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-white focus-visible:shadow-[inset_0_0_0_7px_#12202a]"
             >
-              {/* The words may wrap to a second line (and the pill stays inside the player) at 200% zoom on a phone; at normal size they fit on one. */}
               <span
-                data-play-pill=""
-                className={`flex h-14 max-w-[calc(100%-1rem)] items-center gap-3 rounded-full bg-white py-2 pl-2 pr-5 shadow-[0_8px_28px_rgba(0,0,0,.38)] transition @xl:h-16 @xl:pr-6 ${
-                  ready ? "group-active:scale-95" : ""
+                data-play-circle=""
+                className={`flex h-[60px] w-[60px] items-center justify-center rounded-full bg-white shadow-[0_8px_28px_rgba(0,0,0,.38)] transition @xl:h-[72px] @xl:w-[72px] ${
+                  ready ? "text-[#12333f] group-active:scale-95" : "text-[#9aa5ac] opacity-75"
                 }`}
               >
-                <span
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full @xl:h-12 @xl:w-12 ${ready ? "bg-[#12333f] text-white" : "bg-[#e3e7eb] text-[#7d8a92]"}`}
-                >
-                  {/* Ticked and the video is on its way: a turning ring in place of the triangle (the words say why). */}
-                  {ticked && !ready && !acceptTrouble ? (
-                    <Spinner tone="dark" className="h-6 w-6 @xl:h-7 @xl:w-7" />
-                  ) : (
-                    <PlayIcon className="ml-0.5 h-5 w-5 @xl:h-6 @xl:w-6" />
-                  )}
-                </span>
-                <span id={`${tickId}-why`} className="min-w-0 text-[16px] leading-tight font-semibold text-[#12333f] @xl:text-[17px]">
-                  {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
-                </span>
+                {/* Ticked and the video is on its way: a turning ring in place of the triangle (the hidden line says why). */}
+                {ticked && !ready && !acceptTrouble ? (
+                  <Spinner tone="dark" className="h-8 w-8 @xl:h-9 @xl:w-9" />
+                ) : (
+                  <PlayIcon className="ml-1 h-7 w-7 @xl:h-8 @xl:w-8" />
+                )}
+              </span>
+              <span id={`${tickId}-why`} className="sr-only">
+                {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
               </span>
             </button>
           )}
@@ -641,10 +636,10 @@ export function WatchPlayer({
                   The same panel says, in the expired page's words, that the link's time ran out while the page was open;
                   there is no Try again then, because nothing is renewed once access has ended. */}
               <div className="relative flex flex-1 flex-col items-center justify-center gap-3 px-5 py-6 text-center">
-                <p ref={stoppedHeading} tabIndex={-1} className="text-[20px] leading-[1.35] font-semibold text-white outline-none">
+                <p ref={stoppedHeading} tabIndex={-1} className="text-[18px] leading-[1.35] font-semibold text-white outline-none">
                   {unavailable ? "This video isn't available right now." : ended ? "This link has expired." : "The video did not load."}
                 </p>
-                <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">
+                <p className="max-w-[30ch] text-[15px] leading-[1.45] text-[#d5dde2]">
                   {unavailable
                     ? `Please ask ${clinicName} about it.`
                     : ended
@@ -656,7 +651,7 @@ export function WatchPlayer({
                     ref={retryButton}
                     type="button"
                     onClick={retry}
-                    className="mt-1 flex h-12 shrink-0 items-center rounded-full bg-white px-7 text-[17px] font-semibold text-[#12333f] transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
+                    className="mt-1 flex h-12 shrink-0 items-center rounded-full bg-white px-7 text-[16px] font-semibold text-[#12333f] transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
                   >
                     Try again
                   </button>
@@ -666,12 +661,12 @@ export function WatchPlayer({
                   <>
                     <a
                       href={call.href}
-                      className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[16px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
+                      className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[15px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
                     >
                       <PhoneIcon className="h-5 w-5 shrink-0" />
                       {ended || unavailable ? "Call" : "Still stuck? Call"} {call.label}
                     </a>
-                    <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[16px] text-white" />
+                    <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[15px] text-white" />
                   </>
                 )}
               </div>

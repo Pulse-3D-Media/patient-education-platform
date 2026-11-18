@@ -7,10 +7,9 @@ import { ClinicMark, DEFAULT_PICTURE_RATIO, pictureRatio } from "./ClinicMark";
 
 /**
  * The clinic and the doctor on the video (ClinicMark), as the server first
- * sends it: since the November 2026 refresh, the logo (round until it has
- * loaded and said its shape) and one slim chip with the doctor's name, the
- * title only in full screen. No database. Which shape a loaded logo takes is
- * logoShape() (player-rules.test.ts); that it fades with the controls is
+ * sends it: since the November 2026 refresh, the logo cropped into its round
+ * frame and one slim chip (6px corners) with the doctor's name, the title only
+ * in full screen. No database. That it fades with the controls is
  * PlayerOverlay's (VideoPlayer.test.tsx renders it); that the chips' words
  * are readable is lib/branding.test.ts; how a wide wordmark looks is a
  * browser check (screenshots in the pull request).
@@ -20,14 +19,15 @@ const LOGO = "https://example.com/summit-square.png";
 const CSS = readFileSync(path.join(process.cwd(), "app/globals.css"), "utf8").replace(/\r\n/g, "\n");
 
 describe("what is in the mark", () => {
-  it("the logo in its round frame until it has loaded, then the doctor's name alone on one slim chip", () => {
+  it("the logo cropped to fill its round frame, then the doctor's name alone on one slim chip with slightly rounded corners", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={LOGO} name="Summit Orthopedics" senderName="Dr. Jane Smith, DO" />);
 
-    expect(html).toContain('data-logo-shape="round"');
     expect(html).toMatch(/<img[^>]*src="https:\/\/example\.com\/summit-square\.png"[^>]*class="[^"]*object-cover[^"]*object-center/);
-    expect(html).toContain("h-10 w-10 rounded-full");
+    expect(html).toContain("h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full");
     expect(html.match(/class="video-chip /g)).toHaveLength(1);
-    expect(html).toMatch(/class="video-chip [^"]*rounded-full[^"]*">Dr\. Jane Smith, DO<\/span>/);
+    // 6px corners (rounded-md), not a full pill (Evan, 2026-11-17).
+    expect(html).toMatch(/class="video-chip [^"]*rounded-md[^"]*">Dr\. Jane Smith, DO<\/span>/);
+    expect(html).not.toMatch(/class="video-chip [^"]*rounded-full/);
     expect(html).not.toContain("Sent by");
     expect(html.indexOf(LOGO)).toBeLessThan(html.indexOf("Dr. Jane Smith"));
   });
@@ -50,7 +50,6 @@ describe("what is in the mark", () => {
   it("no logo: the clinic's initials in the round frame", () => {
     const html = renderToStaticMarkup(<ClinicMark logoUrl={null} name="Summit Orthopedics" senderName="Jane Smith, PA-C" />);
 
-    expect(html).toContain('data-logo-shape="initials"');
     expect(html).not.toContain("<img");
     expect(html).toContain(">SO</span>");
     expect(html).toContain(">Jane Smith, PA-C<");
@@ -91,9 +90,8 @@ describe("the CSS it relies on (app/globals.css)", () => {
     expect(CSS).toContain(`.video-chip {\n  background: rgb(0 0 0 / ${VIDEO_CHIP_ALPHA});\n}`);
   });
 
-  it("shows a wide logo whole on a small white tag, sized by the logo's own shape and never wider than 112px on a phone", () => {
-    expect(CSS).toContain(".mark-wide {\n  height: 32px;\n  width: min(112px, calc(24px * var(--logo-ratio, 3) + 14px));\n}");
-    expect(CSS).toContain("@container (min-width: 36rem) {\n  .mark-wide {\n    height: 40px;\n    width: min(160px, calc(32px * var(--logo-ratio, 3) + 14px));");
+  it("has no wide-logo tag: every logo fills the round frame (Evan, 2026-11-17)", () => {
+    expect(CSS).not.toContain(".mark-wide");
   });
 
   it("finds the picture inside the video's box, so the mark sits on the picture, not on black bars", () => {

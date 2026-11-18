@@ -44,29 +44,6 @@ export function clinicInitials(name: string): string {
 }
 
 
-/** How a clinic's logo is shown in the mark on the video, decided by its own shape once it has loaded. */
-export type LogoShape = "round" | "wide" | "tall";
-
-/**
- * A logo's shape from its natural size (logo refresh, November 2026):
- *
- *   - "round": roughly square (from 4:5 to 13:10). It fills the round frame,
- *     cropped a little at most, as the October design did for every logo.
- *   - "wide": a wordmark, wider than 13:10. Shown whole on a small white
- *     rounded tag, so its words read instead of being cropped to nonsense.
- *   - "tall": taller than 4:5. Shown whole inside the round frame.
- *
- * A size that cannot be read (an SVG with no size of its own reports 0) is
- * treated as round, which is what the mark showed before.
- */
-export function logoShape(width: number, height: number): LogoShape {
-  if (!(width > 0) || !(height > 0)) return "round";
-  const ratio = width / height;
-  if (ratio > 1.3) return "wide";
-  if (ratio < 0.8) return "tall";
-  return "round";
-}
-
 /**
  * A length of time in words, for a screen reader: "1 minute 5 seconds",
  * "4 minutes", "45 seconds", "1 hour 2 minutes 3 seconds". Whole seconds,

@@ -125,7 +125,7 @@ describe("opening paused (decided by Evan on 2026-10-15)", () => {
     const html = render();
 
     expect(buttons(html)).toEqual(["Play Total Knee Replacement"]);
-    expect(html).toContain(">Play</span>");
+    expect(html).toContain("data-play-circle");
     expect(html).toContain("data-video-strip");
     expect(html).not.toContain('aria-label="Seek"');
     // The overlay takes no taps until then, so the Play button gets them.
@@ -139,11 +139,12 @@ describe("opening paused (decided by Evan on 2026-10-15)", () => {
     expect(html).not.toContain("my favorites");
   });
 
-  it("makes the big Play button one white pill, at least 48px tall, with a round play button and the word Play", () => {
+  it("makes the big Play button a plain white circle with the triangle, at least 48px to tap, its name for screen readers only", () => {
     const html = render();
-    expect(html).toMatch(/<span data-play-pill="" class="flex h-14 items-center [^"]*rounded-full bg-white/);
-    expect(html).toMatch(/<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-\[#12333f\] text-white/);
-    expect(html).toMatch(/text-\[16px\] font-semibold[^"]*">Play<\/span>/);
+    expect(html).toMatch(/<span data-play-circle="" class="flex h-\[60px\] w-\[60px\] items-center justify-center rounded-full bg-white/);
+    expect(html).toMatch(/<button[^>]*aria-label="Play Total Knee Replacement"/);
+    expect(html).not.toContain(">Play</span>");
+    expect(html).not.toContain("data-play-pill");
   });
 });
 

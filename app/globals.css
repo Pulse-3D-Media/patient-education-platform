@@ -264,26 +264,6 @@ body {
 }
 
 /*
- * A wide logo in the clinic's mark (ClinicMark, logoShape() "wide"): shown
- * whole on a small white tag (32px tall on a phone, 40px on a wider
- * player), as wide as the logo's own shape needs (--logo-ratio, its width
- * over its height) and never wider than 112px on a phone or 160px wider, so
- * it covers little of the picture and the doctor's name beside it keeps its
- * room. The tag's padding is 4px top and bottom, 7px each side.
- */
-.mark-wide {
-  height: 32px;
-  width: min(112px, calc(24px * var(--logo-ratio, 3) + 14px));
-}
-
-@container (min-width: 36rem) {
-  .mark-wide {
-    height: 40px;
-    width: min(160px, calc(32px * var(--logo-ratio, 3) + 14px));
-  }
-}
-
-/*
  * The soft dark fade behind the players' bottom row (the time, sound, full
  * screen and the progress bar; PlayerOverlay). Only as tall as that row, and
  * at least VIDEO_SCRIM_TEXT_ALPHA (lib/branding.ts, 0.55) dark everywhere

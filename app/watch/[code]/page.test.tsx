@@ -316,13 +316,13 @@ describe("when the link stops working (decided 2026-10-08)", () => {
     }
   });
 
-  it("is one quiet line: 16px, the small-text grey, under the video's length, never red, never 'expire'", async () => {
+  it("is one quiet line: 15px (16px until 2026-11-17), the small-text grey, under the video's length, never red, never 'expire'", async () => {
     const clinic = await makeClinic({});
     const link = await makeLink(clinic.id, { expiryPolicy: "FIRST_PLAY", daysAfterFirstPlay: 10 });
     const html = await render(link.code);
     const line = deadlineLine(html);
     expect(line).not.toBeNull();
-    expect(line).toContain("text-[16px]");
+    expect(line).toContain("text-[15px]");
     expect(line).toContain("text-[#46555e]");
     expect(line!.toLowerCase()).not.toMatch(/red|danger|problem|expire/);
     // Under the length line ("About 2 minutes"), not above the video.
@@ -428,20 +428,35 @@ describe("the 'for education only' box before the video", () => {
     // No checked or disabled attribute (the class list mentions "disabled:" for a style, which does not count).
     expect(box).not.toMatch(/\schecked[=\s/>]/);
     expect(box).not.toMatch(/\sdisabled[=\s/>]/);
-    // A 28px square in a row at least 48px tall, with the words at the page's 20px body size.
+    // A 28px square in a row at least 48px tall, with the words at the page's 18px body size (one step down from 20px, 2026-11-17).
     expect(box).toContain("h-7 w-7");
     expect(html).toMatch(/<label[^>]*min-h-12[^>]*>/);
-    expect(html).toMatch(/<span class="text-\[20px\][^"]*">I understand this video/);
+    expect(html).toMatch(/<span class="text-\[18px\][^"]*">I understand this video/);
     expect(html.toLowerCase()).not.toContain("consent");
   });
 
-  it("keeps Play visibly not ready, with one line saying why", async () => {
+  it("keeps Play visibly not ready: a plain dimmed circle with the triangle, and why said to a screen reader only", async () => {
     const clinic = await makeClinic({});
     const html = await render(await makeShare(clinic.id, videoId));
 
     expect(html).toMatch(/<button[^>]*aria-label="Play Vitest Total Knee Replacement"[^>]*aria-disabled="true"/);
-    expect(html).toContain("Tick the box above to play");
+    // The circle: at least 48px to tap (60px), white, dimmed until ready, with no words of its own (Evan, 2026-11-17).
+    expect(html).toMatch(/<span data-play-circle="" class="flex h-\[60px\] w-\[60px\] [^"]*rounded-full bg-white[^"]*opacity-75/);
+    expect(html).toMatch(/<span id="[^"]*-why" class="sr-only">Tick the box above to play<\/span>/);
     expect(html).not.toContain("Tap to play");
+    expect(html).not.toContain("data-play-pill");
+  });
+
+  it("keeps the patient page's text one step smaller than before and never under 15px (2026-11-17)", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+    const sizes = [...html.matchAll(/text-\[(\d+)px\]/g)].map(([, px]) => Number(px));
+
+    expect(sizes.length).toBeGreaterThan(0);
+    for (const px of sizes) expect(px).toBeGreaterThanOrEqual(15);
+    expect(html).toMatch(/<h1 class="[^"]*text-\[24px\][^"]*sm:text-\[27px\]/);
+    expect(html).toMatch(/<p class="[^"]*text-\[18px\][^"]*">Your surgeon shared this/);
+    expect(html).not.toContain("text-[20px] leading-[1.5]");
   });
 
   it("puts no playable address in the page: the video comes only from the accept route, after the tick", async () => {

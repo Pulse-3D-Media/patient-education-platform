@@ -46,6 +46,7 @@ function renderPlaying(overrides: Partial<PlayerControls> = {}, chapters: Chapte
     toggleFullscreen: noop,
     onPictureTap: noop,
     onKey: noop,
+    onKeyUp: noop,
     ...overrides,
   } as PlayerControls;
   return renderToStaticMarkup(

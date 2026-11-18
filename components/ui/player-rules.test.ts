@@ -33,9 +33,32 @@ describe("a key pressed while the controls have faded over a playing video", () 
   });
 
   it("keys that move the focus, leave full screen or are only held do what they always do", () => {
-    for (const key of ["Tab", "Shift", "Control", "Alt", "Meta", "Escape", "CapsLock"]) {
+    for (const key of ["Tab", "Shift", "Control", "Alt", "Meta", "Escape", "CapsLock", "Insert"]) {
       expect(keyFirstPressWhileHidden(key)).toBe("pass");
     }
+  });
+
+  it("never eats a browser's or a screen reader's shortcut: any key with Ctrl, Cmd or Alt held passes", () => {
+    // Zoom, the address bar, find, back, reload with Cmd, a screen reader's own combinations.
+    expect(keyFirstPressWhileHidden("+", { ctrlKey: true })).toBe("pass");
+    expect(keyFirstPressWhileHidden("=", { metaKey: true })).toBe("pass");
+    expect(keyFirstPressWhileHidden("l", { ctrlKey: true })).toBe("pass");
+    expect(keyFirstPressWhileHidden("f", { ctrlKey: true })).toBe("pass");
+    expect(keyFirstPressWhileHidden("ArrowLeft", { altKey: true })).toBe("pass");
+    expect(keyFirstPressWhileHidden("r", { metaKey: true })).toBe("pass");
+    expect(keyFirstPressWhileHidden(" ", { ctrlKey: true, altKey: true })).toBe("pass");
+    // The same keys with nothing held are the player's own (F is full screen, the arrows seek).
+    expect(keyFirstPressWhileHidden("f", { ctrlKey: false, metaKey: false, altKey: false })).toBe("show-only");
+    expect(keyFirstPressWhileHidden("ArrowLeft", {})).toBe("show-only");
+  });
+
+  it("the function keys pass (F5 reloads, F6 goes to the address bar)", () => {
+    for (const key of ["F1", "F5", "F6", "F11", "F12", "F24"]) {
+      expect(keyFirstPressWhileHidden(key)).toBe("pass");
+    }
+    // A lone "f" is not a function key.
+    expect(keyFirstPressWhileHidden("f")).toBe("show-only");
+    expect(keyFirstPressWhileHidden("F")).toBe("show-only");
   });
 });
 

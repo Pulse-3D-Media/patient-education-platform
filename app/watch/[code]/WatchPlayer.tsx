@@ -526,6 +526,7 @@ export function WatchPlayer({
           role="group"
           aria-label={`${title}, video player`}
           onKeyDown={controls.onKey}
+          onKeyUp={controls.onKeyUp}
           onMouseMove={started ? controls.reveal : undefined}
           onMouseLeave={controls.hide}
           // The keyboard's focus arriving on the player or one of its buttons brings the controls back (usePlayerControls).

@@ -28,14 +28,23 @@ export function pictureTapAction(pointerType: string, controlsShowing: boolean, 
 /**
  * A key pressed while the controls have faded over a playing video. Like the first tap on a faded picture on a phone,
  * the first press only brings them back ("show-only"), so nobody presses a button they cannot see; the next press acts.
- * The keys that only move the focus or hold a modifier ("pass") do what they always do: Tab moves on (and the focus
- * arriving shows the controls), Escape still leaves full screen.
+ * Everything that is not a press of the player's own buttons "pass"es and does what it always does:
+ *   - keys that only move the focus or are held: Tab moves on (and the focus arriving shows the controls), Escape
+ *     still leaves full screen;
+ *   - any key with Ctrl, Cmd (Meta) or Alt held: the browser's and the screen reader's shortcuts (zoom, the address
+ *     bar, find, back, a screen reader's own keys) are never eaten;
+ *   - the function keys, F1 to F24 (F5 reloads, F6 moves to the address bar, and so on).
  */
-export function keyFirstPressWhileHidden(key: string): "show-only" | "pass" {
+export function keyFirstPressWhileHidden(
+  key: string,
+  held: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean } = {},
+): "show-only" | "pass" {
+  if (held.ctrlKey || held.metaKey || held.altKey) return "pass";
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return "pass";
   return PASS_KEYS.has(key) ? "pass" : "show-only";
 }
 
-const PASS_KEYS = new Set(["Tab", "Shift", "Control", "Alt", "Meta", "Escape", "CapsLock"]);
+const PASS_KEYS = new Set(["Tab", "Shift", "Control", "Alt", "AltGraph", "Meta", "OS", "Escape", "CapsLock", "NumLock", "Insert", "ContextMenu"]);
 
 /**
  * The letters in the logo's circle when a clinic has no logo (or it does not

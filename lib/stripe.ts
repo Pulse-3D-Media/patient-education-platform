@@ -866,3 +866,119 @@ export const stripePlanGateway: PlanGateway = {
     return session.url;
   },
 };
+
+// ---------------------------------------------------------------------------
+// The demo clean-up (prisma/clear-demo-clinics.ts, lib/demo-cleanup.ts). ONLY
+// that script uses these. They remove a demo clinic's test customer from
+// Stripe.
+//
+// A test key alone does NOT prove this is the demo's Stripe: production also
+// runs on a test key until launch, and the two may share one Stripe sandbox.
+// So two more locks, both here and in lib/demo-cleanup.ts:
+//
+//   1. accountId() names the Stripe account behind the key in use. The
+//      clean-up refuses to start unless it equals DEMO_STRIPE_ACCOUNT_ID.
+//   2. Nothing is cancelled or deleted unless Stripe's own record carries
+//      THIS clinic's id in its metadata (CLINIC_METADATA_KEY, written when
+//      the customer and the subscription were made). A demo database row that
+//      names someone else's customer (a row copied from production, say) is
+//      refused, not followed. The clean-up checks first and skips the whole
+//      clinic; cancelSubscription and deleteCustomer check again themselves.
+//
+// "Already gone" counts as done, so running the clean-up twice is harmless.
+// A live-mode object is refused outright, and getStripe() already refuses a
+// key that is not a test key.
+// ---------------------------------------------------------------------------
+
+/** What Stripe's record says about who it belongs to: gone, or the clinic id in its metadata (null when there is none). */
+export type StripeRecordOwner = { gone: true } | { gone: false; clinicId: string | null };
+
+/** Thrown when a Stripe record does not carry the clinic id the clean-up expected. Its message names no id. */
+export class StripeOwnerMismatchError extends Error {
+  constructor(what: string) {
+    super(`The Stripe ${what} does not carry this clinic's id in its metadata, so it was not touched.`);
+    this.name = "StripeOwnerMismatchError";
+  }
+}
+
+/** What the clean-up asks of Stripe. A plain object so the tests hand in a stand-in. */
+export type DemoCleanupStripe = {
+  /** The id (acct_...) of the Stripe account the key in use belongs to. */
+  accountId(): Promise<string>;
+  /** Who this customer belongs to, by its metadata, or gone. */
+  customerOwner(customerId: string): Promise<StripeRecordOwner>;
+  /** Who this subscription belongs to, by its metadata, or gone. */
+  subscriptionOwner(subscriptionId: string): Promise<StripeRecordOwner>;
+  /** Cancel this subscription now, only if it carries this clinic's id. Already cancelled or gone counts as done. */
+  cancelSubscription(subscriptionId: string, clinicId: string): Promise<void>;
+  /** Delete this customer, only if it carries this clinic's id. Already deleted or gone counts as done. */
+  deleteCustomer(customerId: string, clinicId: string): Promise<void>;
+};
+
+function metadataClinicId(metadata: Record<string, string> | null | undefined): string | null {
+  const value = metadata?.[CLINIC_METADATA_KEY];
+  return typeof value === "string" && value ? value : null;
+}
+
+async function readCustomerOwner(customerId: string): Promise<StripeRecordOwner> {
+  try {
+    const customer = await getStripe().customers.retrieve(customerId);
+    if ("deleted" in customer && customer.deleted) return { gone: true };
+    if (customer.livemode) throw new StripeConfigError("Stripe returned a live-mode customer. The clean-up only touches test mode.");
+    return { gone: false, clinicId: metadataClinicId(customer.metadata) };
+  } catch (error) {
+    if (isStripeRequestError(error, "resource_missing")) return { gone: true };
+    throw error;
+  }
+}
+
+async function readSubscriptionOwner(subscriptionId: string): Promise<StripeRecordOwner & { finished?: boolean }> {
+  try {
+    const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
+    if (subscription.livemode) throw new StripeConfigError("Stripe returned a live-mode subscription. The clean-up only touches test mode.");
+    const finished = subscription.status === "canceled" || subscription.status === "incomplete_expired";
+    return { gone: false, clinicId: metadataClinicId(subscription.metadata), finished };
+  } catch (error) {
+    if (isStripeRequestError(error, "resource_missing")) return { gone: true };
+    throw error;
+  }
+}
+
+export const demoCleanupStripe: DemoCleanupStripe = {
+  async accountId() {
+    const account = await getStripe().accounts.retrieveCurrent();
+    return account.id;
+  },
+
+  customerOwner: readCustomerOwner,
+
+  async subscriptionOwner(subscriptionId) {
+    const owner = await readSubscriptionOwner(subscriptionId);
+    return owner.gone ? { gone: true } : { gone: false, clinicId: owner.clinicId };
+  },
+
+  async cancelSubscription(subscriptionId, clinicId) {
+    const owner = await readSubscriptionOwner(subscriptionId);
+    if (owner.gone) return;
+    if (owner.clinicId !== clinicId) throw new StripeOwnerMismatchError("subscription");
+    if (owner.finished) return;
+    try {
+      await getStripe().subscriptions.cancel(subscriptionId);
+    } catch (error) {
+      if (isStripeRequestError(error, "resource_missing")) return;
+      throw error;
+    }
+  },
+
+  async deleteCustomer(customerId, clinicId) {
+    const owner = await readCustomerOwner(customerId);
+    if (owner.gone) return;
+    if (owner.clinicId !== clinicId) throw new StripeOwnerMismatchError("customer");
+    try {
+      await getStripe().customers.del(customerId);
+    } catch (error) {
+      if (isStripeRequestError(error, "resource_missing")) return;
+      throw error;
+    }
+  },
+};

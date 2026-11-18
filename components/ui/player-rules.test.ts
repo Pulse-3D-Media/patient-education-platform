@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HIDE_AFTER_MS, SKIP_SECONDS, clinicInitials, pictureTapAction, seekValueText, spokenTime } from "./player-rules";
+import { HIDE_AFTER_MS, SKIP_SECONDS, clinicInitials, keyFirstPressWhileHidden, pictureTapAction, seekValueText, spokenTime } from "./player-rules";
 
 /**
  * The rules both players share (player-rules.ts), with plain values. That a
@@ -22,6 +22,20 @@ describe("what a tap or click on the picture does", () => {
     expect(pictureTapAction("touch", false, false)).toBe("show");
     // A pen behaves like a finger.
     expect(pictureTapAction("pen", true, true)).toBe("hide");
+  });
+});
+
+describe("a key pressed while the controls have faded over a playing video", () => {
+  it("the first press of a key that would act only brings the controls back, as the first tap on a faded picture does", () => {
+    for (const key of ["Enter", " ", "k", "m", "f", "ArrowLeft", "ArrowRight", "ArrowUp", "a"]) {
+      expect(keyFirstPressWhileHidden(key)).toBe("show-only");
+    }
+  });
+
+  it("keys that move the focus, leave full screen or are only held do what they always do", () => {
+    for (const key of ["Tab", "Shift", "Control", "Alt", "Meta", "Escape", "CapsLock"]) {
+      expect(keyFirstPressWhileHidden(key)).toBe("pass");
+    }
   });
 });
 

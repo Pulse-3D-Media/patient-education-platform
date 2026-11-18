@@ -39,7 +39,6 @@ function renderPlaying(overrides: Partial<PlayerControls> = {}, chapters: Chapte
     reveal: noop,
     hide: noop,
     onFocusIn: noop,
-    onFocusOut: noop,
     togglePlay: noop,
     seekBy: noop,
     seekTo: noop,
@@ -304,6 +303,25 @@ describe("the loading spinner (patient player)", () => {
   });
 });
 
+describe("the controls fade while the video plays, for the keyboard too (2026-11-17)", () => {
+  it("faded controls are only drawn faded: every button and the progress bar stay in the page for a screen reader", () => {
+    const up = renderPlaying({ showing: true });
+    const faded = renderPlaying({ showing: false });
+    expect(buttons(faded)).toEqual(buttons(up));
+    expect(faded).toContain('aria-label="Seek"');
+    expect(faded).not.toContain("aria-hidden=\"true\"><button");
+    expect(faded).toContain("opacity-0");
+    expect(up).not.toMatch(/class="[^"]*opacity-0[^"]*"><button/);
+  });
+
+  it("asks for less motion: no fade animation, the controls simply go and come back", () => {
+    const html = renderPlaying({ showing: false });
+    const fading = [...html.matchAll(/class="([^"]*transition-opacity[^"]*)"/g)].map(([, c]) => c);
+    expect(fading.length).toBeGreaterThan(0);
+    for (const c of fading) expect(c).toContain("motion-reduce:transition-none");
+  });
+});
+
 describe("the controls for the keyboard and a screen reader (2026-11-16)", () => {
   it("reads the progress bar as words, out of the video's length", () => {
     const html = renderPlaying({ time: 65, duration: 252 });
@@ -322,7 +340,7 @@ describe("the controls for the keyboard and a screen reader (2026-11-16)", () =>
     expect(html).toMatch(/class="[^"]*has-\[input:focus-visible\]:outline-white[^"]*"/);
   });
 
-  it("gives the library's player a visible focus ring of its own, and hears focus arriving and leaving", () => {
+  it("gives the library's player a visible focus ring of its own", () => {
     const html = render();
     expect(html).toMatch(/role="group"[^>]*class="[^"]*focus-visible:outline-white[^"]*"/);
   });

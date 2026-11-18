@@ -136,7 +136,7 @@ network (cellular or clinic Wi-Fi), cold or warm start, and anything that fails.
 What changed on the patient page: each change of state (the video ready, loading, not loading, the link ended, a
 printed code that cannot hand out a link, the clinic asked, a tap that did not go through) is said once through one
 status region that is always on the page; the focus moves to the next thing when the button holding it goes away; the
-player's controls come back while the keyboard is on them; the progress bar is read as words; every control has a
+player's controls come back when a key is pressed or the keyboard's focus arrives (and, since 2026-11-17, fade while the video plays for the keyboard too); the progress bar is read as words; every control has a
 focus ring that shows over a light or dark picture; a browser without JavaScript gets a sentence saying so; and one
 quiet button, "Save or share this link", sits under the video's length and deadline lines.
 
@@ -149,7 +149,8 @@ region said "The video is ready. Tap Play to start." once; Enter on Play started
 player; Tab went through Back 10, Pause, Forward 10, Mute, Full screen and the progress bar, each with a white ring
 and dark edge, the bar ringed as a whole and read as "4 seconds of 1 minute 49 seconds"; with the focus on the bar the
 controls stayed up for over 5 seconds of playing, came back at once when the focus returned, and faded 2.7 seconds
-after the focus left. "Save or share this link" (no share sheet in that browser; the clipboard was stood in for) said
+after the focus left (on 2026-11-17 that was changed on Evan's word: the controls now fade while it plays with the
+focus on them too; see 9.2). "Save or share this link" (no share sheet in that browser; the clipboard was stood in for) said
 "Link copied.", made no request to any server, and the video kept playing. A printed code's page had no share button
 until the Play tap, then the address became `/watch/...` and the button appeared under the deadline line. On a paused
 link, Enter on Ask my clinic put the focus on "Your clinic has been asked" (then the status region also said the
@@ -182,15 +183,18 @@ sheet, Safari, any real phone. Use a patient link made from `/admin/links` on th
 8. **Samsung S22, TalkBack** (Settings, Accessibility, TalkBack on; or hold both volume keys for three seconds)
    1. Repeat 7.1 to 7.8 with TalkBack's gestures (swipe right for next, double-tap to press). In 7.6 the Android share
       sheet opens.
-   2. While the video plays, swipe onto one of the faded controls: it should come back into view while TalkBack is on
-      it. Note whether it does (TalkBack may not move the browser's own focus; if not, a tap on the picture shows them).
+   2. While the video plays, swipe onto one of the faded controls: it should come back into view, then fade again a
+      moment later while the video plays. Double-tap it: it should act at once (a screen reader's press is not held
+      back). Note whether it comes back (TalkBack may not move the browser's own focus; if not, a tap on the picture
+      shows them).
 9. **A computer with the keyboard only** (Chrome or Edge; no mouse)
    1. Press Tab from the top: the box (a ring around it), then Play (a white ring with a dark edge around the picture),
       then "Save or share this link" (a ring). Space ticks the box; the focus is then on Play.
-   2. Enter on Play: the video plays and the player has a ring around it. The controls stay up while the focus is on the
-      player or any of its buttons; Tab moves through them, each with a ring, and the progress bar gets a ring around
-      the whole bar. The arrow keys move ten seconds and do not scroll the page. Tab out of the player: the controls
-      fade a moment later.
+   2. Enter on Play: the video plays and the player has a ring around it. Tab moves through the controls, each with a
+      ring, and the progress bar gets a ring around the whole bar. The arrow keys move ten seconds and do not scroll the
+      page. Leave the keys alone for about three seconds while it plays: the controls fade, even with the focus on one
+      of them. Press Enter: the controls come back and nothing else happens; press Enter again: that button acts. Tab
+      while they are faded: they come back and the focus moves on. Pause: they stay up.
    3. "Save or share this link" on a computer without a share sheet: "Link copied." appears under it, and pasting
       into a new tab opens the same link.
    4. Turn JavaScript off (Chrome: Settings, Privacy and security, Site settings, JavaScript) and reload: a grey box

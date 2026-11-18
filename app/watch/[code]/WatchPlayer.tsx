@@ -528,9 +528,8 @@ export function WatchPlayer({
           onKeyDown={controls.onKey}
           onMouseMove={started ? controls.reveal : undefined}
           onMouseLeave={controls.hide}
-          // Focus on the player or one of its buttons brings the controls back and keeps them up (usePlayerControls).
+          // The keyboard's focus arriving on the player or one of its buttons brings the controls back (usePlayerControls).
           onFocus={controls.onFocusIn}
-          onBlur={controls.onFocusOut}
           style={stopped ? undefined : ({ "--picture-ratio": ratio } as CSSProperties)}
           className={
             stopped

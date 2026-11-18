@@ -193,9 +193,8 @@ export function VideoPlayer({
       onKeyDown={controls.onKey}
       onMouseMove={started ? controls.reveal : undefined}
       onMouseLeave={controls.hide}
-      // Focus on the player or one of its buttons brings the controls back and keeps them up (usePlayerControls).
+      // The keyboard's focus arriving on the player or one of its buttons brings the controls back (usePlayerControls).
       onFocus={controls.onFocusIn}
-      onBlur={controls.onFocusOut}
       className={`relative flex h-full min-h-0 w-full flex-1 select-none flex-col bg-black outline-none ${PLAYER_BOX_FOCUS}`}
     >
       {/* The video's box. "picture-area" lets the overlay find the picture inside it (app/globals.css); its size always

@@ -101,7 +101,7 @@ export function PlayerOverlay({
       {/* Top: the clinic's mark (left), the player's own button and the placeholder chip (right). The video's title joins
           the mark only in full screen, where the page's own title is out of sight. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-2.5 @xl:p-4">
-        <div className={`min-w-0 transition-opacity duration-300 ${fade}`}>
+        <div className={`min-w-0 transition-opacity duration-300 motion-reduce:transition-none ${fade}`}>
           <ClinicMark logoUrl={logoUrl} name={clinicName} title={controls.fullscreen ? title : null} senderName={senderName} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -112,7 +112,7 @@ export function PlayerOverlay({
               <span className="hidden @xl:inline">Placeholder animation</span>
             </span>
           )}
-          {topRight && <div className={`transition-opacity duration-300 ${controls.showing ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>{topRight}</div>}
+          {topRight && <div className={`transition-opacity duration-300 motion-reduce:transition-none ${controls.showing ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>{topRight}</div>}
         </div>
       </div>
 
@@ -163,7 +163,7 @@ export function PlayerOverlay({
 
       {/* The middle, on a screen with no mouse: back 10 seconds, play or pause, forward 10 seconds. */}
       {showControls && !slow && !loading && (
-        <div className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-7 transition-opacity duration-300 computer:hidden @xl:gap-12 ${fade}`}>
+        <div className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-7 transition-opacity duration-300 motion-reduce:transition-none computer:hidden @xl:gap-12 ${fade}`}>
           <Control live={controls.showing} onClick={() => controls.seekBy(-SKIP_SECONDS)} label="Back 10 seconds" size="h-11 w-11 bg-black/45 @xl:h-12 @xl:w-12">
             <SkipBackIcon className="h-6 w-6 @xl:h-7 @xl:w-7" />
           </Control>
@@ -180,7 +180,7 @@ export function PlayerOverlay({
           is only as tall as the row, and takes no taps of its own (only its buttons and the bar do): when an earlier, taller
           fade took taps, it swallowed every tap on Pause and the ten-second buttons on a short player. */}
       {showControls && (
-        <div className={`video-scrim pointer-events-none absolute inset-x-0 bottom-0 px-1.5 pt-3 transition-opacity duration-300 @xl:px-3 ${fade}`}>
+        <div className={`video-scrim pointer-events-none absolute inset-x-0 bottom-0 px-1.5 pt-3 transition-opacity duration-300 motion-reduce:transition-none @xl:px-3 ${fade}`}>
           <div className="flex items-center">
             <span className="hidden computer:flex">
               <Control live={controls.showing} onClick={controls.togglePlay} label={playLabel} size="h-11 w-11">
@@ -200,7 +200,18 @@ export function PlayerOverlay({
               {/* CC: only when the playing video has a caption track (a Mux video whose captions Mux has made; never a
                   CDN file). A toggle: its name stays "Captions" and a screen reader hears "on" or "off" from aria-pressed. */}
               {captions?.available && (
-                <Control live={controls.showing} onClick={captions.toggle} label="Captions" pressed={captions.on} size="h-11 w-11">
+                <Control
+                  live={controls.showing}
+                  // Like sound and full screen: the press also starts the controls' fade over again. On faded controls a key
+                  // press only brings them back first (usePlayerControls' onKey), the same as for every other button.
+                  onClick={() => {
+                    captions.toggle();
+                    controls.reveal();
+                  }}
+                  label="Captions"
+                  pressed={captions.on}
+                  size="h-11 w-11"
+                >
                   <CaptionsIcon on={captions.on} className="h-6 w-6" />
                 </Control>
               )}

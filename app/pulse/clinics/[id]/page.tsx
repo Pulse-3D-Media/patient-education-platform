@@ -276,7 +276,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
       </Section>
       <Section
         title="Recent links"
-        blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made, each named by the day it was made and the end of its row id: a link's code is the working patient link, so it is never shown here. "Disclaimer accepted" is the anonymous record of the "for education only" box on the patient page: when it was first ticked on that link, and how many ticks were recorded (at most one per page load; not people). Recorded from October 2026.`}
+        blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made, each named by its procedure, the day it was made and the end of its row id: a link's code is the working patient link, so it is never shown here. "Disclaimer accepted" is the anonymous record of the "for education only" box on the patient page: when it was first ticked on that link, and how many ticks were recorded (at most one per page load; not people). Recorded from October 2026.`}
       >
         {shares.length === 0 ? (
           <p className="text-sm text-[#667085]">No links yet.</p>
@@ -311,11 +311,8 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
                           : `${formatDate(state.expiresAt)} (fixed date, made before the first-play rule)`;
                   return (
                     <tr key={share.id} className="border-b border-white/5 last:border-b-0">
-                      {/* Named by its date and the short end of its row id, never its code (the code would play the video). */}
-                      <td className="px-3 py-2 text-[#bfbfbf]">
-                        {formatDate(share.createdAt)}
-                        <span className="block text-[13px] text-[#667085]">id {shortLinkId(share.id)}</span>
-                      </td>
+                      {/* Named by the short end of its row id (with its video and its Created date in this row), never its code: the code would play the video. */}
+                      <td className="whitespace-nowrap px-3 py-2 text-[#bfbfbf]">{shortLinkId(share.id)}</td>
                       <td className="px-3 py-2">
                         <span className="flex flex-wrap items-center gap-2">
                           {share.video.title}

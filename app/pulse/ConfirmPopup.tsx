@@ -114,6 +114,22 @@ export function ConfirmPopup({ question, onYes, onNo }: { question: Question; on
 }
 
 /**
+ * The Save button is disabled ("Saving...") while the server works, and a
+ * disabled button drops the keyboard's focus. Once it is enabled again, put
+ * focus back on it, unless the person has moved on to something else
+ * meanwhile. Gives up after a minute.
+ */
+function refocusWhenEnabled(button: HTMLButtonElement) {
+  const observer = new MutationObserver(() => {
+    if (button.disabled) return;
+    observer.disconnect();
+    if (!document.activeElement || document.activeElement === document.body) button.focus();
+  });
+  observer.observe(button, { attributes: true, attributeFilter: ["disabled"] });
+  setTimeout(() => observer.disconnect(), 60_000);
+}
+
+/**
  * Put the popup in front of a form's submit. `ask` looks at the form as it
  * is about to be sent and answers:
  *   - null: nothing to ask, the form is sent at once;
@@ -136,7 +152,9 @@ export function useConfirmedSubmit(ask: (form: HTMLFormElement) => Question | nu
   function send() {
     confirmed.current = true;
     const button = pressed.current;
-    formRef.current?.requestSubmit(button instanceof HTMLButtonElement && button.type === "submit" ? button : undefined);
+    const submitButton = button instanceof HTMLButtonElement && button.type === "submit" ? button : undefined;
+    formRef.current?.requestSubmit(submitButton);
+    if (submitButton) refocusWhenEnabled(submitButton);
   }
 
   function close(thenSend: boolean) {

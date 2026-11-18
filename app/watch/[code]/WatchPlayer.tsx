@@ -5,6 +5,7 @@ import { ClinicMark, pictureRatio } from "@/components/ui/ClinicMark";
 import { PlayerOverlay, Spinner } from "@/components/ui/PlayerOverlay";
 import { usePlayerControls } from "@/components/ui/usePlayerControls";
 import { useVideoSource } from "@/components/ui/useVideoSource";
+import { warmUpStreamLibrary } from "@/components/ui/video-source-loader";
 import { PhoneIcon, PlayIcon } from "@/components/ui/icons";
 import { DISCLAIMER } from "@/lib/education-note";
 import { SLOW_AFTER_MS, playRefusalIsFailure, resumePoint } from "@/lib/playback";
@@ -155,7 +156,13 @@ export function WatchPlayer({
   call,
   qrCode,
   placeholder = false,
+  stream = false,
 }: {
+  /**
+   * The video will be a Mux stream (earlyConnectionsFor in lib/playback-auth.ts). A yes or no, never an address:
+   * it only lets the tick start fetching the streaming library at the same time as its own request.
+   */
+  stream?: boolean;
   /** A sample animation standing in for the named procedure: the amber chip stays on the player, full screen included. */
   placeholder?: boolean;
   /** A still for the video's box before the box is ticked (a signed Mux still, or the poster staff set), or null. Never a playable address. */
@@ -276,6 +283,9 @@ export function WatchPlayer({
     setTicked(true);
     // The box is about to disappear with the focus in it; put the focus on Play, where the next step is.
     playButton.current?.focus({ preventScroll: true });
+    // A stream on a browser that plays it through hls.js: start fetching the library now, while the tick's own
+    // request is on its way, rather than one after the other. Nothing for a plain file, nothing on Safari.
+    if (stream) warmUpStreamLibrary(video.current);
     if (!source) void accept();
   }
 
@@ -432,7 +442,7 @@ export function WatchPlayer({
   return (
     <div>
       {/* The box. Large on purpose: the whole row is the tap target (at least 48px tall), the square itself is 28px, and the
-          words are the page's 20px body text. Once ticked it folds away (the grid row shrinks from its full height to
+          words are the page's 18px body text. Once ticked it folds away (the grid row shrinks from its full height to
           nothing, so the fold needs no measuring) and is taken out of reach of the keyboard and screen readers (inert). */}
       <div
         data-education-box=""
@@ -442,8 +452,8 @@ export function WatchPlayer({
         }`}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="mb-4 rounded-2xl border-2 border-[#e3e7eb] bg-white px-4 py-3">
-            <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3.5 py-1">
+          <div className="mb-4 rounded-2xl border-2 border-[#e3e7eb] bg-white px-3.5 py-2 sm:mb-5 sm:px-4 sm:py-3">
+            <label htmlFor={tickId} className="flex min-h-12 cursor-pointer items-start gap-3 py-1 sm:gap-3.5">
               <input
                 ref={tickBox}
                 id={tickId}
@@ -452,7 +462,7 @@ export function WatchPlayer({
                 onChange={onTick}
                 className="mt-0.5 h-7 w-7 shrink-0 cursor-pointer accent-[#12333f] focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
               />
-              <span className="text-[20px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
+              <span className="text-[18px] leading-[1.45] text-[#12202a]">{DISCLAIMER.text}</span>
             </label>
           </div>
         </div>
@@ -461,11 +471,11 @@ export function WatchPlayer({
       {acceptTrouble && (
         <div className="mb-4 rounded-2xl border-2 border-[#e3e7eb] bg-white px-4 py-3">
           <div role="alert" className="flex flex-col items-start gap-2">
-            <p className="text-[17px] leading-[1.45] text-[#3a4c56]">We couldn&apos;t get the video ready. Check your connection, then try again.</p>
+            <p className="text-[16px] leading-[1.45] text-[#3a4c56]">We couldn&apos;t get the video ready. Check your connection, then try again.</p>
             <button
               type="button"
               onClick={() => void accept()}
-              className="flex h-12 shrink-0 items-center rounded-full bg-[#12333f] px-7 text-[17px] font-semibold text-white transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
+              className="flex h-12 shrink-0 items-center rounded-full bg-[#12333f] px-7 text-[16px] font-semibold text-white transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
             >
               Try again
             </button>
@@ -553,10 +563,12 @@ export function WatchPlayer({
           {!started && !stopped && (
             // The keyboard focus ring is drawn just inside the edge, because the
             // rounded card clips anything drawn outside it.
-            // Visibly not ready until the box is ticked and the video has arrived: the circle is dimmed and its line
-            // says why. Not `disabled`, so a tap still does something useful: it takes the patient to the box.
-            // On a phone the box is only about 184px tall, so the button sits low (anchored to the bottom) and a little
-            // smaller, clear of the clinic's mark in the top left; on a wider player it is in the middle, a little low.
+            // One plain white circle with the triangle, in the middle of the picture, and no words on screen (Evan,
+            // 2026-11-17: "just the circle with the triangle"). Small enough to sit clear of the clinic's mark on a phone's
+            // 184px-tall picture. Visibly not ready until the box is ticked and the video has arrived: the circle is dimmed
+            // and the triangle grey. What to do is still said, to a screen reader only (the hidden line under it), and the
+            // box above says "Tick" on screen. Not `disabled`, so a tap still does something useful: it takes the patient
+            // to the box.
             <button
               ref={playButton}
               type="button"
@@ -564,21 +576,22 @@ export function WatchPlayer({
               aria-label={`Play ${title}`}
               aria-disabled={ready ? undefined : true}
               aria-describedby={ready ? undefined : `${tickId}-why`}
-              className="absolute inset-0 z-20 flex flex-col items-center justify-end gap-2 pb-3 @xl:justify-center @xl:gap-4 @xl:pb-0 @xl:pt-12 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
+              className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-[#1e5668]"
             >
               <span
-                className={`flex h-16 w-16 items-center justify-center rounded-full bg-white @xl:h-20 @xl:w-20 shadow-[0_10px_34px_rgba(0,0,0,.4)] transition ${
-                  ready ? "text-[#12333f] active:scale-95" : "text-[#9aa5ac] opacity-70"
+                data-play-circle=""
+                className={`flex h-[60px] w-[60px] items-center justify-center rounded-full bg-white shadow-[0_8px_28px_rgba(0,0,0,.38)] transition @xl:h-[72px] @xl:w-[72px] ${
+                  ready ? "text-[#12333f] group-active:scale-95" : "text-[#9aa5ac] opacity-75"
                 }`}
               >
-                {/* Ticked and the video is on its way: a turning ring in place of the triangle (its line says why in words). */}
+                {/* Ticked and the video is on its way: a turning ring in place of the triangle (the hidden line says why). */}
                 {ticked && !ready && !acceptTrouble ? (
-                  <Spinner tone="dark" className="h-10 w-10 @xl:h-12 @xl:w-12" />
+                  <Spinner tone="dark" className="h-8 w-8 @xl:h-9 @xl:w-9" />
                 ) : (
-                  <PlayIcon className="ml-1 h-8 w-8 @xl:h-10 @xl:w-10" />
+                  <PlayIcon className="ml-1 h-7 w-7 @xl:h-8 @xl:w-8" />
                 )}
               </span>
-              <span id={`${tickId}-why`} className="rounded-full bg-white px-4 py-1.5 text-[16px] font-semibold text-[#12333f] @xl:py-2 @xl:text-[17px] shadow-[0_4px_16px_rgba(0,0,0,.3)]">
+              <span id={`${tickId}-why`} className="sr-only">
                 {ready ? "Tap to play" : !ticked ? "Tick the box above to play" : acceptTrouble ? "Tap Try again above" : "Getting the video ready"}
               </span>
             </button>
@@ -588,7 +601,7 @@ export function WatchPlayer({
             <>
               {/* No picture while the video will not load: the clinic's mark is a row of its own above the panel. */}
               <div className="px-3 pt-3">
-                <ClinicMark logoUrl={logoUrl} name={clinicName} title={title} senderName={senderName} />
+                <ClinicMark logoUrl={logoUrl} name={clinicName} senderName={senderName} />
               </div>
               {/* Calm, like the expired page: no red, and never the word "error". Announced to a screen reader when it appears.
                   It is part of the page's flow (not laid over the video's box), so it is as tall as its words and buttons
@@ -596,10 +609,10 @@ export function WatchPlayer({
                   The same panel says, in the expired page's words, that the link's time ran out while the page was open;
                   there is no Try again then, because nothing is renewed once access has ended. */}
               <div role="alert" className="relative flex flex-1 flex-col items-center justify-center gap-3 px-5 py-6 text-center">
-                <p className="text-[20px] leading-[1.35] font-semibold text-white">
+                <p className="text-[18px] leading-[1.35] font-semibold text-white">
                   {unavailable ? "This video isn't available right now." : ended ? "This link has expired." : "The video did not load."}
                 </p>
-                <p className="max-w-[30ch] text-[16px] leading-[1.45] text-[#d5dde2]">
+                <p className="max-w-[30ch] text-[15px] leading-[1.45] text-[#d5dde2]">
                   {unavailable
                     ? `Please ask ${clinicName} about it.`
                     : ended
@@ -611,7 +624,7 @@ export function WatchPlayer({
                     ref={retryButton}
                     type="button"
                     onClick={retry}
-                    className="mt-1 flex h-12 shrink-0 items-center rounded-full bg-white px-7 text-[17px] font-semibold text-[#12333f] transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
+                    className="mt-1 flex h-12 shrink-0 items-center rounded-full bg-white px-7 text-[16px] font-semibold text-[#12333f] transition active:scale-95 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-white"
                   >
                     Try again
                   </button>
@@ -621,12 +634,12 @@ export function WatchPlayer({
                   <>
                     <a
                       href={call.href}
-                      className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[16px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
+                      className="flex min-h-12 shrink-0 items-center gap-2 rounded-full px-4 text-[15px] font-medium text-white underline underline-offset-4 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-white computer:hidden"
                     >
                       <PhoneIcon className="h-5 w-5 shrink-0" />
                       {ended || unavailable ? "Call" : "Still stuck? Call"} {call.label}
                     </a>
-                    <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[16px] text-white" />
+                    <CallNumber call={call} className="min-h-12 shrink-0 px-4 text-[15px] text-white" />
                   </>
                 )}
               </div>

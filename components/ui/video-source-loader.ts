@@ -19,7 +19,9 @@ import { refreshDelayMs, tokenHasExpired, tokenRunsOutSoon, type PlaybackSource 
  *     Mac): the address goes straight on the element, like a file;
  *   - everywhere else, hls.js, loaded only now (a dynamic import), so no
  *     browser downloads a streaming library for a page that never plays a
- *     stream, and the library's grid of cards never loads it at all. Which
+ *     stream, and the library's grid of cards never loads it at all. (The
+ *     patient page may start that same download a moment sooner, at the
+ *     tick, for a video it knows will be a stream: warmUpStreamLibrary.) Which
  *     browsers count as "having HLS of their own" is decided by what they
  *     have, not by their name (browserPrefersNativeHls): Chrome and Android
  *     browsers also CLAIM they might play HLS and then do it badly or not at
@@ -90,6 +92,48 @@ export function browserPrefersNativeHls(element: HTMLVideoElement): boolean {
   return !("MediaSource" in w) || "ManagedMediaSource" in w;
 }
 
+/**
+ * Wraps a fetch so it is made once and every caller shares the answer, but a
+ * fetch that FAILED is forgotten, so the next caller fetches again. Used for
+ * hls.js: the patient page may start fetching it early (at the tick) and the
+ * loader asks again when the stream arrives; both get the same download, and
+ * an early fetch that dropped never stands in the way of the real one.
+ */
+export function shareUntilFailure<T>(fetchOnce: () => Promise<T>): () => Promise<T> {
+  let pending: Promise<T> | null = null;
+  return () => {
+    if (!pending) {
+      const made = fetchOnce();
+      pending = made;
+      made.catch(() => {
+        if (pending === made) pending = null;
+      });
+    }
+    return pending;
+  };
+}
+
+/** hls.js, fetched at most once per page (and again only after a failed try). */
+export const loadHlsLibrary: () => Promise<HlsModule> = shareUntilFailure(() => import("hls.js"));
+
+/**
+ * Start fetching hls.js now, before a stream has arrived, on a browser that
+ * will need it. The patient page calls this at the tick for a video it knows
+ * will be a stream, so the library downloads while the tick's own request is
+ * on its way, instead of only after its answer. Nothing happens on a browser
+ * that plays HLS itself (Safari: it never downloads the library), and the
+ * page's first load never waits for it (the tick comes after the page is
+ * up). A failure is ignored here: the loader's own ask, a moment later,
+ * fetches again (shareUntilFailure) and says so if that fails too.
+ */
+export function warmUpStreamLibrary(
+  element: HTMLVideoElement | null,
+  { prefersNativeHls = browserPrefersNativeHls, load = loadHlsLibrary }: { prefersNativeHls?: (element: HTMLVideoElement) => boolean; load?: () => Promise<unknown> } = {},
+): void {
+  if (!element || prefersNativeHls(element)) return;
+  load().catch(() => {});
+}
+
 export class SourceLoader {
   /** The source currently on the element (it moves on after a refresh, while the page's prop stays what it handed in). */
   private current: PlaybackSource = { kind: "unavailable" };
@@ -144,7 +188,7 @@ export class SourceLoader {
 
     let Hls: HlsModule["default"];
     try {
-      Hls = (await (this.env.loadHls ?? (() => import("hls.js")))()).default;
+      Hls = (await (this.env.loadHls ?? loadHlsLibrary)()).default;
     } catch {
       // The library did not arrive (the connection dropped mid-download). Try again fetches it again.
       if (!this.dead) this.env.getHooks().onFailure();
@@ -164,7 +208,7 @@ export class SourceLoader {
       return;
     }
 
-    const instance = new Hls({ startPosition: startAt > 0 ? startAt : -1 });
+    const instance = new Hls(hlsSettings(startAt));
     this.hls = instance;
     instance.on(Hls.Events.ERROR, (_event, data) => {
       if (!data.fatal) return;
@@ -278,6 +322,19 @@ export class SourceLoader {
     if (!this.env.getHooks().refresh) return;
     this.refreshTimer = setTimeout(() => void this.refreshNow(), refreshDelayMs(expiresAt, this.now()));
   }
+}
+
+/**
+ * How hls.js is set up. `capLevelToPlayerSize` keeps it from fetching a
+ * picture bigger than the player is drawn (in device pixels): a phone's
+ * player is about 400 points wide, so it starts on a smaller, quicker
+ * rendition instead of the largest one. hls.js watches the video element's
+ * size (a ResizeObserver, in hls.js 1.7), so when the player goes full
+ * screen, or a tablet turns sideways, the limit rises and it switches up to
+ * a sharper rendition. Safari plays HLS itself and picks its own.
+ */
+export function hlsSettings(startAt: number) {
+  return { startPosition: startAt > 0 ? startAt : -1, capLevelToPlayerSize: true };
 }
 
 /** Once the new file says how long it is, jump to where the old one was. */

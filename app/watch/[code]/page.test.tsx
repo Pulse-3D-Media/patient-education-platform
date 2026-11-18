@@ -111,7 +111,8 @@ describe("a clinic with its own branding", () => {
     const clinic = await makeClinic({ logoUrl: "https://example.com/slow.png" });
     const html = await render(await makeShare(clinic.id, videoId));
 
-    expect(html).toContain("h-11 w-[220px]");
+    // 36px tall on a phone, 44px from 640px wide.
+    expect(html).toContain("h-9 w-[180px] max-w-full sm:h-11 sm:w-[220px]");
     // The picture starts invisible; only the browser, once it has loaded, shows it.
     expect(html).toMatch(/<img[^>]*src="https:\/\/example\.com\/slow\.png"[^>]*opacity-0/);
   });
@@ -140,7 +141,7 @@ describe("a clinic that set nothing", () => {
 
     expect(html).toContain("--brand-accent:#1e5668");
     expect(html).not.toMatch(/font-(merriweather|open-sans|source-sans|montserrat|nunito-sans)/);
-    expect(html).not.toContain("h-11 w-[220px]");
+    expect(html).not.toContain("w-[180px]");
     expect(html).toContain(`From ${clinic.name}`);
   });
 });
@@ -315,13 +316,13 @@ describe("when the link stops working (decided 2026-10-08)", () => {
     }
   });
 
-  it("is one quiet line: 16px, the small-text grey, under the video's length, never red, never 'expire'", async () => {
+  it("is one quiet line: 15px (16px until 2026-11-17), the small-text grey, under the video's length, never red, never 'expire'", async () => {
     const clinic = await makeClinic({});
     const link = await makeLink(clinic.id, { expiryPolicy: "FIRST_PLAY", daysAfterFirstPlay: 10 });
     const html = await render(link.code);
     const line = deadlineLine(html);
     expect(line).not.toBeNull();
-    expect(line).toContain("text-[16px]");
+    expect(line).toContain("text-[15px]");
     expect(line).toContain("text-[#46555e]");
     expect(line!.toLowerCase()).not.toMatch(/red|danger|problem|expire/);
     // Under the length line ("About 2 minutes"), not above the video.
@@ -427,20 +428,35 @@ describe("the 'for education only' box before the video", () => {
     // No checked or disabled attribute (the class list mentions "disabled:" for a style, which does not count).
     expect(box).not.toMatch(/\schecked[=\s/>]/);
     expect(box).not.toMatch(/\sdisabled[=\s/>]/);
-    // A 28px square in a row at least 48px tall, with the words at the page's 20px body size.
+    // A 28px square in a row at least 48px tall, with the words at the page's 18px body size (one step down from 20px, 2026-11-17).
     expect(box).toContain("h-7 w-7");
     expect(html).toMatch(/<label[^>]*min-h-12[^>]*>/);
-    expect(html).toMatch(/<span class="text-\[20px\][^"]*">I understand this video/);
+    expect(html).toMatch(/<span class="text-\[18px\][^"]*">I understand this video/);
     expect(html.toLowerCase()).not.toContain("consent");
   });
 
-  it("keeps Play visibly not ready, with one line saying why", async () => {
+  it("keeps Play visibly not ready: a plain dimmed circle with the triangle, and why said to a screen reader only", async () => {
     const clinic = await makeClinic({});
     const html = await render(await makeShare(clinic.id, videoId));
 
     expect(html).toMatch(/<button[^>]*aria-label="Play Vitest Total Knee Replacement"[^>]*aria-disabled="true"/);
-    expect(html).toContain("Tick the box above to play");
+    // The circle: at least 48px to tap (60px), white, dimmed until ready, with no words of its own (Evan, 2026-11-17).
+    expect(html).toMatch(/<span data-play-circle="" class="flex h-\[60px\] w-\[60px\] [^"]*rounded-full bg-white[^"]*opacity-75/);
+    expect(html).toMatch(/<span id="[^"]*-why" class="sr-only">Tick the box above to play<\/span>/);
     expect(html).not.toContain("Tap to play");
+    expect(html).not.toContain("data-play-pill");
+  });
+
+  it("keeps the patient page's text one step smaller than before and never under 15px (2026-11-17)", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+    const sizes = [...html.matchAll(/text-\[(\d+)px\]/g)].map(([, px]) => Number(px));
+
+    expect(sizes.length).toBeGreaterThan(0);
+    for (const px of sizes) expect(px).toBeGreaterThanOrEqual(15);
+    expect(html).toMatch(/<h1 class="[^"]*text-\[24px\][^"]*sm:text-\[27px\]/);
+    expect(html).toMatch(/<p class="[^"]*text-\[18px\][^"]*">Your surgeon shared this/);
+    expect(html).not.toContain("text-[20px] leading-[1.5]");
   });
 
   it("puts no playable address in the page: the video comes only from the accept route, after the tick", async () => {
@@ -450,6 +466,14 @@ describe("the 'for education only' box before the video", () => {
     expect(html).not.toContain("example.com/vitest.mp4");
     expect(html).not.toMatch(/<video[^>]*\ssrc=/);
     expect(html).not.toContain("stream.mux.com");
+  });
+
+  it("opens the connection to the file's host early, with the bare host and never the file's address", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+
+    expect(html.match(/<link[^>]*rel="preconnect"[^>]*>/g)).toEqual(['<link rel="preconnect" href="https://example.com"/>']);
+    expect(html).not.toContain("vitest.mp4");
   });
 
   it("shows the poster staff set on the video's box until then, a picture and nothing that plays", async () => {
@@ -558,14 +582,14 @@ describe("the clinic and the doctor on the video", () => {
     return html.slice(start, html.indexOf("</div>", start));
   }
 
-  it("is on the picture, top left, from before the first play: the logo, the title and the surgeon's name alone", async () => {
+  it("is on the picture, top left, from before the first play: the logo and the surgeon's name alone (the title is written above the player)", async () => {
     const clinic = await makeClinic({ name: "Vitest Strip Orthopedics", logoUrl: "https://example.com/strip-white.png" });
     const html = await render(await shareFrom(clinic.id, "Dr. Jane Smith, DO"));
     const strip = stripOf(html);
 
     expect(strip).toContain('src="https://example.com/strip-white.png"');
     expect(strip).toContain(">Dr. Jane Smith, DO<");
-    expect(strip).toContain(">Vitest Total Knee Replacement<");
+    expect(strip).not.toContain(">Vitest Total Knee Replacement<");
     expect(strip).not.toContain("Sent by");
     // Inside the video's 16:9 box, in the box over the picture (picture-fit), after the video itself.
     expect(html).toContain("padding-top:56.25%");
@@ -617,7 +641,8 @@ describe("who sent the link", () => {
       select: { code: true },
     });
     const html = await render(share.code);
-    expect(html).toContain('<span class="block">Dr. Jane Smith</span><span class="block">Vitest Summit Orthopedics</span>');
+    // Two lines; on a phone held sideways one, with a dot between that only shows there.
+    expect(html).toContain('<span class="block short-landscape:inline">Dr. Jane Smith</span><span class="block short-landscape:inline"><span aria-hidden="true" class="hidden px-1.5 short-landscape:inline">·</span>Vitest Summit Orthopedics</span>');
     expect(html).not.toContain("Sent by");
     // It comes before the procedure's name, as "who sent me this" always has.
     expect(html.indexOf("Dr. Jane Smith")).toBeLessThan(html.indexOf("Vitest Total Knee Replacement"));
@@ -767,6 +792,22 @@ describe("a video that has moved to Mux", () => {
     expect(html).toContain('controlsList="nodownload"');
     expect(html).toContain("I understand this video is for education only.");
     expect(html).not.toMatch(/stops working in a few minutes/);
+  });
+
+  it("opens the connections to Mux's hosts early, as bare hosts: no playlist, no token, no CDN copy", async () => {
+    Object.assign(process.env, MUX_ENV);
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, muxVideoId));
+
+    expect(html.match(/<link[^>]*rel="preconnect"[^>]*>/g)).toEqual([
+      '<link rel="preconnect" href="https://stream.mux.com"/>',
+      '<link rel="preconnect" href="https://stream.mux.com" crossorigin="anonymous"/>',
+      '<link rel="preconnect" href="https://image.mux.com"/>',
+    ]);
+    // The playlist and its token come only from the accept route, after the tick.
+    expect(html).not.toContain(".m3u8");
+    expect(html).not.toContain(`stream.mux.com/${playbackId}`);
+    expect(html).not.toContain("example.com");
   });
 
   it("shows the calm did-not-load panel, and never the CDN file, when Mux is not configured on this deployment", async () => {

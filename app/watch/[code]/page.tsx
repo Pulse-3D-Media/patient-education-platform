@@ -166,6 +166,7 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
         <WatchPlayer
           poster={poster}
           title={share.video.title}
+          placeholder={share.video.isPlaceholder}
           code={share.code}
           clinicName={share.clinic.name}
           logoUrl={look.logoUrl}

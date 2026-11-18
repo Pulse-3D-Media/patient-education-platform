@@ -481,6 +481,15 @@ describe("what stays the same", () => {
     expect(html).toContain("This plays a sample animation, not this procedure.");
     expect(html.indexOf("Placeholder.")).toBeLessThan(html.indexOf("From "));
     expect(html.indexOf("Placeholder.")).toBeLessThan(html.indexOf("summit.png"));
+    // The mark is carried into the player too, so full screen (which shows only the player) still says so.
+    expect(html).toContain("Placeholder animation");
+    expect(html.indexOf("Placeholder animation")).toBeGreaterThan(html.indexOf("video player"));
+  });
+
+  it("a finished animation's player carries no placeholder mark", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+    expect(html).not.toContain("Placeholder animation");
   });
 
   it("before the first tap there is one thing to press, Play, with the strip's logo and names hidden from screen readers", async () => {

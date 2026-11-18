@@ -120,6 +120,7 @@ export default async function PrintedCodePage({ params }: PageProps<"/q/[code]">
         <WatchPlayer
           poster={poster}
           title={qr.video.title}
+          placeholder={qr.video.isPlaceholder}
           code={null}
           qrCode={qr.code}
           clinicName={qr.clinic.name}

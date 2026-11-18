@@ -479,6 +479,36 @@ export async function listRecentSharesForClinic(clinicId: string, limit: number,
   });
 }
 
+/**
+ * The newest share links this clinic has made, for its Links tab on /pulse,
+ * WITHOUT the link's code. The code is the working patient link: shown on a
+ * staff screen it can be read off a shared screen in a demo, so it is never
+ * read for this page at all. The tab names each link by its video, its date
+ * and the short end of its row id (shortLinkId() in lib/renewal-note.ts),
+ * which plays nothing. At most 20, like listRecentSharesForClinic.
+ */
+export async function listRecentSharesForPulse(clinicId: string, limit: number) {
+  return prisma.share.findMany({
+    where: { clinicId },
+    select: {
+      id: true,
+      createdAt: true,
+      expiresAt: true,
+      expiryPolicy: true,
+      firstPlayedAt: true,
+      daysAfterFirstPlay: true,
+      viewCount: true,
+      qrCodeId: true,
+      disclaimerFirstAcceptedAt: true,
+      disclaimerAcceptances: true,
+      disclaimerVersion: true,
+      video: { select: { title: true, category: true, isPlaceholder: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: Math.max(1, Math.min(limit, 20)),
+  });
+}
+
 /** How many share links this clinic has on the list, counted in the database. For the clinic's /pulse page, which shows the newest few and this number. */
 export async function countSharesForClinic(clinicId: string) {
   return prisma.share.count({ where: { clinicId } });

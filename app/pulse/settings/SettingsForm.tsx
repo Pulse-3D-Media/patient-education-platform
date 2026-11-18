@@ -4,7 +4,9 @@ import { INPUT, PRIMARY_BUTTON } from "@/components/ui/styles";
 import { MAX_LINK_DAYS, MAX_RENEWALS, MIN_RENEWALS } from "@/lib/expiry";
 import { MAX_QR_DAILY } from "@/lib/qr-code";
 import { SETTINGS_DEFAULTS, SETTINGS_HELP, SETTINGS_NOT_ACTIVE, type Settings } from "@/lib/settings-defaults";
+import { settingsWarnings } from "@/lib/settings-warnings";
 import { saveSettingsAction } from "../actions";
+import { useConfirmedSubmit, type Question } from "../ConfirmPopup";
 import { useKeptForm } from "../FormBits";
 
 /**
@@ -15,6 +17,12 @@ import { useKeptForm } from "../FormBits";
  * A setting that nothing in the app reads yet carries an amber "Not active
  * yet" line (SETTINGS_NOT_ACTIVE), so a saved number is never taken for one
  * that is doing something.
+ *
+ * A save that reaches links or clinics (renewals lowered, above all to 0;
+ * the printed-code limit or flag lowered; any of the three day counts
+ * changed) asks for a yes first, in a popup with one plain sentence per
+ * change (settingsWarnings in lib/settings-warnings.ts). The yes is a
+ * courtesy: the server checks staff and every number again.
  *
  * A refused or failed save leaves every number as typed (useKeptForm).
  *
@@ -35,9 +43,10 @@ const FIELDS: { name: keyof Settings; label: string; unit: string; min?: number;
 
 export function SettingsForm({ settings }: { settings: Settings }) {
   const { state, pending, form } = useKeptForm(saveSettingsAction);
+  const { onSubmit, popup } = useConfirmedSubmit((formElement) => askBeforeSaving(settings, formElement));
 
   return (
-    <form {...form} className="flex flex-col gap-4">
+    <form {...form} onSubmit={onSubmit} className="flex flex-col gap-4">
       {FIELDS.map((field) => (
         <div key={field.name} className="rounded-2xl border border-white/10 bg-[#0d1113] p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -83,6 +92,22 @@ export function SettingsForm({ settings }: { settings: Settings }) {
           </p>
         )}
       </div>
+      {popup}
     </form>
   );
+}
+
+/**
+ * The yes to ask for, comparing what the page showed with what is typed now.
+ * A box that is not a whole number is left to the server, which says what
+ * to fix; nothing is asked about it here.
+ */
+export function askBeforeSaving(shown: Settings, formElement: HTMLFormElement): Question | null {
+  const typed = { ...shown };
+  for (const field of FIELDS) {
+    const text = (formElement.elements.namedItem(field.name) as HTMLInputElement | null)?.value.trim() ?? "";
+    if (/^\d+$/.test(text)) typed[field.name] = Number(text);
+  }
+  const sentences = settingsWarnings(shown, typed);
+  return sentences.length > 0 ? { title: "Save these settings?", sentences, yes: "Yes, save settings", danger: typed.maxRenewals === 0 && shown.maxRenewals > 0 } : null;
 }

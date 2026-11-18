@@ -17,6 +17,16 @@ export function linkNoteName(videoTitle: string, shareId: string | null): string
   return shareId ? `A link for ${videoTitle} (link id ${shareId})` : `A link for ${videoTitle}`;
 }
 
+/**
+ * The short end of a link's row id ("...a3f9k2"), for a staff screen that
+ * lists links (the Links tab on /pulse). Enough to tell two links for the
+ * same video apart and to find the row; the row id plays nothing, unlike
+ * the link's code, which is never shown there.
+ */
+export function shortLinkId(shareId: string): string {
+  return `...${shareId.slice(-6)}`;
+}
+
 /** The part every reactivation entry shares, old and new. */
 const TURNED_BACK_ON = " turned back on: ";
 

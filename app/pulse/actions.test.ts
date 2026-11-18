@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/client";
 import { reserveSeat } from "@/lib/db/seats";
-import { saveSettings } from "@/lib/db/settings";
+import { saveSettingsAndCompare } from "@/lib/db/settings";
 import { MAX_GRACE_DAYS } from "@/lib/billing-state";
 import { recordAcceptedPlan, setStripeCustomer } from "@/lib/db/billing";
 import { MAX_LINK_DAYS } from "@/lib/expiry";
@@ -56,7 +56,8 @@ vi.mock("next/cache", () => ({
 // what it hands to the save, never the row.
 vi.mock("@/lib/db/settings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/settings")>();
-  return { ...actual, saveSettings: vi.fn() };
+  // It answers the settings before (the defaults) and after (what it was handed), as the real save does.
+  return { ...actual, saveSettingsAndCompare: vi.fn(async (values: import("@/lib/db/settings").Settings) => ({ before: actual.SETTINGS_DEFAULTS, after: values })) };
 });
 
 // Asking Mux about a playback id is a stand-in: each test says what Mux would answer (lib/mux.test.ts covers the real check's reading of Mux's answers).
@@ -438,8 +439,8 @@ describe("saveSettingsAction", () => {
   it("takes the printed-code limit and flag at their edges, and refuses a flag at or above the limit, or either one out of range, without saving", async () => {
     signInAs("user_staff", { pulseStaff: true });
     expect(await saveSettingsAction(null, typed({ qrDailyFlag: "1", qrDailyCap: "10000" }))).toEqual({ ok: "Settings saved." });
-    expect(vi.mocked(saveSettings)).toHaveBeenLastCalledWith(expect.objectContaining({ qrDailyFlag: 1, qrDailyCap: 10000 }));
-    vi.mocked(saveSettings).mockClear();
+    expect(vi.mocked(saveSettingsAndCompare)).toHaveBeenLastCalledWith(expect.objectContaining({ qrDailyFlag: 1, qrDailyCap: 10000 }));
+    vi.mocked(saveSettingsAndCompare).mockClear();
 
     expect(await saveSettingsAction(null, typed({ qrDailyFlag: "200", qrDailyCap: "200" }))).toEqual({
       error: "Printed-code links per day to flag must be below the daily limit, or the flag would never show before the limit stops a code.",
@@ -450,7 +451,7 @@ describe("saveSettingsAction", () => {
     });
     expect(await saveSettingsAction(null, typed({ qrDailyCap: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
     expect(await saveSettingsAction(null, typed({ qrDailyCap: "2.5" }))).toMatchObject({ error: expect.stringContaining("whole number") });
-    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+    expect(vi.mocked(saveSettingsAndCompare)).not.toHaveBeenCalled();
   });
 
   const typed = (over: Partial<Record<"unclaimedDays" | "viewDays" | "graceDays" | "qrDailyFlag" | "qrDailyCap" | "maxRenewals", string>> = {}) =>
@@ -459,13 +460,13 @@ describe("saveSettingsAction", () => {
   it("refuses a user who is not Pulse staff with not-found, and saves nothing", async () => {
     signInAs("user_clinic_admin", { kind: "staff" });
     await expect(saveSettingsAction(null, typed())).rejects.toMatchObject({ digest: expect.stringContaining("404") });
-    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+    expect(vi.mocked(saveSettingsAndCompare)).not.toHaveBeenCalled();
   });
 
   it("accepts a year for both link day counts, the limit itself, and hands the save exactly what was typed", async () => {
     signInAs("user_staff", { pulseStaff: true });
     expect(await saveSettingsAction(null, typed({ unclaimedDays: String(MAX_LINK_DAYS), viewDays: String(MAX_LINK_DAYS) }))).toEqual({ ok: "Settings saved." });
-    expect(vi.mocked(saveSettings)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 100, qrDailyCap: 200, maxRenewals: 3 });
+    expect(vi.mocked(saveSettingsAndCompare)).toHaveBeenCalledWith({ unclaimedDays: 365, viewDays: 365, graceDays: 14, qrDailyFlag: 100, qrDailyCap: 200, maxRenewals: 3 });
   });
 
   it("refuses a day count past a year, or of zero, for either link setting, naming the field, without saving", async () => {
@@ -479,7 +480,7 @@ describe("saveSettingsAction", () => {
     });
     expect(await saveSettingsAction(null, typed({ viewDays: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
     expect(await saveSettingsAction(null, typed({ unclaimedDays: "1.5" }))).toMatchObject({ error: expect.stringContaining("whole number") });
-    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+    expect(vi.mocked(saveSettingsAndCompare)).not.toHaveBeenCalled();
   });
 
   it("holds the grace days to the limits the grace rule itself enforces", async () => {
@@ -488,22 +489,22 @@ describe("saveSettingsAction", () => {
       error: "Grace days must be a whole number of days from 1 to 365.",
     });
     expect(await saveSettingsAction(null, typed({ graceDays: "0" }))).toMatchObject({ error: expect.stringContaining("at least 1") });
-    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+    expect(vi.mocked(saveSettingsAndCompare)).not.toHaveBeenCalled();
     expect(await saveSettingsAction(null, typed({ graceDays: String(MAX_GRACE_DAYS) }))).toEqual({ ok: "Settings saved." });
   });
 
   it("holds the maximum renewals to 0 through 10: zero is allowed (no link can be turned back on), eleven and minus one are not", async () => {
     signInAs("user_staff", { pulseStaff: true });
     expect(await saveSettingsAction(null, typed({ maxRenewals: "0" }))).toEqual({ ok: "Settings saved." });
-    expect(vi.mocked(saveSettings)).toHaveBeenLastCalledWith(expect.objectContaining({ maxRenewals: 0 }));
+    expect(vi.mocked(saveSettingsAndCompare)).toHaveBeenLastCalledWith(expect.objectContaining({ maxRenewals: 0 }));
     expect(await saveSettingsAction(null, typed({ maxRenewals: "10" }))).toEqual({ ok: "Settings saved." });
-    expect(vi.mocked(saveSettings)).toHaveBeenLastCalledWith(expect.objectContaining({ maxRenewals: 10 }));
+    expect(vi.mocked(saveSettingsAndCompare)).toHaveBeenLastCalledWith(expect.objectContaining({ maxRenewals: 10 }));
 
-    vi.mocked(saveSettings).mockClear();
+    vi.mocked(saveSettingsAndCompare).mockClear();
     for (const bad of ["11", "-1", "2.5", "", "three"]) {
       expect(await saveSettingsAction(null, typed({ maxRenewals: bad }))).toEqual({ error: "Maximum renewals must be a whole number from 0 to 10." });
     }
-    expect(vi.mocked(saveSettings)).not.toHaveBeenCalled();
+    expect(vi.mocked(saveSettingsAndCompare)).not.toHaveBeenCalled();
   });
 });
 

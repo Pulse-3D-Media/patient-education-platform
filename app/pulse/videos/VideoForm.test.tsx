@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { chaptersKey } from "@/lib/chapters";
-import { VideoForm, type VideoValues } from "./VideoForm";
+import { VideoForm, unpublishSentence, type VideoValues } from "./VideoForm";
 
 /**
  * The video form as the server first draws it, with the Server Actions as
@@ -14,6 +14,7 @@ import { VideoForm, type VideoValues } from "./VideoForm";
 
 vi.mock("../actions", () => ({
   saveVideoAction: vi.fn(),
+  countWorkingLinksAction: vi.fn(),
   startMuxUploadAction: vi.fn(),
   checkMuxUploadAction: vi.fn(),
 }));
@@ -77,5 +78,32 @@ describe("the Chapters section", () => {
     const html = renderToStaticMarkup(<VideoForm />);
     expect(html).not.toContain("Chapters");
     expect(html).not.toContain("shownChapters");
+  });
+});
+
+describe("the guard against a page left open, and the yes before an unpublish", () => {
+  it("carries what it showed for the title, category, poster, notes, Published and Placeholder", () => {
+    const html = renderToStaticMarkup(<VideoForm video={{ ...video(), notes: "A note", posterUrl: "https://image.mux.com/x/thumbnail.jpg", isPlaceholder: true }} />);
+    expect(values(html, "shownTitle")).toEqual(["Total Knee Replacement"]);
+    expect(values(html, "shownCategory")).toEqual(["KNEE"]);
+    expect(values(html, "shownPosterUrl")).toEqual(["https://image.mux.com/x/thumbnail.jpg"]);
+    expect(values(html, "shownNotes")).toEqual(["A note"]);
+    expect(values(html, "shownIsPublished")).toEqual(["on"]);
+    expect(values(html, "shownIsPlaceholder")).toEqual(["on"]);
+    expect(renderToStaticMarkup(<VideoForm />)).not.toContain("shownTitle");
+  });
+
+  it("no longer says links keep working after any save: it says unpublishing stops them", () => {
+    const html = renderToStaticMarkup(<VideoForm video={{ ...video(), shareCount: 4 }} />);
+    expect(html).not.toContain("They keep working after a save");
+    expect(html).toContain("Unpublishing it stops every one of them until it is published again.");
+    expect(html).toContain("Unticking it asks for a yes first, saying how many links it stops.");
+  });
+
+  it("the yes says how many links stop right now, none, or all when they could not be counted", () => {
+    expect(unpublishSentence(3)).toMatch(/^This stops 3 links to this video that work right now/);
+    expect(unpublishSentence(1)).toMatch(/^This stops 1 link to this video that works right now/);
+    expect(unpublishSentence(0)).toMatch(/^No link to this video works right now, so none stops./);
+    expect(unpublishSentence(null)).toMatch(/could not be counted just now/);
   });
 });

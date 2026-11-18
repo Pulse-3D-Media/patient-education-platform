@@ -12,7 +12,7 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
  * Change in the library's Send panel.
  *
  * A name box that holds only the name, and an optional title from the list
- * (MD, DO, DPM, PA-C, NP, Staff, Other, None). The "Dr." and the title come
+ * (MD, DO, DPM, PA-C, NP, Other, None). The "Dr." and the title come
  * from the list and are never typed. It opens on what patients see now, read
  * back into a name and a title by the same rule that builds them
  * (lib/sender-name.ts). For someone nobody has chosen for yet that is their
@@ -117,7 +117,7 @@ export function SenderNameForm({
           ))}
         </select>
         <p id={`${idPrefix}-credential-help`} className="mt-1 text-xs text-ink-muted">
-          MD, DO and DPM add &ldquo;Dr.&rdquo; in front. Staff is for office staff. None shows just the name.
+          MD, DO and DPM add &ldquo;Dr.&rdquo; in front. Without a credential, choose None: patients see just the name.
         </p>
       </div>
 

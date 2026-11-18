@@ -122,12 +122,15 @@ describe("a first confirmed payment", () => {
     expect(await autoSeatNotes(clinicId)).toHaveLength(1);
   });
 
-  it("seats the owner on a plan of several seats too, leaving the rest free", async () => {
+  it("does NOT seat the owner of a plan of several seats (limited to exactly one seat on 2026-11-18): they choose with Take a seat", async () => {
     const owner = user();
     const clinicId = await newClinic(owner);
     await firstPayment(clinicId, 3);
-    expect(await seatHolders(clinicId)).toEqual([owner]);
-    expect((await autoSeatNotes(clinicId))[0].body).toContain("Now 1 of 3 seats in use.");
+    expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { status: true } })).status).toBe("ACTIVE");
+    expect(await seatHolders(clinicId)).toEqual([]);
+    expect(await autoSeatNotes(clinicId)).toEqual([]);
+    // Taking one themselves still works.
+    expect((await reserveSeat(clinicId, owner)).held).toBe(true);
   });
 
   it("does not seat the owner when an invitation already holds a seat", async () => {
@@ -149,7 +152,7 @@ describe("a first confirmed payment", () => {
     expect(await autoSeatNotes(clinicId)).toEqual([]);
   });
 
-  it("does not seat the owner when someone else holds a seat, even with one free", async () => {
+  it("does not seat the owner of a two-seat plan, with someone else holding a seat or not", async () => {
     const owner = user();
     const other = user();
     const clinicId = await newClinic(owner, 2);
@@ -187,6 +190,27 @@ describe("Pulse staff opening a clinic", () => {
     // Raising the seats of a clinic that is already open with seats is not an opening.
     await setClinicPlan(clinicId, ["KNEE"], 2, "Vitest Staff");
     expect(await autoSeatNotes(clinicId)).toHaveLength(1);
+  });
+
+  it("a clinic Pulse opens with more than one seat (a managed clinic included) is never auto-seated", async () => {
+    for (const managedByPulse of [false, true]) {
+      const owner = user();
+      const clinicId = await newClinic(owner);
+      if (managedByPulse) await prisma.clinic.update({ where: { id: clinicId }, data: { managedByPulse: true } });
+      await setClinicPlan(clinicId, ["KNEE"], 5, "Vitest Staff");
+      await setClinicStatusByStaff(clinicId, "OPEN", "Vitest: opened by hand.", "Vitest Staff");
+      expect(await seatHolders(clinicId), `managed: ${managedByPulse}`).toEqual([]);
+      expect(await autoSeatNotes(clinicId)).toEqual([]);
+    }
+  });
+
+  it("a managed clinic Pulse opens with exactly one seat seats its owner", async () => {
+    const owner = user();
+    const clinicId = await newClinic(owner);
+    await prisma.clinic.update({ where: { id: clinicId }, data: { managedByPulse: true } });
+    await setClinicPlan(clinicId, ["KNEE"], 1, "Vitest Staff");
+    await setClinicStatusByStaff(clinicId, "OPEN", "Vitest: opened by hand.", "Vitest Staff");
+    expect(await seatHolders(clinicId)).toEqual([owner]);
   });
 
   it("an owner who gave the seat up is not seated again when the clinic closes and opens again", async () => {

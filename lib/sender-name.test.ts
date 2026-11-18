@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CREDENTIALS,
+  withoutStaff,
   CREDENTIAL_CHOICES,
   MAX_DISPLAY_NAME,
   MAX_OTHER_CREDENTIAL,
@@ -65,12 +66,24 @@ describe("parseNameChoice and buildSenderName: a name and a credential make the 
   it("adds no Dr. for PA-C and NP", () => {
     expect(words(pick("Jane Smith", "PA-C"))).toBe("Jane Smith, PA-C");
     expect(words(pick("Jane Smith", "NP"))).toBe("Jane Smith, NP");
-    expect(["PA-C", "NP", "Staff", "other", "none", ""].some((credential) => addsDoctor(credential as CredentialPick))).toBe(false);
+    expect(["PA-C", "NP", "other", "none", ""].some((credential) => addsDoctor(credential as CredentialPick))).toBe(false);
   });
 
-  it("puts Staff after the name, with no Dr. (for office staff, added 2026-11-16)", () => {
-    expect(words(pick("Jane Smith", "Staff"))).toBe("Jane Smith, Staff");
-    expect(words(pick("Jane Smith", "other", "staff"))).toBe("refused: Staff is in the list. Choose it there.");
+  it("has no Staff title (dropped by the user on 2026-11-18): someone without a credential is the name alone", () => {
+    expect(words(pick("Jane Smith", "Staff"))).toBe("refused: Choose a title, or None for just the name.");
+    for (const typed of ["staff", "Staff", "STAFF"]) {
+      expect(words(pick("Jane Smith", "other", typed)), typed).toBe("refused: Choose None instead: someone without a credential is shown by their name alone.");
+    }
+    expect(words(pick("Jane Smith", "none"))).toBe("Jane Smith");
+  });
+
+  it("never shows a stored ', Staff' (from the two days it existed on an unreleased branch), and leaves everything else alone", () => {
+    expect(withoutStaff("Jane Smith, Staff")).toBe("Jane Smith");
+    expect(withoutStaff("Jane Smith ,staff ")).toBe("Jane Smith");
+    expect(effectiveSenderName("Jane Smith, Staff", "Jane Smith")).toBe("Jane Smith");
+    expect(senderLines("Jane Smith, Staff", "Summit Orthopedics")).toEqual(["Jane Smith", "Summit Orthopedics"]);
+    for (const kept of ["Jane Smith", "Dr. Jane Smith, DO", "Jane Smith, PA-C", "Staff", "Jane Staffordshire"]) expect(withoutStaff(kept), kept).toBe(kept);
+    expect(withoutStaff(null)).toBeNull();
   });
 
   it("puts a typed Other credential after the name, with no Dr.", () => {
@@ -85,8 +98,8 @@ describe("parseNameChoice and buildSenderName: a name and a credential make the 
   });
 
   it("offers every credential in the list, nothing picked in advance", () => {
-    expect(CREDENTIAL_CHOICES.map((choice) => choice.value)).toEqual(["MD", "DO", "DPM", "PA-C", "NP", "Staff", "other", "none"]);
-    expect(CREDENTIALS).toEqual(["MD", "DO", "DPM", "PA-C", "NP", "Staff"]);
+    expect(CREDENTIAL_CHOICES.map((choice) => choice.value)).toEqual(["MD", "DO", "DPM", "PA-C", "NP", "other", "none"]);
+    expect(CREDENTIALS).toEqual(["MD", "DO", "DPM", "PA-C", "NP"]);
   });
 
   it("tidies spaces, line breaks and control characters, and keeps names of any language", () => {
@@ -114,7 +127,7 @@ describe("parseNameChoice and buildSenderName: a name and a credential make the 
   });
 
   it("refuses a credential that is not in the list, or none chosen", () => {
-    for (const credential of ["", "md", "PhD", "Dr", "<b>", "staff"]) expect(words(pick("Jane Smith", credential)), credential).toBe("refused: Choose a title, or None for just the name.");
+    for (const credential of ["", "md", "PhD", "Dr", "<b>", "staff", "Staff"]) expect(words(pick("Jane Smith", credential)), credential).toBe("refused: Choose a title, or None for just the name.");
     expect(words({ name: "Jane Smith" })).toBe("refused: Choose a title, or None for just the name.");
   });
 
@@ -146,7 +159,6 @@ describe("readSenderName: stored words back into the choice that made them", () 
     { name: "Jane Smith", credential: "DPM", other: "" },
     { name: "Jane Smith", credential: "PA-C", other: "" },
     { name: "Jane Smith", credential: "NP", other: "" },
-    { name: "Jane Smith", credential: "Staff", other: "" },
     { name: "Jane Smith", credential: "other", other: "LAc" },
     { name: "Jane Smith", credential: "other", other: "Jr" },
     { name: "Jane Smith", credential: "none", other: "" },

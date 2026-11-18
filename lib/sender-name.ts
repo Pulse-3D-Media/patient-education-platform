@@ -25,12 +25,11 @@
  *
  *   MD, DO, DPM   "Dr. Jane Smith, DO"
  *   PA-C, NP      "Jane Smith, PA-C"
- *   Staff         "Jane Smith, Staff"  (office staff; added 2026-11-16 by the
- *                                      user's decision. Shown after the name,
- *                                      not left off, so a saved Staff reads
- *                                      back as Staff and not as None)
  *   Other         "Jane Smith, LAc"   (a short credential typed in, no "Dr.")
- *   None          "Jane Smith"
+ *   None          "Jane Smith"        (anyone without a credential, office
+ *                                      staff included: decided by the user on
+ *                                      2026-11-18, which dropped a "Staff"
+ *                                      choice that was never released)
  *
  * The finished words are what is stored, so nothing in the database changed
  * for this. readSenderName() turns stored words back into the choice that
@@ -60,7 +59,7 @@ export const MAX_DISPLAY_NAME = 80;
 export const MAX_OTHER_CREDENTIAL = 12;
 
 /** The credentials in the list, in the order the dropdown shows them. */
-export const CREDENTIALS = ["MD", "DO", "DPM", "PA-C", "NP", "Staff"] as const;
+export const CREDENTIALS = ["MD", "DO", "DPM", "PA-C", "NP"] as const;
 export type Credential = (typeof CREDENTIALS)[number];
 
 /** What the dropdown can hold: a listed credential, Other, None, or "" for nothing chosen yet. */
@@ -76,7 +75,6 @@ export const CREDENTIAL_CHOICES: { value: Exclude<CredentialPick, "">; label: st
   { value: "DPM", label: "DPM (adds Dr.)" },
   { value: "PA-C", label: "PA-C" },
   { value: "NP", label: "NP" },
-  { value: "Staff", label: "Staff (office staff)" },
   { value: "other", label: "Other (type it)" },
   { value: "none", label: "None" },
 ];
@@ -147,6 +145,8 @@ export function parseNameChoice(value: unknown): { ok: true; choice: NameChoice;
     if (!OTHER_CREDENTIAL.test(other)) return { ok: false, message: "Use letters and hyphens only in the credential, starting with a letter. For example: LAc or APRN-CNP" };
     const listed = CREDENTIALS.find((listedOne) => listedOne.toLowerCase() === other.toLowerCase());
     if (listed) return { ok: false, message: `${listed} is in the list. Choose it there.` };
+    // Someone without a credential is shown by name alone (decided by the user on 2026-11-18), so "Staff" is not one.
+    if (other.toLowerCase() === "staff") return { ok: false, message: "Choose None instead: someone without a credential is shown by their name alone." };
   }
 
   const choice: NameChoice = { name, credential: credential as CredentialPick, other };
@@ -197,7 +197,21 @@ export function readSenderName(words: string | null | undefined): { choice: Name
 
 /** The name shown for a seated person: the one chosen for them, else the default, else null. */
 export function effectiveSenderName(displayName: string | null | undefined, defaultName: string | null | undefined): string | null {
-  return displayName || defaultName || null;
+  return withoutStaff(displayName || defaultName || null);
+}
+
+/**
+ * A name with a ", Staff" at the end loses it: "Jane Smith, Staff" is shown,
+ * and copied onto new links, as "Jane Smith". "Staff" was a choice in the
+ * editor for two days on an unreleased branch (2026-11-16 to 2026-11-18)
+ * before the user dropped it, so only a preview or the testing database can
+ * hold one; this keeps it off every screen and every new link anyway. A name
+ * that is only "Staff" is left alone: it is somebody's name, not a title.
+ */
+export function withoutStaff(name: string | null): string | null {
+  if (name === null) return null;
+  const stripped = name.replace(/\s*,\s*staff\s*$/i, "");
+  return stripped || name;
 }
 
 /**
@@ -220,7 +234,8 @@ export function libraryStripName(seat: { displayName: string | null } | null, de
  * Summit Orthopedics".
  */
 export function senderLines(senderName: string | null | undefined, clinicName: string): string[] {
-  return senderName ? [senderName, clinicName] : [`From ${clinicName}`];
+  const name = withoutStaff(senderName ?? null);
+  return name ? [name, clinicName] : [`From ${clinicName}`];
 }
 
 /** A credential typed under Other: letters and hyphens, starting with a letter. */

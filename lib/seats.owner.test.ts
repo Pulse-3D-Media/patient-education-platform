@@ -11,6 +11,7 @@ import { OWNER_AUTO_SEAT_WORDS, noSeatHelp, ownerAutoSeatDue, ownerAutoSeatNote,
 const due = {
   wasOpenWithSeats: false,
   isOpenWithSeats: true,
+  planSeats: 1,
   ownerClerkUserId: "user_vitestowner",
   seated: 0,
   invited: 0,
@@ -18,13 +19,15 @@ const due = {
 };
 
 describe("ownerAutoSeatDue: a solo owner is seated when the clinic opens", () => {
-  it("is due when the clinic has just opened with seats, has an owner, and nobody holds or is invited to a seat", () => {
+  it("is due when the clinic has just opened with exactly one seat, has an owner, and nobody holds or is invited to it", () => {
     expect(ownerAutoSeatDue(due)).toBe(true);
   });
 
   it("is not due for each thing that is not so", () => {
     expect(ownerAutoSeatDue({ ...due, wasOpenWithSeats: true }), "already open with seats: not an opening").toBe(false);
     expect(ownerAutoSeatDue({ ...due, isOpenWithSeats: false }), "still closed, or no seats").toBe(false);
+    // Only a plan of exactly one seat (limited by the user on 2026-11-18): an owner who buys several keeps choosing.
+    for (const planSeats of [0, 2, 3, 10]) expect(ownerAutoSeatDue({ ...due, planSeats }), `${planSeats} seats`).toBe(false);
     expect(ownerAutoSeatDue({ ...due, ownerClerkUserId: null }), "no owner").toBe(false);
     expect(ownerAutoSeatDue({ ...due, ownerClerkUserId: "not a user id" }), "an owner id that is not a Clerk id").toBe(false);
     expect(ownerAutoSeatDue({ ...due, seated: 1 }), "someone holds a seat").toBe(false);

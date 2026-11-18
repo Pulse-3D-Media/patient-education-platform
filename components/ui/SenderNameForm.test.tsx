@@ -55,11 +55,11 @@ describe("SenderNameForm", () => {
     expect(html).not.toContain("Patients will see:");
   });
 
-  it("says the title is optional, explains Dr. and Staff, and offers Staff", () => {
+  it("says the title is optional, explains Dr. and None, and offers no Staff (dropped 2026-11-18)", () => {
     const html = form("Jane Smith");
     expect(html).toContain("Title (optional)");
-    expect(html).toContain("MD, DO and DPM add &ldquo;Dr.&rdquo; in front. Staff is for office staff. None shows just the name.".replace(/&ldquo;|&rdquo;/g, (m) => (m === "&ldquo;" ? "“" : "”")));
-    expect(html).toContain('<option value="Staff">Staff (office staff)</option>');
+    expect(html).toContain("MD, DO and DPM add “Dr.” in front. Without a credential, choose None: patients see just the name.");
+    expect(html).not.toContain("Staff");
     expect(html).toContain('aria-describedby="t-credential-help"');
   });
 

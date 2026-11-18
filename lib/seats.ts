@@ -8,9 +8,10 @@
  *   The ACCOUNT OWNER   One person per clinic: whoever created it, until they
  *                       hand it to someone else. Always an admin. The only
  *                       person who does not need a seat, and who may still
- *                       take one. A solo owner is given one automatically
- *                       when the clinic opens (ownerAutoSeatDue() below,
- *                       decided by the user on 2026-11-16).
+ *                       take one. The owner of a clinic that bought exactly
+ *                       one seat is given it automatically when the clinic
+ *                       opens (ownerAutoSeatDue() below, decided by the user
+ *                       on 2026-11-16, and limited to one seat on 2026-11-18).
  *   Everyone else       Holds one of the seats the clinic pays for
  *                       (Clinic.surgeonSeats). There is no free "staff" kind
  *                       any more. Whether someone is an admin is a separate
@@ -207,7 +208,10 @@ export function ownerAutoSeatNote(summary: SeatSummary): string {
 
 /**
  * Should the account owner be given a seat automatically, right now?
- * (Decided by the user on 2026-11-16: a solo owner is seated automatically.)
+ * (Decided by the user on 2026-11-16: a solo owner is seated automatically.
+ * Limited by the user on 2026-11-18 to clinics that bought EXACTLY ONE seat:
+ * an owner who buys several is often an office manager buying seats for
+ * others, so they keep choosing with Take a seat, as before.)
  *
  * Before this, an owner who bought one seat for themselves still had to find
  * "Take a seat" on the People page, and the library sent them to "ask your
@@ -217,6 +221,8 @@ export function ownerAutoSeatNote(summary: SeatSummary): string {
  * these are true:
  *
  *   - the clinic was not open with at least one seat a moment ago, and is now;
+ *   - its plan has exactly one surgeon seat (a plan of two or more, a
+ *     clinic Pulse manages included, is never seated by this);
  *   - it has an account owner;
  *   - nobody holds a seat and no invitation holds one (so the owner holds
  *     none either, and a seat is free: the plan has at least one);
@@ -231,6 +237,8 @@ export function ownerAutoSeatNote(summary: SeatSummary): string {
 export function ownerAutoSeatDue(facts: {
   wasOpenWithSeats: boolean;
   isOpenWithSeats: boolean;
+  /** The surgeon seats on the clinic's plan now. Only exactly one qualifies. */
+  planSeats: number;
   ownerClerkUserId: string | null;
   seated: number;
   invited: number;
@@ -239,6 +247,7 @@ export function ownerAutoSeatDue(facts: {
   return (
     !facts.wasOpenWithSeats &&
     facts.isOpenWithSeats &&
+    facts.planSeats === 1 &&
     isClerkUserId(facts.ownerClerkUserId) &&
     facts.seated === 0 &&
     facts.invited === 0 &&

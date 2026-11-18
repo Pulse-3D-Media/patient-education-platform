@@ -241,7 +241,7 @@ function openWithSeats(facts: OpeningFacts, now: Date): boolean {
 
 /**
  * Give the account owner a seat if the clinic has just become open with
- * seats and nobody else holds or is invited to one (the rule and its reasons
+ * exactly one seat and nobody else holds or is invited to it (the rule and its reasons
  * are ownerAutoSeatDue() in lib/seats.ts). Returns true when a seat was given.
  *
  * Called at the end of every write that can open a clinic or give it seats:
@@ -264,14 +264,14 @@ export async function seatSoloOwnerIfDue(tx: Prisma.TransactionClient, clinicId:
   if (!after) return false;
   const wasOpenWithSeats = openWithSeats(before, now);
   const isOpenWithSeats = openWithSeats(after, now);
-  // Most changes are not an opening at all; skip the counting for them.
-  if (wasOpenWithSeats || !isOpenWithSeats || !after.ownerClerkUserId) return false;
+  // Most changes are not the opening of a one-seat clinic; skip the counting for them.
+  if (wasOpenWithSeats || !isOpenWithSeats || after.surgeonSeats !== 1 || !after.ownerClerkUserId) return false;
 
   const seated = await tx.seatAllocation.count({ where: { clinicId } });
   const invited = await tx.seatInvitation.count({ where: { clinicId } });
   const doneBefore =
     (await tx.clinicNote.findFirst({ where: { clinicId, authorName: SEATS_AUTHOR, body: { startsWith: OWNER_AUTO_SEAT_WORDS } }, select: { id: true } })) !== null;
-  if (!ownerAutoSeatDue({ wasOpenWithSeats, isOpenWithSeats, ownerClerkUserId: after.ownerClerkUserId, seated, invited, doneBefore })) return false;
+  if (!ownerAutoSeatDue({ wasOpenWithSeats, isOpenWithSeats, planSeats: after.surgeonSeats, ownerClerkUserId: after.ownerClerkUserId, seated, invited, doneBefore })) return false;
 
   await tx.seatAllocation.create({ data: { clinicId, clerkUserId: after.ownerClerkUserId, syncState: "SYNCED", reservedAt: now }, select: { id: true } });
   const body = ownerAutoSeatNote(seatSummary(after.surgeonSeats, 1, 0));

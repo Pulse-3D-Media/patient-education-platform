@@ -50,6 +50,8 @@ export type CaptionDeps = {
   /** The signed address of a caption track's text (lib/mux.ts). */
   captionUrl: (playbackId: string, trackId: string, expiresAt: Date) => string;
   now: () => Date;
+  /** How long the page waits for Mux before saying it could not check just now. */
+  checkMs: number;
 };
 
 const REAL_DEPS: CaptionDeps = {
@@ -57,6 +59,7 @@ const REAL_DEPS: CaptionDeps = {
   configured: () => muxUploadsAreConfigured(),
   captionUrl: (playbackId, trackId, expiresAt) => signedCaptionUrl(playbackId, trackId, expiresAt),
   now: () => new Date(),
+  checkMs: 4_000,
 };
 
 /** How long the review link on the video's page works. Long enough to read a script through; a page drawn again gets a new one. */
@@ -100,21 +103,44 @@ function stateOfAsset(asset: AssetFacts, playbackId: string | null, deps: Captio
 type VideoFacts = { muxPlaybackId: string | null; muxAssetId: string | null };
 
 /**
- * Where a video's captions stand, asked of Mux as the page is drawn. Never
- * throws: Mux being down is a state of its own ("unreachable"), so the rest
- * of the page draws as usual.
+ * Where captions stand when the answer needs no word from Mux (a CDN video,
+ * Mux not set up here, no asset id), or null when Mux has to be asked. The
+ * video's page draws this straight away, from the row alone.
  */
-export async function readCaptionState(video: VideoFacts, deps: CaptionDeps = REAL_DEPS): Promise<CaptionState> {
+export function captionStateWithoutMux(video: VideoFacts, deps: Pick<CaptionDeps, "configured"> = REAL_DEPS): CaptionState | null {
   if (!video.muxPlaybackId) return { kind: "not-mux" };
   if (!deps.configured()) return { kind: "not-configured" };
   if (!video.muxAssetId) return { kind: "no-asset-id" };
+  return null;
+}
+
+/**
+ * Where a video's captions stand, asked of Mux as the page is drawn. Never
+ * throws: Mux being down, or slower than deps.checkMs, is a state of its own
+ * ("unreachable", said as "could not check just now" with a Check again
+ * button), so the rest of the page draws as usual. The page streams this in
+ * after the rest (a Suspense boundary), so a slow Mux never holds the page up.
+ */
+export async function readCaptionState(video: VideoFacts, deps: CaptionDeps = REAL_DEPS): Promise<CaptionState> {
+  const known = captionStateWithoutMux(video, deps);
+  if (known) return known;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tooSlow = new Promise<"too-slow">((resolve) => {
+    timer = setTimeout(() => resolve("too-slow"), deps.checkMs);
+  });
   try {
-    const asset = await deps.gateway.getAsset(video.muxAssetId);
+    const asset = await Promise.race([deps.gateway.getAsset(video.muxAssetId as string), tooSlow]);
+    if (asset === "too-slow") {
+      console.error("Mux captions: Mux did not answer in time; the page says it could not check just now");
+      return { kind: "unreachable" };
+    }
     if (!asset) return { kind: "unreachable" };
     return stateOfAsset(asset, video.muxPlaybackId, deps);
   } catch (error) {
     console.error(`Mux captions: could not read the asset: ${errorKind(error)}`);
     return { kind: "unreachable" };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

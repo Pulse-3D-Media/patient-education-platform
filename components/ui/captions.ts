@@ -23,7 +23,17 @@
  * so while the phone's own player is up the track is switched to "showing"
  * and the phone draws the captions itself, in the style the phone's
  * accessibility settings ask for; its own captions button works too. Back on
- * the page, the track is "hidden" again and our overlay takes over.
+ * the page, the track is "hidden" again and our overlay takes over. A choice
+ * made with the phone's own captions button counts as the person's choice:
+ * back on the page, CC shows it and our overlay follows it.
+ *
+ * THE DEVICE'S OWN PREFERENCE. With the browser's own HLS (Safari), a phone
+ * or computer whose accessibility settings ask for captions switches a
+ * caption track on ("showing") by itself. Until the person presses our CC
+ * button, the player never switches such a track off: it takes it as CC on
+ * (the button shows on, and our overlay draws the words instead of the
+ * browser). Only a press of CC turns them off. hls.js (Chrome, Edge,
+ * Firefox) is not told of any such setting, so there they start off.
  *
  * Nothing about the choice is stored: it lasts as long as the page.
  */
@@ -58,6 +68,29 @@ export function applyNativeCaptions(video: HTMLVideoElement, on: boolean, system
     const mode: TextTrackMode = track === chosen ? (systemPlayer ? "showing" : "hidden") : "disabled";
     if (track.mode !== mode) track.mode = mode;
   }
+}
+
+/**
+ * The browser's own HLS: the choice to put on the caption tracks, from the
+ * person's own (true or false once they have pressed CC, null before). Before
+ * any press, a track the device itself switched on ("showing", from its
+ * accessibility settings) means on; otherwise null: leave the tracks exactly
+ * as the browser has them, never switching off what the device chose.
+ */
+export function nativeCaptionChoice(video: HTMLVideoElement, choice: boolean | null): boolean | null {
+  if (choice !== null) return choice;
+  return captionTracksOf(video).some((track) => track.mode === "showing") ? true : null;
+}
+
+/**
+ * Leaving an iPhone's own full-screen player: what the person chose there. If
+ * they turned captions on or off with the phone's own captions button, the
+ * tracks say so ("showing" or not) and that is now their choice; otherwise
+ * their choice stays as it was (null if they never chose).
+ */
+export function choiceAfterSystemPlayer(video: HTMLVideoElement, choice: boolean | null): boolean | null {
+  const shown = captionTracksOf(video).some((track) => track.mode === "showing");
+  return shown !== (choice ?? false) ? shown : choice;
 }
 
 /**

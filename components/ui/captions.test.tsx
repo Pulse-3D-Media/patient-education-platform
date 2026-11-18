@@ -144,7 +144,7 @@ function fakeHls() {
 /** A loader with CC wired as useVideoSource wires it: a switch the test flips, and a record of what was said about tracks. */
 function make(element: HTMLVideoElement, native: boolean, refresh?: () => Promise<PlaybackSource | null>) {
   const hls = fakeHls();
-  const state = { wanted: false, available: [] as boolean[] };
+  const state = { wanted: null as boolean | null, available: [] as boolean[], adopted: [] as boolean[] };
   const hooks: LoaderHooks = { onFailure: vi.fn(), refresh };
   const loader = new SourceLoader({
     getElement: () => element,
@@ -152,7 +152,14 @@ function make(element: HTMLVideoElement, native: boolean, refresh?: () => Promis
     loadHls: hls.loadHls,
     now: () => Date.now(),
     prefersNativeHls: () => native,
-    captions: { wanted: () => state.wanted, onAvailable: (yes) => state.available.push(yes) },
+    captions: {
+      wanted: () => state.wanted,
+      onAvailable: (yes) => state.available.push(yes),
+      adopt: (on) => {
+        state.adopted.push(on);
+        state.wanted = on;
+      },
+    },
   });
   const press = (on: boolean) => {
     state.wanted = on;
@@ -227,6 +234,62 @@ describe("captions with the browser's own HLS (Safari, iPhone)", () => {
     expect(english.mode).toBe("showing");
     video.fire("webkitendfullscreen");
     expect(english.mode).toBe("hidden");
+  });
+
+  it("never switches off a track the device's own settings switched on: takes it as CC on until the person presses CC off", async () => {
+    const video = fakeVideo();
+    const { loader, press, state } = make(video, true, async () => stream("bbb"));
+    await loader.attach(stream("aaa"));
+    const english = track("subtitles", "en");
+    english.mode = "showing"; // what Safari does with captions asked for in the accessibility settings
+    video.tracksArrive(english);
+    // Taken as CC on: the button shows on, and the words are ours to draw (hidden), not switched off.
+    expect(state.adopted).toEqual([true]);
+    expect(english.mode).toBe("hidden");
+    // A swap to a fresh address keeps them on.
+    await loader.refreshNow();
+    const fresh = track("subtitles", "en");
+    fresh.mode = "showing";
+    video.tracksArrive(fresh);
+    expect(fresh.mode).toBe("hidden");
+    // Only the person's own press turns them off, and that holds on the next stream even if the device switches it on.
+    press(false);
+    expect(fresh.mode).toBe("disabled");
+    const again = track("subtitles", "en");
+    again.mode = "showing";
+    video.tracksArrive(again);
+    expect(again.mode).toBe("disabled");
+  });
+
+  it("before any press, leaves the tracks as the browser has them (never forces anything off)", async () => {
+    const video = fakeVideo();
+    const { loader, state } = make(video, true);
+    await loader.attach(stream("aaa"));
+    const english = track("subtitles", "en");
+    english.mode = "hidden"; // whatever the browser chose, left alone
+    video.tracksArrive(english);
+    expect(english.mode).toBe("hidden");
+    expect(state.adopted).toEqual([]);
+  });
+
+  it("a choice made with the phone's own captions button in its full-screen player is the person's choice back on the page", async () => {
+    const video = fakeVideo();
+    const { loader, state } = make(video, true);
+    await loader.attach(stream("aaa"));
+    const english = track("subtitles", "en");
+    video.tracksArrive(english);
+    video.fire("webkitbeginfullscreen");
+    english.mode = "showing"; // the person turns captions on with the phone's own button
+    video.fire("webkitendfullscreen");
+    expect(state.adopted).toEqual([true]);
+    expect(english.mode).toBe("hidden"); // still on, drawn by our overlay now
+    // And off again the same way, after pressing nothing of ours.
+    video.fire("webkitbeginfullscreen");
+    expect(english.mode).toBe("showing");
+    english.mode = "disabled";
+    video.fire("webkitendfullscreen");
+    expect(state.adopted).toEqual([true, false]);
+    expect(english.mode).toBe("disabled");
   });
 
   it("keeps CC on across a swap to a fresh address: the new stream's track comes on by itself", async () => {
@@ -378,6 +441,7 @@ describe("the CC button and the words on the picture", () => {
     toggleFullscreen: noop,
     onPictureTap: noop,
     onKey: noop,
+    onKeyUp: noop,
   } as PlayerControls;
 
   function render(captions: Partial<PlayerCaptions> | null, overrides: Partial<PlayerControls> = {}) {

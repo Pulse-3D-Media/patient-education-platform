@@ -21,12 +21,19 @@ describe("CaptionsCard", () => {
   it("offers Add captions only when there are none or they failed", () => {
     expect(render({ kind: "none" })).toContain(">Add captions<");
     expect(render({ kind: "failed" })).toContain(">Add captions<");
-    for (const kind of ["not-mux", "not-configured", "no-asset-id", "unreachable", "video-not-ready", "no-sound", "being-made"] as const) {
+    for (const kind of ["checking", "not-mux", "not-configured", "no-asset-id", "unreachable", "video-not-ready", "no-sound", "being-made"] as const) {
       const html = render({ kind });
       expect(html, kind).not.toContain("Add captions");
       expect(html, kind).toContain(CAPTION_STATE_WORDS[kind].replace(/'/g, "&#x27;"));
     }
     expect(canAskForCaptions({ kind: "ready", reviewUrl: null, name: "English" })).toBe(false);
+  });
+
+  it("offers Check again only when Mux could not be asked just now, and says it is checking while the page waits for Mux", () => {
+    expect(render({ kind: "unreachable" })).toContain(">Check again<");
+    expect(render({ kind: "unreachable" })).toContain("Could not check just now");
+    for (const kind of ["checking", "none", "being-made", "not-mux"] as const) expect(render({ kind }), kind).not.toContain("Check again");
+    expect(render({ kind: "checking" })).toContain("Checking with Mux...");
   });
 
   it("once ready, links to the caption text in a new tab and says to read it through and how to correct it", () => {

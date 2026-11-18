@@ -37,7 +37,8 @@ export function useVideoSource(videoRef: RefObject<HTMLVideoElement | null>, sou
   // long as the page.
   const [captionsAvailable, setCaptionsAvailable] = useState(false);
   const [captionsOn, setCaptionsOn] = useState(false);
-  const wantsCaptions = useRef(false);
+  // The person's choice: null until they press CC (or the device makes it for them, adopt below).
+  const wantsCaptions = useRef<boolean | null>(null);
 
   const loader = useRef<SourceLoader | null>(null);
   useEffect(() => {
@@ -45,7 +46,15 @@ export function useVideoSource(videoRef: RefObject<HTMLVideoElement | null>, sou
     const made = new SourceLoader({
       getElement: () => videoRef.current,
       getHooks: () => latestHooks.current,
-      captions: { wanted: () => wantsCaptions.current, onAvailable: setCaptionsAvailable },
+      captions: {
+        wanted: () => wantsCaptions.current,
+        onAvailable: setCaptionsAvailable,
+        // The device switched captions on by its own settings, or the person used an iPhone's own captions button.
+        adopt: (on: boolean) => {
+          wantsCaptions.current = on;
+          setCaptionsOn(on);
+        },
+      },
     });
     loader.current = made;
     void made.attach(source);

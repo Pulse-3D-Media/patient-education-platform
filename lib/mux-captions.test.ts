@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "./db/client";
-import { REVIEW_LINK_MS, UPLOAD_AGAIN, englishCaptionTrack, readCaptionState, requestCaptions, type CaptionDeps } from "./mux-captions";
+import { REVIEW_LINK_MS, UPLOAD_AGAIN, captionStateWithoutMux, englishCaptionTrack, readCaptionState, requestCaptions, type CaptionDeps } from "./mux-captions";
 import { fakeMux } from "./testing/fake-mux";
 
 /**
@@ -58,6 +58,7 @@ beforeEach(() => {
       return `https://stream.mux.com/${playbackId}/text/${trackId}.vtt?token=made-up`;
     },
     now: () => NOW,
+    checkMs: 4_000,
   };
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -123,6 +124,21 @@ describe("readCaptionState", () => {
     expect(await readCaptionState({ muxPlaybackId: "PlayAny0001", muxAssetId: mux.existingAsset({ silent: true }) }, deps)).toEqual({ kind: "no-sound" });
     expect(await readCaptionState({ muxPlaybackId: "PlayAny0001", muxAssetId: mux.existingAsset({ status: "preparing" }) }, deps)).toEqual({ kind: "video-not-ready" });
     expect(await readCaptionState({ muxPlaybackId: "PlayAny0001", muxAssetId: mux.existingAsset() }, { ...deps, configured: () => false })).toEqual({ kind: "not-configured" });
+  });
+
+  it("gives up on a Mux that does not answer in time and says it could not check (the page is never held up)", async () => {
+    const assetId = mux.existingAsset();
+    const never = { ...mux.gateway, getAsset: () => new Promise<never>(() => {}) };
+    const started = Date.now();
+    expect(await readCaptionState({ muxPlaybackId: "PlayAny0001", muxAssetId: assetId }, { ...deps, gateway: never, checkMs: 50 })).toEqual({ kind: "unreachable" });
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("works out from the row alone the cases that need no word from Mux, and leaves the rest to Mux", () => {
+    expect(captionStateWithoutMux({ muxPlaybackId: null, muxAssetId: null }, deps)).toEqual({ kind: "not-mux" });
+    expect(captionStateWithoutMux({ muxPlaybackId: "PlayAny0001", muxAssetId: null }, deps)).toEqual({ kind: "no-asset-id" });
+    expect(captionStateWithoutMux({ muxPlaybackId: "PlayAny0001", muxAssetId: "AssetAny" }, { configured: () => false })).toEqual({ kind: "not-configured" });
+    expect(captionStateWithoutMux({ muxPlaybackId: "PlayAny0001", muxAssetId: "AssetAny" }, deps)).toBeNull();
   });
 });
 

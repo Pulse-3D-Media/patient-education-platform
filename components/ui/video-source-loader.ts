@@ -1,5 +1,5 @@
 import { refreshDelayMs, tokenHasExpired, tokenRunsOutSoon, type PlaybackSource } from "@/lib/playback-source";
-import { applyNativeCaptions, captionTracksOf, pickCaptionTrack } from "./captions";
+import { applyNativeCaptions, captionTracksOf, choiceAfterSystemPlayer, nativeCaptionChoice, pickCaptionTrack } from "./captions";
 
 /**
  * Puts a PlaybackSource (lib/playback-source.ts) onto a <video> element and
@@ -78,8 +78,16 @@ export type LoaderEnvironment = {
 };
 
 export type CaptionHooks = {
-  /** CC is on. Asked each time a stream goes on, so the choice carries across a swap to a fresh address. */
-  wanted: () => boolean;
+  /**
+   * The person's choice: CC on (true), off (false), or not chosen yet (null). Asked each time a stream goes on, so
+   * the choice carries across a swap to a fresh address.
+   */
+  wanted: () => boolean | null;
+  /**
+   * The device made the choice instead: its accessibility settings switched captions on before any press of CC, or
+   * the person used an iPhone's own captions button in its full-screen player. The CC button follows (captions.ts).
+   */
+  adopt: (on: boolean) => void;
   /** The video on the element has a caption track (true) or not (false). Only a stream can; a file never does. */
   onAvailable: (available: boolean) => void;
 };
@@ -345,7 +353,7 @@ export class SourceLoader {
       return;
     }
     const element = this.env.getElement();
-    if (element && this.nativeCaptions) applyNativeCaptions(element, this.wantsCaptions(), this.systemPlayer);
+    if (element && this.nativeCaptions) this.putNativeChoice(element);
   }
 
   /** Take everything down: the hls.js instance and its listeners, and the timers. Nothing answers after this. */
@@ -359,15 +367,30 @@ export class SourceLoader {
     return (this.env.now ?? Date.now)();
   }
 
-  private wantsCaptions(): boolean {
-    return this.env.captions?.wanted() ?? false;
+  /** The person's choice, or null before they have made one. */
+  private wantsCaptions(): boolean | null {
+    return this.env.captions?.wanted() ?? null;
+  }
+
+  /**
+   * The browser's own HLS: put the choice on the element's caption tracks. Before any press of CC, a track the device
+   * switched on is taken as CC on (adopted, so the button shows it), and a device that switched nothing on is left
+   * exactly as it is: the player never switches off what the device's own settings chose (captions.ts).
+   */
+  private putNativeChoice(element: HTMLVideoElement): void {
+    const asked = this.wantsCaptions();
+    const choice = nativeCaptionChoice(element, asked);
+    if (choice === null) return;
+    if (asked === null) this.env.captions?.adopt(choice);
+    applyNativeCaptions(element, choice, this.systemPlayer);
   }
 
   /** hls.js: the English track (or the first) while CC is on, none while it is off. The words go on a "hidden" track. */
   private applyHlsCaptions(instance: HlsInstance): void {
     instance.subtitleDisplay = false;
     const languages = (instance.subtitleTracks ?? []).map((track) => ({ language: track.lang ?? "" }));
-    const chosen = this.wantsCaptions() ? pickCaptionTrack(languages) : null;
+    // hls.js is told nothing of the device's caption settings: off until the person presses CC.
+    const chosen = this.wantsCaptions() === true ? pickCaptionTrack(languages) : null;
     const index = chosen ? languages.indexOf(chosen) : -1;
     if (instance.subtitleTrack !== index) instance.subtitleTrack = index;
   }
@@ -390,13 +413,17 @@ export class SourceLoader {
     const update = () => {
       if (this.dead) return;
       this.env.captions?.onAvailable(captionTracksOf(element).length > 0);
-      applyNativeCaptions(element, this.wantsCaptions(), this.systemPlayer);
+      this.putNativeChoice(element);
     };
     const enterSystemPlayer = () => {
       this.systemPlayer = true;
       update();
     };
     const leaveSystemPlayer = () => {
+      // A choice made with the phone's own captions button while its player was up is the person's choice now.
+      const asked = this.wantsCaptions();
+      const chosen = choiceAfterSystemPlayer(element, asked);
+      if (chosen !== null && chosen !== asked) this.env.captions?.adopt(chosen);
       this.systemPlayer = false;
       update();
     };

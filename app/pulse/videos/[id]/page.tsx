@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { PLACEHOLDER_BADGE } from "@/components/ui/styles";
 import { labelOf } from "@/lib/categories";
 import { getCategoryList } from "@/lib/db/category-config";
 import { readStoredChapters } from "@/lib/chapters";
 import { getVideoForPulse } from "@/lib/db/videos";
 import { muxUploadsAreConfigured } from "@/lib/mux";
-import { readCaptionState } from "@/lib/mux-captions";
+import { captionStateWithoutMux, readCaptionState } from "@/lib/mux-captions";
 import { parseUploadState } from "@/lib/mux-upload";
 import { requirePulseStaff } from "@/lib/pulse";
 import { describeVideoSource } from "@/lib/video";
@@ -23,6 +24,14 @@ import { VideoForm } from "../VideoForm";
  */
 export const dynamic = "force-dynamic";
 
+/**
+ * The Captions card once Mux has answered (or has not, within a few seconds: then it says it could not check just now,
+ * with Check again). Rendered inside a Suspense boundary, so the page around it is already on screen meanwhile.
+ */
+async function CaptionsFromMux({ video }: { video: { id: string; muxPlaybackId: string | null; muxAssetId: string | null } }) {
+  return <CaptionsCard videoId={video.id} state={await readCaptionState(video)} />;
+}
+
 export default async function PulseVideoPage({ params, searchParams }: PageProps<"/pulse/videos/[id]">) {
   await requirePulseStaff();
 
@@ -34,8 +43,9 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
   const justAdded = (await searchParams).added === "1";
   const list = await getCategoryList();
   const category = labelOf(list, video.category);
-  // Where its captions stand, asked of Mux now (never stored). Mux being down is a state of its own; the page draws as usual.
-  const captions = await readCaptionState(video);
+  // Where its captions stand, when the row alone says (a CDN video, no asset id, Mux not set up here). Otherwise Mux is
+  // asked below, streamed in after the rest of the page, so a slow Mux never holds the page up.
+  const captionsFromRow = captionStateWithoutMux(video);
 
   return (
     <main className="px-5 py-6 sm:px-8">
@@ -82,7 +92,13 @@ export default async function PulseVideoPage({ params, searchParams }: PageProps
 
         {/* Captions: where they stand at Mux, Add captions, and the text for a Pulse staff member to read through. */}
         <div className="mb-5">
-          <CaptionsCard videoId={video.id} state={captions} />
+          {captionsFromRow ? (
+            <CaptionsCard videoId={video.id} state={captionsFromRow} />
+          ) : (
+            <Suspense fallback={<CaptionsCard videoId={video.id} state={{ kind: "checking" }} />}>
+              <CaptionsFromMux video={video} />
+            </Suspense>
+          )}
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-[#0d1113] p-5 sm:p-6">

@@ -9,7 +9,8 @@ import { Outcome } from "../FormBits";
 
 /**
  * The Captions card on a video's page on /pulse: where the video's English
- * captions stand (read from Mux as the page was drawn, lib/mux-captions.ts),
+ * captions stand (read from Mux just after the page is drawn, streamed in, so
+ * the page shows "Checking with Mux..." for a moment; lib/mux-captions.ts),
  * "Add captions" when there are none, and, once they are ready, a link to
  * their text so a Pulse staff member can read them through.
  *
@@ -21,6 +22,12 @@ export function CaptionsCard({ videoId, state }: { videoId: string; state: Capti
   const router = useRouter();
   const [outcome, setOutcome] = useState<FormState>(null);
   const [pending, startTransition] = useTransition();
+  const [checking, startCheck] = useTransition();
+
+  // Check again: draw the page again on the server, which asks Mux again. The rest of the page stays as it is.
+  function checkAgain() {
+    startCheck(() => router.refresh());
+  }
 
   function ask() {
     startTransition(async () => {
@@ -62,6 +69,14 @@ export function CaptionsCard({ videoId, state }: { videoId: string; state: Capti
             the Mux dashboard remove the generated English track and add your corrected file as a new English subtitles track. Patients see
             the new words from their next play.
           </p>
+        </div>
+      )}
+
+      {state.kind === "unreachable" && (
+        <div className="mt-3">
+          <button type="button" disabled={checking} onClick={checkAgain} className={`${SECONDARY_BUTTON} h-11`}>
+            {checking ? "Checking..." : "Check again"}
+          </button>
         </div>
       )}
 

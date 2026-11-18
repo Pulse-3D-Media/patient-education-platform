@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/clerk-webhook", () => ({ handleClerkEvent: vi.fn() }));
 
+import { MAX_CLERK_WEBHOOK_BYTES } from "@/lib/body-size";
 import { handleClerkEvent } from "@/lib/clerk-webhook";
 import { POST } from "./route";
 
@@ -109,5 +110,40 @@ describe("POST /api/webhooks/clerk", () => {
     const response = await post(BODY, headers(BODY));
     expect(response.status).toBe(503);
     expect(handleClerkEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("the size of the body", () => {
+  /** A signed delivery that says it is `length` bytes. Whether its body was read is `bodyUsed`. */
+  function sized(length: string) {
+    return new NextRequest("https://example.test/api/webhooks/clerk", { method: "POST", body: BODY, headers: { ...headers(BODY), "content-length": length } });
+  }
+
+  it("refuses a body that says it is over the limit with 413, before Clerk's check reads it", async () => {
+    const req = sized(String(MAX_CLERK_WEBHOOK_BYTES + 1));
+    const response = await POST(req);
+    expect(response.status).toBe(413);
+    expect(await response.text()).toBe("too large");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(req.bodyUsed).toBe(false);
+    expect(handleClerkEvent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Content-Length that is not a number with 400, before the body is read", async () => {
+    const req = sized("lots");
+    expect((await POST(req)).status).toBe(400);
+    expect(req.bodyUsed).toBe(false);
+    expect(handleClerkEvent).not.toHaveBeenCalled();
+  });
+
+  it("still verifies Clerk's signature over the raw bytes for a real-sized delivery (the control)", async () => {
+    const req = sized(String(Buffer.byteLength(BODY)));
+    expect((await POST(req)).status).toBe(200);
+    expect(req.bodyUsed).toBe(true);
+    expect(handleClerkEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows 256 KiB, far above any membership or organization notification", () => {
+    expect(MAX_CLERK_WEBHOOK_BYTES).toBe(256 * 1024);
   });
 });

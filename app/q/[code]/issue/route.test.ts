@@ -10,8 +10,10 @@ import { ShareTermsError } from "@/lib/expiry";
  */
 
 vi.mock("@/lib/db/shares", () => ({ issueShareFromQrCode: vi.fn() }));
+vi.mock("@/lib/qr-alert", () => ({ notifyPulseOfBusyQrCode: vi.fn() }));
 
 const { issueShareFromQrCode } = await import("@/lib/db/shares");
+const { notifyPulseOfBusyQrCode } = await import("@/lib/qr-alert");
 const route = await import("./route");
 
 const CODE = "abcdefghijklmnopqrstuvwx1";
@@ -25,6 +27,7 @@ function post(code: string, body: unknown) {
 
 afterEach(() => {
   vi.mocked(issueShareFromQrCode).mockReset();
+  vi.mocked(notifyPulseOfBusyQrCode).mockReset();
   vi.restoreAllMocks();
 });
 
@@ -90,6 +93,39 @@ describe("POST /q/<code>/issue", () => {
     const response = await post(CODE, { key: KEY, accepted: V });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ code: null });
+  });
+
+  it("tells Pulse only when the tap made the flag's or the limit's link, without waiting for the email", async () => {
+    const alert = { qrCodeId: "qr_row_madeup1", clinicId: "clinic_madeup1", threshold: "flag", issuedToday: 100, cap: 200, day: "2026-11-17" } as const;
+
+    // No alert on the answer: nothing to send.
+    vi.mocked(issueShareFromQrCode).mockResolvedValueOnce({ ok: true, code: "k7m2xq4v9p8a7b6c" });
+    await post(CODE, { key: KEY, accepted: V });
+    expect(notifyPulseOfBusyQrCode).not.toHaveBeenCalled();
+
+    // The flag's link: the email is started, and an email that never finishes does not hold up the answer.
+    vi.mocked(notifyPulseOfBusyQrCode).mockReturnValueOnce(new Promise(() => {}));
+    vi.mocked(issueShareFromQrCode).mockResolvedValueOnce({ ok: true, code: "k7m2xq4v9p8a7b6c", alert });
+    const response = await post(CODE, { key: KEY, accepted: V });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ code: "k7m2xq4v9p8a7b6c" });
+    expect(notifyPulseOfBusyQrCode).toHaveBeenCalledTimes(1);
+    // The address in the email comes from this deployment's own list, never the request. The tests have none, so none.
+    expect(vi.mocked(notifyPulseOfBusyQrCode).mock.calls[0]).toEqual([alert, null]);
+  });
+
+  it("answers the Play tap as usual when the email fails, and the log never holds the code or the key", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const alert = { qrCodeId: "qr_row_madeup1", clinicId: "clinic_madeup1", threshold: "cap", issuedToday: 200, cap: 200, day: "2026-11-17" } as const;
+    vi.mocked(notifyPulseOfBusyQrCode).mockRejectedValueOnce(new Error(`failed for ${CODE}`));
+    vi.mocked(issueShareFromQrCode).mockResolvedValueOnce({ ok: true, code: "k7m2xq4v9p8a7b6c", alert });
+    const response = await post(CODE, { key: KEY, accepted: V });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ code: "k7m2xq4v9p8a7b6c" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const logged = JSON.stringify(log.mock.calls);
+    expect(logged).not.toContain(CODE);
+    expect(logged).not.toContain(KEY);
   });
 
   it("has no GET or HEAD: opening the address never makes a link", () => {

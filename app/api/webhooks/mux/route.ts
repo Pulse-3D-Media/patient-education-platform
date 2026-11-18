@@ -1,3 +1,4 @@
+import { judgeContentLength, MAX_MUX_WEBHOOK_BYTES } from "@/lib/body-size";
 import { MuxConfigError, getMuxWebhookSecret, verifyMuxWebhook } from "@/lib/mux";
 import { isHandledMuxEvent, readMuxEvent } from "@/lib/mux-upload";
 import { reconcileUpload } from "@/lib/mux-uploads";
@@ -23,6 +24,8 @@ import { reconcileUpload } from "@/lib/mux-uploads";
  * What the answers mean to Mux:
  *
  *   200   finished (done, nothing to do, or a kind we do not use).
+ *   413   the body says it is bigger than any notification (256 KiB);
+ *         refused before it is read.
  *   400   not from Mux, or unreadable. No retry could succeed.
  *   500   the work failed (Mux or the database unreachable). Mux sends it
  *         again later.
@@ -44,6 +47,12 @@ function answer(status: number, word: string) {
 }
 
 export async function POST(request: Request) {
+  // A body that says it is bigger than any real notification is refused
+  // before a byte of it is read (lib/body-size.ts, 256 KiB).
+  const size = judgeContentLength(request.headers.get("content-length"), MAX_MUX_WEBHOOK_BYTES);
+  if (size === "too-large") return answer(413, "too large");
+  if (size === "malformed") return answer(400, "bad request");
+
   let secret: string;
   try {
     secret = getMuxWebhookSecret();

@@ -1,5 +1,4 @@
-import { pingDatabase } from "@/lib/db/health";
-import { withTimeout } from "@/lib/timeout";
+import { isDatabaseHealthy } from "@/lib/health";
 
 /**
  * GET /api/health: can this deployment reach its database? Made for an
@@ -11,7 +10,10 @@ import { withTimeout } from "@/lib/timeout";
  * nothing but ok or not:
  *
  *   200  {"ok":true}    the database answered
- *   503  {"ok":false}   it did not, or not within HEALTH_TIMEOUT_MS
+ *   503  {"ok":false}   it did not, or not within five seconds
+ *
+ * The answer is remembered for five seconds (lib/health.ts), so a burst of
+ * calls from anyone is one database query, not one each.
  *
  * No version, no timing, no error message, no connection detail: the kind
  * of failure goes to the server log, and a monitor only needs the status
@@ -22,19 +24,7 @@ import { withTimeout } from "@/lib/timeout";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** How long to wait for the database before answering "not ok". */
-const HEALTH_TIMEOUT_MS = 5_000;
-
 export async function GET() {
-  try {
-    await withTimeout(pingDatabase(), HEALTH_TIMEOUT_MS, "the database");
-    return answer(200, true);
-  } catch (error) {
-    console.error("Health check: the database did not answer.", error instanceof Error ? error.name : "unknown error");
-    return answer(503, false);
-  }
-}
-
-function answer(status: number, ok: boolean) {
-  return Response.json({ ok }, { status, headers: { "Cache-Control": "no-store" } });
+  const ok = await isDatabaseHealthy();
+  return Response.json({ ok }, { status: ok ? 200 : 503, headers: { "Cache-Control": "no-store" } });
 }

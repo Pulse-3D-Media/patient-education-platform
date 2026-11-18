@@ -131,6 +131,32 @@ export function effectiveQrDailyCap(stored: number, fallback: number): number {
   return isValidQrDaily(stored) ? stored : fallback;
 }
 
+/**
+ * Which threshold, if any, the link a Play tap just made has reached:
+ * "cap" when it is exactly the day's limit, "flag" when it is exactly the
+ * flag (and the flag is below the limit, as the settings form insists), and
+ * null for every other count. `issuedToday` includes the new link. Exactly,
+ * never "at or over", so each threshold is crossed by one tap per code per
+ * UTC day, and Pulse is emailed once for it (lib/qr-alert.ts).
+ */
+export function qrDailyThreshold(issuedToday: number, flag: number, cap: number): QrThreshold | null {
+  if (issuedToday === cap) return "cap";
+  if (issuedToday === flag && flag < cap) return "flag";
+  return null;
+}
+
+export type QrThreshold = "flag" | "cap";
+
+/**
+ * What a Play tap hands back when its link reached the flag or the limit, for
+ * the email to Pulse staff. Only ids and numbers: the code's ROW id (never
+ * the printed code itself, which is a secret like a key), the clinic's id,
+ * the count including the new link, the limit, and the UTC day as
+ * "2026-11-17". Nothing about the person who tapped, because nothing about
+ * them is ever known.
+ */
+export type QrAlert = { qrCodeId: string; clinicId: string; threshold: QrThreshold; issuedToday: number; cap: number; day: string };
+
 /** The start of the day, in UTC, that `now` falls in. The daily flag and the daily limit count links handed out since this moment. */
 export function utcDayStart(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));

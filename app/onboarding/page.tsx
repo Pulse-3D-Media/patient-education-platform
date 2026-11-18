@@ -17,9 +17,16 @@ import { clinicIsOpen } from "@/lib/clinic-status";
  * database.
  *
  * Someone who was invited to an existing clinic, or already belongs to
- * one, sees Clerk's organization list instead: their clinics to pick from,
- * any invitation waiting to be accepted, and a create form for the rare
- * person who wants a new one anyway.
+ * one, sees Clerk's organization list instead: their clinics to pick from
+ * and any invitation waiting to be accepted, and nothing else. Clerk's list
+ * also offers "Create organization", which let an invited person make a
+ * second, empty clinic by accident (audit C4, 2026-11-16). Clerk has no
+ * setting to turn that off (its OrganizationList takes no such prop, checked
+ * in Clerk's documentation on 2026-11-17), so the button is hidden through
+ * Clerk's own styling hook for it (appearance.elements,
+ * organizationListCreateOrganizationActionButton), and creating a new clinic
+ * is behind one quiet link under the list, which opens this page with
+ * ?create=1 and shows the create form on its own.
  *
  * Whoever creates a clinic becomes its account owner (recorded when the
  * clinic's row is made, in lib/clinic.ts) and goes straight to Billing to
@@ -35,7 +42,13 @@ const AFTER_CREATE = "/admin/billing";
 /** Where someone goes after picking a clinic or accepting an invitation. This page then sends them on. */
 const AFTER_SELECT = "/onboarding";
 
-export default async function OnboardingPage() {
+/** The quiet link's address, and the one value of ?create that shows the create form. */
+const CREATE_HREF = "/onboarding?create=1";
+
+/** Hides the create button inside Clerk's list (see the top of this file). */
+const LIST_WITHOUT_CREATE = { elements: { organizationListCreateOrganizationActionButton: { display: "none" } } };
+
+export default async function OnboardingPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   const { userId, orgId } = await auth.protect();
 
   if (orgId) {
@@ -52,7 +65,9 @@ export default async function OnboardingPage() {
     askClerk(client.users.getOrganizationMembershipList({ userId, limit: 1 }), "the person's clinics"),
     askClerk(client.users.getOrganizationInvitationList({ userId, status: "pending", limit: 1 }), "the person's invitations"),
   ]);
-  const belongsSomewhere = memberships.totalCount > 0 || invitations.totalCount > 0;
+  // Someone with a clinic or an invitation who asked, on purpose, to make a new one (the quiet link) gets the create form.
+  const askedToCreate = (await searchParams)?.create === "1";
+  const belongsSomewhere = (memberships.totalCount > 0 || invitations.totalCount > 0) && !askedToCreate;
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-[#e4ebf3] px-4 py-10">
@@ -65,13 +80,24 @@ export default async function OnboardingPage() {
         </h1>
         <p className="mt-2 text-[#667085]">
           {belongsSomewhere
-            ? "Pick the clinic you are working with, or accept the invitation waiting for you. You can create a new one here too."
+            ? "Pick the clinic you are working with, or accept the invitation waiting for you."
             : "Your clinic is where your team signs in and your patients' links come from. Give it a name, and a logo if you have one handy (it can be added later)."}
         </p>
       </div>
 
       {belongsSomewhere ? (
-        <OrganizationList hidePersonal afterSelectOrganizationUrl={AFTER_SELECT} afterCreateOrganizationUrl={AFTER_CREATE} skipInvitationScreen />
+        <>
+          <OrganizationList
+            hidePersonal
+            afterSelectOrganizationUrl={AFTER_SELECT}
+            afterCreateOrganizationUrl={AFTER_CREATE}
+            skipInvitationScreen
+            appearance={LIST_WITHOUT_CREATE}
+          />
+          <a href={CREATE_HREF} className="text-sm text-[#52616a] underline underline-offset-2 hover:text-black">
+            Setting up a different clinic of your own? Create a new one
+          </a>
+        </>
       ) : (
         <CreateOrganization afterCreateOrganizationUrl={AFTER_CREATE} skipInvitationScreen />
       )}

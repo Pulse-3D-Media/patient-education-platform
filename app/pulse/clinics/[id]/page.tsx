@@ -14,18 +14,19 @@ import { NOTES_PAGE_SIZE, countNotesForClinic, listNotesForClinic } from "@/lib/
 import { listQrCodesForPulse, type PulseQrCodeRow } from "@/lib/db/qr-codes";
 import { getSeatSummary } from "@/lib/db/seats";
 import { getSettings } from "@/lib/db/settings";
-import { countSharesForClinic, listRecentSharesForClinic } from "@/lib/db/shares";
+import { countSharesForClinic, listRecentSharesForPulse } from "@/lib/db/shares";
 import { shareExpiryState } from "@/lib/expiry";
 import { pageInfo, readPage } from "@/lib/paging";
 import { formatUsPhone } from "@/lib/phone";
 import { formatCents } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
+import { shortLinkId } from "@/lib/renewal-note";
 import { checkSeats, type SeatedPerson } from "@/lib/seat-changes";
 import { SEAT_STATE_WORDS, seatCountWords, seatSummary } from "@/lib/seats";
 import { saveBrandingAction } from "../../actions";
 import { Pager, Section, StatusBadge, formatDate, formatDateTime } from "../../ui";
 import { ClinicTabs } from "./ClinicTabs";
-import { DetailsForm, ManagedForm, NoteForm, OwnerForm, PlanForm, PracticeTypeForm, StatusForm } from "./forms";
+import { DetailsForm, ManagedForm, NoteForm, OwnerForm, PlanForm, PracticeTypeForm, ResetBillingForm, StatusForm } from "./forms";
 
 /**
  * One clinic, everything Pulse staff can see and change about it, in seven
@@ -71,7 +72,8 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
 
   const [settings, shares, shareCount, noteCount, availability, billing, storedSeats, printed, list] = await Promise.all([
     getSettings(),
-    listRecentSharesForClinic(clinic.id, RECENT_LINK_LIMIT),
+    // Read without the link code: the code is the working patient link, so this page never has it (listRecentSharesForPulse).
+    listRecentSharesForPulse(clinic.id, RECENT_LINK_LIMIT),
     countSharesForClinic(clinic.id),
     countNotesForClinic(clinic.id),
     getCategoryAvailability(),
@@ -152,6 +154,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
             there.
           </p>
         )}
+        {billing && (billing.stripeCustomerId || billing.stripeSubscriptionId) && <ResetBillingForm clinicId={clinic.id} />}
       </Section>
 
       <Section
@@ -274,7 +277,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
       </Section>
       <Section
         title="Recent links"
-        blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made. "Disclaimer accepted" is the anonymous record of the "for education only" box on the patient page: when it was first ticked on that link, and how many ticks were recorded (at most one per page load; not people). Recorded from October 2026.`}
+        blurb={`The newest ${shares.length} of ${shareCount} share ${shareCount === 1 ? "link" : "links"} this clinic has made, each named by its procedure, the day it was made and the end of its row id: a link's code is the working patient link, so it is never shown here. "Disclaimer accepted" is the anonymous record of the "for education only" box on the patient page: when it was first ticked on that link, and how many ticks were recorded (at most one per page load; not people). Recorded from October 2026.`}
       >
         {shares.length === 0 ? (
           <p className="text-sm text-[#667085]">No links yet.</p>
@@ -283,7 +286,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
             <table className="w-full min-w-[780px] text-left text-[15px]">
               <thead className="text-xs uppercase tracking-wider text-[#667085]">
                 <tr className="border-b border-white/10">
-                  <th className="px-3 py-2 font-medium">Code</th>
+                  <th className="px-3 py-2 font-medium">Link</th>
                   <th className="px-3 py-2 font-medium">Procedure</th>
                   <th className="px-3 py-2 font-medium">Category</th>
                   <th className="px-3 py-2 font-medium">Expires</th>
@@ -309,7 +312,8 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
                           : `${formatDate(state.expiresAt)} (fixed date, made before the first-play rule)`;
                   return (
                     <tr key={share.id} className="border-b border-white/5 last:border-b-0">
-                      <td className="px-3 py-2 text-[#bfbfbf]">{share.code}</td>
+                      {/* Named by the short end of its row id (with its video and its Created date in this row), never its code: the code would play the video. */}
+                      <td className="whitespace-nowrap px-3 py-2 text-[#bfbfbf]">{shortLinkId(share.id)}</td>
                       <td className="px-3 py-2">
                         <span className="flex flex-wrap items-center gap-2">
                           {share.video.title}

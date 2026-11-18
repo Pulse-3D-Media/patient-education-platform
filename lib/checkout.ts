@@ -4,11 +4,12 @@ import {
   BillingRefusedError,
   acceptPlanForCheckout,
   getCheckoutFacts,
-  reconcileSubscription,
   setStripeCustomer,
   type AcceptedPlanInput,
   type PurchaseAttempt,
 } from "./db/billing";
+// Every look at Stripe goes through this, so a vanished paying subscription always emails Pulse staff once (lib/billing-gone-alert.ts).
+import { reconcileAndTellPulse } from "./billing-gone-alert";
 import { labelsOf } from "./categories";
 import { getCategoryList, libraryForQuote, listSellableCategories } from "./db/category-config";
 import { getActivePricing } from "./db/pricing";
@@ -275,7 +276,11 @@ const isDead = (status: string) => status === "canceled" || status === "incomple
 function subscriptionToCheck(facts: BillingFacts, subscriptions: { id: string; planId: string | null; status: string }[]) {
   return (
     subscriptions.find((subscription) => facts.pendingPlanId !== null && subscription.planId === facts.pendingPlanId && !isDead(subscription.status)) ??
-    subscriptions.find((subscription) => subscription.id === facts.stripeSubscriptionId)
+    subscriptions.find((subscription) => subscription.id === facts.stripeSubscriptionId) ??
+    // The subscription on record, even when Stripe no longer lists it: asking about it directly is how a
+    // subscription that has vanished from Stripe is noticed (audit finding E3), instead of the record
+    // staying "first payment under way" for ever.
+    (facts.stripeSubscriptionId ? { id: facts.stripeSubscriptionId, planId: null, status: "unknown" } : undefined)
   );
 }
 
@@ -299,7 +304,7 @@ async function paymentUnderWay(args: { clinicId: string; facts: BillingFacts; cu
   if (alive.length === 0 && facts.status !== "INCOMPLETE") return null;
 
   const target = subscriptionToCheck(facts, subscriptions);
-  if (target) await reconcileSubscription({ clinicId, subscriptionId: target.id, fetchSubscription: deps.fetchSubscription, now: deps.now });
+  if (target) await reconcileAndTellPulse({ clinicId, subscriptionId: target.id, fetchSubscription: deps.fetchSubscription, now: deps.now });
 
   const after = (await getCheckoutFacts(clinicId))?.facts.status;
   if (after === "ACTIVE") return "paid";
@@ -350,12 +355,13 @@ export async function checkPayment(args: {
     return { status: facts.status, message: "Stripe has no payment for your clinic yet. If you have just paid, give it a minute and check again." };
   }
 
-  await reconcileSubscription({ clinicId, subscriptionId: target.id, fetchSubscription, now: args.now });
+  await reconcileAndTellPulse({ clinicId, subscriptionId: target.id, fetchSubscription, now: args.now });
 
   const after = (await getCheckoutFacts(clinicId))?.facts.status ?? facts.status;
   const messages: Record<CheckPaymentResult["status"], string> = {
     ACTIVE: "Payment confirmed.",
-    INCOMPLETE: "Stripe has not confirmed the payment yet. Nothing has opened, and nothing will until it does.",
+    INCOMPLETE:
+      "Stripe has not confirmed the payment yet. Nothing has opened, and nothing will until it does. If the payment failed, Stripe drops it 23 hours after checkout started; check again after that and you can choose a plan again.",
     NONE: "Stripe has no confirmed payment for your clinic.",
     PAST_DUE: "Your last payment did not go through.",
     CANCELED: "That subscription has ended.",

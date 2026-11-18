@@ -7,6 +7,8 @@ import {
   centsToDollarsText,
   formatBp,
   formatCents,
+  fullLibraryBlockers,
+  fullLibraryOffSaleWords,
   fullLibraryOffered,
   parseDollarsToCents,
   parsePercentToBp,
@@ -500,5 +502,38 @@ describe("a library with a category added (Option A)", () => {
 
   it("refuses the added category when the engine is not told about it, as before", () => {
     expect(quote(DEFAULT_PRICING_CONFIG, input({ categories: ["ELBOW"], sellable: all }))).toMatchObject({ ok: false, error: expect.stringContaining("Not one of our categories") });
+  });
+});
+
+describe("fullLibraryBlockers: what keeps the full library off sale (audit finding E4)", () => {
+  const list = [
+    { value: "KNEE", label: "Knee" },
+    { value: "HIP", label: "Hip" },
+    { value: "HAND", label: "Hand & Wrist" },
+    { value: "ELBOW", label: "Elbow" },
+  ];
+
+  it("names a category that is not for sale, and none that is for sale or Coming soon", () => {
+    const blockers = fullLibraryBlockers(DEFAULT_PRICING_CONFIG, { KNEE: "sellable", HIP: "coming-soon", HAND: "not-for-sale", ELBOW: "sellable" }, list);
+    expect(blockers).toEqual(["Hand & Wrist"]);
+    expect(fullLibraryOffSaleWords(blockers)).toBe(
+      "The full library is off sale because Hand & Wrist is not for sale. New buyers cannot pick the full library until it is switched For sale in the Categories panel on Videos. Plans already bought are not affected.",
+    );
+  });
+
+  it("names two together, and says nothing when every category is for sale or there is no full library", () => {
+    expect(fullLibraryOffSaleWords(fullLibraryBlockers(DEFAULT_PRICING_CONFIG, { KNEE: "sellable", HIP: "sellable" }, list))).toContain("because Hand & Wrist and Elbow are not for sale");
+    expect(fullLibraryBlockers(DEFAULT_PRICING_CONFIG, { KNEE: "sellable", HIP: "sellable", HAND: "sellable", ELBOW: "coming-soon" }, list)).toEqual([]);
+    expect(fullLibraryOffSaleWords([])).toBeNull();
+    expect(fullLibraryBlockers({ ...DEFAULT_PRICING_CONFIG, fullLibraryFrom: null }, { KNEE: "not-for-sale" }, list)).toEqual([]);
+  });
+
+  it("agrees with fullLibraryOffered: blocked exactly when it is not offered", () => {
+    const availability = { KNEE: "sellable", HIP: "coming-soon", HAND: "not-for-sale", ELBOW: "sellable" };
+    const all = list.map((entry) => entry.value);
+    const sellable = all.filter((category) => availability[category as keyof typeof availability] === "sellable");
+    const comingSoon = all.filter((category) => availability[category as keyof typeof availability] === "coming-soon");
+    expect(fullLibraryOffered(DEFAULT_PRICING_CONFIG, sellable, { all, comingSoon })).toBe(false);
+    expect(fullLibraryBlockers(DEFAULT_PRICING_CONFIG, availability, list).length > 0).toBe(true);
   });
 });

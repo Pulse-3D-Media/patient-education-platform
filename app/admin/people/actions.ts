@@ -106,6 +106,20 @@ export async function giveSeatAction(userId: unknown): Promise<ActionResult> {
   return run(({ clinicId, actor }) => giveSeat({ clinicId, targetUserId: userId, actor }));
 }
 
+/**
+ * "Take a seat" for the signed-in admin themselves, from the library (an
+ * account owner who holds none sees it there when a seat is free). Nothing
+ * comes from the browser: the person is the signed-in admin, and giveSeat()
+ * does the same checks as Give a seat on People (only the owner seats the
+ * owner, a seat only when one is free, under the clinic's lock, logged).
+ */
+export async function takeMySeatAction(): Promise<ActionResult> {
+  const result = await run(({ clinicId, actor }) => giveSeat({ clinicId, targetUserId: actor.userId, actor }));
+  // The library pages draw Send from the seat, so they are redrawn too.
+  if (!result.error) revalidatePath("/library", "layout");
+  return result;
+}
+
 export async function releaseMySeatAction(): Promise<ActionResult> {
   return run(({ clinicId, actor }) => releaseOwnSeat({ clinicId, actor }));
 }

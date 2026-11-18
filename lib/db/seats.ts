@@ -1,7 +1,11 @@
-import type { Prisma } from "@prisma/client";
+import type { ClinicStatus, Prisma } from "@prisma/client";
+import { clinicIsOpen } from "../clinic-status";
 import {
+  OWNER_AUTO_SEAT_WORDS,
   PENDING_WINDOW_MS,
   hasFreeSeat,
+  ownerAutoSeatDue,
+  ownerAutoSeatNote,
   scheduledReductionBlocks,
   isClerkUserId,
   isHoldId,
@@ -135,7 +139,7 @@ export type DisplayNameResult = { found: false } | { found: true; changed: boole
 
 /**
  * Set how one seated person's name appears to patients (null goes back to
- * "Dr. First Last"), and log it in the same transaction. The clinic's row is
+ * "First Last" from Clerk), and log it in the same transaction. The clinic's row is
  * locked first, like every other seat write, so this and a link being made
  * for the same person happen one after the other: the link carries the name
  * as it was before or after, never half of each. Links already made keep the
@@ -221,6 +225,58 @@ export async function releaseSeat(clinicId: string, clerkUserId: string, log?: S
     if (removed.count > 0) await note(tx, clinicId, log, summary);
     return { released: removed.count > 0, summary };
   });
+}
+
+// ---------------------------------------------------------------------------
+// A solo owner, seated when the clinic opens
+// ---------------------------------------------------------------------------
+
+/** What a clinic looked like a moment before a change, for openedWithSeats(). */
+export type OpeningFacts = { status: ClinicStatus; graceEndsAt: Date | null; surgeonSeats: number };
+
+/** Is the clinic open, with at least one seat on its plan? */
+function openWithSeats(facts: OpeningFacts, now: Date): boolean {
+  return clinicIsOpen(facts, now) && seatSummary(facts.surgeonSeats, 0).seats > 0;
+}
+
+/**
+ * Give the account owner a seat if the clinic has just become open with
+ * exactly one seat and nobody else holds or is invited to it (the rule and its reasons
+ * are ownerAutoSeatDue() in lib/seats.ts). Returns true when a seat was given.
+ *
+ * Called at the end of every write that can open a clinic or give it seats:
+ * reconcileSubscription() in billing.ts (a first confirmed payment, or a
+ * recovery) and changeClinicWithLog() in clinics.ts (Pulse staff opening a
+ * clinic, setting its plan, or turning managed on). Those callers already
+ * hold the clinic's row lock inside `tx`, the same lock every seat is taken
+ * under, so the counts read here cannot change before the seat is written,
+ * and two openings at once give the owner one seat. The seat and its log
+ * entry are written in the caller's transaction, so both commit or neither.
+ *
+ * `before` is the clinic as the caller read it under the lock, before its
+ * change. The clinic as it is now is read here, after the change.
+ */
+export async function seatSoloOwnerIfDue(tx: Prisma.TransactionClient, clinicId: string, before: OpeningFacts, now: Date = new Date()): Promise<boolean> {
+  const after = await tx.clinic.findUnique({
+    where: { id: clinicId },
+    select: { status: true, graceEndsAt: true, surgeonSeats: true, ownerClerkUserId: true },
+  });
+  if (!after) return false;
+  const wasOpenWithSeats = openWithSeats(before, now);
+  const isOpenWithSeats = openWithSeats(after, now);
+  // Most changes are not the opening of a one-seat clinic; skip the counting for them.
+  if (wasOpenWithSeats || !isOpenWithSeats || after.surgeonSeats !== 1 || !after.ownerClerkUserId) return false;
+
+  const seated = await tx.seatAllocation.count({ where: { clinicId } });
+  const invited = await tx.seatInvitation.count({ where: { clinicId } });
+  const doneBefore =
+    (await tx.clinicNote.findFirst({ where: { clinicId, authorName: SEATS_AUTHOR, body: { startsWith: OWNER_AUTO_SEAT_WORDS } }, select: { id: true } })) !== null;
+  if (!ownerAutoSeatDue({ wasOpenWithSeats, isOpenWithSeats, planSeats: after.surgeonSeats, ownerClerkUserId: after.ownerClerkUserId, seated, invited, doneBefore })) return false;
+
+  await tx.seatAllocation.create({ data: { clinicId, clerkUserId: after.ownerClerkUserId, syncState: "SYNCED", reservedAt: now }, select: { id: true } });
+  const body = ownerAutoSeatNote(seatSummary(after.surgeonSeats, 1, 0));
+  await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: SEATS_AUTHOR }, select: { id: true } });
+  return true;
 }
 
 // ---------------------------------------------------------------------------

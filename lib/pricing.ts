@@ -374,6 +374,27 @@ export function fullLibraryOffered(config: PricingConfig, sellable: Category[], 
 }
 
 /**
+ * Which categories are keeping the full library off sale for new buyers
+ * right now: the ones that are neither for sale nor Coming soon (the same rule
+ * as fullLibraryOffered above). Empty when the full library is on offer, and
+ * when the config has no full-library count at all. Shown to Pulse staff on
+ * /pulse/pricing (audit finding E4), because a category added on /pulse/videos
+ * starts not for sale by rule, and from that moment until it is switched For
+ * sale the full library cannot be bought.
+ */
+export function fullLibraryBlockers(config: PricingConfig, availability: Record<string, string>, list: { value: Category; label: string }[]): string[] {
+  if (config.fullLibraryFrom === null) return [];
+  return list.filter((entry) => availability[entry.value] !== "sellable" && availability[entry.value] !== "coming-soon").map((entry) => entry.label);
+}
+
+/** The sentence for those categories, or null when there are none. */
+export function fullLibraryOffSaleWords(blockers: string[]): string | null {
+  if (blockers.length === 0) return null;
+  const names = blockers.length === 1 ? blockers[0] : `${blockers.slice(0, -1).join(", ")} and ${blockers[blockers.length - 1]}`;
+  return `The full library is off sale because ${names} ${blockers.length === 1 ? "is" : "are"} not for sale. New buyers cannot pick the full library until ${blockers.length === 1 ? "it is" : "they are"} switched For sale in the Categories panel on Videos. Plans already bought are not affected.`;
+}
+
+/**
  * Work out what a clinic would pay. Pure: the same input always gives the
  * same quote. Returns an error for input that cannot be quoted (no
  * categories, a category that is not ours or not for sale, seats that are

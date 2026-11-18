@@ -98,6 +98,8 @@ describe("a live printed code", () => {
     // No playable address before the tick: the video comes from /q/<code>/accept.
     expect(html).not.toContain("https://example.com/vitest.mp4");
     expect(html).not.toMatch(/<video[^>]*\ssrc=/);
+    // The connection to the file's host is opened early, by its bare host only.
+    expect(html.match(/<link[^>]*rel="preconnect"[^>]*>/g)).toEqual(['<link rel="preconnect" href="https://example.com"/>']);
     // No patient link exists yet, and none is in the page.
     expect(html).not.toContain("/watch/");
     expect(await prisma.share.count({ where: { clinicId: clinic.id } })).toBe(0);

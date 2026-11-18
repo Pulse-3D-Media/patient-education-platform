@@ -2,7 +2,7 @@ import "server-only";
 import { canUseVideo } from "./db/access";
 import { getVideoForPlayback } from "./db/videos";
 import { errorKind } from "./error-kind";
-import { muxIsConfigured, signedPlaylistUrl, signedThumbnailUrl } from "./mux";
+import { MUX_IMAGE_ORIGIN, MUX_STREAM_ORIGIN, muxIsConfigured, signedPlaylistUrl, signedThumbnailUrl } from "./mux";
 import { tokenExpiry, type PlaybackSource } from "./playback-source";
 import { usesProtectedPlayback } from "./video";
 
@@ -82,6 +82,59 @@ export function playbackForVideo(video: PlayableVideo, now: Date, windowEnd: Dat
  */
 export function playbackForShare(share: { expiresAt: Date; video: PlayableVideo }, now: Date): PlaybackSource {
   return playbackForVideo(share.video, now, share.expiresAt);
+}
+
+/**
+ * What the patient page may say about the video before the "for education
+ * only" box is ticked, so the phone can get ready while the patient reads:
+ *
+ *   origins  the bare addresses (scheme and host, nothing else) the video
+ *            will come from, for the page's early-connection hints
+ *            (<link rel="preconnect">): the phone looks the host up and
+ *            opens the secure connection now, instead of after the tick.
+ *            Mux's stream and still hosts for a video on Mux; the CDN's
+ *            host for a plain file. Never a path, a playback id or a token:
+ *            a host name says nothing about which video it is.
+ *   stream   the video will be a Mux stream. The player then starts
+ *            fetching its streaming library (hls.js) the moment the box is
+ *            ticked, at the same time as the tick's own request, on the
+ *            browsers that need it (see components/ui/video-source-loader.ts).
+ *
+ * Worked out from the same facts as playbackForVideo() (a Mux id wins, and
+ * only where Mux can sign here), so the hints point where the video will
+ * really come from. A video that will be unavailable gets no hints. Nothing
+ * here is a permission: it plays nothing.
+ */
+export function earlyConnectionsFor(video: PlayableVideo): EarlyConnections {
+  if (usesProtectedPlayback(video) && video.muxPlaybackId) {
+    if (!muxIsConfigured()) return { origins: [], stream: false };
+    return {
+      // A browser keeps two kinds of connection to a host apart: the one the <video> element and its still use, and the
+      // "anonymous" one a script's own requests use (hls.js fetches the stream that way on Android and Chrome). The
+      // server cannot know which browser it is, so the stream host is warmed both ways; the still host only the first.
+      origins: [
+        { origin: MUX_STREAM_ORIGIN, anonymous: false },
+        { origin: MUX_STREAM_ORIGIN, anonymous: true },
+        { origin: MUX_IMAGE_ORIGIN, anonymous: false },
+      ],
+      stream: true,
+    };
+  }
+  const origin = video.videoUrl ? httpsOriginOf(video.videoUrl) : null;
+  return { origins: origin ? [{ origin, anonymous: false }] : [], stream: false };
+}
+
+/** See earlyConnectionsFor(). Bare origins only; safe to put in the page. */
+export type EarlyConnections = { origins: { origin: string; anonymous: boolean }[]; stream: boolean };
+
+/** The scheme and host of an https address, alone, or null for anything else. */
+function httpsOriginOf(address: string): string | null {
+  try {
+    const url = new URL(address);
+    return url.protocol === "https:" ? url.origin : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -13,16 +13,21 @@ import type { PlayerControls } from "./usePlayerControls";
  * What both players lay over the picture, laid out the way Vimeo does it
  * (agreed by Evan and Van at the 2026-10-15 huddle, with a Vimeo screenshot):
  *
- *   - Top left: the clinic's logo in a round frame, the video's title and
- *     the doctor's name (ClinicMark). Top right: the library's Close.
+ *   - Top left: the clinic's logo (round, or a white tag for a wide
+ *     wordmark) and the doctor's name (ClinicMark). The video's title joins
+ *     them only in full screen: everywhere else the page writes it in full
+ *     right above or under the player. Top right: the placeholder chip.
  *   - In the middle, on a phone or a tablet (a screen with no mouse): back
  *     10 seconds, play or pause, forward 10 seconds, each on a soft dark
- *     circle so it reads over a white frame. With a mouse there is nothing
- *     in the middle: the play button is at the bottom left, as on Vimeo.
+ *     circle so it reads over a white frame (VIDEO_BUTTON_ALPHA in
+ *     lib/branding.ts), sized to cover little of a phone's picture while
+ *     staying at least 44px to tap. With a mouse there is nothing in the
+ *     middle: the play button is at the bottom left, as on Vimeo.
  *     Which one shows is decided by the browser (the `computer:` variant in
  *     app/globals.css: a mouse or trackpad that can hover), never by its name.
  *   - Along the bottom: the play button (mouse only), the time, sound and
- *     full screen, and a thin progress bar to drag. When the video has
+ *     full screen, and a thin progress bar to drag, on a soft fade only as
+ *     tall as that row (.video-scrim in app/globals.css). When the video has
  *     chapters (the library's watch page only), a small gap in the bar marks
  *     where each one starts, and the current chapter's name follows the time.
  *
@@ -89,13 +94,14 @@ export function PlayerOverlay({
       onPointerUp={showControls ? controls.onPictureTap : undefined}
       onDoubleClick={showControls ? controls.toggleFullscreen : undefined}
     >
-      {/* Top: the clinic's mark (left), the player's own button and the placeholder chip (right). */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-3 @xl:p-4">
+      {/* Top: the clinic's mark (left), the player's own button and the placeholder chip (right). The video's title joins
+          the mark only in full screen, where the page's own title is out of sight. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-2.5 @xl:p-4">
         <div className={`min-w-0 transition-opacity duration-300 ${fade}`}>
-          <ClinicMark logoUrl={logoUrl} name={clinicName} title={title} senderName={senderName} />
+          <ClinicMark logoUrl={logoUrl} name={clinicName} title={controls.fullscreen ? title : null} senderName={senderName} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {/* On a narrow player (a phone) the short word, so the clinic's mark beside it keeps room for the title. */}
+          {/* On a narrow player (a phone) the short word, so the clinic's mark beside it keeps room for the doctor's name. */}
           {placeholder && (
             <span className={PLACEHOLDER_CHIP}>
               <span className="@xl:hidden">Placeholder</span>
@@ -127,24 +133,24 @@ export function PlayerOverlay({
 
       {/* The middle, on a screen with no mouse: back 10 seconds, play or pause, forward 10 seconds. */}
       {showControls && !slow && !loading && (
-        <div className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-5 transition-opacity duration-300 computer:hidden @xl:gap-10 ${fade}`}>
-          <Control live={controls.showing} onClick={() => controls.seekBy(-SKIP_SECONDS)} label="Back 10 seconds" size="h-12 w-12 bg-black/40 @xl:h-14 @xl:w-14">
-            <SkipBackIcon className="h-7 w-7 @xl:h-8 @xl:w-8" />
+        <div className={`pointer-events-none absolute inset-0 flex items-center justify-center gap-7 transition-opacity duration-300 computer:hidden @xl:gap-12 ${fade}`}>
+          <Control live={controls.showing} onClick={() => controls.seekBy(-SKIP_SECONDS)} label="Back 10 seconds" size="h-11 w-11 bg-black/45 @xl:h-12 @xl:w-12">
+            <SkipBackIcon className="h-6 w-6 @xl:h-7 @xl:w-7" />
           </Control>
-          <Control live={controls.showing} onClick={controls.togglePlay} label={playLabel} size="h-14 w-14 bg-black/50 @xl:h-16 @xl:w-16">
+          <Control live={controls.showing} onClick={controls.togglePlay} label={playLabel} size="h-13 w-13 bg-black/50 @xl:h-14 @xl:w-14">
             {playIcon("h-7 w-7 @xl:h-8 @xl:w-8")}
           </Control>
-          <Control live={controls.showing} onClick={() => controls.seekBy(SKIP_SECONDS)} label="Forward 10 seconds" size="h-12 w-12 bg-black/40 @xl:h-14 @xl:w-14">
-            <SkipForwardIcon className="h-7 w-7 @xl:h-8 @xl:w-8" />
+          <Control live={controls.showing} onClick={() => controls.seekBy(SKIP_SECONDS)} label="Forward 10 seconds" size="h-11 w-11 bg-black/45 @xl:h-12 @xl:w-12">
+            <SkipForwardIcon className="h-6 w-6 @xl:h-7 @xl:w-7" />
           </Control>
         </div>
       )}
 
       {/* The bottom: play (with a mouse), the time, sound and full screen, then the progress bar. The dark fade behind them
-          takes no taps of its own (only its buttons and the bar do): on a short player, a phone's or a tablet's, it reaches
-          up over the middle buttons, and when it took taps it swallowed every tap on Pause and the ten-second buttons. */}
+          is only as tall as the row, and takes no taps of its own (only its buttons and the bar do): when an earlier, taller
+          fade took taps, it swallowed every tap on Pause and the ten-second buttons on a short player. */}
       {showControls && (
-        <div className={`pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-2 pt-10 transition-opacity duration-300 @xl:px-3 ${fade}`}>
+        <div className={`video-scrim pointer-events-none absolute inset-x-0 bottom-0 px-1.5 pt-3 transition-opacity duration-300 @xl:px-3 ${fade}`}>
           <div className="flex items-center">
             <span className="hidden computer:flex">
               <Control live={controls.showing} onClick={controls.togglePlay} label={playLabel} size="h-11 w-11">
@@ -171,7 +177,7 @@ export function PlayerOverlay({
           </div>
 
           {/* A thin drawn track and thumb, with an invisible range input over it for dragging (taller than it looks, so a finger finds it). */}
-          <div className="relative mx-2 flex h-7 items-center">
+          <div className="relative mx-2.5 flex h-7 items-center">
             <div className="h-1 w-full rounded-full bg-white/30">
               <div className="h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
             </div>

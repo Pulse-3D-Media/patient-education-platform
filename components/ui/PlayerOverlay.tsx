@@ -14,8 +14,8 @@ import type { PlayerCaptions } from "./useVideoSource";
  * What both players lay over the picture, laid out the way Vimeo does it
  * (agreed by Evan and Van at the 2026-10-15 huddle, with a Vimeo screenshot):
  *
- *   - Top left: the clinic's logo (round, or a white tag for a wide
- *     wordmark) and the doctor's name (ClinicMark). The video's title joins
+ *   - Top left: the clinic's logo (cropped round) and the doctor's
+ *     name (ClinicMark). The video's title joins
  *     them only in full screen: everywhere else the page writes it in full
  *     right above or under the player. Top right: the placeholder chip.
  *   - In the middle, on a phone or a tablet (a screen with no mouse): back

@@ -62,6 +62,11 @@ export function usePlayerControls({
   const waiting = useRef(false);
   /** The video could not be played: the controls stay up (the player shows its own calm panel). */
   const broken = useRef(false);
+  /**
+   * The key whose first press only brought faded controls back. Its key-up is cancelled too: Space presses a button
+   * when it is let go, and cancelling the key-down alone may not stop that in every browser.
+   */
+  const swallowedKey = useRef<string | null>(null);
 
   /** May the controls fade right now? Only while the video is actually playing. */
   const mayFade = () => Boolean(video.current && !video.current.paused && !video.current.ended && !waiting.current && !broken.current);
@@ -224,10 +229,20 @@ export function usePlayerControls({
   const onKey = (event: React.KeyboardEvent) => {
     const hidden = playing && !visible;
     reveal();
-    if (hidden && keyFirstPressWhileHidden(event.key) === "show-only") {
+    if (hidden && keyFirstPressWhileHidden(event.key, event) === "show-only") {
+      event.preventDefault();
+      swallowedKey.current = event.key;
+      return;
+    }
+    // A key held down repeats its key-down: the repeats of that first press do nothing either, until it is let go.
+    if (swallowedKey.current === event.key && event.repeat) {
       event.preventDefault();
       return;
     }
+    swallowedKey.current = null;
+    // With Ctrl, Cmd or Alt held the key belongs to the browser or the screen reader (Alt+Left is back, Ctrl+F is
+    // find): the player never acts on it and never cancels it, faded or not.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (!enabled) return;
     if (event.key === " " || event.key === "k") {
       // Space on a focused button already presses that button; only act when the player itself has the focus.
@@ -242,6 +257,13 @@ export function usePlayerControls({
     }
     else if (event.key === "m") toggleMute();
     else if (event.key === "f") fullscreenOnOff();
+  };
+
+  /** The key-up of a press that only brought the controls back: cancel it too, so a button is not pressed by it. */
+  const onKeyUp = (event: React.KeyboardEvent) => {
+    if (swallowedKey.current !== event.key) return;
+    swallowedKey.current = null;
+    event.preventDefault();
   };
 
   return {
@@ -264,6 +286,8 @@ export function usePlayerControls({
     toggleFullscreen: fullscreenOnOff,
     onPictureTap,
     onKey,
+    /** For the player's outer box: onKeyUp. */
+    onKeyUp,
   };
 }
 

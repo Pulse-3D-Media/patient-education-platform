@@ -1,5 +1,6 @@
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
 import type { NextRequest } from "next/server";
+import { judgeContentLength, MAX_CLERK_WEBHOOK_BYTES } from "@/lib/body-size";
 import { readClerkEvent, readDeliveryId } from "@/lib/clerk-events";
 import { handleClerkEvent } from "@/lib/clerk-webhook";
 import { errorKind } from "@/lib/error-kind";
@@ -22,6 +23,8 @@ import { errorKind } from "@/lib/error-kind";
  * What the answers mean to Clerk:
  *
  *   200   finished (something written, nothing to do, or a kind we do not use).
+ *   413   the body says it is bigger than any notification (256 KiB);
+ *         refused before it is read.
  *   400   not from Clerk, or unreadable. No retry could succeed.
  *   500   the work failed (Clerk or the database unreachable). Clerk sends it
  *         again later.
@@ -44,6 +47,14 @@ function answer(status: number, word: string) {
 }
 
 export async function POST(request: NextRequest) {
+  // A body that says it is bigger than any real notification is refused
+  // before a byte of it is read (lib/body-size.ts, 256 KiB). Only the header
+  // is looked at here, so Clerk's verifyWebhook below still reads the body
+  // itself and checks the signature over the exact bytes sent.
+  const size = judgeContentLength(request.headers.get("content-length"), MAX_CLERK_WEBHOOK_BYTES);
+  if (size === "too-large") return answer(413, "too large");
+  if (size === "malformed") return answer(400, "bad request");
+
   const signingSecret = process.env.CLERK_WEBHOOK_SIGNING_SECRET?.trim();
   if (!signingSecret) {
     console.error("Clerk webhook: the signing secret is not set on this deployment.");

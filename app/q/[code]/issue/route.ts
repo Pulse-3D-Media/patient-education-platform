@@ -2,7 +2,10 @@ import { issueShareFromQrCode } from "@/lib/db/shares";
 import { DISCLAIMER, judgeAcceptedVersion } from "@/lib/education-note";
 import { errorKind } from "@/lib/error-kind";
 import { ShareTermsError } from "@/lib/expiry";
-import { isAttemptKey, isQrCodeShape } from "@/lib/qr-code";
+import { notifyPulseOfBusyQrCode } from "@/lib/qr-alert";
+import { isAttemptKey, isQrCodeShape, type QrAlert } from "@/lib/qr-code";
+import { pickTrustedOrigin } from "@/lib/trusted-origin";
+import { after } from "next/server";
 
 /**
  * POST /q/<code>/issue: a patient tapped Play on a printed QR code's page.
@@ -37,7 +40,9 @@ import { isAttemptKey, isQrCodeShape } from "@/lib/qr-code";
  * rule in Vercel's firewall (set by Evan in the dashboard, beside the one
  * for /watch); each code hands out at most the qrDailyCap setting's links
  * per UTC day (200 by default), and one that reaches the qrDailyFlag setting
- * (100) is flagged for Pulse staff on /pulse and the clinic's page. The log
+ * (100) is flagged for Pulse staff on /pulse and the clinic's page. The tap
+ * that reaches the flag, and the one that reaches the limit, also email Pulse
+ * staff once (tellPulseLater, below), after the answer has gone. The log
  * never holds the code, the key, or the link made.
  */
 export async function POST(request: Request, { params }: RouteContext<"/q/[code]/issue">) {
@@ -53,6 +58,7 @@ export async function POST(request: Request, { params }: RouteContext<"/q/[code]
 
   try {
     const outcome = await issueShareFromQrCode(code, body.key, { disclaimerVersion: DISCLAIMER.version });
+    if (outcome.ok && outcome.alert) tellPulseLater(outcome.alert, request);
     return answer({ code: outcome.ok ? outcome.code : null }, 200);
   } catch (error) {
     // A link setting out of range: no link can be made anywhere until Pulse fixes it. Calm for the patient, loud in the log.
@@ -62,6 +68,29 @@ export async function POST(request: Request, { params }: RouteContext<"/q/[code]
     }
     console.error("A printed QR code could not hand out a link.", errorKind(error));
     return answer({ code: null }, 500);
+  }
+}
+
+/**
+ * This tap's link brought the code to the day's flag or its limit: email Pulse
+ * staff (lib/qr-alert.ts) WITHOUT making the patient wait. The send is started
+ * here and handed to Next.js's after(), which keeps the function alive until
+ * it finishes, the same way instrumentation.ts sends error alerts; the answer
+ * goes back at once. Outside a request after() refuses, and the send goes on
+ * regardless. It never throws; anything unexpected is one log word.
+ *
+ * The address in the email is built from an origin this deployment knows is
+ * its own (pickTrustedOrigin), never from the Host header as it came.
+ */
+function tellPulseLater(alert: QrAlert, request: Request) {
+  const origin = pickTrustedOrigin(request.headers.get("host"), process.env);
+  const sending = notifyPulseOfBusyQrCode(alert, origin).catch(() => {
+    console.error("Printed code alert: the email was not sent.", "unexpected");
+  });
+  try {
+    after(sending);
+  } catch {
+    // Not inside a request, so the platform cannot be asked to wait. The send goes on.
   }
 }
 

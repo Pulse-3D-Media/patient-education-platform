@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/mux-uploads", () => ({ reconcileUpload: vi.fn() }));
 
+import { MAX_MUX_WEBHOOK_BYTES } from "@/lib/body-size";
 import { reconcileUpload } from "@/lib/mux-uploads";
 import { POST } from "./route";
 
@@ -92,5 +93,44 @@ describe("POST /api/webhooks/mux", () => {
     expect(response.status).toBe(503);
     expect(await response.text()).toBe("not configured");
     expect(reconcileUpload).not.toHaveBeenCalled();
+  });
+});
+
+describe("the size of the body", () => {
+  /** A signed request that says it is `length` bytes. Whether its body was read is `bodyUsed`. */
+  function sized(length: string) {
+    return new Request("https://example.test/api/webhooks/mux", {
+      method: "POST",
+      body: BODY,
+      headers: { "mux-signature": sign(BODY), "content-type": "application/json", "content-length": length },
+    });
+  }
+
+  it("refuses a body that says it is over the limit with 413, before reading it or checking the signature", async () => {
+    const req = sized(String(MAX_MUX_WEBHOOK_BYTES + 1));
+    const response = await POST(req);
+    expect(response.status).toBe(413);
+    expect(await response.text()).toBe("too large");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(req.bodyUsed).toBe(false);
+    expect(reconcileUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a Content-Length that is not a number with 400, before reading the body", async () => {
+    const req = sized("lots");
+    expect((await POST(req)).status).toBe(400);
+    expect(req.bodyUsed).toBe(false);
+    expect(reconcileUpload).not.toHaveBeenCalled();
+  });
+
+  it("reads and hands on a real-sized notification as before (the control)", async () => {
+    const req = sized(String(Buffer.byteLength(BODY)));
+    expect((await POST(req)).status).toBe(200);
+    expect(req.bodyUsed).toBe(true);
+    expect(reconcileUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows 256 KiB, far above any notification Mux sends (a few kilobytes)", () => {
+    expect(MAX_MUX_WEBHOOK_BYTES).toBe(256 * 1024);
   });
 });

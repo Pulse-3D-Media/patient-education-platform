@@ -2,10 +2,11 @@
  * How big a request's body says it is, judged before the body is read.
  * Pure, with no server code, so it can be tested on its own.
  *
- * Used by the Stripe webhook (app/api/webhooks/stripe/route.ts), which has to
- * read the whole body as text to check Stripe's signature over it. Without a
- * limit, a stranger could send a very large body and make the server read all
- * of it before the signature check refused it (audit run 2, November 2026).
+ * Used by the three webhooks (app/api/webhooks/stripe, mux and clerk), which
+ * each have to read the whole body to check the sender's signature over it.
+ * Without a limit, a stranger could send a very large body and make the server
+ * read all of it before the signature check refused it (audit run 2, and
+ * finding F3 of the 2026-11-16 audit for Mux and Clerk).
  */
 
 /**
@@ -15,6 +16,22 @@
  * the 4.5 MB Vercel lets any request carry.
  */
 export const MAX_STRIPE_WEBHOOK_BYTES = 1024 * 1024;
+
+/**
+ * The largest Mux notification the webhook will read: 256 KiB. Real ones
+ * (an upload or an asset changing state) are a few kilobytes, so this is
+ * many times what Mux sends. Added for audit finding F3, November 2026.
+ */
+export const MAX_MUX_WEBHOOK_BYTES = 256 * 1024;
+
+/**
+ * The largest Clerk notification the webhook will read: 256 KiB. Real ones
+ * (a membership or an organization changing) are a few kilobytes, even with
+ * the most metadata Clerk allows on them. Checked before Clerk's own
+ * verifyWebhook reads the body, so the signature is still checked over the
+ * exact bytes sent.
+ */
+export const MAX_CLERK_WEBHOOK_BYTES = 256 * 1024;
 
 /**
  * What the Content-Length header says about a body, against `maxBytes`:

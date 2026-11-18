@@ -192,34 +192,16 @@ The same table with every note is in `docs/areas/operations.md`.
 The full map, file by file, is `docs/areas/folder-map.md`.
 
 ```
-app/watch/[code]     The patient's page for a link. Public. Routes, never Server Actions.
-app/q/[code]         A printed QR code's page; the Play tap makes the visit's own link.
-app/library          The surgeon's exam-room browser; watch/[videoId] is the watch page.
-app/admin            The clinic admin area: overview, links, people, billing, branding, reactivate, print, qr, qr-codes.
-app/admin/billing    Billing: plan, checkout, plan changes, Stripe's pages. Reachable by an admin of a closed clinic.
-app/pulse            The Pulse 3D master dashboard: clinics, videos, settings, pricing, billing, reports.
+app/watch, app/q     The patient's pages: a link, and a printed QR code. Public. Routes, never Server Actions.
+app/library          The surgeon's exam-room browser and its watch page.
+app/admin            The clinic's back office; app/admin/billing is reachable when the clinic is closed.
+app/pulse            The Pulse 3D master dashboard. Pulse staff only.
 app/api/webhooks     Stripe, Mux and Clerk notifications. Public; the signature is the check.
-app/api/health       GET /api/health for an uptime monitor.
-app/error.tsx etc.   The calm error and not-found pages (see "When something breaks").
-proxy.ts             Clerk's middleware. A convenience, not the security boundary.
-instrumentation.ts   onRequestError: the scrubbed log line and the error alert.
-lib/db/              EVERY database query. Nothing else touches Prisma. Starts with the server-only guard.
-lib/access.ts        The access rule (may this clinic use this video), pure.
-lib/clinic.ts        Who is signed in, and their clinic. The one place the signed-in user meets the database.
-lib/clinic-status.ts clinicIsOpen(): whether a clinic may use the app.
-lib/pulse.ts         isPulseStaff() and requirePulseStaff(): the one gate for /pulse.
+lib/db/              EVERY database query. Nothing else touches Prisma.
+lib/                 The rules, mostly pure. One file per outside service: stripe.ts, mux.ts, email.ts, people.ts (Clerk).
 lib/seat-changes.ts  The only way anyone's seat, role, invitation or ownership changes.
-lib/pricing.ts       The pricing engine, pure. Never a price literal anywhere else.
-lib/stripe.ts        The only file that talks to Stripe. Test keys only.
-lib/checkout.ts      Self-serve checkout; lib/plan-changes.ts changes a paid plan.
-lib/mux.ts           The only file that talks to Mux and holds the signing key.
 lib/playback-auth.ts The only place a playback address is built.
-lib/expiry.ts        The expiry and pausing rule for patient links, pure.
-lib/qr-code.ts       Printed QR codes: the plain facts both sides share.
-lib/categories.ts    The categories as they start, and the checks every place a category arrives makes.
-lib/education-note.ts The fixed "for education only" words and their version.
-lib/testing/         In-memory stand-ins for Clerk, Stripe and Mux, for tests only.
-components/ui/       Shared pieces: the app shell, both players, the clinic's mark on the video, error pages.
+components/ui/       Shared pieces: the app shell, both players, the error pages.
 prisma/              Schema, migrations, and the operator scripts (each refuses production unless told).
 docs/areas/          The detail for each area. Read the right one before editing.
 docs/decisions.md    Dated decisions: who decided what, and when.

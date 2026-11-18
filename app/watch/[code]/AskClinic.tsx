@@ -24,11 +24,13 @@ import { CallButton } from "./CallButton";
  *
  * FOR A SCREEN READER. The button disappears after the tap, with the focus
  * on it; the focus moves to the new heading ("Your clinic has been asked"),
- * so the reader says where things stand and nothing is lost. One status
- * region is always here and only its words change (a region that appears
- * already filled is skipped by many screen readers): it says the clinic was
- * asked, or that the tap did not go through. A page opened already asked
- * says nothing of its own: the heading is read like any page.
+ * so the reader says where things stand and nothing is lost. The status
+ * region below stays empty then, or the reader would hear the same news
+ * twice. One status region is always here and only its words change (a
+ * region that appears already filled is skipped by many screen readers): it
+ * says only that the tap did not go through, when the button (and the focus)
+ * stays where it is. A page opened already asked says nothing of its own:
+ * the heading is read like any page.
  */
 export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyAsked: boolean; call: { href: string; label: string } | null }) {
   const router = useRouter();
@@ -59,7 +61,7 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
   // Always on the page, in both states below; only its words change.
   const status = (
     <p role="status" className="sr-only">
-      {justAsked ? "Your clinic has been asked. Try this same link again in a day or so." : trouble ? "That did not go through. Please try again in a moment." : ""}
+      {trouble ? "That did not go through. Please try again in a moment." : ""}
     </p>
   );
 
@@ -67,13 +69,13 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
     return (
       <>
         {status}
-        <h1 ref={askedHeading} tabIndex={-1} className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em] outline-none">
+        <h1 ref={askedHeading} tabIndex={-1} className="mt-6 text-[24px] leading-[1.22] font-bold tracking-[-.02em] outline-none">
           Your clinic has been asked
         </h1>
-        <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">Try this same link again in a day or so.</p>
+        <p className="mt-3.5 max-w-[30ch] text-[18px] leading-[1.52] break-words text-[#3a4c56]">Try this same link again in a day or so.</p>
         {call && (
           <>
-            <p className="mt-3 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">Need it sooner? Call the office.</p>
+            <p className="mt-3 max-w-[30ch] text-[16px] leading-[1.5] text-[#46555e]">Need it sooner? Call the office.</p>
             <CallButton call={call} />
           </>
         )}
@@ -84,19 +86,19 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
   return (
     <>
       {status}
-      <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">This link has paused</h1>
-      <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">Tap below to ask your clinic to turn it back on.</p>
+      <h1 className="mt-6 text-[24px] leading-[1.22] font-bold tracking-[-.02em]">This link has paused</h1>
+      <p className="mt-3.5 max-w-[30ch] text-[18px] leading-[1.52] break-words text-[#3a4c56]">Tap below to ask your clinic to turn it back on.</p>
       <button
         type="button"
         onClick={ask}
         disabled={pending}
-        className="mt-7 flex min-h-14 items-center rounded-full bg-brand px-8 text-[19px] font-semibold text-on-brand shadow-[0_6px_18px_-8px_rgba(18,32,42,.45)] transition active:scale-[0.98] disabled:opacity-70 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#12202a]"
+        className="mt-7 flex min-h-14 items-center rounded-full bg-brand px-8 text-[17px] font-semibold text-on-brand shadow-[0_6px_18px_-8px_rgba(18,32,42,.45)] transition active:scale-[0.98] disabled:opacity-70 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#12202a]"
       >
         {pending ? "Asking..." : "Ask my clinic"}
       </button>
       {/* Seen here; heard through the status region above. */}
       {trouble && (
-        <p className="mt-4 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">
+        <p className="mt-4 max-w-[30ch] text-[16px] leading-[1.5] text-[#46555e]">
           That did not go through. Please try again in a moment.
         </p>
       )}

@@ -103,7 +103,7 @@ export function PatientViewer({
       >
         {/* The logo's row is a fixed height (36px on a phone, 44px wider) whether the picture loads, loads late, or never loads, so nothing under it moves. */}
         {look.logoUrl && (
-          <div className="mb-2.5 sm:mb-3 short-landscape:hidden">
+          <div className="mb-3 sm:mb-4 short-landscape:hidden">
             <ClinicLogo src={look.logoUrl} name={clinicName} boxClassName="h-9 w-[180px] max-w-full sm:h-11 sm:w-[220px]" fallback="blank" />
           </div>
         )}
@@ -124,12 +124,12 @@ export function PatientViewer({
           ))}
         </p>
         {/* A long word (a made-up name, or "Reconstruction" at 200% zoom on a phone) breaks rather than pushing the page sideways. */}
-        <h1 className="mt-1 text-[26px] leading-[1.15] font-bold tracking-[-.022em] sm:mt-1.5 sm:text-[29px] short-landscape:text-[22px]! break-words">{video.title}</h1>
-        <p className="mt-2 text-[20px] leading-[1.5] text-[#3a4c56] sm:mt-2.5 short-landscape:hidden">Your surgeon shared this so you can see what happens during your operation.</p>
+        <h1 className="mt-2 text-[24px] leading-[1.15] font-bold tracking-[-.022em] sm:mt-2.5 sm:text-[27px] short-landscape:text-[20px]! break-words">{video.title}</h1>
+        <p className="mt-3 text-[18px] leading-[1.5] text-[#3a4c56] sm:mt-3.5 short-landscape:hidden">Your surgeon shared this so you can see what happens during your operation.</p>
 
         {/* Said only when the time left cannot hold one whole viewing and the first play will not add any: honest, calm, and the number to call. */}
         {endsSoon && (
-          <p role="note" className="mt-5 rounded-xl bg-[#eef1f4] px-4 py-3 text-[16px] leading-[1.5] text-[#3a4c56]">
+          <p role="note" className="mt-5 rounded-xl bg-[#eef1f4] px-4 py-3 text-[15px] leading-[1.5] text-[#3a4c56]">
             This link stops working in a few minutes, so the video may stop before the end. {clinicName} can send you a fresh link.
           </p>
         )}
@@ -145,11 +145,11 @@ export function PatientViewer({
         </noscript>
 
         {/* Sideways on a phone, the whole column is no wider than keeps the video's 16:9 picture inside the screen's height (above). */}
-        <div className="mt-4 sm:mt-6 short-landscape:mt-3!">{player}</div>
+        <div className="mt-5 sm:mt-7 short-landscape:mt-3!">{player}</div>
 
         {/* "About 2 minutes", so nobody has to decide whether they have time to start it. */}
         {length && (
-          <p className="mt-5 flex items-center gap-2 text-[16px] font-medium text-[#46555e]">
+          <p className="mt-6 flex items-center gap-2 text-[15px] font-medium text-[#46555e]">
             <ClockIcon className="h-5 w-5 shrink-0" />
             {length}
           </p>
@@ -158,7 +158,7 @@ export function PatientViewer({
         {/* When the link stops working, so the patient can ask for more time before it does. The same size and colour as the length above: a fact, never a warning. */}
         {deadline && !endsSoon && (
           // On a narrow phone a long date wraps to a second line; the icon stays beside the first.
-          <p className={`${length ? "mt-2.5" : "mt-5"} flex items-start gap-2 text-[16px] leading-6 font-medium text-[#46555e]`}>
+          <p className={`${length ? "mt-3" : "mt-6"} flex items-start gap-2 text-[15px] leading-6 font-medium text-[#46555e]`}>
             <CalendarIcon className="mt-0.5 h-5 w-5 shrink-0" />
             <span>
               {deadline.kind === "after-first-play" ? (
@@ -222,9 +222,9 @@ export function Unavailable({
         <div className="flex h-[66px] w-[66px] items-center justify-center rounded-full bg-[#eef1f4] text-[#52616a]">{icon}</div>
         {children ?? (
           <>
-            <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
-            <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">{body}</p>
-            {note && <p className="mt-3 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">{note}</p>}
+            <h1 className="mt-6 text-[24px] leading-[1.22] font-bold tracking-[-.02em]">{heading}</h1>
+            <p className="mt-3.5 max-w-[30ch] text-[18px] leading-[1.52] break-words text-[#3a4c56]">{body}</p>
+            {note && <p className="mt-3 max-w-[30ch] text-[16px] leading-[1.5] text-[#46555e]">{note}</p>}
             {look.call && <CallButton call={look.call} />}
           </>
         )}
@@ -249,7 +249,7 @@ export function Unavailable({
 function PlaceholderBar() {
   return (
     <div role="note" className="border-b-2 border-[#e2a12a] bg-[#fff3d6] px-4 pb-3 pt-3 sm:px-8 sm:pb-3.5 sm:pt-[46px] short-landscape:pt-3!">
-      <p className="mx-auto max-w-2xl text-[16px] leading-[1.45] text-[#5a3d00]">
+      <p className="mx-auto max-w-2xl text-[15px] leading-[1.45] text-[#5a3d00]">
         <strong className="font-bold">Placeholder.</strong> This plays a sample animation, not this procedure.
       </p>
     </div>

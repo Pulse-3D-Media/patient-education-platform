@@ -51,7 +51,6 @@ type ClinicLogoProps = {
   position?: "left" | "center";
   fit?: "contain" | "cover";
   imageClassName?: string;
-  onLoadSize?: (width: number, height: number) => void;
 };
 
 function LogoImage({
@@ -63,7 +62,6 @@ function LogoImage({
   position = "left",
   fit = "contain",
   imageClassName = "",
-  onLoadSize,
 }: {
   /** The logo's address, or null when the clinic has none. */
   src: string | null;
@@ -80,20 +78,9 @@ function LogoImage({
   fit?: "contain" | "cover";
   /** Extra classes for the picture itself (a backing colour, say), which shows only once it has loaded. */
   imageClassName?: string;
-  /** Told the picture's natural width and height once it has loaded (the player's mark picks its shape from them). */
-  onLoadSize?: (width: number, height: number) => void;
 }) {
   const img = useRef<HTMLImageElement>(null);
   const [state, setState] = useState<"waiting" | "loaded" | "failed">("waiting");
-  // The latest callback, read when the picture loads, so a new function on every render never refetches anything.
-  const sizeReport = useRef(onLoadSize);
-  useEffect(() => {
-    sizeReport.current = onLoadSize;
-  });
-  const loaded = (picture: HTMLImageElement | null) => {
-    setState("loaded");
-    if (picture) sizeReport.current?.(picture.naturalWidth, picture.naturalHeight);
-  };
 
   // The picture can finish loading (or failing) before React has attached
   // onLoad and onError, because the server sent the <img> in the page's
@@ -104,13 +91,11 @@ function LogoImage({
     if (!picture || typeof picture.decode !== "function") return;
     let current = true;
     picture.decode().then(
-      () => current && loaded(picture),
+      () => current && setState("loaded"),
       () => {
         // Some browsers refuse to decode a picture they did load (a very
         // large one, say). If it is there, it is there.
-        if (!current) return;
-        if (picture.complete && picture.naturalWidth > 0) loaded(picture);
-        else setState("failed");
+        if (current) setState(picture.complete && picture.naturalWidth > 0 ? "loaded" : "failed");
       },
     );
     return () => {
@@ -136,7 +121,7 @@ function LogoImage({
           fetchPriority="low"
           referrerPolicy="no-referrer"
           draggable={false}
-          onLoad={(event) => loaded(event.currentTarget)}
+          onLoad={() => setState("loaded")}
           onError={() => setState("failed")}
           className={`absolute inset-0 h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"} transition-opacity duration-200 ${
             position === "center" || fit === "cover" ? "object-center" : "object-left"

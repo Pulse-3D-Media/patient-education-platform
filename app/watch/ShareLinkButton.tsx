@@ -22,18 +22,19 @@ import { shareMessage, shareOrCopy, showShareButton } from "./share-link";
  */
 export function ShareLinkButton({ title, when }: { title: string; when: "now" | "once-own-link" }) {
   const pathname = usePathname();
-  const [message, setMessage] = useState("");
+  // The words after a press, and a count of presses. The count is the key of the span the words sit in, so every press
+  // puts a new span in the status region: a second "Link copied." is then heard again, even when React would otherwise
+  // see the same words and change nothing on the page.
+  const [message, setMessage] = useState({ text: "", press: 0 });
   const pressing = useRef(false);
   if (!showShareButton(when, pathname)) return null;
 
   async function press() {
     if (pressing.current) return;
     pressing.current = true;
-    // Clear the last words first, so a second "Link copied." is heard again rather than taken for no change.
-    setMessage("");
     try {
       const outcome = await shareOrCopy(navigator, { url: window.location.href, title });
-      setMessage(shareMessage(outcome));
+      setMessage((last) => ({ text: shareMessage(outcome), press: last.press + 1 }));
     } finally {
       pressing.current = false;
     }
@@ -45,14 +46,14 @@ export function ShareLinkButton({ title, when }: { title: string; when: "now" | 
         type="button"
         onClick={() => void press()}
         data-share-link=""
-        className="flex min-h-12 items-center gap-2.5 rounded-full border-2 border-[#737b83] bg-white px-5 text-[17px] font-semibold text-[#12333f] transition active:scale-[0.98] motion-reduce:transition-none focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
+        className="flex min-h-12 items-center gap-2.5 rounded-full border-2 border-[#737b83] bg-white px-5 text-[16px] font-semibold text-[#12333f] transition active:scale-[0.98] motion-reduce:transition-none focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#1e5668]"
       >
         <ShareIcon className="h-5 w-5 shrink-0" />
         Save or share this link
       </button>
       {/* Always here, so a screen reader hears the words when they arrive. */}
-      <p role="status" className="mt-2 min-h-6 text-[16px] leading-6 text-[#46555e]">
-        {message}
+      <p role="status" className="mt-2 min-h-6 text-[15px] leading-6 text-[#46555e]">
+        <span key={message.press}>{message.text}</span>
       </p>
     </div>
   );

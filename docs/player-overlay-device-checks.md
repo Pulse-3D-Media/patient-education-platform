@@ -4,31 +4,31 @@
 
 What changed, after Evan's screenshots from a Samsung S22:
 
-- **The clinic's mark** is smaller: the logo and the doctor's name on one slim chip. The video's title is no longer on
-  the picture (the page writes it), except in full screen. A **wide wordmark logo is shown whole** on a small white tag
-  instead of being cropped into the circle (this reverses the 2026-10-15 decision and needs Evan's approval); a square
-  logo keeps the round frame.
+- **The clinic's mark** is smaller: the logo in its round frame (cropped to the circle, as before) and the doctor's name
+  on one slim chip with slightly rounded corners. The video's title is no longer on the picture (the page writes it),
+  except in full screen.
 - **The controls cover less**: smaller middle buttons on a phone (still at least 44px to tap), and the dark fade at the
   bottom is only as tall as the time, sound, full screen and progress bar.
-- **The big Play button** is one white pill in the middle of the picture: a round play button with "Tick the box above
-  to play", then "Tap to play" (the library says "Play").
-- **The patient page's first screen** is tighter on a phone (16px sides, a slightly smaller heading, a smaller logo),
-  so the player and its Play button are in view before the box is ticked. **Held sideways** (not full screen), the
+- **The big Play button** is a plain white circle with the triangle in the middle of the picture, with no words on
+  screen: dimmed before the tick, ready after. A screen reader still hears what to do.
+- **The patient page's first screen** is tighter on a phone (16px sides, every text one small step smaller, a little
+  more space between blocks, a smaller logo), so the player and its Play button are in view before the box is ticked. **Held sideways** (not full screen), the
   logo and the sentence under the title step aside, the doctor and the clinic share one line, and the player is no
   taller than the screen.
 
-Seen on Claude's computer (2026-11-16, headless Edge with phone and tablet emulation, a local copy of the database
-with made-up clinics): 360 by 800, 800 by 360, 768 by 1024 and 1280 by 800, before the tick, after it, playing and
-paused, a placeholder, a wide wordmark, a square logo and no logo, and the library's watch page in dark and light.
+Seen on Claude's computer (2026-11-16 and, after Evan's review, 2026-11-17; headless Edge with phone and tablet
+emulation, a local copy of the database with made-up clinics): 360 by 640, 360 by 800, 390 by 844, 800 by 360,
+768 by 1024 and 1280 by 800, before the tick, after it, playing and paused, a placeholder, a wide wordmark, a square
+logo and no logo, and the library's watch page in dark and light.
 **Not seen:** full screen (no browser here can enter it), Safari, and any real device on a real network.
 
 On each device, note the device, browser and version, network, and anything that looks wrong:
 
-1. **Android phone, Chrome (the Samsung S22), upright.** Open a patient link from a clinic with a wide wordmark logo.
+1. **Android phone, Chrome (the Samsung S22), upright.** Open a patient link.
    1. Without scrolling: the logo, the doctor and clinic, the title, the sentence, the box AND the whole player with
-      the Play pill should be on the screen (Chrome's own bars included).
-   2. On the player, top left: the wordmark reads whole on its white tag (no letters cut off), the doctor's name
-      beside it, and nothing else; the animation's own title card is mostly clear of it.
+      the Play circle should be on the screen (Chrome's own bars included).
+   2. On the player, top left: the round logo and the doctor's name on a chip with slightly rounded corners, and
+      nothing else; the animation's own title card is mostly clear of it.
    3. Tick, tap Play. While the controls show: the three middle buttons are smaller than before, the dark fade sits
       only behind the bottom row, and the time is easy to read over the white frames. Each button is easy to hit.
    4. Full screen: the video's title comes back above the doctor's name; everything else as before.
@@ -36,11 +36,10 @@ On each device, note the device, browser and version, network, and anything that
    title, the box, then the player, which starts on the first screen. Tick: the box folds away and nearly all of the
    player is in view without scrolling.
 3. **iPhone, Safari, upright and sideways.** As 1 and 2. Full screen hands the video to the iPhone's own player (no
-   mark, as before). Check the pill and the mark look the same as in the screenshots.
-4. **iPad, Safari, both ways round**, a patient link and the library's watch page: the larger mark (a 40px tag or a
-   48px circle) and larger middle buttons; full screen keeps the mark, the title and our controls.
+   mark, as before). Check the Play circle and the mark look the same as in the screenshots.
+4. **iPad, Safari, both ways round**, a patient link and the library's watch page: the larger mark (a 48px circle) and larger middle buttons; full screen keeps the mark, the title and our controls.
 5. **A clinic with a square logo, and one with none**: the round logo, or the initials, beside the doctor's name.
-6. **The library's watch page in a dark clinic and a light clinic**: the pill and the mark look the same in both; the
+6. **The library's watch page in a dark clinic and a light clinic**: the Play circle and the mark look the same in both; the
    page around the player is unchanged.
 
 ## Earlier checks (2026-10-15)
@@ -153,8 +152,8 @@ controls stayed up for over 5 seconds of playing, came back at once when the foc
 after the focus left. "Save or share this link" (no share sheet in that browser; the clipboard was stood in for) said
 "Link copied.", made no request to any server, and the video kept playing. A printed code's page had no share button
 until the Play tap, then the address became `/watch/...` and the button appeared under the deadline line. On a paused
-link, Enter on Ask my clinic put the focus on "Your clinic has been asked" and the status region said the confirmation
-once; no share button there. At 188 pixels wide (a phone at 200% zoom) the page first scrolled sideways (a long word in
+link, Enter on Ask my clinic put the focus on "Your clinic has been asked" (then the status region also said the
+confirmation; since the 2026-11-17 review it stays empty when the focus moves, so it is said once); no share button there. At 188 pixels wide (a phone at 200% zoom) the page first scrolled sideways (a long word in
 the title) and the box's sentence was cut off at the box's edge; both were fixed and nothing runs past the edge now.
 The accessibility tree: one main area, one heading, the box labelled with the whole sentence, the clinic's mark hidden
 from screen readers, the page's language English, zoom not blocked. **Not seen:** VoiceOver, TalkBack, a real share
@@ -175,8 +174,9 @@ sheet, Safari, any real phone. Use a patient link made from `/admin/links` on th
    5. Turn on Airplane mode before step 2 on a fresh load, then tick: you should hear "We couldn't get the video
       ready. Check your connection, then try again." once, and the focus should land on Try again.
    6. "Save or share this link": double-tap. The iPhone's share sheet opens with the link. Close it: nothing is said.
-   7. A paused link: double-tap "Ask my clinic". You should hear "Your clinic has been asked. Try this same link again
-      in a day or so." and the focus should be on the heading "Your clinic has been asked", not at the top of the page.
+   7. A paused link: double-tap "Ask my clinic". The focus should land on the heading "Your clinic has been asked"
+      (not the top of the page), and you should hear it once, not twice; swipe on for "Try this same link again in a
+      day or so."
    8. A printed code (`/q/...`): before Play, no "Save or share this link" anywhere. After Play has started the
       video, it appears under the deadline line, and the address bar shows `/watch/...`.
 8. **Samsung S22, TalkBack** (Settings, Accessibility, TalkBack on; or hold both volume keys for three seconds)

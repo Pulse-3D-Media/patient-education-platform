@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HIDE_AFTER_MS, SKIP_SECONDS, clinicInitials, logoShape, pictureTapAction, seekValueText, spokenTime } from "./player-rules";
+import { HIDE_AFTER_MS, SKIP_SECONDS, clinicInitials, pictureTapAction, seekValueText, spokenTime } from "./player-rules";
 
 /**
  * The rules both players share (player-rules.ts), with plain values. That a
@@ -46,31 +46,6 @@ describe("the timings", () => {
   it("fades the controls a little over two and a half seconds after the last touch, and skips ten seconds", () => {
     expect(HIDE_AFTER_MS).toBe(2600);
     expect(SKIP_SECONDS).toBe(10);
-  });
-});
-
-describe("how a clinic's logo is shown in the mark, by its own shape", () => {
-  it("a roughly square logo fills the round frame", () => {
-    expect(logoShape(200, 200)).toBe("round");
-    expect(logoShape(130, 100)).toBe("round");
-    expect(logoShape(80, 100)).toBe("round");
-  });
-
-  it("a wide wordmark is shown whole on a white tag (the Pulse 3D logo is 450 by 144), not cropped to the circle", () => {
-    expect(logoShape(450, 144)).toBe("wide");
-    expect(logoShape(131, 100)).toBe("wide");
-    expect(logoShape(1801, 603)).toBe("wide");
-  });
-
-  it("a tall logo is shown whole inside the circle", () => {
-    expect(logoShape(79, 100)).toBe("tall");
-    expect(logoShape(100, 300)).toBe("tall");
-  });
-
-  it("a size that cannot be read is treated as round, as the mark was before", () => {
-    expect(logoShape(0, 0)).toBe("round");
-    expect(logoShape(300, 0)).toBe("round");
-    expect(logoShape(Number.NaN, 100)).toBe("round");
   });
 });
 

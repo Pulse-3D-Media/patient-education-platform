@@ -38,7 +38,10 @@ export function pictureTapAction(pointerType: string, controlsShowing: boolean, 
 export function keyFirstPressWhileHidden(
   key: string,
   held: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean } = {},
+  /** The key was pressed on one of the player's buttons (or its progress bar) holding the keyboard's focus: that button's group never fades (KEEP_FOCUSED_GROUP), so the press is on something in sight and acts at once. */
+  onFocusedControl = false,
 ): "show-only" | "pass" {
+  if (onFocusedControl) return "pass";
   if (held.ctrlKey || held.metaKey || held.altKey) return "pass";
   if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return "pass";
   return PASS_KEYS.has(key) ? "pass" : "show-only";

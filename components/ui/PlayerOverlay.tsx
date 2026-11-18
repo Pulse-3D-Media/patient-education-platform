@@ -43,6 +43,9 @@ import type { PlayerCaptions } from "./useVideoSource";
  * target: a tap shows or hides the controls, a click plays or pauses, a
  * double-click is full screen. Every control is at least 44px to tap.
  */
+/** Added to a faded group: it stays drawn while one of its buttons (or the progress bar) has the keyboard's focus. */
+export const KEEP_FOCUSED_GROUP = "has-[:focus-visible]:opacity-100";
+
 export function PlayerOverlay({
   controls,
   title,
@@ -81,7 +84,10 @@ export function PlayerOverlay({
   /** Captions, from useVideoSource. The CC button shows only when the playing video has a caption track. */
   captions?: PlayerCaptions | null;
 }) {
-  const fade = controls.showing ? "opacity-100" : "pointer-events-none opacity-0";
+  // Faded, a group that holds the keyboard's focus stays drawn, so the focused button and its ring never disappear
+  // (Evan, 2026-11-18: "keep outline for accessabilty"; WCAG 2.4.7). Only the browser's keyboard focus
+  // (:focus-visible) does this, never a tap or a click, and the other groups fade as usual.
+  const fade = controls.showing ? "opacity-100" : `pointer-events-none opacity-0 ${KEEP_FOCUSED_GROUP}`;
   const pct = controls.duration ? (controls.time / controls.duration) * 100 : 0;
   const chapter = chapters[currentChapterIndex(chapters, controls.time)];
   // A mark for every chapter after the first, once the length is known and only where it falls inside the video.
@@ -112,7 +118,7 @@ export function PlayerOverlay({
               <span className="hidden @xl:inline">Placeholder animation</span>
             </span>
           )}
-          {topRight && <div className={`transition-opacity duration-300 motion-reduce:transition-none ${controls.showing ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}>{topRight}</div>}
+          {topRight && <div className={`transition-opacity duration-300 motion-reduce:transition-none ${controls.showing ? "pointer-events-auto opacity-100" : `pointer-events-none opacity-0 ${KEEP_FOCUSED_GROUP}`}`}>{topRight}</div>}
         </div>
       </div>
 

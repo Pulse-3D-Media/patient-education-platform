@@ -22,9 +22,13 @@ import { HIDE_AFTER_MS, SKIP_SECONDS, keyFirstPressWhileHidden, pictureTapAction
  * huddle). The keyboard is treated the same way (Evan, 2026-11-17: "make the
  * controls fade while it plays"): any key press, or the keyboard's focus
  * moving onto the player or one of its buttons, brings them back and starts
- * the count again. When they have faded, the first key press only brings them
- * back, as the first tap on a faded picture does on a phone; the next press
- * acts (keyFirstPressWhileHidden in player-rules.ts). They never fade while
+ * the count again. A button holding the keyboard's focus never fades with
+ * them: its row stays drawn, ring and all (Evan, 2026-11-18: "keep outline
+ * for accessabilty"; KEEP_FOCUSED_GROUP in PlayerOverlay), and a key pressed
+ * on it acts at once. When the focus is on the player itself and the
+ * controls have faded, the first key press only brings them back, as the
+ * first tap on a faded picture does on a phone; the next press acts
+ * (keyFirstPressWhileHidden in player-rules.ts). They never fade while
  * the video is paused, finished, waiting for data, or has failed. Fading is
  * only drawn: the buttons stay in the page for a screen reader, which presses
  * them without a key, so its presses act at once, as before.
@@ -229,7 +233,9 @@ export function usePlayerControls({
   const onKey = (event: React.KeyboardEvent) => {
     const hidden = playing && !visible;
     reveal();
-    if (hidden && keyFirstPressWhileHidden(event.key, event) === "show-only") {
+    // A button (or the progress bar) with the keyboard's focus stays in sight while the rest fades, so a press on it acts.
+    const onFocusedControl = event.target !== event.currentTarget && isKeyboardFocus(event.target);
+    if (hidden && keyFirstPressWhileHidden(event.key, event, onFocusedControl) === "show-only") {
       event.preventDefault();
       swallowedKey.current = event.key;
       return;

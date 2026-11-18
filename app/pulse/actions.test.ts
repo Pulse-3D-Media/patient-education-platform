@@ -9,11 +9,13 @@ import { recordAcceptedPlan, setStripeCustomer } from "@/lib/db/billing";
 import { MAX_LINK_DAYS } from "@/lib/expiry";
 import { MuxApiError, checkPlaybackId } from "@/lib/mux";
 import { cancelUpload, checkUpload, dismissFailure, startUpload } from "@/lib/mux-uploads";
+import { requestCaptions } from "@/lib/mux-captions";
 import { NOTE_MAX_LENGTH } from "@/lib/note-form";
 import { MAX_VIDEO_SECONDS } from "@/lib/video";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
 import {
   activatePricingVersionAction,
+  addCaptionsAction,
   addNoteAction,
   cancelMuxUploadAction,
   checkMuxUploadAction,
@@ -73,6 +75,9 @@ vi.mock("@/lib/mux-uploads", () => ({
   dismissFailure: vi.fn(),
   UPLOADS_NOT_CONFIGURED: "not configured",
 }));
+
+// Asking Mux for captions is a stand-in too (lib/mux-captions.test.ts runs the real one): these tests are about who may ask.
+vi.mock("@/lib/mux-captions", () => ({ requestCaptions: vi.fn() }));
 
 // The upload action reads the request's Host header to pick a trusted origin; here the request is this deployment's own.
 vi.mock("next/headers", () => ({
@@ -1017,6 +1022,38 @@ describe("the upload actions", () => {
     flow.dismiss.mockResolvedValue(undefined);
     expect(await dismissUploadFailureAction("clz0000000000000000000000")).toEqual({ ok: "Dismissed." });
     expect(flow.dismiss).toHaveBeenCalledWith("clz0000000000000000000000");
+  });
+});
+
+describe("addCaptionsAction", () => {
+  const ask = vi.mocked(requestCaptions);
+  beforeEach(() => ask.mockReset());
+
+  it("is for Pulse staff only: anyone else gets not-found before Mux is asked", async () => {
+    signInAs("user_clinic_admin", { kind: "staff" });
+    await expect(addCaptionsAction("clz0000000000000000000000")).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("asks for staff and passes the answer on in words, twice over as safely as once", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    ask.mockResolvedValueOnce({ ok: "Asked Mux for English captions." }).mockResolvedValueOnce({ ok: "Mux is already making this video's captions." });
+    expect(await addCaptionsAction("clz0000000000000000000000")).toEqual({ ok: "Asked Mux for English captions." });
+    expect(await addCaptionsAction("clz0000000000000000000000")).toEqual({ ok: "Mux is already making this video's captions." });
+    expect(ask).toHaveBeenCalledWith("clz0000000000000000000000");
+    ask.mockResolvedValueOnce({ error: "Upload the file again to get captions." });
+    expect(await addCaptionsAction("clz0000000000000000000000")).toEqual({ error: "Upload the file again to get captions." });
+  });
+
+  it("refuses an id that is not one, and answers Mux being down or a refused token in words, never throwing to the page", async () => {
+    signInAs("user_staff", { pulseStaff: true });
+    expect(await addCaptionsAction("../../etc")).toEqual({ error: "That video no longer exists." });
+    expect(ask).not.toHaveBeenCalled();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    ask.mockRejectedValueOnce(new Error("fetch failed https://api.mux.com"));
+    expect(await addCaptionsAction("clz0000000000000000000000")).toEqual({ error: expect.stringMatching(/^Mux could not be reached/) });
+    ask.mockRejectedValueOnce(new MuxApiError(401));
+    expect(await addCaptionsAction("clz0000000000000000000000")).toEqual({ error: expect.stringMatching(/status 401/) });
   });
 });
 

@@ -132,6 +132,10 @@ describe("contentSecurityPolicy", () => {
     // stream.mux.com hands the player on to manifest-...mux.com and chunk-...mux.com.
     expect(directive(production, "media-src")).toContain("https://*.mux.com");
     expect(directive(production, "connect-src")).toContain("https://*.mux.com");
+    // Captions need no host of their own: the subtitle playlists and WebVTT files hls.js fetches, and Safari loads,
+    // come from those same Mux hosts (stream.mux.com/<id>/text/... and the manifest hosts). The staff review link is a
+    // page opened in a new tab, not something our page loads.
+    expect(directive(production, "connect-src").filter((host) => host.includes("mux.com"))).toEqual(["https://stream.mux.com", "https://*.mux.com"]);
     // Nothing of Mux's runs as script here: hls.js is served from our own address.
     expect(directive(production, "script-src")).not.toContain("https://stream.mux.com");
   });

@@ -139,6 +139,25 @@ export function FullscreenIcon({ className }: IconProps) {
   );
 }
 
+/**
+ * "CC" in a rounded box: the captions button on both players. Drawn as an
+ * outline when captions are off and as a filled white box with dark letters
+ * when they are on, so the state shows without reading the label.
+ */
+export function CaptionsIcon({ className, on = false }: IconProps & { on?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <rect x="2.5" y="5" width="19" height="14" rx="3" stroke="currentColor" strokeWidth="2" fill={on ? "currentColor" : "none"} />
+      <path
+        d="M10.5 10.2a2.3 2.3 0 1 0 0 3.6M17 10.2a2.3 2.3 0 1 0 0 3.6"
+        stroke={on ? "#000" : "currentColor"}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function ExitFullscreenIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">

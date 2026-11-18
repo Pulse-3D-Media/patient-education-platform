@@ -234,7 +234,7 @@ export function WatchPlayer({
   /** Nothing is playing and nothing can be: the failure panel, the link's time ran out, or a printed code that cannot hand out a link. The layout treats all three alike. */
   const stopped = failed || ended || unavailable;
   const controls = usePlayerControls({ video, box: frame, enabled: started && !stopped, onPlayFailure: () => fail() });
-  const { reload } = useVideoSource(video, source, {
+  const { reload, captions } = useVideoSource(video, source, {
     onFailure: () => fail(),
     refresh: async () => {
       const ready = pendingGrant.current;
@@ -584,6 +584,7 @@ export function WatchPlayer({
               showControls={started}
               slow={slow}
               loading={started && loading}
+              captions={captions}
             />
           )}
 

@@ -31,6 +31,7 @@ import { isValidRenewalCount, MAX_LINK_DAYS, MAX_RENEWALS, MIN_LINK_DAYS, MIN_RE
 import { parseDuration } from "@/lib/format";
 import { MuxApiError, checkPlaybackId } from "@/lib/mux";
 import { cancelUpload, checkUpload, dismissFailure, startUpload, type ReconcileOutcome, type StartUploadResult } from "@/lib/mux-uploads";
+import { requestCaptions } from "@/lib/mux-captions";
 import { NOTE_MAX_LENGTH, cleanNote } from "@/lib/note-form";
 import { renameClerkOrganization } from "@/lib/organization";
 import { isPlaybackIdShape } from "@/lib/playback-source";
@@ -694,6 +695,26 @@ export async function cancelMuxUploadAction(videoId: unknown): Promise<FormState
   const outcome = await uploadOutcome(() => cancelUpload(id));
   refreshCatalogue(id);
   return outcome;
+}
+
+/**
+ * "Add captions" on a video's page: ask Mux to make English captions for a
+ * video already in Mux (lib/mux-captions.ts). Safe to press twice: the
+ * second press hears that captions are already being made. A failure is
+ * answered in words, never thrown to the page.
+ */
+export async function addCaptionsAction(videoId: unknown): Promise<FormState> {
+  await requirePulseStaff();
+  const id = readVideoId(videoId);
+  if (!id) return { error: "That video no longer exists." };
+  try {
+    const result = await requestCaptions(id);
+    refreshCatalogue(id);
+    return "ok" in result ? { ok: result.ok } : { error: result.error };
+  } catch (error) {
+    console.error(`Mux captions: could not ask: ${errorKind(error)}`);
+    return { error: muxFailureWords(error) };
+  }
 }
 
 /** "Dismiss" on the line about a failed upload. */

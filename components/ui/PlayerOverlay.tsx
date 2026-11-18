@@ -4,10 +4,11 @@ import type { ReactNode } from "react";
 import { currentChapterIndex, type Chapter } from "@/lib/chapters";
 import { formatDuration } from "@/lib/format";
 import { ClinicMark } from "./ClinicMark";
-import { ExitFullscreenIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, ReplayIcon, SkipBackIcon, SkipForwardIcon, VolumeIcon } from "./icons";
+import { CaptionsIcon, ExitFullscreenIcon, FullscreenIcon, MuteIcon, PauseIcon, PlayIcon, ReplayIcon, SkipBackIcon, SkipForwardIcon, VolumeIcon } from "./icons";
 import { SKIP_SECONDS, seekValueText } from "./player-rules";
 import { PLACEHOLDER_CHIP, PLAYER_FOCUS } from "./styles";
 import type { PlayerControls } from "./usePlayerControls";
+import type { PlayerCaptions } from "./useVideoSource";
 
 /**
  * What both players lay over the picture, laid out the way Vimeo does it
@@ -25,8 +26,8 @@ import type { PlayerControls } from "./usePlayerControls";
  *     middle: the play button is at the bottom left, as on Vimeo.
  *     Which one shows is decided by the browser (the `computer:` variant in
  *     app/globals.css: a mouse or trackpad that can hover), never by its name.
- *   - Along the bottom: the play button (mouse only), the time, sound and
- *     full screen, and a thin progress bar to drag, on a soft fade only as
+ *   - Along the bottom: the play button (mouse only), the time, CC (only for
+ *     a video with captions), sound and full screen, and a thin progress bar to drag, on a soft fade only as
  *     tall as that row (.video-scrim in app/globals.css). When the video has
  *     chapters (the library's watch page only), a small gap in the bar marks
  *     where each one starts, and the current chapter's name follows the time.
@@ -57,6 +58,7 @@ export function PlayerOverlay({
   loading = false,
   topRight = null,
   chapters = [],
+  captions = null,
 }: {
   controls: PlayerControls;
   title: string;
@@ -79,6 +81,8 @@ export function PlayerOverlay({
   topRight?: ReactNode;
   /** The video's chapters, sorted by time. Empty for none (always, on the patient page). */
   chapters?: Chapter[];
+  /** Captions, from useVideoSource. The CC button shows only when the playing video has a caption track. */
+  captions?: PlayerCaptions | null;
 }) {
   // Faded, a group that holds the keyboard's focus stays drawn, so the focused button and its ring never disappear
   // (Evan, 2026-11-18: "keep outline for accessabilty"; WCAG 2.4.7). Only the browser's keyboard focus
@@ -130,6 +134,32 @@ export function PlayerOverlay({
         {slow ? "Still loading. A slow connection can take a little longer." : ""}
       </p>
 
+      {/* The caption words being said now, while CC is on (captions.ts). Drawn here rather than by the browser so they
+          look the same everywhere: large, white on a dark band that reads over any frame, centred low on the picture,
+          well under the clinic's mark, and lifted above the bottom row whenever the controls are up (or, on a phone, out of
+          the way of the middle buttons until the controls fade). Takes no taps. Hidden from screen readers, which have the
+          narration itself; the CC button says whether captions are on. */}
+      {captions?.on && captions.lines.length > 0 && (
+        <div
+          data-captions=""
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-x-0 flex-col items-center gap-0.5 px-3 transition-[bottom] duration-300 ${
+            showControls && controls.showing
+              ? // Lifted above the bottom row. On a touch screen with a small player (a phone) there is no room between
+                // the bottom row and the middle buttons, so there the words step aside until the controls fade again
+                // (2.6 seconds after the last touch while playing; while paused nothing is being said).
+                "bottom-[92px] hidden computer:flex @3xl:flex"
+              : "flex bottom-3 @xl:bottom-5"
+          }`}
+        >
+          {/* One band, the cue's lines joined and wrapped to the picture's width: a caption file's line breaks are made for
+              a wide screen, and kept as they are they would wrap again on a phone, into twice as many rows. */}
+          <span className="max-w-[min(94%,44rem)] rounded-md bg-black/80 px-2.5 py-0.5 text-center text-[clamp(17px,4.2cqw,34px)] font-medium leading-[1.3] text-white">
+            {captions.lines.join(" ")}
+          </span>
+        </div>
+      )}
+
       {/* Waiting for data, before the "still loading" sentence: a calm spinner, centred on the picture. */}
       {loading && !slow && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -173,6 +203,25 @@ export function PlayerOverlay({
               </span>
             )}
             <span className="ml-auto flex shrink-0 items-center">
+              {/* CC: only when the playing video has a caption track (a Mux video whose captions Mux has made; never a
+                  CDN file). A toggle: its name stays "Captions" and a screen reader hears "on" or "off" from aria-pressed. */}
+              {captions?.available && (
+                <Control
+                  live={controls.showing}
+                  // Like sound and full screen: the press also starts the controls' fade over again. The keyboard rules are the
+                  // other buttons' too (usePlayerControls' onKey): with the keyboard's focus on CC its row stays drawn while the
+                  // rest fades (KEEP_FOCUSED_GROUP) and a key on it acts at once.
+                  onClick={() => {
+                    captions.toggle();
+                    controls.reveal();
+                  }}
+                  label="Captions"
+                  pressed={captions.on}
+                  size="h-11 w-11"
+                >
+                  <CaptionsIcon on={captions.on} className="h-6 w-6" />
+                </Control>
+              )}
               <Control live={controls.showing} onClick={controls.toggleMute} label={controls.muted ? "Unmute" : "Mute"} size="h-11 w-11">
                 {controls.muted ? <MuteIcon className="h-5 w-5" /> : <VolumeIcon className="h-5 w-5" />}
               </Control>
@@ -242,13 +291,29 @@ export function Spinner({ className = "", tone = "light" }: { className?: string
  * controls are faded away: the button then takes no taps, so a tap where it
  * was only brings the controls back.
  */
-function Control({ live, onClick, label, size, children }: { live: boolean; onClick: () => void; label: string; size: string; children: ReactNode }) {
+function Control({
+  live,
+  onClick,
+  label,
+  size,
+  pressed,
+  children,
+}: {
+  live: boolean;
+  onClick: () => void;
+  label: string;
+  size: string;
+  /** For a button that is on or off (CC): said by a screen reader as "pressed" or not. */
+  pressed?: boolean;
+  children: ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
-      title={label}
+      aria-pressed={pressed}
+      title={pressed === undefined ? label : `${label} ${pressed ? "on" : "off"}`}
       className={`${live ? "pointer-events-auto" : "pointer-events-none"} flex shrink-0 items-center justify-center rounded-full text-white drop-shadow-[0_1px_3px_rgba(0,0,0,.6)] transition hover:bg-white/15 active:bg-white/25 ${PLAYER_FOCUS} ${size}`}
     >
       {children}

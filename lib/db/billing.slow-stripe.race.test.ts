@@ -275,4 +275,77 @@ describe("a plan change that overruns its lock (audit finding E7)", () => {
         return "wrote";
       })).resolves.toBe("wrote");
   });
+
+  it("counts the time spent waiting behind another plan change: one that waited past the cutoff starts no Stripe write", async () => {
+    const f = await makePayingClinic();
+    const stripe = heldStripe(() => "first done");
+    const first = withPlanChangeLock(f.clinicId, async () => stripe.call(), { writeCutoffMs: 200 });
+    await stripe.asked;
+
+    // The second change starts now and waits for the lock while the first holds it past the second's cutoff.
+    let wrote = false;
+    const second = withPlanChangeLock(
+      f.clinicId,
+      async (ensureHeld) => {
+        ensureHeld(); // its very first write, straight after getting the lock
+        wrote = true;
+      },
+      { writeCutoffMs: 200 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    stripe.release();
+    await expect(first).resolves.toBe("first done");
+    await expect(second).rejects.toBeInstanceOf(PlanChangeOverrunError);
+    expect(wrote).toBe(false);
+  });
+
+  it("control: a change that did not wait long gets its write", async () => {
+    const f = await makePayingClinic();
+    const stripe = heldStripe(() => "first done");
+    const first = withPlanChangeLock(f.clinicId, async () => stripe.call(), { writeCutoffMs: 5_000 });
+    await stripe.asked;
+    const second = withPlanChangeLock(
+      f.clinicId,
+      async (ensureHeld) => {
+        ensureHeld();
+        return "wrote";
+      },
+      { writeCutoffMs: 5_000 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    stripe.release();
+    await expect(first).resolves.toBe("first done");
+    await expect(second).resolves.toBe("wrote");
+  });
+});
+
+describe("a plan change and a look at Stripe at the same time", () => {
+  it("the look is not held up by the plan change, and the look after the change applies what Stripe says once it is done", async () => {
+    const f = await makePayingClinic();
+    // "Stripe": before the change, no cancellation; once the change has been made, a cancellation date (standing in for any change).
+    let changed = false;
+    const fetchSubscription = async () => (changed ? f.snap({ cancelAt: new Date("2026-12-01T00:00:00.000Z") }) : f.snap());
+    const stripe = heldStripe(() => {
+      changed = true;
+      return "changed";
+    });
+
+    const change = withPlanChangeLock(f.clinicId, async (ensureHeld) => {
+      ensureHeld();
+      return stripe.call();
+    });
+    await stripe.asked;
+
+    // A notification arrives mid-change. It does not wait for the plan change, and applies what Stripe says right then.
+    const midway = reconcileSubscription({ clinicId: f.clinicId, subscriptionId: f.subscriptionId, fetchSubscription });
+    expect(await settlesWithin(midway, WAIT_MS)).toBe(true);
+    expect((await prisma.clinicBilling.findUniqueOrThrow({ where: { clinicId: f.clinicId }, select: { cancelAt: true } })).cancelAt).toBeNull();
+
+    stripe.release();
+    await expect(change).resolves.toBe("changed");
+    // The plan change flow always looks at Stripe straight afterwards (lib/plan-changes.ts); that look gets the final state.
+    await reconcileSubscription({ clinicId: f.clinicId, subscriptionId: f.subscriptionId, fetchSubscription });
+    const billing = await prisma.clinicBilling.findUniqueOrThrow({ where: { clinicId: f.clinicId }, select: { cancelAt: true } });
+    expect(billing.cancelAt?.toISOString()).toBe("2026-12-01T00:00:00.000Z");
+  });
 });

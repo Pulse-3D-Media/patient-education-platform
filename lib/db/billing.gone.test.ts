@@ -4,7 +4,7 @@ import type { SubscriptionSnapshot } from "../billing-state";
 import { checkPayment } from "../checkout";
 import { DEFAULT_PRICING_CONFIG } from "../pricing";
 import type { CheckoutGateway } from "../stripe";
-import { NEEDS_LOOK, RESET_REFUSED_LIVE, reconcileSubscription, recordAcceptedPlan, resetVanishedStripeRecord, setStripeCustomer, type AcceptedPlanInput } from "./billing";
+import { NEEDS_LOOK, RESET_REFUSED_CHECKOUT, RESET_REFUSED_LIVE, reconcileSubscription, recordAcceptedPlan, resetVanishedStripeRecord, setStripeCustomer, type AcceptedPlanInput } from "./billing";
 import { prisma } from "./client";
 import { createPricingVersion } from "./pricing";
 
@@ -73,7 +73,9 @@ async function makeClinic(status: "active" | "incomplete") {
     planId: plan.id,
   };
   await reconcileSubscription({ clinicId: clinic.id, subscriptionId, fetchSubscription: async () => snap });
-  return { clinicId: clinic.id, customerId, subscriptionId };
+  // The checkout attempt was made long ago, so its payment page has closed (a recent one refuses the reset: see below).
+  await prisma.billingPlan.update({ where: { id: plan.id }, data: { createdAt: new Date(Date.now() - 3 * 60 * 60_000) }, select: { id: true } });
+  return { clinicId: clinic.id, customerId, subscriptionId, planId: plan.id };
 }
 
 const gone = async () => null;
@@ -151,6 +153,38 @@ describe("the staff reset", () => {
     const after = await rows(f.clinicId);
     expect(after.billing).toEqual(before.billing);
     expect(after.notes.length).toBe(before.notes.length);
+  });
+
+  it("is refused while the clinic has a payment page open in Stripe, with nothing written, so a payment made on it is never stranded", async () => {
+    const clinic = await prisma.clinic.create({ data: { name: `Vitest gone ${tag}`, practiceType: "CLINIC" }, select: { id: true } });
+    createdClinicIds.push(clinic.id);
+    const customerId = unique("cus");
+    await setStripeCustomer(clinic.id, customerId);
+    const before = await rows(clinic.id);
+    const result = await resetVanishedStripeRecord(clinic.id, { staffName: "Vitest Staff", checkStripe: async () => "checkout-open" });
+    expect(result).toEqual({ ok: false, message: RESET_REFUSED_CHECKOUT });
+    const after = await rows(clinic.id);
+    expect(after.billing).toEqual(before.billing);
+    expect(after.billing.stripeCustomerId).toBe(customerId);
+    expect(after.notes.length).toBe(before.notes.length);
+  });
+
+  it("is refused while a checkout attempt made within the hour could still be paid, even when Stripe lists no open page; allowed once it has closed", async () => {
+    const clinic = await prisma.clinic.create({ data: { name: `Vitest gone ${tag}`, practiceType: "CLINIC" }, select: { id: true } });
+    createdClinicIds.push(clinic.id);
+    const customerId = unique("cus");
+    await setStripeCustomer(clinic.id, customerId);
+    const attempt = await recordAcceptedPlan(clinic.id, planInput()); // the admin is on Stripe's payment page right now
+    const madeAt = (await prisma.billingPlan.findUniqueOrThrow({ where: { id: attempt.id }, select: { createdAt: true } })).createdAt;
+
+    const now = new Date(madeAt.getTime() + 30 * 60_000);
+    const refused = await resetVanishedStripeRecord(clinic.id, { staffName: "Vitest Staff", checkStripe: async () => "gone", now });
+    expect(refused).toEqual({ ok: false, message: RESET_REFUSED_CHECKOUT });
+    expect((await rows(clinic.id)).billing).toMatchObject({ stripeCustomerId: customerId, pendingPlanId: attempt.id });
+
+    const later = new Date(madeAt.getTime() + 2 * 60 * 60_000);
+    await expect(resetVanishedStripeRecord(clinic.id, { staffName: "Vitest Staff", checkStripe: async () => "gone", now: later })).resolves.toMatchObject({ ok: true });
+    expect((await rows(clinic.id)).billing).toMatchObject({ stripeCustomerId: null, pendingPlanId: null });
   });
 
   it("asks Stripe about the ids on record, then clears them, logged under the staff member's name", async () => {

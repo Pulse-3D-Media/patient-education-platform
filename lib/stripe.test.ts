@@ -6,6 +6,7 @@ import {
   STRIPE_API_VERSION,
   StripeConfigError,
   addPaidEvidence,
+  checkStripeIds,
   checkoutIsOpen,
   checkoutSessionParams,
   eventRefs,
@@ -461,5 +462,36 @@ describe("the Stripe API version is pinned (audit finding E6)", () => {
     expect(made).toContain("apiVersion: STRIPE_API_VERSION");
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_madeup_for_vitest_only");
     expect((getStripe() as unknown as { getApiField(key: string): unknown }).getApiField("version")).toBe(STRIPE_API_VERSION);
+  });
+});
+
+describe("checkStripeIds: may the staff reset clear these ids?", () => {
+  const snapshot = (status: string) => ({ subscriptionId: "sub_madeup", customerId: "cus_madeup", status, latestInvoicePaid: true, currentPeriodEnd: null, cancelAt: null, planId: null });
+  const deps = (more: { sub?: string | null; subs?: string[]; open?: number } = {}) => ({
+    fetchSubscription: async () => (more.sub ? snapshot(more.sub) : null),
+    listSubscriptions: async () => (more.subs ?? []).map((status, i) => ({ id: `sub_madeup_${i}`, planId: null, status })),
+    listOpenSessions: async () => Array.from({ length: more.open ?? 0 }, (_, i) => ({ id: `cs_madeup_${i}` }) as never),
+  });
+  const ids = { customerId: "cus_madeup", subscriptionId: "sub_madeup" };
+
+  it("live while the recorded subscription, or any on the customer, has not ended (a first payment under way included)", async () => {
+    expect(await checkStripeIds(ids, deps({ sub: "active" }))).toBe("live");
+    expect(await checkStripeIds(ids, deps({ sub: "incomplete" }))).toBe("live");
+    expect(await checkStripeIds(ids, deps({ sub: null, subs: ["canceled", "past_due"] }))).toBe("live");
+  });
+
+  it("checkout-open while the customer has a payment page that can still be paid, even with no subscription yet", async () => {
+    expect(await checkStripeIds({ customerId: "cus_madeup", subscriptionId: null }, deps({ open: 1 }))).toBe("checkout-open");
+    expect(await checkStripeIds(ids, deps({ sub: "canceled", subs: ["incomplete_expired"], open: 1 }))).toBe("checkout-open");
+  });
+
+  it("gone only when nothing is alive and no page is open", async () => {
+    expect(await checkStripeIds(ids, deps({ sub: null }))).toBe("gone");
+    expect(await checkStripeIds(ids, deps({ sub: "canceled", subs: ["canceled", "incomplete_expired"] }))).toBe("gone");
+  });
+
+  it("a failure to ask is thrown, never read as gone", async () => {
+    const failing = { ...deps(), listOpenSessions: async () => Promise.reject(new Error("Stripe unreachable")) };
+    await expect(checkStripeIds(ids, failing)).rejects.toThrow();
   });
 });

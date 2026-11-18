@@ -59,6 +59,8 @@ async function makeClinic() {
     acceptedById: "user_vitest_admin",
     acceptedByName: "Vitest Admin",
   });
+  // A checkout attempt from hours ago: its payment page has closed, so it does not refuse the reset.
+  await prisma.billingPlan.updateMany({ where: { clinicId: clinic.id }, data: { createdAt: new Date(Date.now() - 3 * 60 * 60_000) } });
   return clinic.id;
 }
 
@@ -96,6 +98,10 @@ describe("resetBillingAction", () => {
 
     vi.mocked(checkStripeIds).mockResolvedValueOnce("live");
     expect(await resetBillingAction(null, form({ clinicId, checkedStripe: "yes" }))).toMatchObject({ error: expect.stringContaining("live subscription") });
+    expect(await customerOf(clinicId)).not.toBeNull();
+
+    vi.mocked(checkStripeIds).mockResolvedValueOnce("checkout-open");
+    expect(await resetBillingAction(null, form({ clinicId, checkedStripe: "yes" }))).toMatchObject({ error: expect.stringContaining("payment page") });
     expect(await customerOf(clinicId)).not.toBeNull();
 
     vi.mocked(checkStripeIds).mockRejectedValueOnce(new Error("Stripe unreachable cus_secret"));

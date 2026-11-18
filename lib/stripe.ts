@@ -479,7 +479,14 @@ export const stripeGateway: CheckoutGateway = {
   },
 
   async listOpenSessions(customerId) {
-    const page = await getStripe().checkout.sessions.list({ customer: customerId, status: "open", limit: 20 });
+    let page: Stripe.ApiList<Stripe.Checkout.Session>;
+    try {
+      page = await getStripe().checkout.sessions.list({ customer: customerId, status: "open", limit: 20 });
+    } catch (error) {
+      // A customer Stripe no longer has has no payment pages open (as in listSubscriptions below).
+      if (isStripeRequestError(error, "resource_missing")) return [];
+      throw error;
+    }
     return page.data.filter((session) => !session.livemode).map(sessionInfo);
   },
 
@@ -532,16 +539,23 @@ export const stripeGateway: CheckoutGateway = {
  * For the staff reset (resetVanishedStripeRecord in lib/db/billing.ts): does
  * Stripe still have a live subscription for these ids? "live" when the
  * recorded subscription, or any subscription on the recorded customer, has
- * neither ended nor expired; "gone" otherwise (missing, or over). Any failure
- * to ask throws, so the reset never goes ahead on a guess.
+ * neither ended nor expired; "checkout-open" when the customer has a payment
+ * page that can still be paid (clearing the customer would strand that
+ * payment); "gone" otherwise. Any failure to ask throws, so the reset never
+ * goes ahead on a guess.
  */
 export async function checkStripeIds(
   ids: { customerId: string | null; subscriptionId: string | null },
-  deps: { fetchSubscription: FetchSubscription; listSubscriptions: CheckoutGateway["listSubscriptions"] } = {
+  deps: {
+    fetchSubscription: FetchSubscription;
+    listSubscriptions: CheckoutGateway["listSubscriptions"];
+    listOpenSessions: CheckoutGateway["listOpenSessions"];
+  } = {
     fetchSubscription: fetchSubscriptionSnapshot,
     listSubscriptions: (customerId) => stripeGateway.listSubscriptions(customerId),
+    listOpenSessions: (customerId) => stripeGateway.listOpenSessions(customerId),
   },
-): Promise<"live" | "gone"> {
+): Promise<"live" | "checkout-open" | "gone"> {
   const alive = (status: string) => status !== "canceled" && status !== "incomplete_expired";
   if (ids.subscriptionId) {
     const snapshot = await deps.fetchSubscription(ids.subscriptionId);
@@ -550,6 +564,7 @@ export async function checkStripeIds(
   if (ids.customerId) {
     const subscriptions = await deps.listSubscriptions(ids.customerId);
     if (subscriptions.some((subscription) => alive(subscription.status))) return "live";
+    if ((await deps.listOpenSessions(ids.customerId)).length > 0) return "checkout-open";
   }
   return "gone";
 }

@@ -310,6 +310,22 @@ export async function getLiveQrCodeSender(clinicId: string, qrCodeId: string): P
 }
 
 /**
+ * The clinic's name and the procedure's title for one of this clinic's
+ * printed codes, by its row id, for the email Pulse staff get when the code
+ * reaches the day's flag or limit (lib/qr-alert.ts). The clinic id and the
+ * row id come from the code's own row (the Play tap's alert), never from a
+ * request. Never reads the printed code. Null when the id is not this
+ * clinic's.
+ */
+export async function getQrAlertNames(clinicId: string, qrCodeId: string): Promise<{ clinicName: string; videoTitle: string } | null> {
+  const qr = await prisma.qrCode.findFirst({
+    where: { id: qrCodeId, clinicId },
+    select: { clinic: { select: { name: true } }, video: { select: { title: true } } },
+  });
+  return qr ? { clinicName: qr.clinic.name, videoTitle: qr.video.title } : null;
+}
+
+/**
  * A printed code by the code in its address, for the patient's /q/<code>
  * page: the video (to play it), the clinic's name and branding (only what
  * the patient is meant to see, the same fields as a patient link), whether it

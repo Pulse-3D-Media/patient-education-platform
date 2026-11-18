@@ -17,7 +17,7 @@ import {
   resolveShareTerms,
   type ShareTerms,
 } from "../expiry";
-import { effectiveQrDailyCap, utcDayStart } from "../qr-code";
+import { effectiveQrDailyCap, qrDailyThreshold, utcDayStart, type QrAlert } from "../qr-code";
 import { isClerkUserId } from "../seats";
 import { effectiveSenderName } from "../sender-name";
 import { isAcceptedShareCode, SHARE_CODE_LENGTH } from "../share-link";
@@ -300,7 +300,7 @@ export function childShareCode(qrCodeId: string, attemptKey: string): string {
 export type QrIssueRefusal = "no-such-code" | "retired" | "daily-cap" | AccessReason;
 
 /** What issueShareFromQrCode() did: the patient's link, or why there is none. */
-export type QrIssueOutcome = { ok: true; code: string } | { ok: false; reason: QrIssueRefusal };
+export type QrIssueOutcome = { ok: true; code: string; alert?: QrAlert } | { ok: false; reason: QrIssueRefusal };
 
 /**
  * A patient tapped Play on a printed code's page (/q/<code>): make the link
@@ -333,6 +333,12 @@ export type QrIssueOutcome = { ok: true; code: string } | { ok: false; reason: Q
  *     past the limit. Past it, nothing is written and the page says only
  *     "not available right now" (decided by Evan on 2026-10-08, replacing
  *     "a flag only, never a stop").
+ *   - the link that makes the day's count exactly the flag (qrDailyFlag) or
+ *     exactly the limit comes back with an `alert` (ids and numbers only),
+ *     and the route emails Pulse staff about it after this commits
+ *     (lib/qr-alert.ts). One tap per code per day sees each number, because
+ *     the count is taken under the code's row lock. A retry of that visit
+ *     finds its link and carries no second alert.
  *
  * WHO IT IS FROM. The surgeon on the printed code, while they hold a seat at
  * this clinic (read with a share lock, lockSenderSeat), with the name chosen
@@ -418,7 +424,17 @@ export async function issueShareFromQrCode(
         },
         select: { id: true },
       });
-      return { ok: true, code };
+
+      // Telling Pulse (lib/qr-alert.ts): did THIS link bring the code's count for
+      // the UTC day to exactly the flag or exactly the limit? Decided here,
+      // because the count was taken under the code's row lock, so one tap and
+      // only one sees each number. The email itself is sent by the route after
+      // this commits, and never makes the patient wait.
+      const issuedToday = live.issuedSince + 1;
+      const threshold = qrDailyThreshold(issuedToday, settings.qrDailyFlag, cap);
+      if (!threshold) return { ok: true, code };
+      const day = utcDayStart(now).toISOString().slice(0, 10);
+      return { ok: true, code, alert: { qrCodeId: qr.id, clinicId: qr.clinicId, threshold, issuedToday, cap, day } };
     });
   } catch (error) {
     if (!isCodeClash(error)) throw error;

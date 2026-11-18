@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { effectiveQrDailyCap, utcDayStart } from "../qr-code";
 import { SETTINGS_DEFAULTS } from "../settings-defaults";
 import { prisma } from "./client";
-import { createQrCode, listFlaggedQrCodesToday } from "./qr-codes";
+import { createQrCode, getQrAlertNames, listFlaggedQrCodesToday } from "./qr-codes";
 import { getSettings } from "./settings";
 import { issueShareFromQrCode } from "./shares";
 
@@ -35,6 +35,7 @@ const createdClinicIds: string[] = [];
 const createdVideoIds: string[] = [];
 let video = "";
 let cap = 0;
+let flag = 0;
 
 beforeAll(async () => {
   video = (
@@ -44,7 +45,9 @@ beforeAll(async () => {
     })
   ).id;
   createdVideoIds.push(video);
-  cap = effectiveQrDailyCap((await getSettings()).qrDailyCap, SETTINGS_DEFAULTS.qrDailyCap);
+  const settings = await getSettings();
+  cap = effectiveQrDailyCap(settings.qrDailyCap, SETTINGS_DEFAULTS.qrDailyCap);
+  flag = settings.qrDailyFlag;
   // Fifty visits must fit under the limit for the audit's test below to mean anything.
   expect(cap).toBeGreaterThan(50);
 });
@@ -129,7 +132,8 @@ describe("the daily limit on a printed code", () => {
     const first = await issueShareFromQrCode(qr.code, key);
     expect(first.ok).toBe(true);
     // The limit is now reached; the same visit's retry finds its link before anything is counted.
-    expect(await issueShareFromQrCode(qr.code, key)).toEqual(first);
+    // The same link, without a second email: the alert went with the first answer only.
+    expect(await issueShareFromQrCode(qr.code, key)).toEqual(first.ok ? { ok: true, code: first.code } : first);
     expect(await linksFrom(qr.id)).toBe(cap);
   });
 
@@ -150,6 +154,52 @@ describe("the daily limit on a printed code", () => {
       expect(outcomes.every((one) => one.ok)).toBe(true);
     }
     expect(await linksFrom(qr.id)).toBe(50);
+  });
+});
+
+describe("telling Pulse when a code reaches the flag or the limit", () => {
+  const today = () => utcDayStart(new Date()).toISOString().slice(0, 10);
+
+  it("the tap that makes the flag's link carries the alert, with the code's row id, the count and the day; the next one does not", async () => {
+    const qr = await liveCode();
+    await handedOut(qr, flag - 1, new Date());
+    const atFlag = await issueShareFromQrCode(qr.code, randomUUID());
+    expect(atFlag).toEqual({ ok: true, code: expect.any(String), alert: { qrCodeId: qr.id, clinicId: qr.clinic, threshold: "flag", issuedToday: flag, cap, day: today() } });
+    expect(await issueShareFromQrCode(qr.code, randomUUID())).toEqual({ ok: true, code: expect.any(String) });
+  });
+
+  it("the tap that makes the limit's last link carries the limit's alert", async () => {
+    const qr = await liveCode();
+    await handedOut(qr, cap - 1, new Date());
+    const atCap = await issueShareFromQrCode(qr.code, randomUUID());
+    expect(atCap.ok && atCap.alert).toEqual({ qrCodeId: qr.id, clinicId: qr.clinic, threshold: "cap", issuedToday: cap, cap, day: today() });
+    expect(await issueShareFromQrCode(qr.code, randomUUID())).toEqual({ ok: false, reason: "daily-cap" });
+  });
+
+  it("no alert below the flag, between the flag and the limit, or for yesterday's count", async () => {
+    const qr = await liveCode();
+    await handedOut(qr, flag, new Date(utcDayStart(new Date()).getTime() - 1));
+    expect(await issueShareFromQrCode(qr.code, randomUUID())).toEqual({ ok: true, code: expect.any(String) });
+    const between = await liveCode();
+    await handedOut(between, flag + 1, new Date());
+    expect(await issueShareFromQrCode(between.code, randomUUID())).toEqual({ ok: true, code: expect.any(String) });
+  });
+
+  it("five taps at once on the flag's link: five links, and exactly one alert", async () => {
+    const qr = await liveCode();
+    await handedOut(qr, flag - 1, new Date());
+    const outcomes = await Promise.all(Array.from({ length: 5 }, () => issueShareFromQrCode(qr.code, randomUUID())));
+    expect(outcomes.every((one) => one.ok)).toBe(true);
+    expect(outcomes.filter((one) => one.ok && one.alert)).toHaveLength(1);
+    expect(await linksFrom(qr.id)).toBe(flag + 4);
+  });
+
+  it("names the clinic and the procedure for the email, by the clinic and the row id, never the code", async () => {
+    const qr = await liveCode(video, `Vitest QR alert clinic ${tag()}`);
+    expect(await getQrAlertNames(qr.clinic, qr.id)).toEqual({ clinicName: expect.stringMatching(/^Vitest QR alert clinic/), videoTitle: expect.stringMatching(/^Vitest QR cap video/) });
+    // Another clinic's id finds nothing.
+    const other = await liveCode();
+    expect(await getQrAlertNames(other.clinic, qr.id)).toBeNull();
   });
 });
 

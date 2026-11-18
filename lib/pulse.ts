@@ -2,6 +2,7 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { askClerk } from "./clerk-timeout";
+import { pulseStaffFromMetadata } from "./pulse-staff";
 
 /**
  * Who may open /pulse, the Pulse 3D master dashboard.
@@ -28,10 +29,8 @@ export type PulseStaffUser = {
   name: string;
 };
 
-/** Is this metadata a Pulse staff mark? Only the exact boolean true counts. */
-export function pulseStaffFromMetadata(metadata: Record<string, unknown> | null | undefined): boolean {
-  return metadata?.pulseStaff === true;
-}
+/** Is this metadata a Pulse staff mark? Only the exact boolean true counts. In lib/pulse-staff.ts so a script can use it too. */
+export { pulseStaffFromMetadata };
 
 /**
  * The signed-in user if they are Pulse staff, otherwise null. Never throws

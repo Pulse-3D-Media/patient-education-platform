@@ -72,6 +72,14 @@ describe("demoCleanupClerk", () => {
     expect(await demoCleanupClerk.userState("user_gone")).toEqual({ exists: false });
   });
 
+  it("fails closed on an organization count it cannot trust, so nobody is deleted on a guess", async () => {
+    for (const body of [{ data: [] }, { data: [], total_count: "0" }, { total_count: 0 }, { data: [], total_count: -1 }, { data: [], total_count: 0.5 }, {}]) {
+      answers.push(() => ({ status: 200, body: { public_metadata: {} } }), () => ({ status: 200, body }));
+      await expect(demoCleanupClerk.userState("user_odd"), JSON.stringify(body)).rejects.toBeInstanceOf(ClerkCleanupError);
+    }
+    expect(calls.filter((call) => call.method === "DELETE")).toEqual([]);
+  });
+
   it("escapes ids, so an odd id can only name one record", async () => {
     answers.push(() => ({ status: 404 }));
     await demoCleanupClerk.deleteUser("user_x/../organizations/org_y");

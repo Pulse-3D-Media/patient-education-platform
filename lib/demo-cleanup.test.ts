@@ -33,23 +33,39 @@ const madeCategories: string[] = [];
 // Stand-ins
 // ---------------------------------------------------------------------------
 
+const DEMO_ACCOUNT = "acct_fakedemo";
+
+/** Stripe's customers and subscriptions, each with the clinic id in its metadata (null for none). */
 class FakeStripe implements DemoCleanupStripe {
-  customers = new Set<string>();
-  subscriptions = new Set<string>();
+  account = DEMO_ACCOUNT;
+  /** When set, asking for the account fails, the way a Stripe outage would. */
+  accountFails = false;
+  customers = new Map<string, string | null>();
+  subscriptions = new Map<string, string | null>();
+  /** Every call that could change something, in order. Reads are not listed. */
   calls: string[] = [];
   /** Customer ids whose deletion fails, the way a Stripe outage would. */
   failFor = new Set<string>();
 
-  async customerState(id: string) {
-    return this.customers.has(id) ? ("present" as const) : ("gone" as const);
+  async accountId() {
+    if (this.accountFails) throw Object.assign(new Error("fake outage"), { type: "StripeConnectionError" });
+    return this.account;
   }
-  async cancelSubscription(id: string) {
+  async customerOwner(id: string) {
+    return this.customers.has(id) ? { gone: false as const, clinicId: this.customers.get(id) ?? null } : { gone: true as const };
+  }
+  async subscriptionOwner(id: string) {
+    return this.subscriptions.has(id) ? { gone: false as const, clinicId: this.subscriptions.get(id) ?? null } : { gone: true as const };
+  }
+  async cancelSubscription(id: string, clinicId: string) {
     this.calls.push(`cancel ${id}`);
+    if (this.subscriptions.has(id) && this.subscriptions.get(id) !== clinicId) throw new Error("fake: metadata mismatch");
     this.subscriptions.delete(id);
   }
-  async deleteCustomer(id: string) {
+  async deleteCustomer(id: string, clinicId: string) {
     this.calls.push(`delete ${id}`);
     if (this.failFor.has(id)) throw Object.assign(new Error("fake outage"), { type: "StripeConnectionError" });
+    if (this.customers.has(id) && this.customers.get(id) !== clinicId) throw new Error("fake: metadata mismatch");
     this.customers.delete(id);
   }
 }
@@ -71,7 +87,10 @@ class FakeClerk implements DemoCleanupClerk {
     this.calls.push(`delete org ${orgId}`);
     this.orgs.delete(orgId);
   }
+  /** User ids whose organizations come back in a shape the real code refuses (it throws). */
+  unreadable = new Set<string>();
   async userState(userId: string): Promise<CleanupUserState> {
+    if (this.unreadable.has(userId)) throw new Error("fake: the answer was not in the expected shape");
     const user = this.users.get(userId);
     if (!user) return { exists: false };
     const organizations = [...this.orgs.values()].filter((members) => members.has(userId)).length;
@@ -94,7 +113,7 @@ beforeEach(() => {
 });
 
 function options(overrides: Partial<CleanupOptions> = {}): CleanupOptions {
-  return { confirm: false, keepClinicIds: [], keepHours: 24, stripe, clerk, now: NOW, log: (line) => lines.push(line), ...overrides };
+  return { confirm: false, keepClinicIds: [], keepHours: 24, stripeAccountId: DEMO_ACCOUNT, stripe, clerk, now: NOW, log: (line) => lines.push(line), ...overrides };
 }
 
 // ---------------------------------------------------------------------------
@@ -146,8 +165,8 @@ async function makeFullClinic(label: string, createdAt: Date, people: string[] =
     await prisma.personalVideo.create({ data: { clinicId: clinic.id, clerkUserId: userId, videoId, playCount: 1 } });
   }
 
-  stripe.customers.add(customerId);
-  stripe.subscriptions.add(subscriptionId);
+  stripe.customers.set(customerId, clinic.id);
+  stripe.subscriptions.set(subscriptionId, clinic.id);
   clerk.addOrg(orgId, people);
   return { clinicId: clinic.id, orgId, customerId, subscriptionId };
 }
@@ -222,6 +241,8 @@ describe("checkCleanupStart", () => {
     PRODUCTION_DATABASE_HOST: prodHost,
     STRIPE_SECRET_KEY: "sk_test_madeup",
     CLERK_SECRET_KEY: "sk_test_madeupclerk",
+    DEMO_DATABASE_HOST: "ep-tst-example-456.us-east-2.aws.neon.tech",
+    DEMO_STRIPE_ACCOUNT_ID: "acct_madeupdemo",
   };
 
   it("starts on the demo database with test keys and a keep list, as a dry run unless --confirm", () => {
@@ -268,6 +289,30 @@ describe("checkCleanupStart", () => {
       const result = checkCleanupStart({ ...demoEnv, CLERK_SECRET_KEY: key }, ["--keep", "c"]);
       expect(result.ok, String(key)).toBe(false);
     }
+  });
+
+  it("refuses without DEMO_DATABASE_HOST, or when DATABASE_URL is not that database, and never prints either", () => {
+    expect(checkCleanupStart({ ...demoEnv, DEMO_DATABASE_HOST: "" }, ["--keep", "c"]).ok).toBe(false);
+    expect(checkCleanupStart({ ...demoEnv, DEMO_DATABASE_HOST: undefined }, ["--keep", "c"]).ok).toBe(false);
+    // A wrong PRODUCTION_DATABASE_HOST makes production look safe to the deny check; the allow check still refuses it.
+    const prodUrl = "postgresql://user:secret@ep-prod-example-123-pooler.us-east-2.aws.neon.tech/neondb";
+    const wrongDeny = checkCleanupStart({ ...demoEnv, DATABASE_URL: prodUrl, PRODUCTION_DATABASE_HOST: "ep-wrong-000.us-east-2.aws.neon.tech" }, ["--keep", "c"]);
+    expect(wrongDeny.ok).toBe(false);
+    if (!wrongDeny.ok) {
+      expect(wrongDeny.reason).toContain("DEMO_DATABASE_HOST");
+      expect(wrongDeny.reason).not.toContain("ep-");
+    }
+    // Pooled or direct, written with a port or capitals: the same database.
+    for (const host of ["ep-tst-example-456-pooler.us-east-2.aws.neon.tech", "EP-TST-EXAMPLE-456.us-east-2.aws.neon.tech:5432"]) {
+      expect(checkCleanupStart({ ...demoEnv, DEMO_DATABASE_HOST: host }, ["--keep", "c"]).ok, host).toBe(true);
+    }
+  });
+
+  it("refuses without a Stripe account id that looks like one", () => {
+    for (const value of [undefined, "", "acct_", "sk_test_madeup", "acct_has space"]) {
+      expect(checkCleanupStart({ ...demoEnv, DEMO_STRIPE_ACCOUNT_ID: value }, ["--keep", "c"]).ok, String(value)).toBe(false);
+    }
+    expect(checkCleanupStart(demoEnv, ["--keep", "c"])).toMatchObject({ ok: true, stripeAccountId: "acct_madeupdemo" });
   });
 
   it("refuses without a keep list", () => {
@@ -420,6 +465,85 @@ describe("runDemoCleanup", () => {
     expect(again.exitCode).toBe(0);
     expect(again.cleared).toEqual([broken.clinicId]);
     expect(await rowsOf(broken.clinicId)).toEqual(ALL_GONE);
+  });
+
+  it("refuses to start when the Stripe key belongs to another account, or the account cannot be asked, and changes nothing", async () => {
+    const showroom = await makeFullClinic(label("showroom"), OLD);
+    const demo = await makeFullClinic(label("demo"), OLD, [`user_fake_${tag}_acct`]);
+    const before = await rowsOf(demo.clinicId);
+
+    stripe.account = "acct_fakeproduction";
+    const wrong = await runDemoCleanup(options({ confirm: true, keepClinicIds: [showroom.clinicId] }));
+    expect(wrong.exitCode).toBe(1);
+    expect(lines.join("\n")).toContain("different Stripe account");
+    expect(lines.join("\n")).not.toContain("acct_");
+
+    stripe.account = DEMO_ACCOUNT;
+    stripe.accountFails = true;
+    lines = [];
+    const unreachable = await runDemoCleanup(options({ confirm: true, keepClinicIds: [showroom.clinicId] }));
+    expect(unreachable.exitCode).toBe(1);
+    expect(lines.join("\n")).toContain("StripeConnectionError");
+
+    expect(await rowsOf(demo.clinicId)).toEqual(before);
+    expect(stripe.calls).toEqual([]);
+    expect(clerk.calls).toEqual([]);
+  });
+
+  it("skips a clinic whose Stripe records name another clinic, or none: no Stripe, Clerk or row change for it", async () => {
+    const showroom = await makeFullClinic(label("showroom"), OLD);
+    const foreignCustomer = await makeFullClinic(label("foreigncus"), OLD, [`user_fake_${tag}_fc`]);
+    const foreignSub = await makeFullClinic(label("foreignsub"), OLD, [`user_fake_${tag}_fs`]);
+    const unmarked = await makeFullClinic(label("unmarked"), OLD, [`user_fake_${tag}_um`]);
+    const fine = await makeFullClinic(label("fine"), OLD);
+    // As if these rows had been copied from somewhere else: Stripe says the records are another clinic's, or nobody's.
+    stripe.customers.set(foreignCustomer.customerId, "clinic_from_production");
+    stripe.subscriptions.set(foreignSub.subscriptionId, "clinic_from_production");
+    stripe.customers.set(unmarked.customerId, null);
+    stripe.subscriptions.set(unmarked.subscriptionId, null);
+    const before = {
+      foreignCustomer: await rowsOf(foreignCustomer.clinicId),
+      foreignSub: await rowsOf(foreignSub.clinicId),
+      unmarked: await rowsOf(unmarked.clinicId),
+    };
+
+    // The dry run says so first.
+    await runDemoCleanup(options({ keepClinicIds: [showroom.clinicId] }));
+    expect(lines.filter((line) => line.includes("WILL BE SKIPPED"))).toHaveLength(3);
+    lines = [];
+
+    const result = await runDemoCleanup(options({ confirm: true, keepClinicIds: [showroom.clinicId] }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.failed.sort()).toEqual([foreignCustomer.clinicId, foreignSub.clinicId, unmarked.clinicId].sort());
+    expect(result.cleared).toEqual([fine.clinicId]);
+    // Only the fine clinic's Stripe records were written to.
+    expect(stripe.calls).toEqual([`cancel ${fine.subscriptionId}`, `delete ${fine.customerId}`]);
+    expect(clerk.calls).toEqual([`delete org ${fine.orgId}`]);
+    expect(await rowsOf(foreignCustomer.clinicId)).toEqual(before.foreignCustomer);
+    expect(await rowsOf(foreignSub.clinicId)).toEqual(before.foreignSub);
+    expect(await rowsOf(unmarked.clinicId)).toEqual(before.unmarked);
+    const text = lines.join("\n");
+    expect(text).toContain("belongs to a different clinic");
+    expect(text).toContain("carries no clinic id");
+    expect(text).not.toContain("clinic_from_production");
+    expect(text).not.toContain("cus_fake");
+  });
+
+  it("a Clerk answer it cannot read stops that clinic and deletes nobody", async () => {
+    const showroom = await makeFullClinic(label("showroom"), OLD);
+    const odd = `user_fake_${tag}_odd`;
+    const demo = await makeFullClinic(label("oddclerk"), OLD, [odd]);
+    const before = await rowsOf(demo.clinicId);
+    clerk.unreadable.add(odd);
+
+    const result = await runDemoCleanup(options({ confirm: true, keepClinicIds: [showroom.clinicId] }));
+
+    expect(result.exitCode).toBe(1);
+    expect(result.failed).toEqual([demo.clinicId]);
+    expect(clerk.users.has(odd)).toBe(true);
+    expect(clerk.calls.filter((call) => call.startsWith("delete user"))).toEqual([]);
+    expect(await rowsOf(demo.clinicId)).toEqual(before);
   });
 
   it("a second run is a no-op", async () => {

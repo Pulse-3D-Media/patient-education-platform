@@ -12,9 +12,12 @@
  *
  * It reads .env.demo, never .env (the main checkout's .env is production):
  * the demo site's database (the Neon testing branch), its Stripe test key, its
- * Clerk test-instance secret key, and PRODUCTION_DATABASE_HOST so it can tell
- * the database is not production. It refuses production outright, with no
- * --production override, and refuses a live Stripe or Clerk key. The rules
+ * Clerk test-instance secret key, PRODUCTION_DATABASE_HOST and
+ * DEMO_DATABASE_HOST (it must not be the first and must be the second), and
+ * DEMO_STRIPE_ACCOUNT_ID (the Stripe key must belong to that account). It
+ * refuses production outright, with no --production override, refuses a live
+ * Stripe or Clerk key, and touches no Stripe record that does not carry the
+ * clinic's own id. The rules
  * and the order of the work are in lib/demo-cleanup.ts.
  */
 import { prisma } from "../lib/db/client";
@@ -46,6 +49,7 @@ async function main() {
     confirm: start.confirm,
     keepClinicIds: start.keepClinicIds,
     keepHours: start.keepHours,
+    stripeAccountId: start.stripeAccountId,
     stripe: demoCleanupStripe,
     clerk: demoCleanupClerk,
     now: new Date(),

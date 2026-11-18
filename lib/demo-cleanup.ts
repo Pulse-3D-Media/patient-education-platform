@@ -1,3 +1,4 @@
+import { endpointOf } from "../vitest.guard";
 import { checkScriptTarget, databaseKind, PRODUCTION_FLAG } from "../prisma/preflight";
 import {
   CLEANUP_CLINIC_LIMIT,
@@ -22,11 +23,20 @@ import { isTestSecretKey, type DemoCleanupStripe } from "./stripe";
  *
  * THE SAFETY RULES, every one of them checked before anything is read:
  *
- * - Never production. The database is checked the way every operator script
- *   checks it (prisma/preflight.ts), and unlike the others there is NO
- *   --production override: given, the run is refused.
- * - Stripe's key must be a test key and Clerk's secret key a test-instance
- *   key. A live key of either refuses the run.
+ * - Never production, checked two ways. Deny: the database is checked the
+ *   way every operator script checks it (prisma/preflight.ts), and unlike the
+ *   others there is NO --production override: given, the run is refused.
+ *   Allow: DATABASE_URL must be the demo database named by DEMO_DATABASE_HOST
+ *   (pooled or direct, compared the way the test guard compares), so a wrong
+ *   PRODUCTION_DATABASE_HOST alone cannot make production look safe.
+ * - Clerk's secret key must be a test-instance key.
+ * - Stripe: a test key is NOT enough, because production also runs on a test
+ *   key until launch and may share the sandbox. So the key must belong to the
+ *   Stripe account named by DEMO_STRIPE_ACCOUNT_ID (asked of Stripe before
+ *   anything else), and no customer or subscription is touched unless
+ *   Stripe's own record carries this clinic's id in its metadata. A clinic
+ *   whose Stripe record names another clinic, or none, is skipped whole:
+ *   nothing in Stripe, Clerk or our rows changes for it.
  * - A keep list is required (--keep, or DEMO_KEEP_CLINIC_IDS), and every id
  *   on it must be a clinic, so a typo stops the run instead of clearing the
  *   showroom.
@@ -52,7 +62,7 @@ export const DEFAULT_KEEP_HOURS = 24;
 const MAX_KEEP_HOURS = 24 * 365;
 
 export type CleanupStart =
-  | { ok: true; confirm: boolean; keepClinicIds: string[]; keepHours: number; host: string }
+  | { ok: true; confirm: boolean; keepClinicIds: string[]; keepHours: number; host: string; stripeAccountId: string }
   | { ok: false; reason: string };
 
 /** "a, b,,c" into ["a", "b", "c"]. */
@@ -113,6 +123,16 @@ export function checkCleanupStart(
   if (!target.ok) return { ok: false, reason: target.reason };
   if (target.production) return refuse(`${target.host} is the production database.`);
 
+  // And the allow check: DATABASE_URL must be the demo database itself. Neither value is ever printed.
+  const demoHost = env.DEMO_DATABASE_HOST?.trim();
+  const demoEndpoint = demoHost ? endpointOf(demoHost.includes("://") ? demoHost : `postgresql://${demoHost}`) : null;
+  if (!demoEndpoint) {
+    return refuse("DEMO_DATABASE_HOST is missing or cannot be read. Set it in .env.demo to the demo database's host name (no user, no password).");
+  }
+  if (endpointOf(env.DATABASE_URL) !== demoEndpoint) {
+    return refuse("DATABASE_URL is not the demo database named by DEMO_DATABASE_HOST.");
+  }
+
   // Stripe and Clerk: test keys only.
   if (!isTestSecretKey(env.STRIPE_SECRET_KEY)) {
     return refuse("STRIPE_SECRET_KEY is missing or is not a Stripe test key (sk_test_ or rk_test_). The clean-up only runs on Stripe's test mode.");
@@ -121,17 +141,24 @@ export function checkCleanupStart(
     return refuse("CLERK_SECRET_KEY is missing or is not a key for a Clerk test (development) instance (sk_test_). The clean-up never touches the live sign-in.");
   }
 
+  const stripeAccountId = env.DEMO_STRIPE_ACCOUNT_ID?.trim() ?? "";
+  if (!/^acct_[A-Za-z0-9]+$/.test(stripeAccountId)) {
+    return refuse("DEMO_STRIPE_ACCOUNT_ID is missing or does not look like a Stripe account id (acct_...). Set it in .env.demo to the demo's Stripe account.");
+  }
+
   if (keep.size === 0) {
     return refuse("no clinic to keep was named. Give the showroom clinic's id with --keep <clinicId> (several separated by commas), or set DEMO_KEEP_CLINIC_IDS.");
   }
 
-  return { ok: true, confirm, keepClinicIds: [...keep], keepHours, host: target.host };
+  return { ok: true, confirm, keepClinicIds: [...keep], keepHours, host: target.host, stripeAccountId };
 }
 
 export type CleanupOptions = {
   confirm: boolean;
   keepClinicIds: string[];
   keepHours: number;
+  /** The Stripe account the key must belong to (DEMO_STRIPE_ACCOUNT_ID). */
+  stripeAccountId: string;
   stripe: DemoCleanupStripe;
   clerk: DemoCleanupClerk;
   /** Now, as the run sees it. A parameter so the tests can set it. */
@@ -162,7 +189,20 @@ export async function runDemoCleanup(options: CleanupOptions): Promise<CleanupRe
   const result: CleanupResult = { exitCode: 0, cleared: [], failed: [], kept: [] };
   const createdBefore = new Date(options.now.getTime() - options.keepHours * 60 * 60 * 1000);
 
-  // Every name on the keep list must be a clinic, or the run stops before anything else.
+  // The Stripe key must belong to the demo's own Stripe account, or the run stops before anything else.
+  let actualAccount: string;
+  try {
+    actualAccount = await options.stripe.accountId();
+  } catch (error) {
+    log(`Refusing to run: Stripe could not be asked which account the key belongs to (${errorKind(error)}). Nothing was changed.`);
+    return { ...result, exitCode: 1 };
+  }
+  if (actualAccount !== options.stripeAccountId) {
+    log("Refusing to run: STRIPE_SECRET_KEY belongs to a different Stripe account than DEMO_STRIPE_ACCOUNT_ID. Nothing was changed.");
+    return { ...result, exitCode: 1 };
+  }
+
+  // Every name on the keep list must be a clinic, or the run stops.
   const existing = await existingClinicIds(options.keepClinicIds);
   const missing = options.keepClinicIds.filter((id) => !existing.has(id));
   if (missing.length > 0) {
@@ -224,14 +264,37 @@ export async function runDemoCleanup(options: CleanupOptions): Promise<CleanupRe
 }
 
 async function stripeDescription(stripe: DemoCleanupStripe, clinic: CleanupClinic): Promise<string> {
-  if (!clinic.stripeCustomerId) return "no customer recorded";
+  if (!clinic.stripeCustomerId && !clinic.stripeSubscriptionId) return "no customer recorded";
   try {
-    const state = await stripe.customerState(clinic.stripeCustomerId);
+    const mismatch = await stripeMismatch(stripe, clinic);
+    if (mismatch) return `WILL BE SKIPPED: ${mismatch}`;
+    const customer = clinic.stripeCustomerId ? await stripe.customerOwner(clinic.stripeCustomerId) : null;
     const sub = clinic.stripeSubscriptionId ? ", with a subscription recorded" : "";
-    return state === "present" ? `test customer found${sub}` : "customer recorded, already gone from Stripe";
+    if (!customer) return `subscription recorded, no customer`;
+    return customer.gone ? "customer recorded, already gone from Stripe" : `test customer found, carrying this clinic's id${sub}`;
   } catch (error) {
     return `could not check (${errorKind(error)})`;
   }
+}
+
+/**
+ * Does any Stripe record this clinic names belong to someone else? A plain
+ * reason when so (the record carries another clinic's id, or none), null when
+ * every record is gone or carries this clinic's id. Names no id.
+ */
+async function stripeMismatch(stripe: DemoCleanupStripe, clinic: CleanupClinic): Promise<string | null> {
+  const checks: [string, string | null, (id: string) => Promise<{ gone: true } | { gone: false; clinicId: string | null }>][] = [
+    ["subscription", clinic.stripeSubscriptionId, (id) => stripe.subscriptionOwner(id)],
+    ["customer", clinic.stripeCustomerId, (id) => stripe.customerOwner(id)],
+  ];
+  for (const [what, id, read] of checks) {
+    if (!id) continue;
+    const owner = await read(id);
+    if (owner.gone) continue;
+    if (owner.clinicId === null) return `the Stripe ${what} it names carries no clinic id in its metadata, so it may not be this clinic's`;
+    if (owner.clinicId !== clinic.id) return `the Stripe ${what} it names belongs to a different clinic`;
+  }
+  return null;
 }
 
 async function clerkDescription(clerk: DemoCleanupClerk, clinic: CleanupClinic): Promise<string> {
@@ -256,10 +319,20 @@ async function clearOneClinic(options: CleanupOptions, listed: CleanupClinic, cr
     return true;
   }
 
-  // 1. Stripe.
+  // 1. Stripe. First make sure every record it names is this clinic's; if not, skip the clinic whole.
   try {
-    if (clinic.stripeSubscriptionId) await options.stripe.cancelSubscription(clinic.stripeSubscriptionId);
-    if (clinic.stripeCustomerId) await options.stripe.deleteCustomer(clinic.stripeCustomerId);
+    const mismatch = await stripeMismatch(options.stripe, clinic);
+    if (mismatch) {
+      log(`  SKIPPED: ${mismatch}. Nothing was changed for this clinic in Stripe, Clerk or our database. Look at it by hand.`);
+      return false;
+    }
+  } catch (error) {
+    log(`  STOPPED: Stripe could not be checked (${errorKind(error)}). This clinic was left as it was.`);
+    return false;
+  }
+  try {
+    if (clinic.stripeSubscriptionId) await options.stripe.cancelSubscription(clinic.stripeSubscriptionId, clinic.id);
+    if (clinic.stripeCustomerId) await options.stripe.deleteCustomer(clinic.stripeCustomerId, clinic.id);
     log(clinic.stripeCustomerId || clinic.stripeSubscriptionId ? "  Stripe: test subscription cancelled and customer deleted (or already gone)." : "  Stripe: nothing recorded.");
   } catch (error) {
     log(`  STOPPED: Stripe could not be updated (${errorKind(error)}). This clinic was left as it was; Clerk and our rows were not touched.`);

@@ -108,7 +108,12 @@ export const demoCleanupClerk: DemoCleanupClerk = {
     if (user === null) return { exists: false };
     const memberships = (await askClerk("GET", `/users/${part(userId)}/organization_memberships?limit=1`, "reading a demo user's organizations")) as MembershipPage | null;
     if (memberships === null) return { exists: false };
-    return { exists: true, pulseStaff: pulseStaffFromMetadata(user.public_metadata), organizations: memberships.total_count ?? (memberships.data ?? []).length };
+    // Fail closed: an answer without a proper count and list is never read as "no organizations",
+    // which would delete the person. It stops this clinic instead, and the person stays.
+    if (typeof memberships.total_count !== "number" || !Number.isInteger(memberships.total_count) || memberships.total_count < 0 || !Array.isArray(memberships.data)) {
+      throw new ClerkCleanupError("reading a demo user's organizations (the answer was not in the expected shape)", null);
+    }
+    return { exists: true, pulseStaff: pulseStaffFromMetadata(user.public_metadata), organizations: memberships.total_count };
   },
 
   async deleteUser(userId) {

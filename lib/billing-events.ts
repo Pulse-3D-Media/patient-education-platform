@@ -6,10 +6,11 @@ import {
   isFinished,
   markBillingEventFailed,
   receiveBillingEvent,
-  reconcileSubscription,
   setBillingEventClinic,
   type BillingEventRow,
 } from "./db/billing";
+// Every look at Stripe goes through this, so a vanished paying subscription always emails Pulse staff once (lib/billing-gone-alert.ts).
+import { reconcileAndTellPulse } from "./billing-gone-alert";
 import { errorKind } from "./error-kind";
 import { eventRefs, fetchSubscriptionSnapshot, isHandledEventType, type FetchSubscription } from "./stripe";
 
@@ -109,7 +110,7 @@ async function processRow(row: BillingEventRow, deps: BillingDeps): Promise<Hand
       return { status: "ignored", outcome };
     }
 
-    const result = await reconcileSubscription({
+    const result = await reconcileAndTellPulse({
       clinicId,
       subscriptionId: row.stripeSubscriptionId,
       fetchSubscription: deps.fetchSubscription,

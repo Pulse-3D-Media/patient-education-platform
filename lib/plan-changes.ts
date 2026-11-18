@@ -8,11 +8,12 @@ import {
   acceptPlanForChange,
   getCheckoutFacts,
   getPlanShape,
-  reconcileSubscription,
   withPlanChangeLock,
   type AcceptedPlanInput,
   type CheckoutFacts,
 } from "./db/billing";
+// Every look at Stripe goes through this, so a vanished paying subscription always emails Pulse staff once (lib/billing-gone-alert.ts).
+import { reconcileAndTellPulse } from "./billing-gone-alert";
 import { labelsOf } from "./categories";
 import { getCategoryList, libraryForQuote, listSellableCategories } from "./db/category-config";
 import { getActivePricing, getPricingVersion } from "./db/pricing";
@@ -379,7 +380,7 @@ export async function confirmPlanChange(args: {
   if (step.kind === "refused") return step;
 
   // Whatever Stripe now says is what gets applied: the same rules the webhook runs.
-  await reconcileSubscription({ clinicId, subscriptionId, fetchSubscription: deps.fetchSubscription, now: deps.now });
+  await reconcileAndTellPulse({ clinicId, subscriptionId, fetchSubscription: deps.fetchSubscription, now: deps.now });
 
   const per = summary.interval === "YEAR" ? "year" : "month";
   if (step.kind === "already") return ALREADY;
@@ -435,7 +436,7 @@ export async function cancelWaitingChange(args: { clinicId: string; which: "sche
     return true;
   });
 
-  await reconcileSubscription({ clinicId, subscriptionId, fetchSubscription: deps.fetchSubscription, now: deps.now });
+  await reconcileAndTellPulse({ clinicId, subscriptionId, fetchSubscription: deps.fetchSubscription, now: deps.now });
   if (!cancelled) return { ok: true, message: "There was no change waiting, so nothing was cancelled." };
   return { ok: true, message: which === "scheduled" ? "The scheduled change was cancelled. Your plan stays as it is." : "The change was cancelled and nothing was charged for it. Your plan stays as it is." };
 }

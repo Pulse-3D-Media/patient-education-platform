@@ -4,11 +4,12 @@ import {
   BillingRefusedError,
   acceptPlanForCheckout,
   getCheckoutFacts,
-  reconcileSubscription,
   setStripeCustomer,
   type AcceptedPlanInput,
   type PurchaseAttempt,
 } from "./db/billing";
+// Every look at Stripe goes through this, so a vanished paying subscription always emails Pulse staff once (lib/billing-gone-alert.ts).
+import { reconcileAndTellPulse } from "./billing-gone-alert";
 import { labelsOf } from "./categories";
 import { getCategoryList, libraryForQuote, listSellableCategories } from "./db/category-config";
 import { getActivePricing } from "./db/pricing";
@@ -303,7 +304,7 @@ async function paymentUnderWay(args: { clinicId: string; facts: BillingFacts; cu
   if (alive.length === 0 && facts.status !== "INCOMPLETE") return null;
 
   const target = subscriptionToCheck(facts, subscriptions);
-  if (target) await reconcileSubscription({ clinicId, subscriptionId: target.id, fetchSubscription: deps.fetchSubscription, now: deps.now });
+  if (target) await reconcileAndTellPulse({ clinicId, subscriptionId: target.id, fetchSubscription: deps.fetchSubscription, now: deps.now });
 
   const after = (await getCheckoutFacts(clinicId))?.facts.status;
   if (after === "ACTIVE") return "paid";
@@ -354,7 +355,7 @@ export async function checkPayment(args: {
     return { status: facts.status, message: "Stripe has no payment for your clinic yet. If you have just paid, give it a minute and check again." };
   }
 
-  await reconcileSubscription({ clinicId, subscriptionId: target.id, fetchSubscription, now: args.now });
+  await reconcileAndTellPulse({ clinicId, subscriptionId: target.id, fetchSubscription, now: args.now });
 
   const after = (await getCheckoutFacts(clinicId))?.facts.status ?? facts.status;
   const messages: Record<CheckPaymentResult["status"], string> = {

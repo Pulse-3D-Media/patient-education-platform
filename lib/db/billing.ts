@@ -676,6 +676,25 @@ export type ReconcileResult = {
   outcome: string;
   /** How many log entries were written: 1 when something a person cares about changed, 0 otherwise. */
   logged: number;
+  /**
+   * Set only by the look at Stripe that read a paying clinic's subscription as
+   * gone and ended it (ACTIVE or PAST_DUE to CANCELED, audit finding E3). It is
+   * decided inside the transaction that made the change, under the billing
+   * sync lock, so exactly one look sees it per ending, however many overlap:
+   * the next one finds the record already ended. The caller emails Pulse
+   * staff once it has committed (lib/billing-gone-alert.ts).
+   */
+  goneClosure?: GoneClosure;
+};
+
+/** Which clinic a vanished subscription just ended, for the email to Pulse staff. Names and the new status only. */
+export type GoneClosure = {
+  clinicId: string;
+  clinicName: string;
+  /** The clinic's status after the change (normally Canceled; unchanged for a clinic Pulse manages). */
+  clinicStatus: ClinicStatus;
+  /** When the change was made, for the email's idempotency key. */
+  at: Date;
 };
 
 /** What the locked read asks for about the clinic. */
@@ -819,7 +838,13 @@ async function reconcileOnce(args: {
         await finish("IGNORED", gone.reason);
         return { kind: "ignored", outcome: gone.reason, logged: 0 };
       }
-      return applyDecision(tx, { clinicId, clinic, current, decision: gone, now, finish, strangePlan: false, needsLook: GONE_LOOK });
+      const applied = await applyDecision(tx, { clinicId, clinic, current, decision: gone, now, finish, strangePlan: false, needsLook: GONE_LOOK });
+      // A paying clinic just ended: Pulse staff get one email about it, sent by
+      // the caller after this commits. A first payment that never finished
+      // (INCOMPLETE) ends quietly; it was never open.
+      if (current.status !== "ACTIVE" && current.status !== "PAST_DUE") return applied;
+      const after = await tx.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { name: true, status: true } });
+      return { ...applied, goneClosure: { clinicId, clinicName: after.name, clinicStatus: after.status, at: now } };
     }
 
     // The plans Stripe names for a plan change (the one the subscription is

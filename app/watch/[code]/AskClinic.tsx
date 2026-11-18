@@ -44,11 +44,11 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
   if (asked) {
     return (
       <>
-        <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">Your clinic has been asked</h1>
-        <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">Try this same link again in a day or so.</p>
+        <h1 className="mt-6 text-[24px] leading-[1.22] font-bold tracking-[-.02em]">Your clinic has been asked</h1>
+        <p className="mt-3.5 max-w-[30ch] text-[18px] leading-[1.52] break-words text-[#3a4c56]">Try this same link again in a day or so.</p>
         {call && (
           <>
-            <p className="mt-3 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">Need it sooner? Call the office.</p>
+            <p className="mt-3 max-w-[30ch] text-[16px] leading-[1.5] text-[#46555e]">Need it sooner? Call the office.</p>
             <CallButton call={call} />
           </>
         )}
@@ -58,18 +58,18 @@ export function AskClinic({ code, alreadyAsked, call }: { code: string; alreadyA
 
   return (
     <>
-      <h1 className="mt-6 text-[26px] leading-[1.22] font-bold tracking-[-.02em]">This link has paused</h1>
-      <p className="mt-3.5 max-w-[30ch] text-[20px] leading-[1.52] break-words text-[#3a4c56]">Tap below to ask your clinic to turn it back on.</p>
+      <h1 className="mt-6 text-[24px] leading-[1.22] font-bold tracking-[-.02em]">This link has paused</h1>
+      <p className="mt-3.5 max-w-[30ch] text-[18px] leading-[1.52] break-words text-[#3a4c56]">Tap below to ask your clinic to turn it back on.</p>
       <button
         type="button"
         onClick={ask}
         disabled={pending}
-        className="mt-7 flex min-h-14 items-center rounded-full bg-brand px-8 text-[19px] font-semibold text-on-brand shadow-[0_6px_18px_-8px_rgba(18,32,42,.45)] transition active:scale-[0.98] disabled:opacity-70 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#12202a]"
+        className="mt-7 flex min-h-14 items-center rounded-full bg-brand px-8 text-[17px] font-semibold text-on-brand shadow-[0_6px_18px_-8px_rgba(18,32,42,.45)] transition active:scale-[0.98] disabled:opacity-70 focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#12202a]"
       >
         {pending ? "Asking..." : "Ask my clinic"}
       </button>
       {trouble && (
-        <p role="status" className="mt-4 max-w-[30ch] text-[17px] leading-[1.5] text-[#46555e]">
+        <p role="status" className="mt-4 max-w-[30ch] text-[16px] leading-[1.5] text-[#46555e]">
           That did not go through. Please try again in a moment.
         </p>
       )}

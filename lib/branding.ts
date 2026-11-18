@@ -159,6 +159,33 @@ export function contrastRatio(a: string, b: string): number {
  */
 export const VIDEO_CHIP_ALPHA = 0.7;
 
+/**
+ * THE FADE BEHIND THE PLAYERS' BOTTOM ROW (PlayerOverlay; app/globals.css,
+ * .video-scrim): at least this dark wherever the time's white words sit. Over
+ * a pure white frame that is #737373, and white on it is 4.7:1 (the words are
+ * 15px, so the floor is 4.5:1). Lighter than the 0.75 fade it replaced, and
+ * only as tall as the row (player refresh, November 2026).
+ */
+export const VIDEO_SCRIM_TEXT_ALPHA = 0.55;
+
+/**
+ * THE ROUND MIDDLE BUTTONS (back 10, play or pause, forward 10, on a touch
+ * screen): a white icon on a black circle at least this dark. Over a pure
+ * white frame the circle is #8c8c8c, and the white icon on it is 3.4:1 (an
+ * icon's floor is 3:1).
+ */
+export const VIDEO_BUTTON_ALPHA = 0.45;
+
+/** What the fade behind the bottom row looks like where the words sit, over a frame of this colour. */
+export function videoScrimGround(frame: string): string {
+  return mix(frame, BLACK, VIDEO_SCRIM_TEXT_ALPHA);
+}
+
+/** What a middle button's circle looks like over a frame of this colour. */
+export function videoButtonGround(frame: string): string {
+  return mix(frame, BLACK, VIDEO_BUTTON_ALPHA);
+}
+
 /** What a chip looks like over a frame of this colour: the frame, darkened by the chip. */
 export function videoChipGround(frame: string): string {
   return mix(frame, BLACK, VIDEO_CHIP_ALPHA);

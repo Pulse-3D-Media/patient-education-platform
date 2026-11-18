@@ -20,6 +20,15 @@
  */
 @custom-variant side-by-side (@media (min-width: 64rem) and (orientation: landscape));
 
+/*
+ * `short-landscape:` is a screen held sideways and short: a phone on its side
+ * (a Samsung S22 is 800 by 360 there, less the browser's own bars). The
+ * patient page tightens its heading there so the video is in view without
+ * scrolling past a screen of words (player refresh, November 2026). A tablet
+ * on its side is taller than 32rem and keeps the usual page.
+ */
+@custom-variant short-landscape (@media (orientation: landscape) and (max-height: 32rem));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -252,6 +261,18 @@ body {
  */
 .video-chip {
   background: rgb(0 0 0 / 0.7);
+}
+
+/*
+ * The soft dark fade behind the players' bottom row (the time, sound, full
+ * screen and the progress bar; PlayerOverlay). Only as tall as that row, and
+ * at least VIDEO_SCRIM_TEXT_ALPHA (lib/branding.ts, 0.55) dark everywhere
+ * the time's words sit (the lower three quarters), so white words read over a white
+ * frame; above that it fades out quickly instead of reaching up over the
+ * picture. lib/branding.test.ts checks the words and these numbers.
+ */
+.video-scrim {
+  background: linear-gradient(to top, rgb(0 0 0 / 0.72) 0%, rgb(0 0 0 / 0.55) 75%, rgb(0 0 0 / 0) 100%);
 }
 
 /*

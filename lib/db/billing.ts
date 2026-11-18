@@ -37,7 +37,13 @@ import { readSettingsIn } from "./settings";
  * therefore happen one after the other, never at once, and each reads what
  * the one before it wrote.
  *
- * Inside that lock the code asks Stripe where the subscription stands NOW
+ * NO ROW LOCK IS EVER HELD WHILE STRIPE IS BEING ASKED (audit finding E1):
+ * a look at Stripe holds the clinic's billing sync lock instead (a named lock
+ * only other looks at Stripe wait for, lib/db/billing-locks.ts), asks, and
+ * only then takes the row lock for the write. So a slow Stripe never holds
+ * up a link being made for the clinic.
+ *
+ * The code asks Stripe where the subscription stands NOW
  * and applies that (decideBilling in lib/billing-state.ts), rather than
  * applying what the notification said. So it does not matter in what order
  * notifications arrive, how late, or how many times: whichever is handled
@@ -473,8 +479,9 @@ export class PlanChangeOverrunError extends Error {
 }
 
 /**
- * Run one clinic's plan change while holding the clinic's row lock, so two
- * plan changes for one clinic (two tabs, a double click, two admins) happen
+ * Run one clinic's plan change while holding the clinic's plan change lock
+ * (a named lock, lib/db/billing-locks.ts; not the row lock, so links are
+ * never held up by a slow Stripe), so two plan changes for one clinic (two tabs, a double click, two admins) happen
  * one after the other, never at once. The second one starts by asking Stripe
  * where the subscription stands, and sees what the first one did.
  *

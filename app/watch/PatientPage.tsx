@@ -9,6 +9,7 @@ import type { EarlyConnections } from "@/lib/playback-auth";
 import { senderLines } from "@/lib/sender-name";
 import { CallButton } from "./[code]/CallButton";
 import { LinkDeadline } from "./LinkDeadline";
+import { ShareLinkButton } from "./ShareLinkButton";
 
 /**
  * The patient's page, drawn the same way for a patient link (/watch/<code>)
@@ -36,6 +37,16 @@ import { LinkDeadline } from "./LinkDeadline";
  * after it, or for an older link with a fixed date (patientDeadline() in
  * lib/expiry.ts). When the "stops working in a few minutes" note is showing,
  * that note says it and this line is left out.
+ *
+ * Under those lines, one quiet button, "Save or share this link" (decided on
+ * 2026-11-16; ShareLinkButton), on a patient link's page from the
+ * start and on a printed code's page once the Play tap has made the visit's
+ * own link (`share`). It is below the player, so it never moves the video.
+ *
+ * Without JavaScript (switched off, or a browser too old to run the page)
+ * the box would tick and nothing would happen. A <noscript> sentence above
+ * the player says so in plain words, with the clinic's number when one is on
+ * file. A browser that runs scripts never shows it.
  */
 export function PatientViewer({
   look,
@@ -47,6 +58,7 @@ export function PatientViewer({
   now,
   player,
   early,
+  share,
 }: {
   look: Look;
   clinicName: string;
@@ -62,6 +74,8 @@ export function PatientViewer({
   player: ReactNode;
   /** The hosts the video will come from, for early-connection hints (earlyConnectionsFor in lib/playback-auth.ts). Host names only. */
   early: EarlyConnections;
+  /** When "Save or share this link" shows: "now" on a patient link's page, "once-own-link" on a printed code's page. */
+  share: "now" | "once-own-link";
 }) {
   const length = describeDuration(video.durationSeconds);
   return (
@@ -109,7 +123,8 @@ export function PatientViewer({
             </span>
           ))}
         </p>
-        <h1 className="mt-2 text-[24px] leading-[1.15] font-bold tracking-[-.022em] sm:mt-2.5 sm:text-[27px] short-landscape:text-[20px]!">{video.title}</h1>
+        {/* A long word (a made-up name, or "Reconstruction" at 200% zoom on a phone) breaks rather than pushing the page sideways. */}
+        <h1 className="mt-2 text-[24px] leading-[1.15] font-bold tracking-[-.022em] sm:mt-2.5 sm:text-[27px] short-landscape:text-[20px]! break-words">{video.title}</h1>
         <p className="mt-3 text-[18px] leading-[1.5] text-[#3a4c56] sm:mt-3.5 short-landscape:hidden">Your surgeon shared this so you can see what happens during your operation.</p>
 
         {/* Said only when the time left cannot hold one whole viewing and the first play will not add any: honest, calm, and the number to call. */}
@@ -118,6 +133,16 @@ export function PatientViewer({
             This link stops working in a few minutes, so the video may stop before the end. {clinicName} can send you a fresh link.
           </p>
         )}
+
+        {/* Only for a browser that cannot run the page: the box and Play need JavaScript. Calm, never "error". */}
+        <noscript>
+          {/* The share button needs JavaScript too: hide it rather than leave a button that does nothing. */}
+          <style>{"[data-needs-script]{display:none}"}</style>
+          <div className="mt-5 rounded-xl bg-[#eef1f4] px-4 py-3 text-[18px] leading-[1.5] text-[#3a4c56]">
+            <p>To play this video, your browser needs JavaScript turned on. Turn it on in your browser&apos;s settings, or call {clinicName} and they can help.</p>
+            {look.call && <CallButton call={look.call} />}
+          </div>
+        </noscript>
 
         {/* Sideways on a phone, the whole column is no wider than keeps the video's 16:9 picture inside the screen's height (above). */}
         <div className="mt-5 sm:mt-7 short-landscape:mt-3!">{player}</div>
@@ -144,6 +169,8 @@ export function PatientViewer({
             </span>
           </p>
         )}
+
+        <ShareLinkButton title={video.title} when={share} />
 
         {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
         <div className="mt-auto pt-10">

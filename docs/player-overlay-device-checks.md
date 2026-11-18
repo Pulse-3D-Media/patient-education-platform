@@ -131,4 +131,76 @@ network (cellular or clinic Wi-Fi), cold or warm start, and anything that fails.
    address in the page; a member without a seat given Favorite only; the round picture showing its letter when the
    image could not load. **Not seen:** full screen, Safari, scanning the code with a real phone, and any real device.
 
+## Screen readers, the keyboard and the share button (the patient-a11y PR, 2026-11-16)
+
+What changed on the patient page: each change of state (the video ready, loading, not loading, the link ended, a
+printed code that cannot hand out a link, the clinic asked, a tap that did not go through) is said once through one
+status region that is always on the page; the focus moves to the next thing when the button holding it goes away; the
+player's controls come back when a key is pressed or the keyboard's focus arrives (and, since 2026-11-17, fade while the video plays for the keyboard too); the progress bar is read as words; every control has a
+focus ring that shows over a light or dark picture; a browser without JavaScript gets a sentence saying so; and one
+quiet button, "Save or share this link", sits under the video's length and deadline lines.
+
+None of this can be heard on Claude's computer: there is no VoiceOver or TalkBack here.
+
+**Seen on Claude's computer (2026-11-16, the app's browser pane, Chromium, phone size 375 by 812, keyboard only, a
+local dev server on a throwaway copy of the database with made-up rows):** Tab order before the tick is the box, Play,
+then "Save or share this link", each with a visible ring; Space on the box moved the focus to Play and the status
+region said "The video is ready. Tap Play to start." once; Enter on Play started the video and put a ring around the
+player; Tab went through Back 10, Pause, Forward 10, Mute, Full screen and the progress bar, each with a white ring
+and dark edge, the bar ringed as a whole and read as "4 seconds of 1 minute 49 seconds"; with the focus on the bar the
+controls stayed up for over 5 seconds of playing, came back at once when the focus returned, and faded 2.7 seconds
+after the focus left (on 2026-11-17 that was changed on Evan's word: the controls now fade while it plays with the
+focus on them too; see 9.2). "Save or share this link" (no share sheet in that browser; the clipboard was stood in for) said
+"Link copied.", made no request to any server, and the video kept playing. A printed code's page had no share button
+until the Play tap, then the address became `/watch/...` and the button appeared under the deadline line. On a paused
+link, Enter on Ask my clinic put the focus on "Your clinic has been asked" (then the status region also said the
+confirmation; since the 2026-11-17 review it stays empty when the focus moves, so it is said once); no share button there. At 188 pixels wide (a phone at 200% zoom) the page first scrolled sideways (a long word in
+the title) and the box's sentence was cut off at the box's edge; both were fixed and nothing runs past the edge now.
+The accessibility tree: one main area, one heading, the box labelled with the whole sentence, the clinic's mark hidden
+from screen readers, the page's language English, zoom not blocked. **Not seen:** VoiceOver, TalkBack, a real share
+sheet, Safari, any real phone. Use a patient link made from `/admin/links` on the preview, and a printed code from the same page.
+
+7. **iPhone, VoiceOver** (Settings, Accessibility, VoiceOver on; or ask Siri "turn on VoiceOver")
+   1. Open the patient link. Swipe right through the page from the top. You should hear, in order: the doctor and the
+      clinic, the procedure's name (a heading), the sentence under it, the box with the whole sentence "I understand
+      this video is for education only..." as a checkbox, not checked, then "Play <procedure>, dimmed", with "Tick the
+      box above to play", then the length, the deadline line, then "Save or share this link, button", then Pulse 3D.
+   2. Double-tap the box. The box goes away. Within a moment you should hear "The video is ready. Tap Play to start."
+      once, and not again.
+   3. Double-tap Play. You should hear "Loading the video." at most once, then the video plays. You should NOT hear the
+      time ticking over while it plays.
+   4. While it plays, swipe right onto the controls (back 10, pause, forward 10, sound, full screen, the progress bar).
+      Each should be read with its name. On the progress bar you should hear something like "1 minute 5 seconds of 1
+      minute 50 seconds"; swipe up or down on it moves the video.
+   5. Turn on Airplane mode before step 2 on a fresh load, then tick: you should hear "We couldn't get the video
+      ready. Check your connection, then try again." once, and the focus should land on Try again.
+   6. "Save or share this link": double-tap. The iPhone's share sheet opens with the link. Close it: nothing is said.
+   7. A paused link: double-tap "Ask my clinic". The focus should land on the heading "Your clinic has been asked"
+      (not the top of the page), and you should hear it once, not twice; swipe on for "Try this same link again in a
+      day or so."
+   8. A printed code (`/q/...`): before Play, no "Save or share this link" anywhere. After Play has started the
+      video, it appears under the deadline line, and the address bar shows `/watch/...`.
+8. **Samsung S22, TalkBack** (Settings, Accessibility, TalkBack on; or hold both volume keys for three seconds)
+   1. Repeat 7.1 to 7.8 with TalkBack's gestures (swipe right for next, double-tap to press). In 7.6 the Android share
+      sheet opens.
+   2. While the video plays, swipe onto one of the faded controls: it should come back into view, then fade again a
+      moment later while the video plays. Double-tap it: it should act at once (a screen reader's press is not held
+      back). Note whether it comes back (TalkBack may not move the browser's own focus; if not, a tap on the picture
+      shows them).
+9. **A computer with the keyboard only** (Chrome or Edge; no mouse)
+   1. Press Tab from the top: the box (a ring around it), then Play (a white ring with a dark edge around the picture),
+      then "Save or share this link" (a ring). Space ticks the box; the focus is then on Play.
+   2. Enter on Play: the video plays and the player has a ring around it. Tab moves through the controls, each with a
+      ring, and the progress bar gets a ring around the whole bar. The arrow keys move ten seconds and do not scroll the
+      page. Leave the keys alone for about three seconds while it plays: the controls fade, except the row holding
+      the focused button, which stays drawn with its ring (2026-11-18). Press Enter: that button acts at once. Tab
+      while they are faded: they come back and the focus moves on. Click the picture so the player itself has the
+      focus, wait for the fade, then press Space: the controls come back and nothing else happens; Space again pauses.
+      Pause: they stay up.
+   3. "Save or share this link" on a computer without a share sheet: "Link copied." appears under it, and pasting
+      into a new tab opens the same link.
+   4. Turn JavaScript off (Chrome: Settings, Privacy and security, Site settings, JavaScript) and reload: a grey box
+      above the video says the browser needs JavaScript turned on, with the clinic's number; no share button.
+   5. Zoom to 200% (Ctrl and +): nothing is cut off, and no sideways scrolling.
+
 Record the results in the PR, or below this line, with the date.

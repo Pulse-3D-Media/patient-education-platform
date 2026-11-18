@@ -26,6 +26,30 @@ export function pictureTapAction(pointerType: string, controlsShowing: boolean, 
 }
 
 /**
+ * A key pressed while the controls have faded over a playing video. Like the first tap on a faded picture on a phone,
+ * the first press only brings them back ("show-only"), so nobody presses a button they cannot see; the next press acts.
+ * Everything that is not a press of the player's own buttons "pass"es and does what it always does:
+ *   - keys that only move the focus or are held: Tab moves on (and the focus arriving shows the controls), Escape
+ *     still leaves full screen;
+ *   - any key with Ctrl, Cmd (Meta) or Alt held: the browser's and the screen reader's shortcuts (zoom, the address
+ *     bar, find, back, a screen reader's own keys) are never eaten;
+ *   - the function keys, F1 to F24 (F5 reloads, F6 moves to the address bar, and so on).
+ */
+export function keyFirstPressWhileHidden(
+  key: string,
+  held: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean } = {},
+  /** The key was pressed on one of the player's buttons (or its progress bar) holding the keyboard's focus: that button's group never fades (KEEP_FOCUSED_GROUP), so the press is on something in sight and acts at once. */
+  onFocusedControl = false,
+): "show-only" | "pass" {
+  if (onFocusedControl) return "pass";
+  if (held.ctrlKey || held.metaKey || held.altKey) return "pass";
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) return "pass";
+  return PASS_KEYS.has(key) ? "pass" : "show-only";
+}
+
+const PASS_KEYS = new Set(["Tab", "Shift", "Control", "Alt", "AltGraph", "Meta", "OS", "Escape", "CapsLock", "NumLock", "Insert", "ContextMenu"]);
+
+/**
  * The letters in the logo's circle when a clinic has no logo (or it does not
  * load): the first letter of its first two real words, "Summit Orthopedics"
  * is "SO", "The Knee Clinic" is "KC". Never empty: a name with no letters at
@@ -43,3 +67,28 @@ export function clinicInitials(name: string): string {
   return letters || "?";
 }
 
+
+/**
+ * A length of time in words, for a screen reader: "1 minute 5 seconds",
+ * "4 minutes", "45 seconds", "1 hour 2 minutes 3 seconds". Whole seconds,
+ * rounded down, as the player's own "1:05" is. Nothing, or a number that is
+ * not a time, reads as "0 seconds".
+ */
+export function spokenTime(seconds: number): string {
+  const whole = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  const part = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const parts = [h > 0 ? part(h, "hour") : "", m > 0 ? part(m, "minute") : "", s > 0 ? part(s, "second") : ""].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : "0 seconds";
+}
+
+/**
+ * What a screen reader says for the progress bar, instead of a bare number
+ * of seconds: "1 minute 5 seconds of 4 minutes 12 seconds". Before the
+ * video's length is known, just where it is.
+ */
+export function seekValueText(time: number, duration: number): string {
+  return Number.isFinite(duration) && duration > 0 ? `${spokenTime(time)} of ${spokenTime(duration)}` : spokenTime(time);
+}

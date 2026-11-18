@@ -1,6 +1,6 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checkPlaybackId, muxIsConfigured, signPlaybackToken, signedPlaylistUrl, signedThumbnailUrl, type MuxEnv } from "./mux";
+import { checkPlaybackId, muxIsConfigured, signPlaybackToken, signedCaptionUrl, signedPlaylistUrl, signedThumbnailUrl, type MuxEnv } from "./mux";
 
 /**
  * Signing a Mux playback token, with a key pair made here and never a real
@@ -94,6 +94,18 @@ describe("the signed addresses", () => {
     expect(still.pathname).toBe(`/${ID}/thumbnail.jpg`);
     expect([...still.searchParams.keys()]).toEqual(["token"]);
     expect(open(still.searchParams.get("token")!).claims).toMatchObject({ aud: "t", time: 1, width: 640 });
+  });
+
+  it("signs a caption track's text with the video's own audience, for the staff review link, and refuses a track id that is not one", () => {
+    const text = new URL(signedCaptionUrl(ID, "TextTrack0001", EXPIRES, ENV));
+    expect(text.origin).toBe("https://stream.mux.com");
+    expect(text.pathname).toBe(`/${ID}/text/TextTrack0001.vtt`);
+    expect([...text.searchParams.keys()]).toEqual(["token"]);
+    const token = open(text.searchParams.get("token")!);
+    expect(token.valid).toBe(true);
+    expect(token.claims).toMatchObject({ sub: ID, aud: "v", exp: Math.floor(EXPIRES.getTime() / 1000) });
+    expect(() => signedCaptionUrl(ID, "../other", EXPIRES, ENV)).toThrow(/track id/);
+    expect(() => signedCaptionUrl(ID, "TextTrack0001", EXPIRES, {})).toThrow(/not configured/);
   });
 });
 

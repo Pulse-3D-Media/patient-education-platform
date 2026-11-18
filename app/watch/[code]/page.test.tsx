@@ -29,7 +29,8 @@ import WatchPage from "./page";
 // The play count is a Server Action the player imports; rendering never calls it.
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // The "ask my clinic" piece refreshes the page after a tap that did not go through; a render never taps.
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
+// The share button reads the address (usePathname) to know whether there is a link of the patient's own yet.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }), usePathname: () => "/watch/vitest" }));
 // The request action reads the request's host to build the email's address; a render never asks.
 vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
 
@@ -67,6 +68,11 @@ async function makeShare(clinicId: string, video: string, expired = false) {
 
 async function render(shareCode: string) {
   return renderToStaticMarkup(await WatchPage({ params: Promise.resolve({ code: shareCode }) } as never));
+}
+
+/** The page as a browser that runs scripts sees it: the <noscript> sentence (and the number in it) taken out. */
+function withScripts(html: string) {
+  return html.replace(/<noscript>[\s\S]*?<\/noscript>/g, "");
 }
 
 beforeAll(async () => {
@@ -234,7 +240,7 @@ describe("the tap-to-call button", () => {
 
   it("is offered on a working link only if the video fails, so it is not in the page a patient first sees", async () => {
     const clinic = await makeClinic({ phone: "8015550123" });
-    const html = await render(await makeShare(clinic.id, videoId));
+    const html = withScripts(await render(await makeShare(clinic.id, videoId)));
 
     expect(html).not.toContain("tel:");
     expect(html).not.toContain("Call your clinic:");
@@ -431,7 +437,7 @@ describe("the 'for education only' box before the video", () => {
     // A 28px square in a row at least 48px tall, with the words at the page's 18px body size (one step down from 20px, 2026-11-17).
     expect(box).toContain("h-7 w-7");
     expect(html).toMatch(/<label[^>]*min-h-12[^>]*>/);
-    expect(html).toMatch(/<span class="text-\[18px\][^"]*">I understand this video/);
+    expect(html).toMatch(/<span class="[^"]*\btext-\[18px\][^"]*">I understand this video/);
     expect(html.toLowerCase()).not.toContain("consent");
   });
 
@@ -516,12 +522,14 @@ describe("what stays the same", () => {
     expect(html).not.toContain("Placeholder animation");
   });
 
-  it("before the first tap there is one thing to press, Play, with the strip's logo and names hidden from screen readers", async () => {
+  it("before the first tap there is one thing to press on the video, Play, and the one named exception under it, with the strip's logo and names hidden from screen readers", async () => {
     const clinic = await makeClinic({ logoUrl: "https://example.com/summit.png" });
     const html = await render(await makeShare(clinic.id, videoId));
 
-    expect(html.match(/<button/g)).toHaveLength(1);
+    // Play, and "Save or share this link" (the one exception, decided on 2026-11-16), and nothing else.
+    expect(html.match(/<button/g)).toHaveLength(2);
     expect(html).toContain('aria-label="Play Vitest Total Knee Replacement"');
+    expect(html).toContain("Save or share this link");
     expect(html).not.toContain("Make the video bigger");
     // Our Vimeo-style controls arrive with the first play, not before (they are not drawn at all until then).
     expect(html).not.toContain('aria-label="Full screen"');
@@ -593,7 +601,7 @@ describe("the clinic and the doctor on the video", () => {
     expect(strip).not.toContain("Sent by");
     // Inside the video's 16:9 box, in the box over the picture (picture-fit), after the video itself.
     expect(html).toContain("padding-top:56.25%");
-    expect(html).toMatch(/class="picture-area absolute inset-0 bg-black outline-none"/);
+    expect(html).toMatch(/class="picture-area absolute inset-0 bg-black outline-none[ "]/);
     expect(html.indexOf("<video")).toBeLessThan(html.indexOf("data-video-strip"));
     expect(html.indexOf("picture-fit")).toBeLessThan(html.indexOf("data-video-strip"));
     // Before Play in the page's order, so it is there before the first tap.
@@ -856,5 +864,85 @@ describe("a video that has moved to Mux", () => {
       select: { code: true },
     });
     expect(await render(unplayed.code)).not.toContain("stops working in a few minutes");
+  });
+});
+
+describe("for screen readers, the keyboard and a browser without JavaScript (2026-11-16)", () => {
+  it("has the player's one status region on the page from the start, empty, so a change is heard when it comes", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+    expect(html).toMatch(/<p role="status" class="sr-only" data-player-status=""><\/p>/);
+    // No region that would appear already filled: the old "alert" panels are gone from the page a patient first sees.
+    expect(html).not.toContain('role="alert"');
+  });
+
+  it("says what to do without JavaScript in a <noscript> sentence, calmly, with the clinic's number when it has one", async () => {
+    const clinic = await makeClinic({ phone: "8015550123" });
+    const html = await render(await makeShare(clinic.id, videoId));
+    const noscript = html.match(/<noscript>([\s\S]*?)<\/noscript>/)?.[1] ?? "";
+    expect(noscript).toContain("To play this video, your browser needs JavaScript turned on.");
+    expect(noscript).toContain(`call ${clinic.name}`);
+    expect(noscript).toContain('href="tel:+18015550123"');
+    // The share button needs JavaScript too, so it is hidden there rather than left doing nothing.
+    expect(noscript).toContain("[data-needs-script]{display:none}");
+    expect(noscript).not.toMatch(/error|invalid/i);
+  });
+
+  it("keeps the sentence, with no number, for a clinic that has none", async () => {
+    const clinic = await makeClinic({});
+    const noscript = (await render(await makeShare(clinic.id, videoId))).match(/<noscript>([\s\S]*?)<\/noscript>/)?.[1] ?? "";
+    expect(noscript).toContain("your browser needs JavaScript turned on");
+    expect(noscript).not.toContain("tel:");
+  });
+
+  it("labels the box with the whole fixed sentence, and keeps one heading, the procedure, and the page's main landmark", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+    expect(html).toMatch(/<label for="([^"]+)"[^>]*>.*?<input[^>]*id="\1"[^>]*type="checkbox".*?I understand this video is for education only\. It is not medical advice, and I will ask my doctor about anything I am unsure of\.<\/span><\/label>/);
+    expect(html.match(/<h1/g)).toHaveLength(1);
+    expect(html.match(/<h[2-6]/g)).toBeNull();
+    expect(html).toContain("<main");
+  });
+});
+
+describe("Save or share this link (decided on 2026-11-16)", () => {
+  it("is on a working link's page, under the video's length and the deadline line, 48px tall, with its words as its label", async () => {
+    const clinic = await makeClinic({});
+    const html = await render(await makeShare(clinic.id, videoId));
+    expect(html).toMatch(/<button type="button" data-share-link="" class="[^"]*min-h-12[^"]*">.*?Save or share this link<\/button>/);
+    // Below the player and below "About 2 minutes" and the deadline line, so it never pushes the video down.
+    expect(html.indexOf("Save or share this link")).toBeGreaterThan(html.indexOf("About 2 minutes"));
+    expect(html.indexOf("This link works until")).toBeGreaterThan(0);
+    expect(html.indexOf("Save or share this link")).toBeGreaterThan(html.indexOf("This link works until"));
+    expect(html.indexOf("Save or share this link")).toBeGreaterThan(html.indexOf("<video"));
+    // No box to type into came with it: the page's only input is still the tick box.
+    expect(html.match(/<input/g)).toHaveLength(1);
+    expect(html).not.toContain("<form");
+  });
+
+  it("is not on a paused, finished (expired), taken-down or not-found page", async () => {
+    const clinic = await makeClinic({ phone: "8015550123" });
+    const DAY = 86_400_000;
+    const paused = await prisma.share.create({
+      data: {
+        code: code(),
+        clinicId: clinic.id,
+        videoId,
+        expiryPolicy: "FIRST_PLAY",
+        firstPlayedAt: new Date(Date.now() - 20 * DAY),
+        daysAfterFirstPlay: 10,
+        expiresAt: new Date(Date.now() - 10 * DAY),
+        viewCount: 1,
+      },
+      select: { code: true },
+    });
+    const pages = [
+      await render(paused.code),
+      await render(await makeShare(clinic.id, videoId, true)),
+      await render(await makeShare(clinic.id, unpublishedVideoId)),
+      await render(code()),
+    ];
+    expect(pages[0]).toContain("This link has paused");
+    for (const html of pages) expect(html).not.toContain("Save or share this link");
   });
 });

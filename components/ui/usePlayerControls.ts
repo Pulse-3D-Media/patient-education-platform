@@ -2,7 +2,7 @@
 
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { flipMuted, playOrPause, seekVideo, toggleFullscreen } from "./player-element";
-import { HIDE_AFTER_MS, SKIP_SECONDS, pictureTapAction } from "./player-rules";
+import { HIDE_AFTER_MS, SKIP_SECONDS, keyFirstPressWhileHidden, pictureTapAction } from "./player-rules";
 
 /**
  * The machinery behind both players' controls (the patient's, WatchPlayer,
@@ -19,7 +19,19 @@ import { HIDE_AFTER_MS, SKIP_SECONDS, pictureTapAction } from "./player-rules";
  * started. While it plays they fade away HIDE_AFTER_MS after the last touch
  * or mouse movement, and at once when the mouse leaves the player; any touch
  * or movement brings them back (Vimeo's behaviour, agreed at the 2026-10-15
- * huddle).
+ * huddle). The keyboard is treated the same way (Evan, 2026-11-17: "make the
+ * controls fade while it plays"): any key press, or the keyboard's focus
+ * moving onto the player or one of its buttons, brings them back and starts
+ * the count again. A button holding the keyboard's focus never fades with
+ * them: its row stays drawn, ring and all (Evan, 2026-11-18: "keep outline
+ * for accessabilty"; KEEP_FOCUSED_GROUP in PlayerOverlay), and a key pressed
+ * on it acts at once. When the focus is on the player itself and the
+ * controls have faded, the first key press only brings them back, as the
+ * first tap on a faded picture does on a phone; the next press acts
+ * (keyFirstPressWhileHidden in player-rules.ts). They never fade while
+ * the video is paused, finished, waiting for data, or has failed. Fading is
+ * only drawn: the buttons stay in the page for a screen reader, which presses
+ * them without a key, so its presses act at once, as before.
  *
  * FULL SCREEN puts `box` (the whole player, the clinic's mark and our
  * controls with it) full screen wherever the browser can do that for part
@@ -50,20 +62,41 @@ export function usePlayerControls({
   const [visible, setVisible] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const hideTimer = useRef<number | undefined>(undefined);
+  /** The video is out of data and waiting for more (just after Play, or buffering): the controls stay up until frames show. */
+  const waiting = useRef(false);
+  /** The video could not be played: the controls stay up (the player shows its own calm panel). */
+  const broken = useRef(false);
+  /**
+   * The key whose first press only brought faded controls back. Its key-up is cancelled too: Space presses a button
+   * when it is let go, and cancelling the key-down alone may not stop that in every browser.
+   */
+  const swallowedKey = useRef<string | null>(null);
+
+  /** May the controls fade right now? Only while the video is actually playing. */
+  const mayFade = () => Boolean(video.current && !video.current.paused && !video.current.ended && !waiting.current && !broken.current);
 
   /** Show the controls, then hide them again after a pause if the video is still playing. */
   const reveal = () => {
     setVisible(true);
     window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
-      if (video.current && !video.current.paused) setVisible(false);
+      if (mayFade()) setVisible(false);
     }, HIDE_AFTER_MS);
   };
 
   /** Hide the controls now, if the video is playing (a paused video keeps them up). */
   const hide = () => {
     window.clearTimeout(hideTimer.current);
-    if (video.current && !video.current.paused) setVisible(false);
+    if (mayFade()) setVisible(false);
+  };
+
+  /**
+   * The keyboard's focus came onto the player or one of its buttons (React's onFocus hears it from anything inside):
+   * bring the controls back and start the count again. Only focus the browser would draw a ring for (the keyboard, or
+   * a screen reader moving the focus); a finger's tap is already handled as a tap.
+   */
+  const onFocusIn = (event: React.FocusEvent) => {
+    if (isKeyboardFocus(event.target)) reveal();
   };
 
   /** The video started playing: the controls show, then fade (an effect event, so the listeners below need not be added again on every draw). */
@@ -78,12 +111,34 @@ export function usePlayerControls({
       setFinished(false);
       onStartedPlaying();
     };
-    const onPause = () => {
-      setPlaying(false);
+    /** Keep the controls up from now (paused, finished, waiting, failed): no fade is counting down. */
+    const holdUp = () => {
       window.clearTimeout(hideTimer.current);
       setVisible(true);
     };
-    const onEnded = () => setFinished(true);
+    const onPause = () => {
+      setPlaying(false);
+      holdUp();
+    };
+    const onEnded = () => {
+      setFinished(true);
+      holdUp();
+    };
+    const onWaiting = () => {
+      waiting.current = true;
+      holdUp();
+    };
+    // Frames are showing again: fade as usual from now.
+    const onFramesBack = () => {
+      const wasHeldUp = waiting.current || broken.current;
+      waiting.current = false;
+      broken.current = false;
+      if (wasHeldUp) onStartedPlaying();
+    };
+    const onError = () => {
+      broken.current = true;
+      holdUp();
+    };
     const onTime = () => setTime(v.currentTime);
     const onLength = () => {
       if (Number.isFinite(v.duration) && v.duration > 0) setDuration(v.duration);
@@ -92,6 +147,9 @@ export function usePlayerControls({
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
     v.addEventListener("ended", onEnded);
+    v.addEventListener("waiting", onWaiting);
+    v.addEventListener("playing", onFramesBack);
+    v.addEventListener("error", onError);
     v.addEventListener("timeupdate", onTime);
     v.addEventListener("loadedmetadata", onLength);
     v.addEventListener("durationchange", onLength);
@@ -103,6 +161,9 @@ export function usePlayerControls({
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
       v.removeEventListener("ended", onEnded);
+      v.removeEventListener("waiting", onWaiting);
+      v.removeEventListener("playing", onFramesBack);
+      v.removeEventListener("error", onError);
       v.removeEventListener("timeupdate", onTime);
       v.removeEventListener("loadedmetadata", onLength);
       v.removeEventListener("durationchange", onLength);
@@ -163,18 +224,52 @@ export function usePlayerControls({
     else reveal();
   };
 
-  /** Keys on the focused player: space or K plays and pauses, the arrows move ten seconds, M mutes, F is full screen. */
+  /**
+   * Keys on the focused player: space or K plays and pauses, the arrows move ten seconds, M mutes, F is full screen.
+   * Any key brings the controls back and starts the count again. If they had faded, that first press does nothing else
+   * (it is not passed on to the focused button either), as the first tap on a faded picture only shows them; Tab and
+   * the like still move as usual.
+   */
   const onKey = (event: React.KeyboardEvent) => {
+    const hidden = playing && !visible;
+    reveal();
+    // A button (or the progress bar) with the keyboard's focus stays in sight while the rest fades, so a press on it acts.
+    const onFocusedControl = event.target !== event.currentTarget && isKeyboardFocus(event.target);
+    if (hidden && keyFirstPressWhileHidden(event.key, event, onFocusedControl) === "show-only") {
+      event.preventDefault();
+      swallowedKey.current = event.key;
+      return;
+    }
+    // A key held down repeats its key-down: the repeats of that first press do nothing either, until it is let go.
+    if (swallowedKey.current === event.key && event.repeat) {
+      event.preventDefault();
+      return;
+    }
+    swallowedKey.current = null;
+    // With Ctrl, Cmd or Alt held the key belongs to the browser or the screen reader (Alt+Left is back, Ctrl+F is
+    // find): the player never acts on it and never cancels it, faded or not.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (!enabled) return;
     if (event.key === " " || event.key === "k") {
       // Space on a focused button already presses that button; only act when the player itself has the focus.
       if (event.key === " " && event.target !== event.currentTarget) return;
       event.preventDefault();
       togglePlay();
-    } else if (event.key === "ArrowRight") seekBy(SKIP_SECONDS);
-    else if (event.key === "ArrowLeft") seekBy(-SKIP_SECONDS);
+    } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      // Ten seconds, from the player or from the progress bar alike (the bar's own step is a tenth of a second, and
+      // without this the page would also scroll sideways).
+      event.preventDefault();
+      seekBy(event.key === "ArrowRight" ? SKIP_SECONDS : -SKIP_SECONDS);
+    }
     else if (event.key === "m") toggleMute();
     else if (event.key === "f") fullscreenOnOff();
+  };
+
+  /** The key-up of a press that only brought the controls back: cancel it too, so a button is not pressed by it. */
+  const onKeyUp = (event: React.KeyboardEvent) => {
+    if (swallowedKey.current !== event.key) return;
+    swallowedKey.current = null;
+    event.preventDefault();
   };
 
   return {
@@ -188,6 +283,8 @@ export function usePlayerControls({
     showing: visible || !playing,
     reveal,
     hide,
+    /** For the player's outer box: onFocus. */
+    onFocusIn,
     togglePlay,
     seekBy,
     seekTo,
@@ -195,7 +292,18 @@ export function usePlayerControls({
     toggleFullscreen: fullscreenOnOff,
     onPictureTap,
     onKey,
+    /** For the player's outer box: onKeyUp. */
+    onKeyUp,
   };
 }
 
 export type PlayerControls = ReturnType<typeof usePlayerControls>;
+
+/** The browser would draw a focus ring here (:focus-visible). A browser too old to know the question answers no. */
+function isKeyboardFocus(target: EventTarget | null): boolean {
+  try {
+    return target instanceof Element && target.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}

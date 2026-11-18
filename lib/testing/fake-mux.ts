@@ -1,4 +1,4 @@
-import type { AssetFacts, MuxUploadGateway, UploadFacts } from "../mux";
+import { CAPTION_LANGUAGE, CAPTION_TRACK_NAME, type AssetFacts, type MuxUploadGateway, type UploadFacts } from "../mux";
 
 /**
  * An in-memory stand-in for the parts of Mux an upload uses, for the tests.
@@ -21,7 +21,17 @@ import type { AssetFacts, MuxUploadGateway, UploadFacts } from "../mux";
  * call fail, for "Mux is down".
  */
 
-type FakeUpload = { id: string; url: string; status: UploadFacts["status"]; assetId: string | null; corsOrigin: string; title: string; externalId: string };
+type FakeUpload = {
+  id: string;
+  url: string;
+  status: UploadFacts["status"];
+  assetId: string | null;
+  corsOrigin: string;
+  title: string;
+  externalId: string;
+  /** What the upload asked Mux to caption, as the real gateway asks: English, from the narration (lib/mux.ts). */
+  captions: { languageCode: string; name: string }[];
+};
 type FakeAsset = AssetFacts;
 
 let serial = 0;
@@ -31,6 +41,7 @@ export function fakeMux(tag: string) {
   const uploads = new Map<string, FakeUpload>();
   const assets = new Map<string, FakeAsset>();
   let failure: Error | null = null;
+  let generateCalls = 0;
 
   function maybeFail() {
     if (failure) {
@@ -44,7 +55,16 @@ export function fakeMux(tag: string) {
     async createUpload({ corsOrigin, title, externalId }) {
       maybeFail();
       const id = next("Upload");
-      const upload: FakeUpload = { id, url: `https://uploads.fake-mux.test/${id}`, status: "waiting", assetId: null, corsOrigin, title, externalId };
+      const upload: FakeUpload = {
+        id,
+        url: `https://uploads.fake-mux.test/${id}`,
+        status: "waiting",
+        assetId: null,
+        corsOrigin,
+        title,
+        externalId,
+        captions: [{ languageCode: CAPTION_LANGUAGE, name: CAPTION_TRACK_NAME }],
+      };
       uploads.set(id, upload);
       return { id, url: upload.url };
     },
@@ -56,7 +76,7 @@ export function fakeMux(tag: string) {
     async getAsset(assetId) {
       maybeFail();
       const asset = assets.get(assetId);
-      return asset ? { ...asset, playbackIds: asset.playbackIds.map((entry) => ({ ...entry })) } : null;
+      return asset ? { ...asset, playbackIds: asset.playbackIds.map((entry) => ({ ...entry })), captionTracks: asset.captionTracks.map((entry) => ({ ...entry })) } : null;
     },
     async cancelUpload(uploadId) {
       maybeFail();
@@ -64,6 +84,13 @@ export function fakeMux(tag: string) {
       if (!upload) throw Object.assign(new Error("Mux answered 404."), { name: "MuxApiError", status: 404 });
       if (upload.status !== "waiting") throw Object.assign(new Error("Mux answered 400."), { name: "MuxApiError", status: 400 });
       upload.status = "cancelled";
+    },
+    async generateCaptions(assetId, audioTrackId) {
+      maybeFail();
+      generateCalls += 1;
+      const asset = assets.get(assetId);
+      if (!asset || asset.audioTrackId !== audioTrackId) throw Object.assign(new Error("Mux answered 404."), { name: "MuxApiError", status: 404 });
+      asset.captionTracks.push({ id: next("Text"), status: "preparing", languageCode: CAPTION_LANGUAGE, name: CAPTION_TRACK_NAME, generated: true });
     },
   };
 
@@ -81,7 +108,7 @@ export function fakeMux(tag: string) {
     fileArrives(uploadId: string) {
       const upload = must(uploadId);
       const assetId = next("Asset");
-      assets.set(assetId, { id: assetId, status: "preparing", playbackIds: [], durationSeconds: null, uploadId });
+      assets.set(assetId, { id: assetId, status: "preparing", playbackIds: [], durationSeconds: null, uploadId, audioTrackId: null, captionTracks: [] });
       upload.status = "asset_created";
       upload.assetId = assetId;
       return assetId;
@@ -95,8 +122,38 @@ export function fakeMux(tag: string) {
       asset.status = "ready";
       asset.playbackIds = [{ id: playbackId, policy: options.policy ?? "signed" }];
       asset.durationSeconds = options.durationSeconds ?? 125;
+      asset.audioTrackId = next("Audio");
+      // As Mux does for an upload that asked for them: the captions start being made once the video is ready.
+      for (const caption of upload.captions) {
+        asset.captionTracks.push({ id: next("Text"), status: "preparing", languageCode: caption.languageCode, name: caption.name, generated: true });
+      }
       return { assetId, playbackId };
     },
+    /**
+     * An asset made somewhere else (the Mux dashboard, before captions were
+     * asked for): ready, with a sound track (unless `silent`) and no captions.
+     */
+    existingAsset(options: { silent?: boolean; status?: AssetFacts["status"] } = {}) {
+      const assetId = next("Asset");
+      assets.set(assetId, {
+        id: assetId,
+        status: options.status ?? "ready",
+        playbackIds: [{ id: next("Play"), policy: "signed" }],
+        durationSeconds: 125,
+        uploadId: null,
+        audioTrackId: options.silent ? null : next("Audio"),
+        captionTracks: [],
+      });
+      return assetId;
+    },
+    /** Mux has finished (or failed) every caption track it was making on this asset. */
+    captionsFinish(assetId: string, status: "ready" | "errored" = "ready") {
+      for (const track of assets.get(assetId)?.captionTracks ?? []) if (track.status === "preparing") track.status = status;
+    },
+    /** The caption tracks on an asset now. */
+    captionTracks: (assetId: string) => (assets.get(assetId)?.captionTracks ?? []).map((track) => ({ ...track })),
+    /** How many times Mux was asked to make captions for an existing asset. */
+    generateCalls: () => generateCalls,
     /** Mux could not prepare the file. */
     assetFails(uploadId: string) {
       const upload = must(uploadId);

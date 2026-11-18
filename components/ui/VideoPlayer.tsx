@@ -6,7 +6,7 @@ import { pictureRatio } from "./ClinicMark";
 import { PlayIcon } from "./icons";
 import { jumpVideo } from "./player-element";
 import { PlayerOverlay } from "./PlayerOverlay";
-import { PRIMARY_BUTTON } from "./styles";
+import { PLAYER_BOX_FOCUS, PRIMARY_BUTTON } from "./styles";
 import { usePlayerControls } from "./usePlayerControls";
 import { SLOW_AFTER_MS, resumePoint } from "@/lib/playback";
 import type { PlaybackSource } from "@/lib/playback-source";
@@ -139,7 +139,7 @@ export function VideoPlayer({
 
   const controls = usePlayerControls({ video: vid, box, enabled: !stopped, onPlayFailure: () => fail() });
 
-  const { reload } = useVideoSource(vid, source, {
+  const { reload, captions } = useVideoSource(vid, source, {
     onFailure: () => fail(),
     refresh,
     onEnded: () => {
@@ -191,9 +191,12 @@ export function VideoPlayer({
       role="group"
       aria-label={`${title}, video player`}
       onKeyDown={controls.onKey}
+      onKeyUp={controls.onKeyUp}
       onMouseMove={started ? controls.reveal : undefined}
       onMouseLeave={controls.hide}
-      className="flex h-full min-h-0 w-full flex-1 select-none flex-col bg-black outline-none"
+      // The keyboard's focus arriving on the player or one of its buttons brings the controls back (usePlayerControls).
+      onFocus={controls.onFocusIn}
+      className={`relative flex h-full min-h-0 w-full flex-1 select-none flex-col bg-black outline-none ${PLAYER_BOX_FOCUS}`}
     >
       {/* The video's box. "picture-area" lets the overlay find the picture inside it (app/globals.css); its size always
           comes from the screen, never from what is in it, which that needs. */}
@@ -248,6 +251,7 @@ export function VideoPlayer({
           senderName={senderName}
           placeholder={placeholder}
           chapters={chapters}
+          captions={captions}
           // Before the first play only the clinic's mark is drawn; the big Play button below is the one thing to press.
           showControls={started && !stopped}
           slow={slow && !stopped}
@@ -261,7 +265,7 @@ export function VideoPlayer({
             type="button"
             onClick={controls.togglePlay}
             aria-label={`Play ${title}`}
-            className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-white"
+            className="group absolute inset-0 z-20 flex items-center justify-center focus-visible:outline-solid focus-visible:outline-[3px] focus-visible:outline-offset-[-4px] focus-visible:outline-white focus-visible:shadow-[inset_0_0_0_7px_#12202a]"
           >
             <span
               data-play-circle=""

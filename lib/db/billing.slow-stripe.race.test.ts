@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SubscriptionSnapshot } from "../billing-state";
 import { DEFAULT_PRICING_CONFIG } from "../pricing";
-import { reconcileSubscription, recordAcceptedPlan, setStripeCustomer, withPlanChangeLock, type AcceptedPlanInput } from "./billing";
+import { PlanChangeOverrunError, reconcileSubscription, recordAcceptedPlan, setStripeCustomer, withPlanChangeLock, type AcceptedPlanInput } from "./billing";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
 import { createPricingVersion } from "./pricing";
@@ -212,7 +212,7 @@ describe("two looks at Stripe for one clinic", () => {
     const second = reconcileSubscription({
       clinicId: f.clinicId,
       subscriptionId: f.subscriptionId,
-      fetchSubscription: async (id) => {
+      fetchSubscription: async () => {
         secondAsked = true;
         return fastNew();
       },
@@ -251,5 +251,28 @@ describe("two looks at Stripe for one clinic", () => {
     const billing = await prisma.clinicBilling.findUniqueOrThrow({ where: { clinicId: f.clinicId }, select: { cancelAt: true, stripeSubscriptionId: true } });
     // The first, stale answer (a cancellation on 1 December) was never written.
     expect(billing.cancelAt?.toISOString()).not.toBe("2026-12-01T00:00:00.000Z");
+  });
+});
+
+describe("a plan change that overruns its lock (audit finding E7)", () => {
+  it("stops before its next Stripe write instead of carrying on, and one inside the time carries on", async () => {
+    const f = await makePayingClinic();
+    let wrote = false;
+    const late = withPlanChangeLock(
+      f.clinicId,
+      async (ensureHeld) => {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        ensureHeld();
+        wrote = true;
+      },
+      { writeCutoffMs: 50 },
+    );
+    await expect(late).rejects.toBeInstanceOf(PlanChangeOverrunError);
+    expect(wrote).toBe(false);
+
+    await expect(withPlanChangeLock(f.clinicId, async (ensureHeld) => {
+        ensureHeld();
+        return "wrote";
+      })).resolves.toBe("wrote");
   });
 });

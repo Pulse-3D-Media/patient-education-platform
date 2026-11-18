@@ -60,8 +60,9 @@ import { STRIPE_INVOICE_PREFIX, STRIPE_PORTAL_PREFIX, type FetchSubscription, ty
  *   ends, and a scheduled change grants nothing until its date.
  *
  *   ONE CHANGE AT A TIME. The Stripe calls for one clinic run under the
- *   clinic's row lock (withPlanChangeLock), and begin by asking Stripe where
- *   the subscription stands. A second request finds what the first one did
+ *   clinic's plan change lock (withPlanChangeLock, a named lock only other
+ *   plan changes wait for, so links are never held up by Stripe), and begin
+ *   by asking Stripe where the subscription stands. A second request finds what the first one did
  *   and is told so, instead of changing the plan a second time.
  *
  * The clinic id is always the signed-in office admin's own clinic, found
@@ -344,7 +345,8 @@ export async function confirmPlanChange(args: {
   const priceId = await gateway.ensurePrice({ planId, perSeatCents: input.perSeatCents, interval: input.interval });
 
   type Step = { kind: "refused"; message: string } | { kind: "already" } | { kind: "upgraded"; applied: boolean } | { kind: "scheduled"; at: Date };
-  const step = await withPlanChangeLock<Step>(clinicId, async () => {
+  // ensureHeld() before each Stripe write: a change that has overrun its lock stops (withPlanChangeLock).
+  const step = await withPlanChangeLock<Step>(clinicId, async (ensureHeld = () => {}) => {
     let state = await gateway.getState(subscriptionId);
     if (await alreadyThere(state)) return { kind: "already" };
     const problem = stateProblem(state, basePlanId, customerId);
@@ -354,12 +356,14 @@ export async function confirmPlanChange(args: {
     // rest of that period, with nothing left to do. Let it go first, so it is
     // not in the way (the subscription itself is untouched by that).
     if (state.schedule && !state.schedule.next) {
+      ensureHeld();
       await gateway.releaseSchedule(state.schedule.id);
       state = { ...state, schedule: null };
     }
 
     if (change.timing === "now") {
       if (state.schedule?.next) return { kind: "refused", message: "A change is already scheduled for your next renewal. Cancel that one first, then make this one." };
+      ensureHeld();
       const done = await gateway.applyUpgrade({ state, planId, priceId, seats: input.surgeonSeats, at: seen.at as Date });
       return { kind: "upgraded", applied: done.applied };
     }
@@ -367,6 +371,7 @@ export async function confirmPlanChange(args: {
     // The same change is already scheduled (a double click): nothing more to do.
     const waiting = state.schedule?.next?.planId ? await getPlanShape(clinicId, state.schedule.next.planId) : null;
     if (waiting && samePlanShape(waiting, input)) return { kind: "already" };
+    ensureHeld();
     const done = await gateway.scheduleChange({ state, planId, priceId, seats: input.surgeonSeats, interval: input.interval });
     return { kind: "scheduled", at: done.at };
   });
@@ -414,16 +419,18 @@ export async function cancelWaitingChange(args: { clinicId: string; which: "sche
   const { stripeSubscriptionId: subscriptionId, stripeCustomerId: customerId } = clinic.facts;
   if (!subscriptionId || !customerId) return { ok: false, message: "Your clinic has no subscription, so there is nothing to cancel." };
 
-  const cancelled = await withPlanChangeLock(clinicId, async () => {
+  const cancelled = await withPlanChangeLock(clinicId, async (ensureHeld = () => {}) => {
     const state = await gateway.getState(subscriptionId);
     if (!state || state.customerId !== customerId) return false;
     if (which === "scheduled") {
       if (!state.schedule?.next) return false;
+      ensureHeld();
       await gateway.releaseSchedule(state.schedule.id);
       return true;
     }
     // Voiding the unpaid invoice is how Stripe drops an upgrade it was holding back.
     if (!state.pending || !state.openInvoice) return false;
+    ensureHeld();
     await gateway.voidInvoice(state.openInvoice.id);
     return true;
   });

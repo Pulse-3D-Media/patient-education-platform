@@ -452,8 +452,25 @@ export async function acceptPlanForChange(
 /** What an admin is told when the plan was changed by someone else between drawing the page and pressing the button. */
 export const PLAN_MOVED_MESSAGE = "Your plan changed a moment ago. Reload this page and check it before changing anything.";
 
-/** Longer than TX_OPTIONS: a plan change asks Stripe two or three things while the lock is held, each bounded at eight seconds. */
-const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+/** Longer than TX_OPTIONS: a plan change asks Stripe two or three things while the lock is held, each bounded at eight seconds (one retry). */
+const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 45_000 } as const;
+
+/**
+ * After this long holding the plan change lock, no NEW Stripe write is
+ * started (audit finding E7). The gap to the 45-second hold is longer than
+ * one Stripe call can take (eight seconds, once retried), so a write that is
+ * started always finishes while the lock is still held: a second plan change
+ * can never get in while the first is still changing Stripe.
+ */
+export const PLAN_CHANGE_WRITE_CUTOFF_MS = 25_000;
+
+/** Thrown when a plan change ran so long that it stopped rather than start another Stripe write. Nothing more was asked of Stripe. */
+export class PlanChangeOverrunError extends Error {
+  constructor() {
+    super("Billing: a plan change took too long, so it stopped before asking Stripe to change anything more.");
+    this.name = "PlanChangeOverrunError";
+  }
+}
 
 /**
  * Run one clinic's plan change while holding the clinic's row lock, so two
@@ -466,14 +483,25 @@ const CHANGE_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
  * because the change is applied from what Stripe says (reconcileSubscription),
  * by the caller straight afterwards and by Stripe's own notification.
  */
-export async function withPlanChangeLock<T>(clinicId: string, work: () => Promise<T>): Promise<T> {
+export async function withPlanChangeLock<T>(
+  clinicId: string,
+  work: (ensureHeld: () => void) => Promise<T>,
+  options: { writeCutoffMs?: number } = {},
+): Promise<T> {
   // A named lock only other plan changes at this clinic wait for (lib/db/billing-locks.ts), so a
   // slow Stripe here never holds up a link, a seat or a staff change (audit finding E1).
   return prisma.$transaction(async (tx) => {
     const clinic = await tx.clinic.findUnique({ where: { id: clinicId }, select: { id: true } });
     if (!clinic) throw new BillingRefusedError("That clinic no longer exists.");
     await takeNamedBillingLock(tx, PLAN_CHANGE_LOCK, clinicId);
-    return work();
+    // `work` calls ensureHeld() before each Stripe write: past the cutoff it throws instead, so a change
+    // that overruns is stopped rather than carrying on after its lock has been let go.
+    const heldSince = Date.now();
+    const cutoff = options.writeCutoffMs ?? PLAN_CHANGE_WRITE_CUTOFF_MS;
+    const ensureHeld = () => {
+      if (Date.now() - heldSince > cutoff) throw new PlanChangeOverrunError();
+    };
+    return work(ensureHeld);
   }, CHANGE_TX_OPTIONS);
 }
 

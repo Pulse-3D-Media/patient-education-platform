@@ -131,7 +131,7 @@ describe("making a printed code", () => {
     const again = await createQrCodeAction(video, surgeonA);
     expect(again).toEqual({ ok: true, id: (first as { id: string }).id, created: false });
     const row = await prisma.qrCode.findUniqueOrThrow({ where: { id: (first as { id: string }).id } });
-    expect(row).toMatchObject({ clinicId: clinicA, senderUserId: surgeonA, senderFallbackName: "Dr. Jane Smith" });
+    expect(row).toMatchObject({ clinicId: clinicA, senderUserId: surgeonA, senderFallbackName: "Jane Smith" });
   });
 });
 

@@ -63,7 +63,7 @@ describe("listSenders: the doctor dropdown", () => {
 
     const senders = await listSenders(clinicId);
     expect(senders.map((sender) => sender.userId).sort()).toEqual([jane, pat, nameless].sort());
-    expect(senders.find((sender) => sender.userId === jane)).toEqual({ userId: jane, name: "Jane Smith", patientName: "Dr. Jane Smith" });
+    expect(senders.find((sender) => sender.userId === jane)).toEqual({ userId: jane, name: "Jane Smith", patientName: "Jane Smith" });
     expect(senders.find((sender) => sender.userId === pat)?.patientName).toBe("Pat Lee, PA-C");
     // No name in Clerk: the office sees their email to tell who it is, but patients would see no name, never the email.
     expect(senders.find((sender) => sender.userId === nameless)).toEqual({ userId: nameless, name: "nameless@example.test", patientName: null });
@@ -97,7 +97,7 @@ describe("resolveSender: the server's check of a choice", () => {
   it("accepts someone in this clinic, with the name from Clerk as the fallback", async () => {
     const jane = user("jane");
     const { clinicId } = await makeClinic([{ userId: jane, firstName: "Jane", lastName: "Smith" }], [{ userId: jane }]);
-    expect(await resolveSender(clinicId, jane)).toEqual({ ok: true, sender: { clerkUserId: jane, fallbackName: "Dr. Jane Smith" } });
+    expect(await resolveSender(clinicId, jane)).toEqual({ ok: true, sender: { clerkUserId: jane, fallbackName: "Jane Smith" } });
   });
 
   it("refuses nobody, junk, and someone from another clinic", async () => {

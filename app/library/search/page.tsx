@@ -13,6 +13,7 @@ import { VideoGrid } from "../[category]/VideoGrid";
 import { CategoryTabs } from "../CategoryTabs";
 import { toLibraryItems } from "../items";
 import { LibraryBrowser } from "../LibraryBrowser";
+import { seatHelpFor } from "../seat-help";
 
 /**
  * What the search box in the top bar finds: every video this clinic may
@@ -60,6 +61,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/library/s
             heartedIds={heartedIds}
             // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
             canSend={seat !== null}
+            seatHelp={await seatHelpFor(clinic, seat)}
           >
             <VideoGrid videos={items} />
           </LibraryBrowser>

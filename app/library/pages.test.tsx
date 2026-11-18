@@ -44,6 +44,7 @@ vi.mock("@clerk/nextjs", () => ({
 }));
 
 vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: () => {} }),
   usePathname: () => "/library",
   redirect: (to: string) => {
     throw new Error(`redirect:${to}`);
@@ -262,6 +263,11 @@ describe("the library home", () => {
     const html = renderToStaticMarkup(await LibraryPage());
 
     expect(html).toContain("Your clinic&#x27;s plan has no categories yet.");
+    // A member only reads the line; an office admin gets the way to Billing.
+    expect(html).not.toContain(">Go to Billing</a>");
+    signInAs(orgNone, "Vitest library clinic (no categories)", "admin");
+    expect(renderToStaticMarkup(await LibraryPage())).toContain('href="/admin/billing"');
+    signInAs(orgNone, "Vitest library clinic (no categories)");
     // Hip has a published video, so it is listed, and the section starts open.
     expect(html).toMatch(/<details[^>]*\sopen/);
     expect(html).toContain(">Hip<");
@@ -361,6 +367,43 @@ describe("a category's own page", () => {
       expect(seated).not.toContain("needs a surgeon seat");
     } finally {
       await prisma.seatAllocation.deleteMany({ where: { clinicId: hipAllClinic } });
+    }
+  });
+
+  it("offers the account owner without a seat Take a seat when one is free, a link to People when none is, and a member the old line", async () => {
+    const before = await prisma.clinic.findUniqueOrThrow({ where: { id: hipAllClinic }, select: { ownerClerkUserId: true, surgeonSeats: true } });
+    try {
+      // The owner (an admin), one seat on the plan and nobody holding it.
+      await prisma.clinic.update({ where: { id: hipAllClinic }, data: { ownerClerkUserId: "user_vitest", surgeonSeats: 1 } });
+      signInAs(orgHipAll, "Vitest library clinic (hip)", "admin");
+      const free = await renderCategory("hip");
+      expect(free).toContain(">Take a seat</button>");
+      expect(free).toContain("your clinic has one free");
+      expect(free).not.toContain("ask your clinic&#x27;s office admin");
+
+      // Every seat taken by someone else: they are the admin, so the way is People, not "ask your admin".
+      await prisma.seatAllocation.create({ data: { clinicId: hipAllClinic, clerkUserId: "user_vitestsomeoneelse", syncState: "SYNCED" } });
+      const full = await renderCategory("hip");
+      expect(full).not.toContain("Take a seat</button>");
+      expect(full).toContain('href="/admin/people"');
+      expect(full).toContain("Seats are given on the People page");
+
+      // An admin who is not the owner, with a seat free, gets People too: only the owner takes a seat in one tap here.
+      await prisma.seatAllocation.deleteMany({ where: { clinicId: hipAllClinic } });
+      await prisma.clinic.update({ where: { id: hipAllClinic }, data: { ownerClerkUserId: "user_vitestowner" } });
+      const admin = await renderCategory("hip");
+      expect(admin).not.toContain("Take a seat</button>");
+      expect(admin).toContain("Seats are given on the People page");
+
+      // A member is told to ask, as before.
+      signInAs(orgHipAll, "Vitest library clinic (hip)");
+      const member = await renderCategory("hip");
+      expect(member).toContain("ask your clinic&#x27;s office admin");
+      expect(member).not.toContain("Take a seat</button>");
+      expect(member).not.toContain('href="/admin/people"');
+    } finally {
+      await prisma.seatAllocation.deleteMany({ where: { clinicId: hipAllClinic } });
+      await prisma.clinic.update({ where: { id: hipAllClinic }, data: before });
     }
   });
 

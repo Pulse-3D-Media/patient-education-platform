@@ -81,7 +81,7 @@ export class SenderRefusedError extends Error {
 /**
  * Who a new link is from. `clerkUserId` is the surgeon; `fallbackName` is
  * the name to show when no name has been typed for them on /admin/people
- * ("Dr. First Last" from Clerk, or null). Worked out on the server
+ * ("First Last" from Clerk, or null). Worked out on the server
  * (lib/senders.ts), never taken from the browser as it stands.
  */
 export type ShareSender = { clerkUserId: string; fallbackName: string | null };
@@ -336,7 +336,7 @@ export type QrIssueOutcome = { ok: true; code: string } | { ok: false; reason: Q
  *
  * WHO IT IS FROM. The surgeon on the printed code, while they hold a seat at
  * this clinic (read with a share lock, lockSenderSeat), with the name chosen
- * for them on /admin/people or, if none, the "Dr. First Last" recorded when
+ * for them on /admin/people or, if none, the "First Last" from Clerk recorded when
  * the code was made. When they hold no seat here any more (let go, or left),
  * the link is from the clinic only: no surgeon's id, no name (decided by Evan
  * on 2026-10-08: the printed code keeps working, and /admin/links flags it).
@@ -489,11 +489,10 @@ export const SUMMARY_RECENT_DAYS = 30;
 export const SUMMARY_SOON_DAYS = 7;
 
 /**
- * The numbers on the admin overview. Every one is a count or a sum done in
- * the database, over the links that are on the list right now. Cancelling
- * a link deletes its row (deleteShareForClinic), so a cancelled link drops
- * out of every number here, its play starts included. None of these is a
- * lifetime total, and the overview says so beside them.
+ * The numbers on the admin overview. Every one is a count done in the
+ * database. None is about plays: clinics get no usage numbers (decided by
+ * Van on 2026-10-08, and the overview's play starts taken off by the
+ * user's decision of 2026-11-16).
  */
 export type ShareSummary = {
   /** Links that work right now: not expired, and their video is published. */
@@ -504,35 +503,26 @@ export type ShareSummary = {
   notWorking: number;
   /** Links made in the last SUMMARY_RECENT_DAYS days that are still on the list, whether or not they still work. */
   madeRecently: number;
-  /**
-   * Play starts across the links still on the list. A play start is counted
-   * once per page load, the first time the video actually starts playing on
-   * the patient page (recordSharePlay, called from the player): not a
-   * patient, not a completed watch, not every press of play.
-   */
-  playStarts: number;
 };
 
 /**
  * A handful of totals about one clinic's share links, for the admin
- * overview. Counts and a sum, all worked out in the database, so the
- * overview reads five numbers rather than the whole links table. Cancelled
- * links are gone from the table, so they are not in these numbers.
+ * overview. Counts, all worked out in the database, so the overview reads
+ * four numbers rather than the whole links table.
  */
 export async function summarizeSharesForClinic(clinicId: string): Promise<ShareSummary> {
   const now = new Date();
   const soon = addDays(now, SUMMARY_SOON_DAYS);
   const since = addDays(now, -SUMMARY_RECENT_DAYS);
 
-  const [working, expiringSoon, notWorking, madeRecently, views] = await Promise.all([
+  const [working, expiringSoon, notWorking, madeRecently] = await Promise.all([
     prisma.share.count({ where: { clinicId, expiresAt: { gt: now }, video: { isPublished: true } } }),
     prisma.share.count({ where: { clinicId, expiresAt: { gt: now, lte: soon }, video: { isPublished: true } } }),
     prisma.share.count({ where: { clinicId, expiresAt: { gt: now }, video: { isPublished: false } } }),
     prisma.share.count({ where: { clinicId, createdAt: { gte: since } } }),
-    prisma.share.aggregate({ where: { clinicId }, _sum: { viewCount: true } }),
   ]);
 
-  return { working, expiringSoon, notWorking, madeRecently, playStarts: views._sum.viewCount ?? 0 };
+  return { working, expiringSoon, notWorking, madeRecently };
 }
 
 /**

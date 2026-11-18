@@ -632,7 +632,7 @@ export async function setOwnerByStaff(args: { clinicId: string; toUserId: unknow
 export type SeatedPerson = Person & {
   seat: SeatState;
   isOwner: boolean;
-  /** For someone holding a seat: the name patients see on links they send (typed, else "Dr. First Last", else null). Null without a seat. */
+  /** For someone holding a seat: the name patients see on links they send (typed, else "First Last" from Clerk, else null). Null without a seat. */
   patientName: string | null;
   /** The name an admin typed for them, or null when they use the default. */
   typedPatientName: string | null;

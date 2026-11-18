@@ -970,3 +970,99 @@ async function applyDecision(
     return { kind: "processed", outcome: needsLook ? `${NEEDS_LOOK}${needsLook} ${outcome}` : outcome, logged: entries.length > 0 ? 1 : 0 };
   }
 }
+
+// ---------------------------------------------------------------------------
+// The staff reset, for a clinic whose subscription Stripe no longer has
+// ---------------------------------------------------------------------------
+
+/** What Stripe says about a clinic's recorded ids, for the reset. "live" refuses it. */
+export type StripeIdsCheck = "live" | "gone";
+
+/** What the reset tells the staff member when Stripe still knows a live subscription. */
+export const RESET_REFUSED_LIVE =
+  "Stripe still has a live subscription for this clinic, so nothing was reset. Cancel it in Stripe first if it should end, then try again.";
+
+/**
+ * Clear the Stripe ids on a clinic whose subscription Stripe says is gone
+ * (audit finding E3). Pulse staff only (the action calls requirePulseStaff()
+ * first); logged under the staff member's name.
+ *
+ * When it is needed: Stripe's test data was deleted, or the clinic paid in
+ * test mode and the app has moved to a different Stripe key. AT GO-LIVE THAT
+ * IS EVERY TEST-MODE CLINIC: a live key cannot see a single test-mode
+ * customer or subscription. Without the reset such a clinic is stuck, because
+ * a clinic's Stripe customer is set once and never replaced (setStripeCustomer).
+ *
+ *   1. The billing sync lock, so no look at Stripe for this clinic is half
+ *      way through (lib/db/billing-locks.ts). No row lock yet.
+ *   2. Stripe is asked (`checkStripe`, built from lib/stripe.ts by the
+ *      caller): is the recorded subscription, or any subscription on the
+ *      recorded customer, still alive? If so, nothing is done.
+ *   3. The clinic's row lock, and the ids checked to be the very ones Stripe
+ *      was asked about. Then, in one transaction: the ids, the waiting and
+ *      scheduled plans and the dates are cleared, the status becomes CANCELED
+ *      for a clinic that was ever paid for and NONE otherwise, access follows
+ *      the state table, and one log entry is written. The plan in force stays
+ *      as history; the plans themselves are never edited.
+ *
+ * Nothing in Stripe is changed by this, and nothing is charged or refunded.
+ * The clinic's admin then starts again with the plan picker, which makes a
+ * new Stripe customer.
+ */
+export async function resetVanishedStripeRecord(
+  clinicId: string,
+  args: { staffName: string; checkStripe: (ids: { customerId: string | null; subscriptionId: string | null }) => Promise<StripeIdsCheck> },
+): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  return prisma.$transaction(async (tx) => {
+    await takeNamedBillingLock(tx, BILLING_SYNC_LOCK, clinicId);
+    const before = await readBillingFacts(tx, clinicId);
+    if (!before.stripeCustomerId && !before.stripeSubscriptionId) return { ok: false, message: "This clinic has no Stripe ids on record, so there is nothing to reset." };
+
+    const verdict = await args.checkStripe({ customerId: before.stripeCustomerId, subscriptionId: before.stripeSubscriptionId });
+    if (verdict !== "gone") return { ok: false, message: RESET_REFUSED_LIVE };
+
+    const clinic = await readClinicLocked(tx, clinicId, { id: true, status: true, graceEndsAt: true, staffAccess: true, managedByPulse: true });
+    if (!clinic) return { ok: false, message: "That clinic no longer exists." };
+    const current = await readBillingFacts(tx, clinicId);
+    if (current.stripeCustomerId !== before.stripeCustomerId || current.stripeSubscriptionId !== before.stripeSubscriptionId) {
+      return { ok: false, message: "The clinic's billing changed a moment ago. Reload the page and look again." };
+    }
+
+    const everPaid = current.status === "ACTIVE" || current.status === "PAST_DUE" || current.status === "CANCELED" || current.currentPlanId !== null;
+    const status = everPaid ? "CANCELED" : "NONE";
+    await tx.clinicBilling.update({
+      where: { clinicId },
+      data: {
+        status,
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        pendingPlanId: null,
+        currentPeriodEnd: null,
+        cancelAt: null,
+        paymentFailedAt: null,
+        graceEndsAt: null,
+        scheduledPlanId: null,
+        scheduledChangeAt: null,
+      },
+      select: { clinicId: true },
+    });
+
+    const access = effectiveAccess({ staffAccess: clinic.staffAccess, managedByPulse: clinic.managedByPulse, billingStatus: status, billingGraceEndsAt: null });
+    const words = [
+      `Billing reset by ${args.staffName}: Stripe no longer has this clinic's subscription or customer, so the Stripe ids on record were cleared.`,
+      "The clinic starts again with the plan picker. Nothing in Stripe was changed and nothing was charged or refunded.",
+    ];
+    const clinicData: Prisma.ClinicUncheckedUpdateInput = {};
+    if (access.status !== clinic.status) {
+      clinicData.status = access.status;
+      clinicData.statusChangedBy = args.staffName;
+      clinicData.statusChangedAt = new Date();
+      clinicData.statusReason = words[0].slice(0, 300);
+      words.push(`Status is now ${STATUS_WORDS[access.status]}.`);
+    }
+    if ((access.graceEndsAt?.getTime() ?? null) !== (clinic.graceEndsAt?.getTime() ?? null)) clinicData.graceEndsAt = access.graceEndsAt;
+    if (Object.keys(clinicData).length > 0) await tx.clinic.update({ where: { id: clinicId }, data: clinicData, select: { id: true } });
+    await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body: words.join(" "), authorName: args.staffName }, select: { id: true } });
+    return { ok: true, message: "Billing reset. The clinic's admin can choose a plan again on their Billing page." };
+  }, SYNC_TX_OPTIONS);
+}

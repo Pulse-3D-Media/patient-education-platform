@@ -22,6 +22,7 @@ import {
   updateClinicBranding,
   updateClinicDetails,
 } from "@/lib/db/clinics";
+import { resetVanishedStripeRecord } from "@/lib/db/billing";
 import { addClinicNote } from "@/lib/db/notes";
 import { PricingError, activatePricingVersion, createPricingVersion } from "@/lib/db/pricing";
 import { saveSettings, type Settings } from "@/lib/db/settings";
@@ -36,6 +37,7 @@ import { renameClerkOrganization } from "@/lib/organization";
 import { isPlaybackIdShape } from "@/lib/playback-source";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
+import { checkStripeIds } from "@/lib/stripe";
 import { qrDailyProblem } from "@/lib/qr-code";
 import { setOwnerByStaff } from "@/lib/seat-changes";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
@@ -170,6 +172,32 @@ export async function retryBillingEventAction(_previous: FormState, formData: Fo
     // The kind of failure is on the row and in the server log (lib/billing-events.ts).
     revalidatePath("/pulse/billing");
     return { error: "It failed again. The kind of error is shown on the row. Stripe or the database may be unreachable; try later." };
+  }
+}
+
+/**
+ * Reset billing on a clinic whose subscription Stripe no longer has (audit
+ * finding E3): clears the Stripe ids so the clinic can choose a plan again.
+ * Pulse staff only. Refused while Stripe still knows a live subscription for
+ * the clinic, and unless the staff member ticked that they checked Stripe.
+ * Changes nothing in Stripe. See resetVanishedStripeRecord in lib/db/billing.ts.
+ */
+export async function resetBillingAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePulseStaff();
+
+  const clinic = await clinicFromForm(formData);
+  if (!clinic) return { error: "That clinic no longer exists." };
+  if (formData.get("checkedStripe") !== "yes") return { error: "Tick the box to say you have checked Stripe first." };
+
+  try {
+    const result = await resetVanishedStripeRecord(clinic.id, { staffName: staff.name, checkStripe: (ids) => checkStripeIds(ids) });
+    if (!result.ok) return { error: result.message };
+    refreshClinic(clinic.id);
+    revalidatePath("/pulse/billing");
+    return { ok: result.message };
+  } catch (error) {
+    console.error(`Pulse: billing reset failed (${errorKind(error)}).`);
+    return { error: "Stripe could not be asked just now, so nothing was reset. Try again in a minute." };
   }
 }
 

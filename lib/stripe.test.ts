@@ -1,11 +1,15 @@
 import Stripe from "stripe";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
+  STRIPE_API_VERSION,
   StripeConfigError,
   addPaidEvidence,
   checkoutIsOpen,
   checkoutSessionParams,
   eventRefs,
+  getStripe,
   getWebhookSecret,
   isHandledEventType,
   isTestSecretKey,
@@ -437,5 +441,25 @@ describe("stateFromSubscription: what a plan change reads", () => {
   it("gives null, never a guess, for a subscription with no customer or no line", () => {
     expect(stateFromSubscription(subscription({ customer: null }))).toBeNull();
     expect(stateFromSubscription(subscription({ items: { data: [] } }))).toBeNull();
+  });
+});
+
+describe("the Stripe API version is pinned (audit finding E6)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("is the version the installed stripe package was built for, so a package update that moves it fails here", () => {
+    const file = readFileSync(path.join(process.cwd(), "node_modules", "stripe", "cjs", "apiVersion.js"), "utf8");
+    const built = /exports\.ApiVersion = '([^']+)'/.exec(file)?.[1];
+    expect(built).toBeTruthy();
+    expect(STRIPE_API_VERSION).toBe(built);
+  });
+
+  it("is passed to the client explicitly, not left to the package's default", () => {
+    const source = readFileSync(path.join(process.cwd(), "lib", "stripe.ts"), "utf8");
+    const start = source.indexOf("client = new Stripe(key, {");
+    const made = source.slice(start, source.indexOf("return client;", start));
+    expect(made).toContain("apiVersion: STRIPE_API_VERSION");
+    vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_madeup_for_vitest_only");
+    expect((getStripe() as unknown as { getApiField(key: string): unknown }).getApiField("version")).toBe(STRIPE_API_VERSION);
   });
 });

@@ -25,7 +25,7 @@ import { SEAT_STATE_WORDS, seatCountWords, seatSummary } from "@/lib/seats";
 import { saveBrandingAction } from "../../actions";
 import { Pager, Section, StatusBadge, formatDate, formatDateTime } from "../../ui";
 import { ClinicTabs } from "./ClinicTabs";
-import { DetailsForm, ManagedForm, NoteForm, OwnerForm, PlanForm, PracticeTypeForm, StatusForm } from "./forms";
+import { DetailsForm, ManagedForm, NoteForm, OwnerForm, PlanForm, PracticeTypeForm, ResetBillingForm, StatusForm } from "./forms";
 
 /**
  * One clinic, everything Pulse staff can see and change about it, in seven
@@ -152,6 +152,7 @@ export default async function PulseClinicPage({ params, searchParams }: PageProp
             there.
           </p>
         )}
+        {billing && (billing.stripeCustomerId || billing.stripeSubscriptionId) && <ResetBillingForm clinicId={clinic.id} />}
       </Section>
 
       <Section

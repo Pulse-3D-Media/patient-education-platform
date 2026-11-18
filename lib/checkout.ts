@@ -275,7 +275,11 @@ const isDead = (status: string) => status === "canceled" || status === "incomple
 function subscriptionToCheck(facts: BillingFacts, subscriptions: { id: string; planId: string | null; status: string }[]) {
   return (
     subscriptions.find((subscription) => facts.pendingPlanId !== null && subscription.planId === facts.pendingPlanId && !isDead(subscription.status)) ??
-    subscriptions.find((subscription) => subscription.id === facts.stripeSubscriptionId)
+    subscriptions.find((subscription) => subscription.id === facts.stripeSubscriptionId) ??
+    // The subscription on record, even when Stripe no longer lists it: asking about it directly is how a
+    // subscription that has vanished from Stripe is noticed (audit finding E3), instead of the record
+    // staying "first payment under way" for ever.
+    (facts.stripeSubscriptionId ? { id: facts.stripeSubscriptionId, planId: null, status: "unknown" } : undefined)
   );
 }
 

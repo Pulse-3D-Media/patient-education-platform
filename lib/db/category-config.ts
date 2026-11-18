@@ -143,7 +143,7 @@ export async function saveCategoryConfig(
   category: Category,
   config: CategoryConfig,
   details?: CategoryDetailsInput,
-): Promise<CategoryConfig> {
+): Promise<CategoryConfig & { changes: string }> {
   await readRows(); // makes sure every row exists, so the lock below covers all of them
   try {
     return await prisma.$transaction(async (tx) => {
@@ -168,7 +168,8 @@ export async function saveCategoryConfig(
       }
 
       const row = await tx.categoryConfig.update({ where: { category }, data: { ...config, ...detailFields } });
-      return { sellable: row.sellable, comingSoonText: row.comingSoonText };
+      const after = categoryListFromRows(await tx.categoryConfig.findMany({ select: ROW_FIELDS })).find((entry) => entry.value === category) ?? before;
+      return { sellable: row.sellable, comingSoonText: row.comingSoonText, changes: categoryChangeWords(before, after) };
     });
   } catch (error) {
     // The unique column on slug is the last word if anything got past the check above.
@@ -177,6 +178,23 @@ export async function saveCategoryConfig(
     }
     throw error;
   }
+}
+
+/**
+ * What a save changed about one category, in words for the server log
+ * (`for sale yes -> no, name "Knee" -> "Knee and leg"`), or "" when it
+ * changed nothing. The picture and the coming-soon sentence are only said
+ * to have changed: the log is for who did what, not a copy of the page.
+ */
+function categoryChangeWords(before: CategoryDetails, after: CategoryDetails): string {
+  const words: string[] = [];
+  if (before.sellable !== after.sellable) words.push(`for sale ${before.sellable ? "yes" : "no"} -> ${after.sellable ? "yes" : "no"}`);
+  if (before.label !== after.label) words.push(`name "${before.label}" -> "${after.label}"`);
+  if (before.slug !== after.slug) words.push(`web address /library/${before.slug} -> /library/${after.slug}`);
+  if (before.image !== after.image) words.push("picture changed");
+  if (before.order !== after.order) words.push(`place ${before.order} -> ${after.order}`);
+  if (before.comingSoonText !== after.comingSoonText) words.push("coming-soon sentence changed");
+  return words.join(", ");
 }
 
 /**

@@ -6,10 +6,11 @@ import {
   isFinished,
   markBillingEventFailed,
   receiveBillingEvent,
-  reconcileSubscription,
   setBillingEventClinic,
   type BillingEventRow,
 } from "./db/billing";
+// Every look at Stripe goes through this, so a vanished paying subscription always emails Pulse staff once (lib/billing-gone-alert.ts).
+import { reconcileAndTellPulse } from "./billing-gone-alert";
 import { errorKind } from "./error-kind";
 import { eventRefs, fetchSubscriptionSnapshot, isHandledEventType, type FetchSubscription } from "./stripe";
 
@@ -28,10 +29,10 @@ import { eventRefs, fetchSubscriptionSnapshot, isHandledEventType, type FetchSub
  *   3. Only two facts are taken from the notification's body: which customer
  *      and which subscription. The clinic is found by the customer. News
  *      about a customer we do not know is closed as ignored.
- *   4. reconcileSubscription (lib/db/billing.ts) locks the clinic, asks
- *      Stripe where the subscription stands NOW, applies that, writes the
- *      log entry and marks the notification finished, all in one
- *      transaction.
+ *   4. reconcileSubscription (lib/db/billing.ts) asks Stripe where the
+ *      subscription stands NOW (holding the clinic's billing sync lock, never
+ *      its row lock), then locks the clinic and applies that, writes the log
+ *      entry and marks the notification finished, all in one transaction.
  *   5. If anything throws, the notification is marked FAILED with the kind
  *      of error only, and the error is thrown on, so the route answers 500
  *      and Stripe sends it again (for up to three days in live mode, three
@@ -109,7 +110,7 @@ async function processRow(row: BillingEventRow, deps: BillingDeps): Promise<Hand
       return { status: "ignored", outcome };
     }
 
-    const result = await reconcileSubscription({
+    const result = await reconcileAndTellPulse({
       clinicId,
       subscriptionId: row.stripeSubscriptionId,
       fetchSubscription: deps.fetchSubscription,

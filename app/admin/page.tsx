@@ -24,7 +24,7 @@ import { AdminFrame } from "./AdminFrame";
  * a few totals about the clinic's links, the newest few links, and a card
  * for each section, so Shared links, People and Billing are one tap away.
  *
- * Everything on it is bounded: five counts done in the database, and the
+ * Everything on it is bounded: four counts done in the database, and the
  * newest RECENT_LINKS links made by the office or a surgeon (not the ones
  * printed QR codes handed to patients). There is no full list of links anywhere on the
  * clinic side, on purpose: the office never needs to find a link again, and
@@ -162,15 +162,10 @@ export default async function AdminOverviewPage() {
         <h2 id="numbers-heading" className="text-lg font-semibold">
           Your links
         </h2>
-        {/* A cancelled link is deleted (see lib/db/shares.ts), so these count the links still on the list, not everything ever made. */}
-        <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+        {/* No play numbers here: clinics get no usage numbers (Van, 2026-10-08; the play starts came off on 2026-11-16, the user's decision). */}
+        <dl className="mt-3 grid gap-3 sm:grid-cols-2">
           <Fact label="Working right now" value={summary.working} />
-          <Fact label={`Made in the last ${SUMMARY_RECENT_DAYS} days`} value={summary.madeRecently} note="Links you have cancelled are not counted." />
-          <Fact
-            label="Play starts, current links"
-            value={summary.playStarts}
-            note="Counted once per page load, the first time play is pressed. Not a count of patients, and not counting links you have cancelled."
-          />
+          <Fact label={`Made in the last ${SUMMARY_RECENT_DAYS} days`} value={summary.madeRecently} />
         </dl>
       </section>
 
@@ -216,7 +211,8 @@ export default async function AdminOverviewPage() {
                   </p>
                   <p className="text-sm text-ink-muted">
                     {when} &middot;{" "}
-                    {share.viewCount === 0 ? "Not played yet" : `${share.viewCount} ${share.viewCount === 1 ? "play start" : "play starts"}`}
+                    {/* Whether it has been played, in words, never how many times. */}
+                    {share.viewCount === 0 ? "Not played yet" : "Played"}
                   </p>
                 </li>
               );

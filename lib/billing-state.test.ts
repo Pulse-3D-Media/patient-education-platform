@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   NO_BILLING,
   decideBilling,
+  decideGone,
   effectiveAccess,
   graceDeadline,
   hasLiveSubscription,
@@ -516,5 +517,33 @@ describe("who may pay by card", () => {
 
   it("a subscription that may still be charging is any but none and ended", () => {
     expect((["NONE", "INCOMPLETE", "ACTIVE", "PAST_DUE", "CANCELED"] as const).filter(hasLiveSubscription)).toEqual(["INCOMPLETE", "ACTIVE", "PAST_DUE"]);
+  });
+});
+
+describe("decideGone: the subscription the clinic expects is gone from Stripe (audit finding E3)", () => {
+  const expected: BillingFacts = { ...NO_BILLING, stripeCustomerId: "cus_madeup", stripeSubscriptionId: "sub_madeup", currentPlanId: "plan_madeup" };
+
+  it("a live subscription (active or in grace) is read as ended, and nothing is started", () => {
+    for (const status of ["ACTIVE", "PAST_DUE"] as const) {
+      const decision = decideGone({ ...expected, status, paymentFailedAt: new Date(), graceEndsAt: new Date(), cancelAt: new Date(), scheduledPlanId: "plan_x", pendingPlanId: "plan_y" });
+      expect(decision.kind).toBe("apply");
+      if (decision.kind !== "apply") continue;
+      expect(decision.next).toMatchObject({ status: "CANCELED", stripeSubscriptionId: "sub_madeup", currentPlanId: "plan_madeup", graceEndsAt: null, cancelAt: null, scheduledPlanId: null, pendingPlanId: null });
+      expect(decision.activatePlanId).toBeNull();
+      expect(decision.entries).toHaveLength(1);
+      expect(effectiveAccess({ staffAccess: null, managedByPulse: false, billingStatus: decision.next.status, billingGraceEndsAt: decision.next.graceEndsAt }).status).toBe("CANCELED");
+    }
+  });
+
+  it("a first payment that never finished is read as never started, so a plan can be chosen again", () => {
+    const decision = decideGone({ ...expected, status: "INCOMPLETE", currentPlanId: null, pendingPlanId: "plan_waiting" });
+    expect(decision.kind).toBe("apply");
+    if (decision.kind !== "apply") return;
+    expect(decision.next).toMatchObject({ status: "NONE", stripeSubscriptionId: null });
+    expect(decision.activatePlanId).toBeNull();
+  });
+
+  it("a record already over is left alone, so asking again changes and logs nothing", () => {
+    for (const status of ["CANCELED", "NONE"] as const) expect(decideGone({ ...expected, status }).kind).toBe("ignored");
   });
 });

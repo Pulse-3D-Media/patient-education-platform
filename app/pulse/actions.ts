@@ -22,10 +22,13 @@ import {
   updateClinicBranding,
   updateClinicDetails,
 } from "@/lib/db/clinics";
+import { resetVanishedStripeRecord } from "@/lib/db/billing";
 import { addClinicNote } from "@/lib/db/notes";
 import { PricingError, activatePricingVersion, createPricingVersion } from "@/lib/db/pricing";
-import { saveSettings, type Settings } from "@/lib/db/settings";
-import { createVideo, getVideoForPulse, updateVideo, type VideoInput } from "@/lib/db/videos";
+import { saveSettingsAndCompare, type Settings } from "@/lib/db/settings";
+import { VideoSaveRefusedError, countWorkingLinksForVideo, createVideo, getVideoForPulse, updateVideoKeepingOthers, type VideoInput } from "@/lib/db/videos";
+import { settingsChangeWords } from "@/lib/settings-warnings";
+import { readShownVideoValues } from "@/lib/video-form-guard";
 import { errorKind } from "@/lib/error-kind";
 import { isValidRenewalCount, MAX_LINK_DAYS, MAX_RENEWALS, MIN_LINK_DAYS, MIN_RENEWALS } from "@/lib/expiry";
 import { parseDuration } from "@/lib/format";
@@ -36,6 +39,7 @@ import { renameClerkOrganization } from "@/lib/organization";
 import { isPlaybackIdShape } from "@/lib/playback-source";
 import { validatePricingConfig, type FieldError } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
+import { checkStripeIds } from "@/lib/stripe";
 import { qrDailyProblem } from "@/lib/qr-code";
 import { setOwnerByStaff } from "@/lib/seat-changes";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
@@ -170,6 +174,32 @@ export async function retryBillingEventAction(_previous: FormState, formData: Fo
     // The kind of failure is on the row and in the server log (lib/billing-events.ts).
     revalidatePath("/pulse/billing");
     return { error: "It failed again. The kind of error is shown on the row. Stripe or the database may be unreachable; try later." };
+  }
+}
+
+/**
+ * Reset billing on a clinic whose subscription Stripe no longer has (audit
+ * finding E3): clears the Stripe ids so the clinic can choose a plan again.
+ * Pulse staff only. Refused while Stripe still knows a live subscription for
+ * the clinic, and unless the staff member ticked that they checked Stripe.
+ * Changes nothing in Stripe. See resetVanishedStripeRecord in lib/db/billing.ts.
+ */
+export async function resetBillingAction(_previous: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requirePulseStaff();
+
+  const clinic = await clinicFromForm(formData);
+  if (!clinic) return { error: "That clinic no longer exists." };
+  if (formData.get("checkedStripe") !== "yes") return { error: "Tick the box to say you have checked Stripe first." };
+
+  try {
+    const result = await resetVanishedStripeRecord(clinic.id, { staffName: staff.name, checkStripe: (ids) => checkStripeIds(ids) });
+    if (!result.ok) return { error: result.message };
+    refreshClinic(clinic.id);
+    revalidatePath("/pulse/billing");
+    return { ok: result.message };
+  } catch (error) {
+    console.error(`Pulse: billing reset failed (${errorKind(error)}).`);
+    return { error: "Stripe could not be asked just now, so nothing was reset. Try again in a minute." };
   }
 }
 
@@ -353,7 +383,7 @@ const DAY_LIMITED: (keyof Settings)[] = ["unclaimedDays", "viewDays"];
  * limit (qrDailyProblem in lib/qr-code.ts).
  */
 export async function saveSettingsAction(_previous: FormState, formData: FormData): Promise<FormState> {
-  await requirePulseStaff();
+  const staff = await requirePulseStaff();
 
   const fields: (keyof Settings)[] = ["unclaimedDays", "viewDays", "graceDays", "qrDailyFlag", "qrDailyCap", "maxRenewals"];
   const values: Partial<Settings> = {};
@@ -382,7 +412,12 @@ export async function saveSettingsAction(_previous: FormState, formData: FormDat
   const qrProblem = qrDailyProblem(values.qrDailyFlag as number, values.qrDailyCap as number);
   if (qrProblem) return { error: qrProblem };
 
-  await saveSettings(values as Settings);
+  // The form asked for a yes first when the save reaches links or clinics (lib/settings-warnings.ts). That is a courtesy;
+  // the protection is the staff check above and the limits just checked.
+  const { before, after } = await saveSettingsAndCompare(values as Settings);
+  // Who changed what, in the server log: setting names and numbers only. Settings belong to no clinic, so there is no clinic log for it.
+  const changed = settingsChangeWords(before, after);
+  if (changed) console.info(`Settings changed: ${changed} by ${staff.name}`);
   revalidatePath("/pulse/settings");
   return { ok: "Settings saved." };
 }
@@ -587,7 +622,7 @@ function refreshCatalogue(videoId?: string) {
  * would be nothing to ever play.
  */
 export async function saveVideoAction(_previous: FormState, formData: FormData): Promise<FormState> {
-  await requirePulseStaff();
+  const staff = await requirePulseStaff();
 
   const id = String(formData.get("id") ?? "").trim();
   const uploadPending = formData.get("uploadPending") === "1";
@@ -600,8 +635,16 @@ export async function saveVideoAction(_previous: FormState, formData: FormData):
       if ("error" in checked) return checked;
       const refused = await checkMuxBeforeSave(checked.input, existing);
       if (refused) return { error: refused };
-      await updateVideo(id, checked.input);
+      // Title, category, poster, notes, Published and Placeholder: a field the staff member left as their page showed it
+      // keeps what the row says NOW, so a page left open cannot undo a colleague's save (lib/video-form-guard.ts).
+      // Decided and written under a row lock, in one transaction (updateVideoKeepingOthers).
+      const saved = await updateVideoKeepingOthers(id, checked.input, readShownVideoValues(formData));
+      if (!saved) return { error: "That video no longer exists." };
+      if (saved.before.isPublished !== saved.after.isPublished) logPublishChange(saved.after, staff.name);
       refreshCatalogue(id);
+      if (saved.before.isPublished && !saved.after.isPublished) {
+        return { ok: "Saved and unpublished. Every link to this video stops working until it is published again." };
+      }
       return { ok: "Saved. Every link that points at this video plays the new version." };
     }
 
@@ -613,13 +656,44 @@ export async function saveVideoAction(_previous: FormState, formData: FormData):
     const refused = await checkMuxBeforeSave(checked.input, null);
     if (refused) return { error: refused };
     const video = await createVideo(checked.input);
+    if (video.isPublished) logPublishChange(video, staff.name);
     refreshCatalogue(video.id);
     if (uploadPending) return { ok: "Added. Sending the file to Mux...", videoId: video.id };
     redirect(`/pulse/videos/${video.id}?added=1`);
   } catch (error) {
+    if (error instanceof VideoSaveRefusedError) return { error: error.message };
     // One playback id belongs to one video: the unique column refuses a second row with it (Prisma P2002).
     if (errorKind(error) === "Prisma P2002") return { error: "That playback id is already on another video. Each Mux playback id belongs to one video." };
     throw error;
+  }
+}
+
+/**
+ * A video was published or unpublished: one line in the server log under the
+ * staff member's name, with the video's title and row id and nothing else.
+ * Videos belong to Pulse, not to a clinic, so there is no clinic log to
+ * write it in (a table for this would be a schema change; the catalogue's
+ * other changes are logged the same way, see addCategoryAction).
+ */
+function logPublishChange(video: { id: string; title: string; isPublished: boolean }, staffName: string) {
+  console.info(`Video ${video.isPublished ? "published" : "unpublished"}: "${video.title}" (${video.id}) by ${staffName}`);
+}
+
+/**
+ * How many links to one video work right now, asked by the video form just
+ * before it unpublishes the video, so the yes it asks for can say how many
+ * links that stops. A number only: never a list, never a code. Pulse staff
+ * only, like every action here.
+ */
+export async function countWorkingLinksAction(videoId: unknown): Promise<{ count: number } | { error: string }> {
+  await requirePulseStaff();
+  const id = readVideoId(videoId);
+  if (!id) return { error: "That video no longer exists." };
+  try {
+    return { count: await countWorkingLinksForVideo(id) };
+  } catch (error) {
+    console.error(`Counting a video's working links failed: ${errorKind(error)}`);
+    return { error: "The links could not be counted just now." };
   }
 }
 
@@ -715,7 +789,7 @@ export async function dismissUploadFailureAction(videoId: unknown): Promise<Form
  * library page redirects it.
  */
 export async function saveCategoryConfigAction(_previous: FormState, formData: FormData): Promise<FormState> {
-  await requirePulseStaff();
+  const staff = await requirePulseStaff();
 
   const category = String(formData.get("category") ?? "") as Category;
   const list = await getCategoryList();
@@ -743,6 +817,8 @@ export async function saveCategoryConfigAction(_previous: FormState, formData: F
     if (error instanceof CategoryDetailsError) return { error: error.message };
     throw error;
   }
+  // Who changed what, in the server log, like adding and deleting a category: the switch and the details, in words.
+  if (saved.changes) console.info(`Category changed: ${category} (${saved.changes}) by ${staff.name}`);
   // A category's name and address show on nearly every page, so everything is drawn again.
   revalidatePath("/", "layout");
   return { ok: saved.sellable ? "Saved. This category is for sale." : "Saved. This category is not for sale." };
@@ -855,13 +931,15 @@ export async function savePricingVersionAction(input: { config: unknown; note: u
 
 /** Make one saved version the active one. The version's id comes from the history list. */
 export async function activatePricingVersionAction(_previous: FormState, formData: FormData): Promise<FormState> {
-  await requirePulseStaff();
+  const staff = await requirePulseStaff();
 
   const versionId = String(formData.get("versionId") ?? "").trim();
   if (!versionId) return { error: "Choose a version to make active." };
 
   try {
     const version = await activatePricingVersion(versionId);
+    // Who did it, in the server log: the version's number and nothing else.
+    console.info(`Pricing version ${version.version} made active by ${staff.name}`);
     refreshPricing();
     return { ok: `Version ${version.version} is now active.` };
   } catch (error) {

@@ -11,13 +11,14 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
  * Change on /admin/people (for anyone holding a seat), and a surgeon's own
  * Change in the library's Send panel.
  *
- * A name box that holds only the name, and a credential from the list (MD,
- * DO, DPM, PA-C, NP, Other, None). The "Dr." and the credential come from
- * the list and are never typed. It opens on what patients see now, read
- * back into a name and a credential by the same rule that builds them
- * (lib/sender-name.ts); for someone nobody has chosen for yet, the name is
- * filled in from their account and the credential is left to choose, so
- * nobody is given a credential they do not hold.
+ * A name box that holds only the name, and an optional title from the list
+ * (MD, DO, DPM, PA-C, NP, Other, None). The "Dr." and the title come
+ * from the list and are never typed. It opens on what patients see now, read
+ * back into a name and a title by the same rule that builds them
+ * (lib/sender-name.ts). For someone nobody has chosen for yet that is their
+ * name from their account with no title (None), since that is what patients
+ * see (the bare-name default, decided by the user on 2026-11-16), so nobody
+ * is given a credential they do not hold.
  *
  * The words under the boxes ("Patients will see ...") are worked out here
  * only to show them. What is saved is worked out again on the server from
@@ -76,7 +77,7 @@ export function SenderNameForm({
       <p className="text-sm text-ink-soft">{heading}</p>
       {current && !start.exact && (
         <p className="text-sm text-ink-muted">
-          Patients see &ldquo;{current}&rdquo; now. Choose the credential and save to set it.
+          Patients see &ldquo;{current}&rdquo; now. Choose a title, or None, and save to set it.
         </p>
       )}
 
@@ -93,26 +94,31 @@ export function SenderNameForm({
           placeholder="Jane Smith"
           className={INPUT}
         />
-        <p className="mt-1 text-xs text-ink-muted">Only the name. &ldquo;Dr.&rdquo; and the credential come from the list below.</p>
+        <p className="mt-1 text-xs text-ink-muted">Only the name. &ldquo;Dr.&rdquo; and any title come from the list below.</p>
       </div>
 
       <div>
         <label htmlFor={`${idPrefix}-credential`} className={LABEL}>
-          Credential
+          Title (optional)
         </label>
         <select
           id={`${idPrefix}-credential`}
+          aria-describedby={`${idPrefix}-credential-help`}
           value={credential}
           onChange={(event) => setCredential(event.target.value as CredentialPick)}
           className={INPUT}
         >
-          <option value="">Choose...</option>
+          {/* Only offered while nothing is chosen (an old "Dr." name with no title after it): otherwise None is the no-title choice. */}
+          {credential === "" && <option value="">Choose...</option>}
           {CREDENTIAL_CHOICES.map((choice) => (
             <option key={choice.value} value={choice.value}>
               {choice.label}
             </option>
           ))}
         </select>
+        <p id={`${idPrefix}-credential-help`} className="mt-1 text-xs text-ink-muted">
+          MD, DO and DPM add &ldquo;Dr.&rdquo; in front. Without a credential, choose None: patients see just the name.
+        </p>
       </div>
 
       {credential === "other" && (

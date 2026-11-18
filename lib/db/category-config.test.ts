@@ -64,8 +64,9 @@ describe("getCategoryConfigs", () => {
 
   it("returns what saveCategoryConfig wrote", async () => {
     const saved = await saveCategoryConfig(EDITED, { sellable: false, comingSoonText: "Ankle and foot arrive after launch." });
-    expect(saved).toEqual({ sellable: false, comingSoonText: "Ankle and foot arrive after launch." });
-    expect((await getCategoryConfigs())[EDITED]).toEqual(saved);
+    // It also says what changed, in words for the server log (saveCategoryConfigAction writes the line).
+    expect(saved).toEqual({ sellable: false, comingSoonText: "Ankle and foot arrive after launch.", changes: "for sale yes -> no, coming-soon sentence changed" });
+    expect((await getCategoryConfigs())[EDITED]).toEqual({ sellable: saved.sellable, comingSoonText: saved.comingSoonText });
     expect(await prisma.categoryConfig.count()).toBe(ALL.length);
   });
 });

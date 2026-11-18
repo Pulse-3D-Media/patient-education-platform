@@ -65,7 +65,7 @@ export type SendResult =
       unclaimedUntil: string;
       /** How many days the link works after the patient first plays it. Copied onto the link, so this is what it will do. */
       daysAfterFirstPlay: number;
-      /** The name patients will see ("Dr. Jane Smith"), or null when there is none and the link names only the clinic. */
+      /** The name patients will see ("Jane Smith", "Dr. Jane Smith, DO"), or null when there is none and the link names only the clinic. */
       senderName: string | null;
     }
   | { ok: false; error: string };

@@ -98,13 +98,25 @@ export async function lockSettings(tx: Prisma.TransactionClient): Promise<Settin
  * lands in the middle of a link being made.
  */
 export async function saveSettings(values: Settings): Promise<Settings> {
+  return (await saveSettingsAndCompare(values)).after;
+}
+
+/**
+ * The same save, answering what the settings were just before it (read with
+ * the exclusive lock held, so two saves at once each describe the real
+ * previous numbers) and what they are now. The settings page uses this to
+ * write who changed what to the server log.
+ */
+export async function saveSettingsAndCompare(values: Settings): Promise<{ before: Settings; after: Settings }> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SETTINGS_LOCK_KEY}::bigint)`;
-    return tx.appSettings.upsert({
+    const before = (await tx.appSettings.findUnique({ where: { id: SETTINGS_ID }, select: SETTINGS_SELECT })) ?? SETTINGS_DEFAULTS;
+    const after = await tx.appSettings.upsert({
       where: { id: SETTINGS_ID },
       create: { id: SETTINGS_ID, ...values },
       update: values,
       select: SETTINGS_SELECT,
     });
+    return { before, after };
   });
 }

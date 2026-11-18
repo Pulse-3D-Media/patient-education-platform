@@ -1,5 +1,6 @@
 import { getCategoryAvailability, getCategoryList } from "@/lib/db/category-config";
 import { PricingError, getActivePricing, listPricingVersions } from "@/lib/db/pricing";
+import { DEFAULT_PRICING_CONFIG, fullLibraryBlockers, fullLibraryOffSaleWords } from "@/lib/pricing";
 import { requirePulseStaff } from "@/lib/pulse";
 import { formatDateTime } from "../ui";
 import { PricingEditor, type EditorVersion, type EstimateSource } from "./PricingEditor";
@@ -39,6 +40,9 @@ export default async function PulsePricingPage() {
     source = { kind: "problem", message: error.message };
   }
 
+  // The full library is off sale while any category is neither for sale nor Coming soon (audit finding E4).
+  const offSale = fullLibraryOffSaleWords(fullLibraryBlockers(source.kind === "version" ? source.config : DEFAULT_PRICING_CONFIG, availability, list));
+
   const rows: EditorVersion[] = versions.map((version) => ({
     id: version.id,
     version: version.version,
@@ -62,6 +66,11 @@ export default async function PulsePricingPage() {
             version. Internal only: nothing here is shown to a clinic.
           </p>
         </header>
+        {offSale && (
+          <p role="status" className="mt-6 max-w-3xl rounded-lg border border-[#f3b94d]/40 bg-[#f3b94d]/10 px-4 py-3 text-[15px] text-[#f3b94d]">
+            {offSale}
+          </p>
+        )}
         <div className="mt-8">
           <PricingEditor
             versions={rows}

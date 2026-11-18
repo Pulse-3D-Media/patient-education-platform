@@ -89,7 +89,7 @@ These comments were in the copy of the schema that this file used to carry, and 
 // model SeatAllocation
   clerkUserId String                              // the Clerk user id of the person holding the seat. An id only
 
-  displayName String?                             // how this person's name appears to patients on links they send ("Dr. Jane Smith, DO", "Jane Smith, PA-C"); empty means "Dr. First Last" from Clerk. Set by an admin on /admin/people or by the person from the library's Send panel; built from a name and a credential by lib/sender-name.ts
+  displayName String?                             // how this person's name appears to patients on links they send ("Dr. Jane Smith, DO", "Jane Smith, PA-C"); empty means "First Last" from Clerk (it was "Dr. First Last" until 2026-11-16; this comment in schema.prisma still says the old words, left alone because the schema file is not edited without asking). Set by an admin on /admin/people or by the person from the library's Send panel; built from a name and a credential by lib/sender-name.ts
 
 // above model SeatInvitation
 /// One seat held by an invitation not yet accepted. Counts against the plan
@@ -188,7 +188,7 @@ These comments were in the copy of the schema that this file used to carry, and 
   code               String    @unique              // 25 random lowercase letters and digits, about 128 bits. A secret like a key: never logged
 
   senderUserId       String                         // the surgeon's Clerk user id; its links name them while they hold a seat, the clinic only once they do not
-  senderFallbackName String?                        // "Dr. First Last" from Clerk when the code was made (the patient page never asks Clerk)
+  senderFallbackName String?                        // "First Last" from Clerk when the code was made ("Dr. First Last" for codes made before 2026-11-16, kept as they are; the patient page never asks Clerk)
   liveKey            String?   @unique              // "<clinicId>:<videoId>:<senderUserId>" while live, empty once retired: one live code per pair, whatever the timing
 
   retiredAt          DateTime?                      // set once, when retired or replaced

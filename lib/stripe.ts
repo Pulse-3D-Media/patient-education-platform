@@ -798,3 +798,62 @@ export const stripePlanGateway: PlanGateway = {
     return session.url;
   },
 };
+
+// ---------------------------------------------------------------------------
+// The demo clean-up (prisma/clear-demo-clinics.ts, lib/demo-cleanup.ts). ONLY
+// that script uses these. They remove a demo clinic's test customer from
+// Stripe, on the demo site's test key. Each one treats "already gone" as done,
+// so running the clean-up twice is harmless, and refuses a live-mode object
+// outright (a test key cannot see one, so that would mean something is very
+// wrong). getStripe() already refuses a key that is not a test key.
+// ---------------------------------------------------------------------------
+
+/** What the clean-up asks of Stripe. A plain object so the tests hand in a stand-in. */
+export type DemoCleanupStripe = {
+  /** Does Stripe still have this customer? "gone" when deleted or never known. */
+  customerState(customerId: string): Promise<"present" | "gone">;
+  /** Cancel this subscription now. Already cancelled or gone counts as done. */
+  cancelSubscription(subscriptionId: string): Promise<void>;
+  /** Delete this customer. Already deleted or gone counts as done. */
+  deleteCustomer(customerId: string): Promise<void>;
+};
+
+export const demoCleanupStripe: DemoCleanupStripe = {
+  async customerState(customerId) {
+    try {
+      const customer = await getStripe().customers.retrieve(customerId);
+      if ("deleted" in customer && customer.deleted) return "gone";
+      if (customer.livemode) throw new StripeConfigError("Stripe returned a live-mode customer. The clean-up only touches test mode.");
+      return "present";
+    } catch (error) {
+      if (isStripeRequestError(error, "resource_missing")) return "gone";
+      throw error;
+    }
+  },
+
+  async cancelSubscription(subscriptionId) {
+    const stripe = getStripe();
+    try {
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      if (subscription.livemode) throw new StripeConfigError("Stripe returned a live-mode subscription. The clean-up only touches test mode.");
+      if (subscription.status === "canceled" || subscription.status === "incomplete_expired") return;
+      await stripe.subscriptions.cancel(subscriptionId);
+    } catch (error) {
+      if (isStripeRequestError(error, "resource_missing")) return;
+      throw error;
+    }
+  },
+
+  async deleteCustomer(customerId) {
+    const stripe = getStripe();
+    try {
+      const customer = await stripe.customers.retrieve(customerId);
+      if ("deleted" in customer && customer.deleted) return;
+      if (customer.livemode) throw new StripeConfigError("Stripe returned a live-mode customer. The clean-up only touches test mode.");
+      await stripe.customers.del(customerId);
+    } catch (error) {
+      if (isStripeRequestError(error, "resource_missing")) return;
+      throw error;
+    }
+  },
+};

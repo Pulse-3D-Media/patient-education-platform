@@ -11,7 +11,7 @@ import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
  * Staff only; the layout has already checked that before this renders.
  *
  * A thin banner across the top (the Pulse 3D mark, a "Staff" label, Clerk's
- * user button) and a left rail with the five sections. Desktop first: the
+ * user button, and "Open demo site" when the layout hands it an address) and a left rail with the five sections. Desktop first: the
  * rail is a column of 48px-tall links from tablet width up, and a scrolling
  * row of the same links on a phone so nothing overflows.
  *
@@ -29,7 +29,12 @@ const SECTIONS: { href: string; label: string; coming?: boolean; matches: (path:
   { href: "/pulse/reports", label: "Reports", matches: (p) => p.startsWith("/pulse/reports") },
 ];
 
-export function PulseShell({ children }: { children: ReactNode }) {
+/**
+ * `demoSiteUrl` is the demo site's address, already checked on the server by
+ * demoSiteUrl() in lib/demo-site.ts, or null, and then there is no link. It
+ * opens in a new tab, so a sales call keeps this dashboard open beside it.
+ */
+export function PulseShell({ children, demoSiteUrl }: { children: ReactNode; demoSiteUrl: string | null }) {
   const pathname = usePathname();
 
   return (
@@ -43,6 +48,17 @@ export function PulseShell({ children }: { children: ReactNode }) {
           Staff
         </span>
         <div className="ml-auto flex items-center gap-3">
+          {demoSiteUrl && (
+            <a
+              href={demoSiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex h-9 items-center rounded-lg border border-line-strong px-3 text-sm font-medium text-ink hover:bg-wash"
+            >
+              Open demo site
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          )}
           <Link href="/library" className="hidden text-sm text-[#667085] hover:text-white sm:inline">
             Open the library
           </Link>

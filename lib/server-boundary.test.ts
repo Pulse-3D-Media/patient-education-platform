@@ -60,7 +60,7 @@ describe("browser code and the database", () => {
   });
 
   it("the files that hold Stripe's, Resend's and Clerk's server keys start with the server-only guard too", () => {
-    for (const path of ["lib/stripe.ts", "lib/email.ts", "lib/people.ts"]) {
+    for (const path of ["lib/stripe.ts", "lib/email.ts", "lib/people.ts", "lib/clerk-demo-cleanup.ts"]) {
       expect(readFileSync(path, "utf8").trimStart().startsWith('import "server-only";'), path).toBe(true);
     }
   });

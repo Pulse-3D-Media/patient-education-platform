@@ -1,6 +1,7 @@
 # Folder map, in full
 
-Moved out of the root `CLAUDE.md` in November 2026, word for word except where the pull request that moved it says otherwise. A section name in quotes ("Billing state", "Roles") is a heading in one of the files under `docs/areas/`; the index at the end of the root `CLAUDE.md` says which.
+Moved out of the root `CLAUDE.md` in November 2026, word for word except where the pull request that moved it says otherwise.
+A section name in quotes ("Billing state", "Roles") is a heading in one of the files under `docs/areas/`; the index at the end of the root `CLAUDE.md` says which.
 
 The root `CLAUDE.md` has a short version of this map.
 

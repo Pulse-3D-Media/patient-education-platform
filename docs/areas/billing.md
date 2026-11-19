@@ -183,7 +183,8 @@ The timing rule is `lib/plan-change.ts` (pure; read its top comment first); the 
   Confirm sends back what was on screen; the server works everything out again, asks Stripe again FOR THE SAME MOMENT (the review's own clock, good for `REVIEW_MINUTES`, 15), and does nothing if the total, the amount due or the kind of change differs.
   Nothing the browser sends is charged.
 - **Where the form starts, and the total while picking** (Prompt H, from the 2026-10-08 huddle).
-  The change form opens on the plan the clinic PAYS FOR (the accepted plan in force), plus the one category from an "Add to your plan" link, and nothing else.
+  The change form opens from **Change plan** under Your plan (`?change=1`), or from an "Add to your plan" link; until then the page stays short.
+  It opens on the plan the clinic PAYS FOR (the accepted plan in force), plus the one category from an "Add to your plan" link, and nothing else.
   That is what a change is priced and sorted against; the library opens `Clinic.categories`, which billing copies from the paid plan whenever a plan starts or changes, and which only differs when Pulse staff edited it by hand on `/pulse`.
   Where the two differ (`planLibraryGap()` in `lib/plan-change.ts`), the box says so ("Paid for, off in your library", "In your library, not paid for") and the page says, above the form, what Pulse turned off and what a change would do to a category Pulse added; a link asking for a category that is paid for but turned off ticks nothing extra and says there is nothing to add (decided in the billing-picks PR; Evan may overrule).
   Starting from `Clinic.categories` instead was not chosen: a plain add would then read as also taking the turned-off categories away, which waits for the renewal and stops paying for them.
@@ -223,6 +224,11 @@ The timing rule is `lib/plan-change.ts` (pure; read its top comment first); the 
   Stripe refuses a cancellation while a schedule is attached, so a schedule whose change has already happened is released before the visit.
   While a real change is scheduled, Stripe's page still offers Cancel subscription (seen on the preview, 2026-10-05); whatever it leaves behind is read from Stripe like everything else (a cancellation date, and the scheduled change gone if Stripe dropped it).
   The cancellation terms are NOT approved: end-of-period with no refund is the test-mode placeholder.
+- **The payment method and billing history on the page** (built with the design of 2026-11-19, `getBillingHistory()` in `app/admin/billing/history.ts`): the card on file (brand, last four digits and expiry, or the kind of method when it is not a card) and the newest six invoices (`BILLING_HISTORY_LIMIT`), each with its date, what it was for (from Stripe's own reason: first payment, renewal, plan change), its amount and status as Stripe reports them, and Stripe's own page for it (only an address on `invoice.stripe.com`).
+  Read from Stripe at the moment of asking, through `readBillingRecord()` in `lib/stripe.ts`, and never stored: no schema, no package and no change to the content policy (the receipt is a link, opened in a new tab).
+  Asked only where Stripe's billing page may be opened (`portal`, the same gate as Update on Stripe), for the customer and subscription on the clinic's own record.
+  When Stripe cannot be reached, the page says so in a calm sentence and the rest of the page is unaffected; only the kind of failure is logged.
+  Older invoices are on Stripe's billing page.
 - **Recovery.**
   A clinic whose renewal failed sees "Settle the missed payment", which goes to Stripe's page for that invoice (`findInvoiceToPay()`, which hands out an invoice only where the page offers one: a missed renewal, or an upgrade waiting for its payment, never a first payment; `invoicePaymentAllowed()`), and can change its card on Stripe's billing page.
   Coming back from Stripe proves nothing: the clinic recovers when Stripe says the invoice is paid, by notification or by "Check with Stripe" (any admin; the same reconcile, safe to repeat).

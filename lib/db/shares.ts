@@ -1075,6 +1075,8 @@ export type RenewalRequestRow = {
   createdAt: Date;
   /** When the patient last asked. */
   requestedAt: Date;
+  /** When the link paused: the moment it stopped working. */
+  pausedAt: Date;
   renewalsLeft: number;
   daysPerRenewal: number;
   /** The video's category, for the "Add to your plan" link when the plan stops this link. */
@@ -1135,6 +1137,7 @@ export async function listRenewalRequestsForClinic(clinicId: string, limit: numb
       senderName: row.senderName,
       createdAt: row.createdAt,
       requestedAt: row.renewalRequestedAt,
+      pausedAt: row.expiresAt,
       renewalsLeft: state.renewalsLeft,
       daysPerRenewal: state.daysPerRenewal,
       category: row.video.category,

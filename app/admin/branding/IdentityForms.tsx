@@ -2,18 +2,18 @@
 
 import { useState, type FormEvent } from "react";
 import { useKeptForm } from "@/app/pulse/FormBits";
-import { INPUT, LABEL, PRIMARY_BUTTON } from "@/components/ui/styles";
-import { CLINIC_NAME_MAX, checkLogoSize, LOGO_ACCEPT, LOGO_MAX_WORDS, LOGO_MISSING, LOGO_WRONG_KIND, readClinicName, sniffLogoKind } from "@/lib/clinic-identity";
+import { LABEL, PRIMARY_BUTTON } from "@/components/ui/styles";
+import { checkLogoSize, LOGO_ACCEPT, LOGO_MAX_WORDS, LOGO_MISSING, LOGO_WRONG_KIND, sniffLogoKind } from "@/lib/clinic-identity";
 import type { BrandingFormState } from "./actions";
 
 /**
- * The two small forms at the top of /admin/branding: the clinic's name, and
- * its logo. They replace Clerk's organization panel that used to sit at the
- * bottom of People.
+ * The logo's form on /admin/branding (the clinic's name is in the page's
+ * main form, ClinicBrandingForm.tsx). It replaces Clerk's organization panel
+ * that used to sit at the bottom of People.
  *
- * Both go through useKeptForm (app/pulse/FormBits.tsx), so a refused or
+ * It goes through useKeptForm (app/pulse/FormBits.tsx), so a refused or
  * failed save keeps what was typed and the file that was chosen, with a plain
- * sentence under the button. Both check in the browser first with the same
+ * sentence under the button. It checks in the browser first with the same
  * rules the server uses (lib/clinic-identity.ts), so a file that is too big
  * or not a picture is caught before it is sent; the server checks everything
  * again, and decides who may save and for which clinic.
@@ -39,42 +39,6 @@ function Said({ state, local }: { state: BrandingFormState; local?: string | nul
     );
   }
   return null;
-}
-
-/** The clinic's name: one box and Save. */
-export function ClinicNameForm({ action, name }: { action: Action; name: string }) {
-  const { state, pending, form } = useKeptForm(action);
-  const [typed, setTyped] = useState(name);
-  const checked = readClinicName(typed);
-  const problem = typed.trim() === "" ? null : "error" in checked ? checked.error : null;
-
-  return (
-    <form {...form} className="flex flex-col gap-2">
-      <label htmlFor="clinic-name" className={LABEL}>
-        Clinic name
-      </label>
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          id="clinic-name"
-          name="name"
-          value={typed}
-          onChange={(event) => setTyped(event.target.value)}
-          maxLength={CLINIC_NAME_MAX + 20}
-          autoComplete="organization"
-          aria-invalid={problem !== null}
-          aria-describedby="clinic-name-help"
-          className={`${INPUT} max-w-md`}
-        />
-        <button type="submit" disabled={pending} className={`${PRIMARY_BUTTON} h-11`}>
-          {pending ? "Saving..." : "Save name"}
-        </button>
-      </div>
-      <p id="clinic-name-help" className="text-xs text-ink-muted">
-        Shown to your team at the top of every page, and to patients on every page they open from one of your links.
-      </p>
-      <Said state={state} local={problem} />
-    </form>
-  );
 }
 
 /** The logo: choose a picture, then Upload. */

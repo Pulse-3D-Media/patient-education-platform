@@ -12,7 +12,9 @@ import {
   eventRefs,
   getStripe,
   getWebhookSecret,
+  historyFromInvoices,
   isHandledEventType,
+  paymentMethodFacts,
   isTestSecretKey,
   snapshotFromSubscription,
   stateFromSubscription,
@@ -493,5 +495,52 @@ describe("checkStripeIds: may the staff reset clear these ids?", () => {
   it("a failure to ask is thrown, never read as gone", async () => {
     const failing = { ...deps(), listOpenSessions: async () => Promise.reject(new Error("Stripe unreachable")) };
     await expect(checkStripeIds(ids, failing)).rejects.toThrow();
+  });
+});
+
+describe("historyFromInvoices and paymentMethodFacts (the Billing page's history and card, read only)", () => {
+  const invoice = (over: Record<string, unknown>) =>
+    ({
+      id: "in_madeup",
+      livemode: false,
+      created: Date.UTC(2026, 9, 5, 18) / 1000,
+      billing_reason: "subscription_cycle",
+      status: "paid",
+      amount_paid: 26700,
+      amount_due: 26700,
+      currency: "usd",
+      hosted_invoice_url: "https://invoice.stripe.com/i/madeup",
+      ...over,
+    }) as unknown as Stripe.Invoice;
+
+  it("keeps Stripe's amounts and dates, says what each invoice was for, and keeps only Stripe's own invoice page", () => {
+    const [renewal, first, change, other, foreign] = historyFromInvoices([
+      invoice({}),
+      invoice({ id: "in_2", billing_reason: "subscription_create" }),
+      invoice({ id: "in_3", billing_reason: "subscription_update", status: "open", amount_paid: 0, amount_due: 5000 }),
+      invoice({ id: "in_4", billing_reason: "manual", status: "something_new" }),
+      invoice({ id: "in_5", hosted_invoice_url: "https://evil.example.com/pay" }),
+    ]);
+    expect(renewal).toEqual({ id: "in_madeup", date: new Date(Date.UTC(2026, 9, 5, 18)), what: "Renewal", amountCents: 26700, currency: "usd", status: "paid", pageUrl: "https://invoice.stripe.com/i/madeup" });
+    expect(first.what).toBe("First payment");
+    // An unpaid invoice shows what is due, not the nothing that was paid.
+    expect(change).toMatchObject({ what: "Plan change", status: "open", amountCents: 5000 });
+    expect(other).toMatchObject({ what: "Invoice", status: "other" });
+    expect(foreign.pageUrl).toBeNull();
+  });
+
+  it("drops a live-mode invoice, as everywhere in the app", () => {
+    expect(historyFromInvoices([invoice({ livemode: true })])).toEqual([]);
+  });
+
+  it("reads a card's brand, last four digits and expiry, names other methods, and gives nothing for a bare id or none", () => {
+    expect(paymentMethodFacts({ type: "card", card: { brand: "visa", display_brand: "visa", last4: "4242", exp_month: 8, exp_year: 2029 } } as unknown as Stripe.PaymentMethod)).toEqual({
+      card: { brand: "visa", last4: "4242", expMonth: 8, expYear: 2029 },
+      method: null,
+    });
+    expect(paymentMethodFacts({ type: "us_bank_account" } as unknown as Stripe.PaymentMethod)).toEqual({ card: null, method: "Bank account" });
+    expect(paymentMethodFacts({ type: "something_new" } as unknown as Stripe.PaymentMethod)).toEqual({ card: null, method: "Another payment method" });
+    expect(paymentMethodFacts("pm_madeup")).toBeNull();
+    expect(paymentMethodFacts(null)).toBeNull();
   });
 });

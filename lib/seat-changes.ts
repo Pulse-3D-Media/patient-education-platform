@@ -381,6 +381,23 @@ export async function removePerson(args: { clinicId: string; targetUserId: unkno
 }
 
 /**
+ * The clinic's open invitations, newest first, for the overview's
+ * "Invitation not accepted yet". A read only: nothing is checked, changed or
+ * let go here (the People page's seat check does that). Empty for a clinic
+ * with no organization; null when Clerk could not be read.
+ */
+export async function listOpenInvitationsForClinic(clinicId: string): Promise<OpenInvitation[] | null> {
+  const clinic = await clinicFor(clinicId);
+  if (!clinic) return [];
+  try {
+    return await listOpenInvitations(clinic.orgId);
+  } catch (error) {
+    logFailure("could not read the open invitations", error);
+    return null;
+  }
+}
+
+/**
  * Who could be removed from a clinic that is NOT open, for the People page's closed view: everyone in the
  * clinic's organization but the account owner and the person looking. Only read from Clerk; no seat is
  * checked or changed here (the full People page and its seat check come back once the clinic is open).

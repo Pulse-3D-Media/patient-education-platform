@@ -53,12 +53,12 @@ function Note({ note }: { note: { text: string; problem: boolean } | null }) {
 }
 
 /** "Open Stripe's billing page": update the card, see invoices, cancel. */
-export function PortalButton({ primary = false }: { primary?: boolean }) {
+export function PortalButton({ primary = false, label = "Open Stripe’s billing page" }: { primary?: boolean; label?: string }) {
   const { press, note, busy, leaving } = useBillingAction(openBillingPortalAction);
   return (
     <div className="flex flex-wrap items-center gap-3">
       <button type="button" onClick={press} disabled={busy} className={primary ? PRIMARY_BUTTON : SECONDARY_BUTTON}>
-        {leaving ? "Opening Stripe..." : "Open Stripe’s billing page"}
+        {leaving ? "Opening Stripe..." : label}
       </button>
       <Note note={note} />
     </div>

@@ -110,7 +110,8 @@ describe("the words", () => {
     expect(TOUR_COPY.nav.body).toBeNull();
     expect(TOUR_COPY.videoSend.title).toBe("Send it or save it");
     expect(TOUR_COPY.admin.title).toBe("Your admin pages");
-    expect(JSON.stringify(TOUR_COPY)).not.toContain("—");
+    // An em dash, written as its code so this file holds none.
+    expect(JSON.stringify(TOUR_COPY)).not.toContain(String.fromCharCode(0x2014));
   });
 
   it("say nothing about seats or plans to someone without a seat", () => {

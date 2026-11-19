@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { readBrandingForm } from "@/lib/branding-form";
+import { readBrandingForm, readColorField, readPhoneField } from "@/lib/branding-form";
 import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getCurrentClinicId, type LiveAdminCheck } from "@/lib/clinic";
 import { checkLogoBytes, checkLogoSize, LOGO_MISSING, readClinicName } from "@/lib/clinic-identity";
-import { getClerkOrgIdForClinic, recordClinicName, recordUploadedLogo, updateClinicBranding } from "@/lib/db/clinics";
+import { getClerkOrgIdForClinic, recordClinicName, recordUploadedLogo, updateClinicBranding, updateClinicBrandingPart } from "@/lib/db/clinics";
 import { errorKind } from "@/lib/error-kind";
 import { renameClerkOrganization, uploadClerkOrganizationLogo } from "@/lib/organization";
 import { isClinicAdmin } from "@/lib/roles";
@@ -96,6 +96,38 @@ export async function saveClinicBrandingAction(_previous: BrandingFormState, for
 
   refreshClinicScreens();
   return { ok: "Saved. Your team sees it on their next page, and patients on the next link they open." };
+}
+
+/**
+ * Save ONE part of the branding, the phone or the colour, and leave the rest
+ * as it is. For the setup steps (app/onboarding/setup), where step 1 asks
+ * only for the phone and step 2 only for the colour. The same checks as the
+ * full save above: an office admin of an open clinic, asked of Clerk live
+ * before anything is written, the values checked by the same rules
+ * (lib/branding-form.ts), and logged under this person's name.
+ */
+export async function saveClinicBrandingPartAction(part: "phone" | "brandColor", formData: FormData): Promise<BrandingFormState> {
+  if (!(await isClinicAdmin())) return { error: NOT_ADMIN };
+
+  const clinicId = await getCurrentClinicId();
+  if (!clinicId) return { error: NOT_OPEN };
+
+  const checked = part === "phone" ? readPhoneField(formData) : part === "brandColor" ? readColorField(formData) : { error: "That is not part of the branding." };
+  if ("error" in checked) return checked;
+
+  const live = await liveAdmin(clinicId);
+  if (!live.ok) return { error: live.error };
+
+  try {
+    const { logged } = await updateClinicBrandingPart(clinicId, checked, adminName(live.name));
+    if (!logged) return { ok: "Nothing changed, so nothing was saved." };
+  } catch (error) {
+    console.error("Saving part of a clinic's branding failed", errorKind(error));
+    return { error: "That did not save. Nothing was changed. Try again in a moment." };
+  }
+
+  refreshClinicScreens();
+  return { ok: "Saved." };
 }
 
 /**

@@ -9,7 +9,7 @@ import { setClinicManagedByPulse, setClinicPracticeType, setClinicStatusByStaff 
 import { createPricingVersion, getActivePricing, type CurrentPricing } from "./db/pricing";
 import { reserveSeat } from "./db/seats";
 import type { ChangeRequest, ChangeSeen } from "./plan-change";
-import { cancelWaitingChange, confirmPlanChange, findInvoiceToPay, openBillingPortal, reviewPlanChange, type ConfirmResult, type PlanChangeDeps } from "./plan-changes";
+import { cancelWaitingChange, confirmAddSeat, confirmPlanChange, findInvoiceToPay, openBillingPortal, reviewAddSeat, reviewPlanChange, type ConfirmResult, type PlanChangeDeps } from "./plan-changes";
 import { DEFAULT_PRICING_CONFIG, quote, type PricingConfig } from "./pricing";
 import { clinicIsOpen } from "./clinic-status";
 import { fakePlanStripe, type FakePlanStripe } from "./testing/fake-stripe-plans";
@@ -806,5 +806,39 @@ describe("Stripe's billing page, and recovering from a failed payment", () => {
 
     expect(await billingOf(f.clinicId)).toMatchObject({ status: "CANCELED", scheduledPlanId: null, scheduledChangeAt: null });
     expect((await logOf(f.clinicId)).at(-1)).toContain("The plan change that was scheduled will not happen.");
+  });
+});
+
+describe("one more seat, from setup's team step (reviewAddSeat, confirmAddSeat)", () => {
+  it("builds the plan in force plus one seat on the server, shows its true price, and buys it once", async () => {
+    const f = await makePayingClinic("add seat", { categories: ["KNEE"], seats: 3 });
+    const review = await reviewAddSeat({ clinicId: f.clinicId, deps: depsFor(f.fake) });
+    if (review.kind !== "review" || !review.now) throw new Error(`no review: ${review.kind}`);
+    expect(review.summary.seats).toBe(4);
+    expect(review.summary.included).toEqual(["KNEE"]);
+    expect(review.summary.versionId).toBe(versionA);
+    expect(review.now.dueNowCents).toBeGreaterThan(0);
+
+    const seen = { timing: "now" as const, at: review.now.at, dueNowCents: review.now.dueNowCents, versionId: review.summary.versionId, totalCents: review.summary.totalCents };
+    expect((await confirmAddSeat({ clinicId: f.clinicId, seen, actor: owner, deps: depsFor(f.fake) })).kind).toBe("changed");
+    expect((await clinicOf(f.clinicId)).surgeonSeats).toBe(4);
+
+    // The same press again: the plan has moved, so the total it was shown is out of date and nothing more is bought.
+    expect((await confirmAddSeat({ clinicId: f.clinicId, seen, actor: owner, deps: depsFor(f.fake) })).kind).toBe("stale");
+    expect((await clinicOf(f.clinicId)).surgeonSeats).toBe(4);
+  });
+
+  it("buys nothing when the total sent back is not the one the server works out", async () => {
+    const f = await makePayingClinic("add seat forged", { categories: ["KNEE"], seats: 2 });
+    const review = await reviewAddSeat({ clinicId: f.clinicId, deps: depsFor(f.fake) });
+    if (review.kind !== "review" || !review.now) throw new Error(`no review: ${review.kind}`);
+    const seen = { timing: "now" as const, at: review.now.at, dueNowCents: review.now.dueNowCents, versionId: review.summary.versionId, totalCents: 100 };
+    expect((await confirmAddSeat({ clinicId: f.clinicId, seen, actor: owner, deps: depsFor(f.fake) })).kind).toBe("stale");
+    expect((await clinicOf(f.clinicId)).surgeonSeats).toBe(2);
+  });
+
+  it("is refused where plan changes are shut (test mode off, or the production deployment)", async () => {
+    const f = await makePayingClinic("add seat shut", { categories: ["KNEE"], seats: 2 });
+    expect((await reviewAddSeat({ clinicId: f.clinicId, deps: depsFor(f.fake, { isOpen: false }) })).kind).toBe("refused");
   });
 });

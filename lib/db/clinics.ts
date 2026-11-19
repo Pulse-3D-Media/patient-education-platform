@@ -8,11 +8,12 @@ import { UNNAMED_CLINIC, nameFromClerk } from "../clinic-identity";
 import { clinicIsOpen } from "../clinic-status";
 import { clampPage } from "../paging";
 import { formatUsPhone } from "../phone";
+import { SETUP_START } from "../setup";
 import { checkSeatReduction, isClerkUserId, overAllocatedWords, seatSummary } from "../seats";
 import { readBillingFacts } from "./billing";
 import { readClinicLocked } from "./clinic-lock";
 import { prisma } from "./client";
-import { countSeatsInUseIn, seatSoloOwnerIfDue } from "./seats";
+import { countSeatsInUseIn, seatOwnerIfDue } from "./seats";
 
 /**
  * Queries for the Clinic table.
@@ -52,6 +53,9 @@ const CLINIC_FIELDS = {
   ownerClerkUserId: true,
   // The categories on the plan, for the library's sidebar (lib/clinic.ts). Access itself is always decided from getClinicAccess().
   categories: true,
+  // Where the clinic's setup stands, for the library's "Finish setup" reminder (lib/setup.ts). Read with the rest, so nothing extra.
+  setupStep: true,
+  setupDone: true,
 } as const;
 
 /** What Clerk tells us about an organization that we keep a copy of. */
@@ -152,6 +156,8 @@ export async function upsertClinicForClerkOrg(clerkOrgId: string, details: Clerk
         logoUrl,
         status: "PENDING",
         ownerClerkUserId: isClerkUserId(details.creatorClerkUserId) ? details.creatorClerkUserId : null,
+        // A clinic made from now on goes through setup (lib/setup.ts). Clinics made before have it empty, and count as set up.
+        setupStep: SETUP_START,
       },
       // When Clerk has no image, omit the column entirely. Writing the logo
       // from the earlier read could overwrite a concurrent Pulse branding save.
@@ -466,7 +472,7 @@ async function changeClinicWithLog(
     // its owner when nobody else holds or is invited to a seat (the rule is
     // ownerAutoSeatDue() in lib/seats.ts). Under the same lock, in the same
     // transaction; most changes are not an opening and it does nothing.
-    await seatSoloOwnerIfDue(tx, clinicId, before);
+    await seatOwnerIfDue(tx, clinicId, before);
     return { clinic, logged: body };
   });
 }
@@ -893,6 +899,30 @@ export async function updateClinicBranding(clinicId: string, branding: ClinicBra
         changeWords("phone", formatUsPhone(before.phone) || null, formatUsPhone(branding.phone) || null),
       ].filter((part): part is string => part !== null);
       return parts.length > 0 ? `Branding changed: ${parts.join("; ")}.` : null;
+    },
+    changedBy,
+  );
+}
+
+/**
+ * Save ONE part of the branding (the phone, or the colour) and leave the
+ * rest exactly as it is. For the setup steps, where step 1 asks only for the
+ * phone and step 2 only for the colour: saving the whole look from there
+ * would write back font and mode values read earlier, over a change another
+ * admin made in between. Logged with the same words as a full save, in the
+ * same transaction, under the clinic's row lock (changeClinicWithLog).
+ * Saving the value it already has writes and logs nothing.
+ */
+export async function updateClinicBrandingPart(clinicId: string, part: { phone: string | null } | { brandColor: string | null }, changedBy: string) {
+  return changeClinicWithLog(
+    clinicId,
+    part,
+    (before) => {
+      const words =
+        "phone" in part
+          ? changeWords("phone", formatUsPhone(before.phone) || null, formatUsPhone(part.phone) || null)
+          : changeWords("colour", before.brandColor, part.brandColor);
+      return words ? `Branding changed: ${words}.` : null;
     },
     changedBy,
   );

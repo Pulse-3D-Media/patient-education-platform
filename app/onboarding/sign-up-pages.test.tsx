@@ -350,8 +350,8 @@ describe("the welcome dialog on the library", () => {
     for (const words of ["Thanks for signing up.", "We want you to have a great experience.", "Finish setting up", "(recommended)", "Clinic name, branding, your team. About 5 minutes.", "Take a quick tour", "Three stops, under a minute.", "Go to the library", "Look around first."]) {
       expect(html).toContain(words);
     }
-    // Until setup (PR #5) exists, Finish setting up goes to Clinic branding.
-    expect(html).toContain('href="/admin/branding"');
+    // Finish setting up opens setup (pull request #5), which sends the admin to the step their clinic is on.
+    expect(html).toContain('href="/onboarding/setup"');
   });
 
   it("never shows for anyone but the owner, or without the address", async () => {

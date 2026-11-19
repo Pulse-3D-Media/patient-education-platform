@@ -17,6 +17,7 @@ Making a new clinic is not logged.
 ## Clinic branding and dependable playback (Prompt 10)
 
 Pulse staff use a clinic's **Branding** tab at /pulse/clinics/[id]; an office admin uses /admin/branding.
+A new clinic's admins also meet two parts of it in setup: the name and phone (step 1) and the logo and colour (step 2), through the same name, logo and branding actions, with the phone and the colour each saved on its own (`saveClinicBrandingPartAction`, `updateClinicBrandingPart()`), so a step never writes back the font or mode it did not show.
 The clinic id for the admin save comes from its server-checked session, never the form.
 Members and closed clinics cannot save branding.
 Both forms validate the whole submission; malformed or duplicate values are refused.

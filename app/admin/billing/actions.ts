@@ -8,12 +8,15 @@ import { checkPayment, startCheckout } from "@/lib/checkout";
 import { readPlanSelection } from "@/lib/checkout-rules";
 import { getCategoryList } from "@/lib/db/category-config";
 import { ADMIN_CHECK_UNREACHABLE, confirmAdminWithClerk, getBillingClinicId } from "@/lib/clinic";
-import { readChangeConfirm, readChangeRequest } from "@/lib/plan-change";
+import { getCheckoutFacts } from "@/lib/db/billing";
+import { readAddSeatConfirm, readChangeConfirm, readChangeRequest } from "@/lib/plan-change";
 import {
   cancelWaitingChange,
+  confirmAddSeat,
   confirmPlanChange,
   findInvoiceToPay,
   openBillingPortal,
+  reviewAddSeat,
   reviewPlanChange,
   type ChangeSummary,
   type PlanChangeDeps,
@@ -242,6 +245,87 @@ export async function confirmPlanChangeAction(formData: FormData): Promise<Confi
     revalidatePath("/admin/billing");
     // Stripe may or may not have been reached, so this does not say "nothing was charged".
     return { error: "We could not confirm that change just now. Press Check with Stripe below to see where your plan stands before trying again." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// One more seat, from setup's team step ("Add another")
+// ---------------------------------------------------------------------------
+
+/** What the "Add a seat?" confirmation shows: the seats now and after, the new total, and what Stripe charges today. Plain values only. */
+export type AddSeatReview = {
+  seatsNow: number;
+  seatsAfter: number;
+  interval: "MONTH" | "YEAR";
+  totalCents: number;
+  /** The total before the seat, for "(was $X)". */
+  wasCents: number | null;
+  versionId: string;
+  /** Starts now (an added seat always does): the amount due today and the moment it was worked out for. */
+  now: { dueNowCents: number; atSeconds: number } | null;
+};
+
+export type AddSeatReviewState = { review?: AddSeatReview; error?: string } | null;
+
+/**
+ * "Add another": what one more seat would cost. Changes nothing. The plan is
+ * the clinic's own plan plus one seat, built on the server
+ * (reviewAddSeat in lib/plan-changes.ts); nothing about it comes from the
+ * browser. Offered only where plan changes are (test mode, never the
+ * production deployment): the same gate refuses here too.
+ */
+export async function reviewAddSeatAction(): Promise<AddSeatReviewState> {
+  const clinicId = await getBillingClinicId();
+  if (!clinicId) return { error: ADMINS_ONLY };
+  try {
+    const result = await reviewAddSeat({ clinicId, deps: planDeps() });
+    if (result.kind !== "review") return { error: result.message };
+    const { summary } = result;
+    const was = (await getCheckoutFacts(clinicId))?.currentPlan?.totalCents ?? null;
+    return {
+      review: {
+        seatsNow: summary.seats - 1,
+        seatsAfter: summary.seats,
+        interval: summary.interval,
+        totalCents: summary.totalCents,
+        wasCents: was,
+        versionId: summary.versionId,
+        now: result.now ? { dueNowCents: result.now.dueNowCents, atSeconds: Math.floor(result.now.at.getTime() / 1000) } : null,
+      },
+    };
+  } catch (error) {
+    console.error(`Reviewing an added seat failed: ${errorKind(error)}`);
+    return { error: "We could not work that out just now. Nothing has changed. Try again in a moment." };
+  }
+}
+
+export type AddSeatState = { done?: string; payUrl?: string | null; unpaid?: string; stale?: string; error?: string } | null;
+
+/**
+ * "Add a seat": buy the seat that was reviewed. The form sends back only what
+ * was on the confirmation (readAddSeatConfirm); the server builds the plan
+ * again and compares, so a repeated press finds the total moved and buys
+ * nothing more. The same live admin check as every billing change.
+ */
+export async function confirmAddSeatAction(formData: FormData): Promise<AddSeatState> {
+  const clinicId = await getBillingClinicId();
+  if (!clinicId) return { error: ADMINS_ONLY };
+  const read = readAddSeatConfirm(formData);
+  if (!read.ok) return { stale: read.error };
+  try {
+    const live = await confirmAdminWithClerk(clinicId);
+    if (!live.ok) return { error: liveRefusal(live.reason, ADMINS_ONLY) };
+    const result = await confirmAddSeat({ clinicId, seen: read.seen, actor: { id: live.userId, name: live.name }, deps: planDeps() });
+    revalidatePath("/admin/billing");
+    revalidatePath("/onboarding/setup/team");
+    if (result.kind === "changed" || result.kind === "scheduled") return { done: result.message };
+    if (result.kind === "payment-needed") return { unpaid: result.message, payUrl: result.payUrl };
+    if (result.kind === "stale") return { stale: result.message };
+    return { error: result.message };
+  } catch (error) {
+    console.error(`Adding a seat failed: ${errorKind(error)}`);
+    revalidatePath("/onboarding/setup/team");
+    return { error: "We could not confirm that just now. Open Billing and press Check with Stripe to see where your plan stands before trying again." };
   }
 }
 

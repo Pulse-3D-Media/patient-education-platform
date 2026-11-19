@@ -19,7 +19,7 @@ vi.mock("@clerk/nextjs", () => ({
   ClerkLoading: () => null,
   ClerkFailed: () => null,
   SignIn: (props: { path?: string; routing?: string }) => <span data-testid="clerk-sign-in" data-path={props.path ?? ""} data-routing={props.routing ?? ""} />,
-  SignUp: (props: { path?: string }) => <span data-testid="clerk-sign-up" data-path={props.path ?? ""} />,
+  SignUp: (props: { path?: string; forceRedirectUrl?: string }) => <span data-testid="clerk-sign-up" data-path={props.path ?? ""} data-after={props.forceRedirectUrl ?? ""} />,
   AuthenticateWithRedirectCallback: () => <span data-testid="clerk-sso-callback" />,
   TaskChooseOrganization: () => <span data-testid="clerk-choose-organization" />,
   useSignUp: () => ({ signUp: {} }),
@@ -130,21 +130,22 @@ describe("/sign-up", () => {
     expect(await where(() => draw({}))).toBe("redirect:/onboarding");
   });
 
-  it("an invitation for a new person gets Clerk's own sign-up form, exactly as before", async () => {
+  it("an invitation for a new person gets Clerk's own sign-up form, which then opens the join screen", async () => {
     const html = renderToStaticMarkup(await draw({ __clerk_status: "sign_up", __clerk_ticket: "made.up.ticket" }));
     expect(html).toContain('data-testid="clerk-sign-up"');
     expect(html).toContain('data-path="/sign-up"');
+    expect(html).toContain('data-after="/onboarding/join"');
     expect(html).not.toContain(">Your name</label>");
     // The invitation's ticket never leaks into the other tab's address.
     expect(html).not.toContain("made.up.ticket");
     expect(auth).not.toHaveBeenCalled();
   });
 
-  it("an invitation for someone with an account, or one already accepted, is sent on as before", async () => {
+  it("an invitation for someone with an account, or one already accepted, is sent on: to sign in, or to the join screen once accepted", async () => {
     expect(await where(() => draw({ __clerk_status: "sign_in", __clerk_ticket: "made.up.ticket" }))).toBe(
       "redirect:/sign-in?__clerk_status=sign_in&__clerk_ticket=made.up.ticket",
     );
-    expect(await where(() => draw({ __clerk_status: "complete" }))).toBe("redirect:/onboarding");
+    expect(await where(() => draw({ __clerk_status: "complete" }))).toBe("redirect:/onboarding/join");
   });
 
   it("Google comes back to Clerk's own callback, and Clerk's later steps keep Clerk's form", async () => {

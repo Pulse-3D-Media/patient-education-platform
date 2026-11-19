@@ -139,7 +139,7 @@ const refused = (message: string): Prepared => ({ ok: false, result: { kind: "re
  * anything: may this clinic change its plan, what the picked plan comes to
  * on the server's numbers, and whether it starts now or at the renewal.
  */
-async function prepare(clinicId: string, request: ChangeRequest, deps: PlanChangeDeps): Promise<Prepared> {
+async function prepare(clinicId: string, request: ChangeRequest, deps: PlanChangeDeps, checkSeen = true): Promise<Prepared> {
   const clinic = await getCheckoutFacts(clinicId);
   if (!clinic) return refused(NOT_FOUND);
 
@@ -195,7 +195,7 @@ async function prepare(clinicId: string, request: ChangeRequest, deps: PlanChang
   }
 
   // Is that the total the admin was looking at?
-  if (selection.seenVersionId !== version.id || selection.seenTotalCents !== amounts.totalCents) {
+  if (checkSeen && (selection.seenVersionId !== version.id || selection.seenTotalCents !== amounts.totalCents)) {
     return {
       ok: false,
       result: { kind: "stale", message: `The total on this page was out of date. This plan comes to ${formatCents(amounts.totalCents)} per ${amounts.interval}. Check it, then review the change again.` },
@@ -255,9 +255,9 @@ const whole = (date: Date) => new Date(Math.floor(date.getTime() / 1000) * 1000)
  * nothing anywhere. For a change that starts now, Stripe is asked what it
  * would charge today; that is the amount shown, to the cent.
  */
-export async function reviewPlanChange(args: { clinicId: string; request: ChangeRequest; deps: PlanChangeDeps }): Promise<ReviewResult> {
+export async function reviewPlanChange(args: { clinicId: string; request: ChangeRequest; deps: PlanChangeDeps; checkSeen?: boolean }): Promise<ReviewResult> {
   const { clinicId, request, deps } = args;
-  const prepared = await prepare(clinicId, request, deps);
+  const prepared = await prepare(clinicId, request, deps, args.checkSeen ?? true);
   if (!prepared.ok) return prepared.result;
   const { clinic, summary, change, basePlanId } = prepared;
 
@@ -396,6 +396,65 @@ export async function confirmPlanChange(args: {
     payUrl: payUrl && payUrl.startsWith(STRIPE_INVOICE_PREFIX) ? payUrl : null,
     message: "The payment for this change did not go through, so your plan has not changed and you keep what you had. You can pay for it on Stripe's page, or cancel the change.",
   };
+}
+
+// ---------------------------------------------------------------------------
+// One more seat ("Add another" on setup's team step)
+// ---------------------------------------------------------------------------
+
+/**
+ * The change "the plan in force, with one more seat", built HERE from the
+ * clinic's own plan: the same categories, the same billing interval, the
+ * seats plus one, at the prices the clinic signed up at. Nothing about what
+ * is bought comes from the browser. `seen` is what the admin was shown on
+ * the confirmation (the pricing version and the new total), which is only
+ * compared, never charged; null for the review step, which shows the true
+ * figures and changes nothing. Null when there is no plan in force.
+ */
+async function addSeatRequest(clinicId: string, seen: { versionId: string; totalCents: number } | null): Promise<ChangeRequest | null> {
+  const clinic = await getCheckoutFacts(clinicId);
+  const current = clinic?.currentPlan;
+  if (!current) return null;
+  return {
+    selection: {
+      categories: current.categories,
+      seats: current.surgeonSeats + 1,
+      interval: current.interval,
+      seenVersionId: seen?.versionId ?? "",
+      seenTotalCents: seen?.totalCents ?? -1,
+    },
+    moveToCurrentPricing: false,
+  };
+}
+
+/**
+ * Step one of "Add another": what one more seat would cost, from today and
+ * at the renewal. Exactly reviewPlanChange() above (the same checks, Stripe
+ * asked what it would charge today), with the change built on the server.
+ * Changes nothing anywhere.
+ */
+export async function reviewAddSeat(args: { clinicId: string; deps: PlanChangeDeps }): Promise<ReviewResult> {
+  const request = await addSeatRequest(args.clinicId, null);
+  if (!request) return { kind: "refused", message: "Your clinic has no subscription to change." };
+  return reviewPlanChange({ clinicId: args.clinicId, request, deps: args.deps, checkSeen: false });
+}
+
+/**
+ * Step two of "Add a seat": exactly confirmPlanChange() above, with the
+ * change built on the server again. If the plan moved since the review (a
+ * second press, another admin's change, new prices), the total shown no
+ * longer matches and nothing is done ("stale"), so a seat is never bought
+ * twice by a repeated press, and never at a price the admin did not see.
+ */
+export async function confirmAddSeat(args: {
+  clinicId: string;
+  seen: ChangeSeen & { versionId: string; totalCents: number };
+  actor: { id: string; name: string };
+  deps: PlanChangeDeps;
+}): Promise<ConfirmResult> {
+  const request = await addSeatRequest(args.clinicId, { versionId: args.seen.versionId, totalCents: args.seen.totalCents });
+  if (!request) return { kind: "refused", message: "Your clinic has no subscription to change." };
+  return confirmPlanChange({ clinicId: args.clinicId, request, seen: args.seen, actor: args.actor, deps: args.deps });
 }
 
 // ---------------------------------------------------------------------------

@@ -143,6 +143,18 @@ model Clinic {
   // is no longer in the clinic. Empty for every clinic made before owners
   // existed, and after an owner leaves: /pulse flags it. An id only.
   ownerClerkUserId String?
+
+  // Setup: the four steps a new clinic's admins go through after the first
+  // payment (clinic name, branding, your team, test link; lib/setup.ts has the
+  // rules, lib/db/setup.ts the writes). Approved by Evan on 2026-11-18.
+  // setupStep is where setup stands: the step to come back to ("clinic",
+  // "branding", "team", "test") or "finished". EMPTY means the clinic was made
+  // before setup existed, and it counts as set up, so no clinic that was
+  // already open is ever asked to set up. A clinic gets "clinic" when its row
+  // is made. setupDone lists the steps that were completed rather than
+  // skipped. It only ever moves forward.
+  setupStep String?
+  setupDone String[] @default([])
 }
 
 /// Whether Clerk's copy of a seat agrees with ours yet. From the seat model

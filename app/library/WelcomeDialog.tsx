@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef } from "react";
+import { SETUP_PATH } from "@/lib/setup";
 
 /**
  * "Thanks for signing up." (the approved design, screen 03-welcome): the
@@ -22,8 +23,8 @@ import { useEffect, useRef } from "react";
  * it, since the library is already underneath.
  */
 
-/** Pull request #5 (setup-steps) replaces this with the first setup step. */
-const FINISH_SETTING_UP_HREF = "/admin/branding";
+/** Setup (pull request #5): the step the clinic is on, or the finished page. */
+const FINISH_SETTING_UP_HREF = SETUP_PATH;
 /** Pull request #6 (tour) replaces this with the tour's first stop. */
 const TOUR_HREF = "/library";
 

@@ -228,7 +228,7 @@ export async function releaseSeat(clinicId: string, clerkUserId: string, log?: S
 }
 
 // ---------------------------------------------------------------------------
-// A solo owner, seated when the clinic opens
+// The account owner, seated when the clinic opens
 // ---------------------------------------------------------------------------
 
 /** What a clinic looked like a moment before a change, for openedWithSeats(). */
@@ -241,8 +241,10 @@ function openWithSeats(facts: OpeningFacts, now: Date): boolean {
 
 /**
  * Give the account owner a seat if the clinic has just become open with
- * exactly one seat and nobody else holds or is invited to it (the rule and its reasons
- * are ownerAutoSeatDue() in lib/seats.ts). Returns true when a seat was given.
+ * seats, a seat is free, and the rule says so (the person who signs up takes
+ * a seat; the rule and its reasons are ownerAutoSeatDue() in lib/seats.ts).
+ * Never takes a seat someone holds or was invited to: when every seat is
+ * taken it does nothing. Returns true when a seat was given.
  *
  * Called at the end of every write that can open a clinic or give it seats:
  * reconcileSubscription() in billing.ts (a first confirmed payment, or a
@@ -256,25 +258,39 @@ function openWithSeats(facts: OpeningFacts, now: Date): boolean {
  * `before` is the clinic as the caller read it under the lock, before its
  * change. The clinic as it is now is read here, after the change.
  */
-export async function seatSoloOwnerIfDue(tx: Prisma.TransactionClient, clinicId: string, before: OpeningFacts, now: Date = new Date()): Promise<boolean> {
+export async function seatOwnerIfDue(tx: Prisma.TransactionClient, clinicId: string, before: OpeningFacts, now: Date = new Date()): Promise<boolean> {
   const after = await tx.clinic.findUnique({
     where: { id: clinicId },
-    select: { status: true, graceEndsAt: true, surgeonSeats: true, ownerClerkUserId: true },
+    select: { status: true, graceEndsAt: true, surgeonSeats: true, ownerClerkUserId: true, setupStep: true },
   });
   if (!after) return false;
   const wasOpenWithSeats = openWithSeats(before, now);
   const isOpenWithSeats = openWithSeats(after, now);
-  // Most changes are not the opening of a one-seat clinic; skip the counting for them.
-  if (wasOpenWithSeats || !isOpenWithSeats || after.surgeonSeats !== 1 || !after.ownerClerkUserId) return false;
+  const newClinic = after.setupStep !== null;
+  // Most changes are not an opening the rule could apply to; skip the counting for them.
+  if (wasOpenWithSeats || !isOpenWithSeats || !after.ownerClerkUserId || !(newClinic || after.surgeonSeats === 1)) return false;
 
   const seated = await tx.seatAllocation.count({ where: { clinicId } });
   const invited = await tx.seatInvitation.count({ where: { clinicId } });
+  const ownerSeated =
+    (await tx.seatAllocation.findUnique({ where: { clinicId_clerkUserId: { clinicId, clerkUserId: after.ownerClerkUserId } }, select: { id: true } })) !== null;
   const doneBefore =
     (await tx.clinicNote.findFirst({ where: { clinicId, authorName: SEATS_AUTHOR, body: { startsWith: OWNER_AUTO_SEAT_WORDS } }, select: { id: true } })) !== null;
-  if (!ownerAutoSeatDue({ wasOpenWithSeats, isOpenWithSeats, planSeats: after.surgeonSeats, ownerClerkUserId: after.ownerClerkUserId, seated, invited, doneBefore })) return false;
+  const due = ownerAutoSeatDue({
+    wasOpenWithSeats,
+    isOpenWithSeats,
+    planSeats: after.surgeonSeats,
+    ownerClerkUserId: after.ownerClerkUserId,
+    ownerSeated,
+    seated,
+    invited,
+    doneBefore,
+    newClinic,
+  });
+  if (!due) return false;
 
   await tx.seatAllocation.create({ data: { clinicId, clerkUserId: after.ownerClerkUserId, syncState: "SYNCED", reservedAt: now }, select: { id: true } });
-  const body = ownerAutoSeatNote(seatSummary(after.surgeonSeats, 1, 0));
+  const body = ownerAutoSeatNote(seatSummary(after.surgeonSeats, seated + 1, invited));
   await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: SEATS_AUTHOR }, select: { id: true } });
   return true;
 }

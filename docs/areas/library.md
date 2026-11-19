@@ -39,6 +39,9 @@ No price is ever shown in the library.
 Everyone in the clinic can browse and play; **only someone holding a seat gets Send**, and a link they send is from them automatically, with no picker (the page hides the button from everyone else, and the action checks the seat again).
 Someone without a seat gets one line under the videos instead (`NoSeatNote`, chosen by `noSeatHelp()` in `lib/seats.ts`; decided by the user on 2026-11-16, audit C3): the account owner with a seat free gets a **Take a seat** button, any other office admin (or the owner when none is free) a link to People, and a member the old "ask your clinic's office admin".
 A plan with no categories says so, and an office admin also gets a **Go to Billing** link.
+**"Finish setup" in the menu** (the approved design, screens 06-library-reminder and 06-library-collapsed): an office admin of a clinic whose setup is under way sees a card under Home in the full menu ("Finish setup", a bar, "0 of 4 done") and a clock in the narrow rail, both opening setup at the step the clinic is on; members never see it, a clinic made before setup never shows it, and it goes once setup is finished.
+It is drawn from the clinic row the shell already reads (`Clinic.setupStep`, `setupDone`), so it costs no extra request and adds nothing to playing a video.
+**The menu folds to icons and stays as it was left:** on a wide screen the menu button switches between the full menu and the narrow rail, and the choice is remembered in that browser (local storage, nothing on the server); a tablet keeps the rail with the full menu sliding out over the page, and a phone slides it out.
 
 ## Category entitlements
 

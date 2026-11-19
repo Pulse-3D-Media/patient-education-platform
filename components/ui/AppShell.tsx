@@ -11,7 +11,8 @@ import { CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
 import { ClinicLogo } from "./ClinicLogo";
-import { AdminIcon, ArrowLeftIcon, BooksIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
+import { SETUP_PATH } from "@/lib/setup";
+import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
 
 /**
  * The frame around every staff-facing page: the library and the admin
@@ -93,6 +94,9 @@ export type ShellBrand = {
   logoUrl: string | null;
 };
 
+/** How far an office admin's clinic has got with setup, for the "Finish setup" card in the menu. */
+export type SetupReminder = { doneCount: number; total: number };
+
 /** Which pull-out is showing, if any: the full sidebar slid over the page, the categories, or the admin sections. */
 type Menu = "guide" | "library" | "admin" | null;
 
@@ -110,10 +114,13 @@ export function AppShell({
   showAdmin = false,
   brand,
   categories,
+  setup = null,
 }: {
   children: ReactNode;
   showAdmin?: boolean;
   brand?: ShellBrand;
+  /** "Finish setup" and how far it has got, for an office admin while their clinic's setup is under way; null for everyone else (members never see it). Decided on the server (ClinicShell). */
+  setup?: SetupReminder | null;
   /** The categories on the clinic's plan, for the navigation, in list order with their current names. Left out, none is listed. */
   categories?: NavCategory[];
 }) {
@@ -238,6 +245,11 @@ export function AppShell({
           <RailLink href="/library" label="Home" active={onHome}>
             <HomeIcon className="h-6 w-6" />
           </RailLink>
+          {setup && (
+            <RailLink href={SETUP_PATH} label="Setup" active={false} title={`Finish setup, ${setup.doneCount} of ${setup.total} done`}>
+              <ClockIcon className="h-6 w-6" />
+            </RailLink>
+          )}
           <RailButton label="Library" open={menu === "library"} onClick={() => toggle("library")} controls="category-menu">
             <BooksIcon className="h-6 w-6" />
           </RailButton>
@@ -254,7 +266,7 @@ export function AppShell({
 
         {/* The full sidebar, on a wide screen while it is not folded: every line an icon and a label, YouTube-style. */}
         <nav aria-label="Library" className={`sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 flex-col border-r border-line bg-sunken ${folded ? "" : "xl:flex"}`}>
-          <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} />
+          <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} />
           {/* The same avatar at the foot of the full sidebar, lined up with where it sits on the rail. */}
           <div className="flex h-14 shrink-0 items-center border-t border-line px-[1.375rem]">
             <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
@@ -277,7 +289,7 @@ export function AppShell({
                   <MenuButton open onClick={close} />
                   {logo}
                 </div>
-                <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} onChoose={close} />
+                <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} onChoose={close} />
                 {brand && <PoweredBy />}
               </aside>
             ) : menu === "library" ? (
@@ -362,9 +374,9 @@ const RAIL_ITEM = "flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[1
 const RAIL_ON = "bg-wash-strong text-ink";
 const RAIL_OFF = "text-ink-soft hover:bg-wash hover:text-ink";
 
-function RailLink({ href, label, active, children }: { href: string; label: string; active: boolean; children: ReactNode }) {
+function RailLink({ href, label, active, title, children }: { href: string; label: string; active: boolean; title?: string; children: ReactNode }) {
   return (
-    <Link href={href} aria-current={active ? "page" : undefined} className={`${RAIL_ITEM} ${active ? RAIL_ON : RAIL_OFF}`}>
+    <Link href={href} title={title} aria-label={title} aria-current={active ? "page" : undefined} className={`${RAIL_ITEM} ${active ? RAIL_ON : RAIL_OFF}`}>
       {children}
       {label}
     </Link>
@@ -398,12 +410,13 @@ function SideLink({ href, active, icon, onClick, children }: { href: string; act
 }
 
 /** The full sidebar's lines: Home, the plan's categories, Admin for admins. Used on a wide screen and slid out on a smaller one. */
-function Guide({ pathname, categories, showAdmin, onChoose }: { pathname: string; categories: NavCategory[]; showAdmin: boolean; onChoose?: () => void }) {
+function Guide({ pathname, categories, showAdmin, setup, onChoose }: { pathname: string; categories: NavCategory[]; showAdmin: boolean; setup: SetupReminder | null; onChoose?: () => void }) {
   return (
     <div className="flex-1 overflow-y-auto px-3 py-3">
       <SideLink href="/library" onClick={onChoose} active={pathname === "/library"} icon={<HomeIcon className="h-6 w-6" />}>
         Home
       </SideLink>
+      {setup && <SetupCard setup={setup} onChoose={onChoose} />}
 
       {categories.length > 0 && (
         <>
@@ -536,5 +549,32 @@ function AdminMenu({ pathname, onClose }: { pathname: string; onClose: () => voi
         </ul>
       </nav>
     </aside>
+  );
+}
+
+/**
+ * "Finish setup" in the menu (the approved design, screen 06-library-reminder):
+ * a card under Home with a bar and "0 of 4 done", for an office admin while
+ * their clinic's setup is under way. It opens setup at the step the clinic
+ * is on. Only a link: it loads nothing and adds nothing to playing a video.
+ */
+function SetupCard({ setup, onChoose }: { setup: SetupReminder; onChoose?: () => void }) {
+  return (
+    <Link
+      href={SETUP_PATH}
+      onClick={onChoose}
+      className="mt-2 block rounded-xl border border-brand/40 bg-brand/10 px-3 py-3 text-ink transition hover:border-brand"
+    >
+      <span className="flex items-center gap-3 text-base font-semibold">
+        <ClockIcon className="h-5 w-5 shrink-0" />
+        Finish setup
+      </span>
+      <span role="progressbar" aria-label="Setup progress" aria-valuemin={0} aria-valuemax={setup.total} aria-valuenow={setup.doneCount} className="mt-3 block h-1.5 overflow-hidden rounded-full bg-wash-strong">
+        <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.round((setup.doneCount / setup.total) * 100)}%` }} />
+      </span>
+      <span className="mt-2 block text-sm text-ink-soft">
+        {setup.doneCount} of {setup.total} done
+      </span>
+    </Link>
   );
 }

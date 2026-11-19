@@ -15,7 +15,8 @@ A section name in quotes ("Billing state", "Roles") is a heading in one of the f
 | Logins | **Clerk** (`@clerk/nextjs`) | Staff only. See Auth below. |
 | Tests | **Vitest**, against a local PostgreSQL copy or a Neon branch called `testing` | `npm test`. See Tests below. |
 | Payments | **Stripe** (the `stripe` package), **test mode only** | Only `lib/stripe.ts` talks to it, and it refuses any key that is not a test key. Card details are entered on Stripe's own page, never here. See "Billing state" and "Self-serve checkout". |
-| Email | **Resend**, over plain HTTPS, no package | Only `lib/email.ts` talks to it, with the fetch built into Node. Without `RESEND_API_KEY` and `EMAIL_FROM` nothing is sent and the app runs as before. Two emails exist: a patient asking for a paused link back (see "How a link expires, pauses, and is turned back on"), and the error alert to Pulse (see "When something breaks"). |
+| Email | **Resend**, over plain HTTPS, no package | Only `lib/email.ts` talks to it, with the fetch built into Node. Without `RESEND_API_KEY` and `EMAIL_FROM` nothing is sent and the app runs as before. Three emails exist: a patient asking for a paused link back (see "How a link expires, pauses, and is turned back on"), the error alert to Pulse (see "When something breaks"), and the setup reminder to a new clinic's owner (see "The daily job: setup reminder emails"). |
+| Scheduled jobs | **Vercel cron**, listed in `vercel.json` | One job, `/api/cron/setup-reminders`, once a day. Runs only on the production deployment, and only once Evan has set `CRON_SECRET` there. See "The daily job: setup reminder emails" in `docs/areas/when-something-breaks.md`. |
 
 ## Automatic checks
 

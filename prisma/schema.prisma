@@ -155,6 +155,16 @@ model Clinic {
   // skipped. It only ever moves forward.
   setupStep String?
   setupDone String[] @default([])
+
+  // Setup reminder emails: 1 day, 1 week and 2 weeks after the clinic's row
+  // was made, only while setup is unfinished; the third is the last (Evan,
+  // 2026-11-18). lib/setup-reminders.ts has the rules, lib/db/setup-reminders.ts
+  // the one write. setupReminder is the number of the latest reminder sent
+  // (1, 2 or 3; 0 means none yet), and setupReminderAt is when it was sent.
+  // Written under the clinic's row lock BEFORE the email goes, so two runs at
+  // once send one email. Nothing about the person it went to is stored.
+  setupReminder   Int       @default(0)
+  setupReminderAt DateTime?
 }
 
 /// Whether Clerk's copy of a seat agrees with ours yet. From the seat model

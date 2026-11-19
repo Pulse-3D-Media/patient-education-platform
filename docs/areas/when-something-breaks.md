@@ -49,3 +49,37 @@ A handful of files under `app/` see to it, one file at the root tells Pulse, and
   Public, for an uptime monitor.
   **The answer is remembered for five seconds** (`HEALTH_MEMORY_MS` in `lib/health.ts`, audit finding F3, November 2026), ok or not, and calls that arrive while a query is on its way wait for that one, so a burst of calls from anyone is one query per server; each server remembers for itself.
   A monitor that calls it every few minutes keeps the Neon compute awake, which counts against its compute hours.
+
+## The daily job: setup reminder emails
+
+**What it does.**
+Once a day Vercel calls `GET /api/cron/setup-reminders` (the entry in `vercel.json`, 15:00 UTC; on the Hobby plan Vercel fires it at any minute of that hour).
+It emails a clinic's account owner, and nobody else, 1 day, 1 week and 2 weeks after the clinic signed up, only while setup is unfinished; the third is the last (Evan, 2026-11-18).
+"Signed up" is the clinic row's `createdAt`, which the clinic cannot change.
+Only an ACTIVE clinic with setup under way (`setupStep` one of the four steps) and an owner who is still an admin of it is emailed: never a clinic made before setup existed, a finished one, one that never paid (PENDING), a paused, cancelled or past-due one.
+A clinic Pulse manages by hand is not left out, because setup and the library's "Finish setup" reminder do not leave it out either.
+The rules are `lib/setup-reminders.ts`, the run `lib/setup-reminder-run.ts`, the record `lib/db/setup-reminders.ts`.
+**Each run sends at most the one reminder now due to each clinic**: a missed day is made up the next day, never two at once, never an older reminder after a newer one, and nothing from three weeks after sign-up.
+A run looks at no more than 25 clinics, oldest sign-up first, and stops starting new ones after 200 seconds; the rest go the next day.
+
+**Safe twice, late or overlapped.**
+The reminder is decided and recorded (`Clinic.setupReminder`, `Clinic.setupReminderAt`) in one transaction holding the clinic's row lock, and only then sent, so two runs at once send one email and a rerun sends none.
+If the send fails after the record, that reminder is missed rather than sent twice; Resend also gets an idempotency key per clinic and reminder.
+If Clerk does not answer, or the owner left, nothing is recorded and the next run looks again.
+
+**The secret.**
+The route is public by address, so it refuses everything unless the request carries `Authorization: Bearer <CRON_SECRET>`, which is how Vercel calls it (compared in constant time, `lib/cron-secret.ts`).
+With no `CRON_SECRET` on the deployment, or one shorter than 16 characters, it answers 503 "not configured" and sends nothing; a wrong one gets 401.
+`CRON_SECRET` is set by Evan in Vercel for Production; a scheduled job runs only on the production deployment, so Preview needs none.
+Without `RESEND_API_KEY` and `EMAIL_FROM`, or without a known address for the app (`APP_ORIGINS` or Vercel's own), the run reads and records nothing.
+The "Reply to this email and a person will answer" line is in the email only when `EMAIL_REPLY_TO` is set, because `EMAIL_FROM` may be a no-reply address.
+
+**How to tell it ran.**
+Vercel, the project, Settings, Cron Jobs, View Logs: each run writes one line, `Setup reminders: run finished` with counts (checked, sent, skipped, failed, more).
+The answer and the log hold counts and the kind of a failure only: never an address, a clinic name, an id, the secret or an error message.
+
+**If it did not run, or `failed` is not 0.**
+Vercel does not retry a failed call; the next day's run catches up, inside each reminder's window.
+"not configured" in the log means `CRON_SECRET` is missing on Production (add it, then redeploy, since a deployment reads it when it is built).
+A failed send names one word (refused, unreachable): check Resend's dashboard and the two email settings.
+To run it by hand, call the address with the header (`curl -H "Authorization: Bearer <secret>" https://<site>/api/cron/setup-reminders`): it is safe to repeat.

@@ -65,6 +65,12 @@ Every clinic that existed before the migration has `setupStep` empty, which the 
 The same empty value is how the owner's automatic seat tells a clinic made before the 2026-11-19 rule from one made after (see "Surgeon seats").
 They are written only by `recordSetupStep()` in `lib/db/setup.ts`, under the clinic's row lock, never moving backwards.
 
+**Setup reminders (`Clinic.setupReminder`, `Clinic.setupReminderAt`, migration `20261119200000_add_clinic_setup_reminders`, approved by Evan on 2026-11-18).**
+Two additive columns on `Clinic`, no new model: `setupReminder` (a whole number, 0 by default: the number of the latest reminder sent, 1 to 3) and `setupReminderAt` (optional: when it was sent).
+Every existing clinic gets 0 and empty, and no data script is needed: a clinic made before setup has `setupStep` empty and is never reminded anyway.
+They are written only by `claimSetupReminder()` in `lib/db/setup-reminders.ts`, under the clinic's row lock, before the email is sent (see "The daily job: setup reminder emails").
+Nothing about the person emailed is stored.
+
 **Why `Clinic` existed in Phase 1 when there was only one of them.**
 Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter.
 Adding it early cost one table and one column.

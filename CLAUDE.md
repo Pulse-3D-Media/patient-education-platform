@@ -21,7 +21,7 @@ The patient scans a QR code or opens the link, watches an animation explaining t
 
 **Phase 1 is done:** create a link, watch a video, link expires.
 **We are in Phase 2, the clinic dashboard.**
-Built: logins, clinics and people, the Pulse 3D master dashboard, the clinic admin area, clinic branding (device acceptance pending), paused links a clinic can turn back on, calm error pages, error alerts and a health check, billing in steps, real video hosting on Mux, reports for Pulse staff, printed QR codes, and the approved sign-up design up to setup (the landing page, sign-up's plan and payment steps in test mode, the welcome dialog, four setup steps with saved progress, and the join screen for invited people), and the quick tour of the library (its code loads only when it is shown; see `docs/areas/library.md`).
+Built: logins, clinics and people, the Pulse 3D master dashboard, the clinic admin area, clinic branding (device acceptance pending), paused links a clinic can turn back on, calm error pages, error alerts and a health check, billing in steps, real video hosting on Mux, reports for Pulse staff, printed QR codes, and the approved sign-up design up to setup (the landing page, sign-up's plan and payment steps in test mode, the welcome dialog, four setup steps with saved progress, and the join screen for invited people), the quick tour of the library (its code loads only when it is shown; see `docs/areas/library.md`), and the setup reminder emails from a daily job that sends nothing until `CRON_SECRET` is set (see "The daily job: setup reminder emails" in `docs/areas/when-something-breaks.md`).
 Where each piece stands, and what is still not built, is in `docs/areas/product-scope.md`.
 **Billing is built in Stripe test mode only.**
 **Nothing real is ever charged: the app refuses a live Stripe key, and test-mode checkout, plan changes and Stripe's billing page are never offered on the production deployment.**
@@ -322,6 +322,7 @@ app/library          The surgeon's exam-room browser and its watch page.
 app/admin            The clinic's back office; app/admin/billing is reachable when the clinic is closed.
 app/pulse            The Pulse 3D master dashboard. Pulse staff only.
 app/api/webhooks     Stripe, Mux and Clerk notifications. Public; the signature is the check.
+app/api/cron         The daily jobs Vercel calls (vercel.json). Public by address; CRON_SECRET is the check.
 lib/db/              EVERY database query. Nothing else touches Prisma.
 lib/                 The rules, mostly pure. One file per outside service: stripe.ts, mux.ts, email.ts, people.ts (Clerk).
 lib/seat-changes.ts  The only way anyone's seat, role, invitation or ownership changes.
@@ -486,7 +487,7 @@ Code comments and older documents point at sections by their old names ("Billing
 | Branding, the mark on the video, the players, light and dark | `docs/areas/branding-and-players.md` | "The name and logo sync", "Clinic branding and dependable playback", "Light and dark staff screens" |
 | `app/pulse`, the reports, the clinic log | `docs/areas/pulse-dashboard-and-reports.md` | the `app/pulse` paragraphs, "The Pulse reports", "The clinic log" |
 | Headers, the content policy, link codes, the rate limit | `docs/areas/security-headers.md` | "Security headers and link guessing" |
-| Error pages, Clerk's time limit, alerts, the health check | `docs/areas/when-something-breaks.md` | "When something breaks" |
+| Error pages, Clerk's time limit, alerts, the health check, the daily setup reminder job | `docs/areas/when-something-breaks.md` | "When something breaks" |
 | `prisma/`, migrations, operator scripts | `docs/areas/database-and-migrations.md` | rule 3 in full and its steps, "The database", "Clinic status", "Operator scripts", "Neon needs both URLs" |
 | Tests | `docs/areas/tests.md` | "Tests", "The local test database" |
 | The stack in full, GitHub's checks | `docs/areas/operations.md` | "Automatic checks" |

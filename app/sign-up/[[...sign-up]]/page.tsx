@@ -1,44 +1,87 @@
-import { SignUp } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
+import { AuthenticateWithRedirectCallback, SignUp } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
-import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
+import { BOX_APPEARANCE } from "@/components/landing/clerk-look";
+import { LandingFrame } from "@/components/landing/LandingFrame";
+import { SetUpClinicForm } from "@/components/landing/SetUpClinicForm";
+import { SignInExtras } from "@/components/landing/SignInExtras";
 import { signInHandoffHref } from "@/lib/invitation-handoff";
 
 /**
- * The sign-up page, at /sign-up, built from Clerk's prebuilt component. The
- * sign-in page links here. A new account goes on to /onboarding (the
- * fallback address set in StaffClerkProvider), which sends the creator of a
- * new clinic to Billing and anyone who joined one to the library.
+ * The sign-up page, at /sign-up: the landing page with its "Set up a
+ * clinic" tab open. What the box holds depends on how the person arrived.
  *
- * It is also where an invitation email lands (the invitation's return
- * address, set in lib/people.ts). Clerk checks the link, then sends the person
- * here with the invitation's ticket in the address, and says what they need:
+ *   Nothing special (the usual case): our two-box form, "Your name" and
+ *   "Work email", then the email code (SetUpClinicForm, which drives Clerk's
+ *   own sign-up; see the top of that file for why it is not Clerk's
+ *   ready-made form). A new account then goes on to /onboarding, or back to
+ *   the page it started from.
  *
- *   __clerk_status=sign_up    a new person: the component below creates their
- *                             account and accepts the invitation with it.
- *   __clerk_status=sign_in    they already have an account: they are handed
- *                             to /sign-in with the same address, whose
- *                             component signs them in and accepts it.
- *   __clerk_status=complete   already accepted: on to /onboarding.
+ *   An invitation: the email's link lands here (the invitation's return
+ *   address, set in lib/people.ts). Clerk checks the link, then sends the
+ *   person here with the invitation's ticket in the address, and says what
+ *   they need:
  *
- * The folder is a catch-all ([[...sign-up]]) for the same reason as
- * sign-in: Clerk's component moves between steps on its own sub-paths.
+ *     __clerk_status=sign_up    a new person: Clerk's own ready-made sign-up
+ *                               form, exactly as before, which creates their
+ *                               account and accepts the invitation with it.
+ *                               (The invited person's own screen is a later
+ *                               pull request of the design.)
+ *     __clerk_status=sign_in    they already have an account: they are handed
+ *                               to /sign-in with the same address, whose
+ *                               form signs them in and accepts it.
+ *     __clerk_status=complete   already accepted: on to /onboarding.
+ *
+ *   /sign-up/sso-callback: where Google sends someone back to after "Continue
+ *   with Google" on this tab; Clerk's own component finishes the sign-up (or
+ *   the sign-in, for an account that already exists).
+ *
+ *   Any other /sign-up/... address: one of the steps of Clerk's ready-made
+ *   form (an invitation's next step, or "continue" after Google when Clerk
+ *   needs one more thing), so that form answers it, as before.
+ *
+ * Someone already signed in who opens /sign-up goes to /onboarding, which
+ * routes them, rather than being offered a second account. An invitation
+ * link is left to Clerk's own form, which knows what to do with it.
+ *
+ * The folder is a catch-all ([[...sign-up]]) for the same reason as sign-in:
+ * Clerk's ready-made form moves between steps on its own sub-paths.
  */
-export default async function SignUpPage({ searchParams }: PageProps<"/sign-up/[[...sign-up]]">) {
-  const params = await searchParams;
-  const status = typeof params.__clerk_status === "string" ? params.__clerk_status : null;
+export default async function SignUpPage({ params, searchParams }: PageProps<"/sign-up/[[...sign-up]]">) {
+  const query = await searchParams;
+  const status = typeof query.__clerk_status === "string" ? query.__clerk_status : null;
   if (status === "complete") redirect("/onboarding");
   // The ticket and status travel with them unchanged; nothing else does (lib/invitation-handoff.ts).
-  if (status === "sign_in") redirect(signInHandoffHref(params));
+  if (status === "sign_in") redirect(signInHandoffHref(query));
+
+  const steps = (await params)["sign-up"] ?? [];
+  const redirectUrl = typeof query.redirect_url === "string" ? query.redirect_url : undefined;
+  const invited = typeof query.__clerk_ticket === "string" || status === "sign_up";
+
+  if (steps[0] === "sso-callback") {
+    return (
+      <LandingFrame tab="set-up" redirectUrl={redirectUrl}>
+        <AuthenticateWithRedirectCallback continueSignUpUrl="/sign-up/continue" />
+        <SignInExtras patientLine={false} />
+      </LandingFrame>
+    );
+  }
+
+  if (invited || steps.length > 0) {
+    return (
+      <LandingFrame tab="set-up" redirectUrl={redirectUrl}>
+        <SignUp path="/sign-up" appearance={BOX_APPEARANCE} />
+        <SignInExtras patientLine={false} />
+      </LandingFrame>
+    );
+  }
+
+  const { userId } = await auth();
+  if (userId) redirect("/onboarding");
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-[#e4ebf3] px-4 py-10">
-      {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
-      <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="h-12 w-auto" />
-      <SignUp path="/sign-up" />
-      <p className="max-w-sm text-center text-sm text-[#667085]">
-        For clinic staff. Once you are in, you can set up your clinic or join one you were invited to. Patients never
-        need an account.
-      </p>
-    </main>
+    <LandingFrame tab="set-up" redirectUrl={redirectUrl}>
+      <SetUpClinicForm redirectUrl={redirectUrl} />
+    </LandingFrame>
   );
 }

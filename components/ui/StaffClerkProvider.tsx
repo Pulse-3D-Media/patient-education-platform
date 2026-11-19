@@ -1,12 +1,13 @@
 import { ClerkProvider } from "@clerk/nextjs";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { clerkRedirectOrigins } from "@/lib/trusted-origin";
 
 /**
  * Clerk's provider, with our settings, for the staff side of the app.
  *
- * It wraps the library, the admin console and the sign-in page (each of
- * those has a layout that renders this). It deliberately does NOT wrap the
+ * It wraps the library, the admin console, onboarding and the landing page
+ * with its sign-in and sign-up tabs (each of those has a layout, or for the
+ * bare address the page itself, that renders this). It deliberately does NOT wrap the
  * whole app: the patient page at /watch never needs Clerk, and wrapping it
  * would load Clerk's script on every patient's phone for nothing. Clerk's
  * docs allow the provider to sit below the root layout for exactly this
@@ -38,8 +39,11 @@ export function StaffClerkProvider({
   // Every layout passes the font: the staff text font (app/staff-fonts.ts), or the clinic's own. This is only a fallback.
   fontFamily = "var(--font-hanken), var(--font-inter), system-ui, sans-serif",
   theme = "light",
+  localization,
 }: {
   children: ReactNode;
+  /** Clerk's words to change, by Clerk's own names. Only the landing page's box passes any ("Work email"; components/landing/clerk-look.ts). */
+  localization?: ComponentProps<typeof ClerkProvider>["localization"];
   accent?: string;
   /** The text colour that reads on `accent`. Only used in light mode; dark mode leaves Clerk's own choice alone, as before. */
   onAccent?: string;
@@ -69,6 +73,7 @@ export function StaffClerkProvider({
       // domain. Read from the settings Vercel gives the deployment, never
       // from the request. See clerkRedirectOrigins() in lib/trusted-origin.ts.
       allowedRedirectOrigins={clerkRedirectOrigins(process.env)}
+      localization={localization}
       appearance={{
         variables: {
           colorPrimary: accent,

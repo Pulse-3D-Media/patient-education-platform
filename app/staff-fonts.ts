@@ -23,7 +23,8 @@ import { Hanken_Grotesk, Schibsted_Grotesk } from "next/font/google";
  * a video. This is how the clinics' own fonts are loaded too (app/brand-fonts.ts).
  *
  * HOW A PAGE USES THEM. Only the staff layouts (app/admin, app/library,
- * app/pulse, app/sign-in, app/sign-up, app/onboarding) import this file.
+ * app/pulse, app/onboarding) and the landing page (LandingProviders in
+ * components/landing/LandingFrame.tsx, for /, /sign-in and /sign-up) import this file.
  * Each wraps its pages in an element with STAFF_TYPE_CLASS, which defines the
  * two fonts as CSS variables and sets Hanken Grotesk as the text font (the
  * "staff-type" rule in app/globals.css). The shell then adds

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { SETUP_PATH } from "@/lib/setup";
+import { TOUR_START_HREF } from "@/lib/tour";
 
 /**
  * "Thanks for signing up." (the approved design, screen 03-welcome): the
@@ -25,8 +26,8 @@ import { SETUP_PATH } from "@/lib/setup";
 
 /** Setup (pull request #5): the step the clinic is on, or the finished page. */
 const FINISH_SETTING_UP_HREF = SETUP_PATH;
-/** Pull request #6 (tour) replaces this with the tour's first stop. */
-const TOUR_HREF = "/library";
+/** The quick tour's first stop, on the library home (components/tour). */
+const TOUR_HREF = TOUR_START_HREF;
 
 export function WelcomeDialog() {
   const dialog = useRef<HTMLDialogElement>(null);

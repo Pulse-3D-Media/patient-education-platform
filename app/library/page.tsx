@@ -108,9 +108,15 @@ export default async function LibraryPage({ searchParams }: { searchParams?: Pro
   // clinic is open (checked above), and only when /onboarding/done sent them here. No extra read: all three are known.
   const welcome = clinic.isOwner && (await searchParams)?.welcome === "1";
 
+  // The video the quick tour opens at its second stop (components/tour): the first one on this page, so one this clinic
+  // may use (every list above is read through the access rule). None means the tour skips that stop. No extra read.
+  const tourVideoId = [...rows.flat(), ...favorites, ...mostPlayed][0]?.id ?? null;
+
   return (
-    <main className="py-6">
+    // data-tour-home tells the quick tour (components/tour) that the home page has been drawn, so its first stop can begin.
+    <main className="py-6" data-tour-home="">
       {welcome && <WelcomeDialog />}
+      {tourVideoId && <span hidden data-tour-video={tourVideoId} />}
       {/* No headline on the page (Evan, 2026-10-15): the pills say where you are. A screen reader still gets one. */}
       <h1 className="sr-only">My Procedure Library</h1>
       {mine.length === 0 && (

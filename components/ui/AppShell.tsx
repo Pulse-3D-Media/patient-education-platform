@@ -1,7 +1,6 @@
 "use client";
 
 import type { Category } from "@/lib/categories";
-import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -11,6 +10,8 @@ import { CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
 import { ClinicLogo } from "./ClinicLogo";
+import { AccountButton } from "./AccountButton";
+import { TourHost } from "@/components/tour/TourHost";
 import { SETUP_PATH } from "@/lib/setup";
 import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
 
@@ -80,6 +81,12 @@ import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, Me
  * a dark value and a light one. The server writes the attribute, so there
  * is no flash of the wrong mode. Pulse 3D's own mark sits at the foot of
  * the sidebar and the category pull-out, small, as "Powered by".
+ *
+ * THE QUICK TOUR (components/tour): the categories, the rail's Library
+ * button, the menu button and the search carry data-tour attributes so its
+ * first stop can find them, the account menu has "Take the tour", and
+ * TourHost at the end draws nothing (and loads none of the tour's code)
+ * unless the address asks for the tour.
  */
 
 /** One clinic's look, as plain values the server has already checked. */
@@ -204,7 +211,7 @@ export function AppShell({
         {logo}
         {/* The search box at the right of the bar, from a small tablet up (Evan, 2026-10-15). */}
         <div className="hidden min-w-0 flex-1 justify-end pl-4 sm:flex">
-          <SearchForm pathname={pathname} />
+          <SearchForm pathname={pathname} tourTarget />
         </div>
         {/* A phone has no rail, so the magnifier and the person's avatar ride in the bar there. */}
         <div className="ml-auto flex items-center gap-1 sm:ml-0 md:hidden">
@@ -213,12 +220,14 @@ export function AppShell({
             type="button"
             onClick={() => setSearching(true)}
             aria-label="Search the library"
+            data-tour="search"
+            data-tour-name="Search"
             className="flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-wash hover:text-ink sm:hidden"
           >
             <SearchIcon className="h-5 w-5" />
           </button>
           <div className="flex h-11 w-11 items-center justify-center">
-            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+            <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
           </div>
         </div>
         {searching && (
@@ -250,7 +259,7 @@ export function AppShell({
               <ClockIcon className="h-6 w-6" />
             </RailLink>
           )}
-          <RailButton label="Library" open={menu === "library"} onClick={() => toggle("library")} controls="category-menu">
+          <RailButton label="Library" open={menu === "library"} onClick={() => toggle("library")} controls="category-menu" tourTarget>
             <BooksIcon className="h-6 w-6" />
           </RailButton>
           {showAdmin && (
@@ -260,7 +269,7 @@ export function AppShell({
           )}
           {/* Clerk's user button at the foot of the rail, as it always was: the signed-in person's avatar, with Sign out in its menu. The box keeps the rail lined up while Clerk loads. */}
           <div className="mt-auto flex h-11 w-11 items-center justify-center">
-            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+            <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
           </div>
         </nav>
 
@@ -269,7 +278,7 @@ export function AppShell({
           <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} />
           {/* The same avatar at the foot of the full sidebar, lined up with where it sits on the rail. */}
           <div className="flex h-14 shrink-0 items-center border-t border-line px-[1.375rem]">
-            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+            <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
           </div>
           {brand && <PoweredBy />}
         </nav>
@@ -302,6 +311,8 @@ export function AppShell({
 
         <div className="min-w-0 flex-1">{children}</div>
       </div>
+      {/* The quick tour: draws nothing, and loads none of its code, unless the address asks for it (components/tour). */}
+      <TourHost isAdmin={showAdmin} />
     </div>
   );
 }
@@ -319,6 +330,9 @@ function MenuButton({ open, onClick }: { open: boolean; onClick: () => void }) {
       aria-expanded={open}
       aria-label={open ? "Close the menu" : "Show or hide the menu"}
       title="Menu"
+      // On a phone, the tour's first stop points here, since the categories are inside this menu.
+      data-tour="menu"
+      data-tour-name="Menu, with the procedure categories"
       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft transition hover:bg-wash hover:text-ink"
     >
       <MenuIcon className="h-6 w-6" />
@@ -331,7 +345,7 @@ function MenuButton({ open, onClick }: { open: boolean; onClick: () => void }) {
  * that opens /library/search?q=..., so it works even before the page has
  * woken up. On the results page it shows what was searched for.
  */
-function SearchForm({ pathname, autoFocus = false }: { pathname: string; autoFocus?: boolean }) {
+function SearchForm({ pathname, autoFocus = false, tourTarget = false }: { pathname: string; autoFocus?: boolean; tourTarget?: boolean }) {
   const box = useRef<HTMLInputElement>(null);
 
   // Keep what was searched for in the box on the results page, and empty it everywhere else.
@@ -342,7 +356,15 @@ function SearchForm({ pathname, autoFocus = false }: { pathname: string; autoFoc
   }, [pathname]);
 
   return (
-    <form action={SEARCH_PATH} method="get" role="search" className="flex w-full max-w-xl">
+    <form
+      action={SEARCH_PATH}
+      method="get"
+      role="search"
+      className="flex w-full max-w-xl"
+      // What the tour's first stop highlights (components/tour). The phone's copy, opened from the magnifier, is not.
+      data-tour={tourTarget ? "search" : undefined}
+      data-tour-name={tourTarget ? "Search" : undefined}
+    >
       <input
         ref={box}
         type="search"
@@ -383,9 +405,18 @@ function RailLink({ href, label, active, title, children }: { href: string; labe
   );
 }
 
-function RailButton({ label, open, onClick, controls, children }: { label: string; open: boolean; onClick: () => void; controls: string; children: ReactNode }) {
+function RailButton({ label, open, onClick, controls, tourTarget = false, children }: { label: string; open: boolean; onClick: () => void; controls: string; tourTarget?: boolean; children: ReactNode }) {
   return (
-    <button type="button" onClick={onClick} aria-expanded={open} aria-controls={controls} className={`${RAIL_ITEM} ${open ? RAIL_ON : RAIL_OFF}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      aria-controls={controls}
+      // The rail's Library button holds the categories, so the tour's first stop points at it where there is a rail.
+      data-tour={tourTarget ? "categories" : undefined}
+      data-tour-name={tourTarget ? "Library, with the procedure categories" : undefined}
+      className={`${RAIL_ITEM} ${open ? RAIL_ON : RAIL_OFF}`}
+    >
       {children}
       {label}
     </button>
@@ -419,10 +450,11 @@ function Guide({ pathname, categories, showAdmin, setup, onChoose }: { pathname:
       {setup && <SetupCard setup={setup} onChoose={onChoose} />}
 
       {categories.length > 0 && (
-        <>
-          <p className="mt-4 border-t border-line px-3 pt-4 pb-1 text-sm font-semibold text-ink">{CATEGORY_GROUP}</p>
+        // The block the tour's first stop highlights in the full menu ("Navigate by specialty").
+        <div className="mt-4 border-t border-line pt-3" data-tour="categories" data-tour-name="Procedure categories">
+          <p className="px-3 pt-1 pb-1 text-sm font-semibold text-ink">{CATEGORY_GROUP}</p>
           <CategoryLines pathname={pathname} categories={categories} onChoose={onChoose} />
-        </>
+        </div>
       )}
 
       {showAdmin && (

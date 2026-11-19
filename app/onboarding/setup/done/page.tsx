@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PatientPhonePreview } from "@/components/ui/PatientPhonePreview";
 import { setupStepHref, SETUP_PATH } from "@/lib/setup";
+import { TOUR_START_HREF } from "@/lib/tour";
 import { SETUP_PRIMARY, SETUP_SECONDARY } from "../SetupButtons";
 import { SetupFrame, StepBody, StepHeading } from "../SetupFrame";
 import { previewFacts, requireSetup } from "../setup-view";
@@ -12,14 +13,13 @@ import { previewFacts, requireSetup } from "../setup-view";
  * that step; saving it there keeps setup finished), then "Take the tour" and
  * "Open the library".
  *
- * "Take the tour" goes to the library for now, as the welcome dialog's
- * "Take a quick tour" does: the tour is pull request #6 of the plan, which
- * replaces both.
+ * "Take the tour" opens the quick tour's first stop on the library home
+ * (components/tour), as the welcome dialog's "Take a quick tour" does.
  */
 export const dynamic = "force-dynamic";
 
-/** Pull request #6 (tour) replaces this with the tour's first stop, as it does the welcome dialog's TOUR_HREF. */
-const TOUR_HREF = "/library";
+/** The quick tour's first stop, as the welcome dialog's "Take a quick tour" has. */
+const TOUR_HREF = TOUR_START_HREF;
 
 export default async function SetupDonePage() {
   const { clinic, progress } = await requireSetup();

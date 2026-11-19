@@ -43,6 +43,28 @@ A plan with no categories says so, and an office admin also gets a **Go to Billi
 It is drawn from the clinic row the shell already reads (`Clinic.setupStep`, `setupDone`), so it costs no extra request and adds nothing to playing a video.
 **The menu folds to icons and stays as it was left:** on a wide screen the menu button switches between the full menu and the narrow rail, and the choice is remembered in that browser (local storage, nothing on the server); a tablet keeps the rail with the full menu sliding out over the page, and a phone slides it out.
 
+## The quick tour
+
+**The tour** (the approved design, screens 07-tour-1 to 3; `lib/tour.ts` for the rules, `components/tour/` for the code) is two stops for everyone and a third for office admins.
+Stop 1, "Navigate by specialty", on the library home: the categories and the search box highlighted together, title only (on a phone, the menu button that holds the categories and the search magnifier; on a tablet, the rail's Library button and the search box).
+Stop 2, "Send it or save it", on an open video's watch page: the row with Favorite, Send to patient and Show QR on screen.
+Stop 3, "Your admin pages", on the admin overview: the list of admin pages, for office admins only.
+The video at stop 2 is the first card on the library home, so one the clinic's plan allows (the home page names it in a hidden attribute, from lists it already read through the access rule); a clinic with no video it can open skips that stop, and the count says "1 of 2".
+**Someone without a seat** has no Send or Show QR on the page, so stop 2 highlights only Favorite and reads "Save it", with nothing about seats or plans.
+The tour only points at what the page already drew for this person; hiding or showing something in it decides nothing about who may do what.
+**How it starts:** from the welcome dialog's "Take a quick tour", from "Take the tour" at the end of setup, and from "Take the tour" in the account menu (Clerk's user button, on every library and admin page) at any time.
+Someone who has just joined a clinic (the join screen, or an invited person with no seat) lands on the library home with the tour offered once in a small card, "Take a quick tour?", with Not now and Show me.
+Where the tour is lives in the address (`?tour=nav`, `?tour=video`, `?tour=admin`, and `?tv=` for the video), and moving between stops replaces the address rather than adding to the history, so the browser's Back never brings it back.
+**Whether it has been seen is kept in the browser's own storage** (one value, `p3-tour-seen`), with no table and no schema change, because people live in Clerk and there is no per-person table.
+It is per browser, not per person: a second device, another browser or cleared site data offers it once more.
+It only decides the one-time offer; when storage is blocked the offer is simply not shown, and the account menu still starts the tour.
+**The speed rule outranks the tour.**
+Its code is a separate file loaded lazily, only when the address asks for the tour, so a normal library visit downloads none of it and the first paint is unchanged.
+It never starts by itself over a video (the offer is only ever on the library home), never starts, pauses or touches a video (the watch page opens paused, as always), and pressing Play ends it.
+The darkening lets every tap through, so nothing under it, Play included, is ever blocked, and any stop can be left with one tap (End tour, or Done on the last) or the Escape key.
+Each caption takes the keyboard and tells a screen reader which controls are highlighted, the keyboard goes back where it was when the tour ends, and nothing is animated, so reduced motion is honoured.
+No package: plain markup, styles and the colour tokens.
+
 ## Category entitlements
 
 A clinic can browse, play and issue new links only for the videos its current access permits.

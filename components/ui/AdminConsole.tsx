@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { ADMIN_SECTIONS, activeAdminSection, type AdminSection } from "@/lib/admin-nav";
 import { ClinicLogo } from "./ClinicLogo";
 import { ConsoleShell } from "./ConsoleShell";
+import { TourHost } from "@/components/tour/TourHost";
 import type { ShellBrand } from "./AppShell";
 import { CardIcon, HomeIcon, LinkIcon, PaletteIcon, PeopleIcon } from "./icons";
 
@@ -47,8 +48,11 @@ export function AdminConsole({ brand, children }: { brand: ShellBrand; children:
       }
       sections={ADMIN_SECTIONS.map((section) => ({ href: section.href, label: section.label, icon: ICONS[section.href], active: section.href === current }))}
       library={{ href: "/library", label: "Library" }}
+      tour
     >
       {children}
+      {/* The tour's admin stop (only an admin reaches these pages). Draws nothing, and loads none of its code, without ?tour= in the address. */}
+      <TourHost isAdmin />
     </ConsoleShell>
   );
 }

@@ -21,7 +21,7 @@ The patient scans a QR code or opens the link, watches an animation explaining t
 
 **Phase 1 is done:** create a link, watch a video, link expires.
 **We are in Phase 2, the clinic dashboard.**
-Built: logins, clinics and people, the Pulse 3D master dashboard, the clinic admin area, clinic branding (device acceptance pending), paused links a clinic can turn back on, calm error pages, error alerts and a health check, billing in steps, real video hosting on Mux, reports for Pulse staff, printed QR codes, and the approved sign-up design up to setup (the landing page, sign-up's plan and payment steps in test mode, the welcome dialog, four setup steps with saved progress, and the join screen for invited people).
+Built: logins, clinics and people, the Pulse 3D master dashboard, the clinic admin area, clinic branding (device acceptance pending), paused links a clinic can turn back on, calm error pages, error alerts and a health check, billing in steps, real video hosting on Mux, reports for Pulse staff, printed QR codes, and the approved sign-up design up to setup (the landing page, sign-up's plan and payment steps in test mode, the welcome dialog, four setup steps with saved progress, and the join screen for invited people), and the quick tour of the library (its code loads only when it is shown; see `docs/areas/library.md`).
 Where each piece stands, and what is still not built, is in `docs/areas/product-scope.md`.
 **Billing is built in Stripe test mode only.**
 **Nothing real is ever charged: the app refuses a live Stripe key, and test-mode checkout, plan changes and Stripe's billing page are never offered on the production deployment.**

@@ -211,6 +211,10 @@ describe("the watch page for a video the clinic may use", () => {
     expect(html).not.toContain("Send to patient");
     expect(html).not.toContain("Show QR on screen");
     expect(html).toContain("needs a surgeon seat");
+    // The tour's second stop points at this row, and finds only Favorite in it: no Send for the tour to describe.
+    expect(html).toContain('data-tour="video-actions"');
+    expect(html).toContain('data-tour-name="Favorite"');
+    expect(html).not.toContain("data-tour-send");
   });
 
   it("gives someone holding a seat Send to patient and Show QR on screen, and the heart they chose", async () => {
@@ -222,6 +226,10 @@ describe("the watch page for a video the clinic may use", () => {
       expect(html).toContain("Send to patient");
       expect(html).toContain("Show QR on screen");
       expect(html).not.toContain("needs a surgeon seat");
+      // The tour's second stop finds Send and Show QR here, so it describes them.
+      expect(html).toContain('data-tour-name="Send to patient"');
+      expect(html).toContain('data-tour-name="Show QR on screen"');
+      expect(html).toContain("data-tour-send");
       expect(html).toMatch(new RegExp(`aria-pressed="true"[^>]*aria-label="Remove ${title("watched")} from my favorites"`));
       // The player's mark carries their name as patients see it.
       expect(html).toContain(">Jane Smith<");

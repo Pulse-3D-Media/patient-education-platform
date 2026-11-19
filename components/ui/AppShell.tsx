@@ -1,16 +1,19 @@
 "use client";
 
 import type { Category } from "@/lib/categories";
-import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ADMIN_SECTIONS, activeAdminSection } from "@/lib/admin-nav";
+import { DEFAULT_BRAND_THEME } from "@/lib/branding";
 import { CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
 import { ClinicLogo } from "./ClinicLogo";
-import { AdminIcon, ArrowLeftIcon, BooksIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
+import { AccountButton } from "./AccountButton";
+import { TourHost } from "@/components/tour/TourHost";
+import { SETUP_PATH } from "@/lib/setup";
+import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
 
 /**
  * The frame around every staff-facing page: the library and the admin
@@ -68,7 +71,9 @@ import { AdminIcon, ArrowLeftIcon, BooksIcon, CloseIcon, HomeIcon, MenuIcon, Sea
  * on the server (ClinicShell, app/brand-look.ts): the colours as CSS
  * variables and the font's class, both set on the outermost element so
  * every page inside picks them up, plus the clinic's name and logo. Without
- * it the shell is the plain Pulse 3D one, in dark.
+ * it the shell is the plain Pulse 3D one, in light (the staff screens'
+ * default since 2026-11-18), in the staff fonts with Schibsted Grotesk
+ * headings ("staff-headings"; a clinic's own font replaces both).
  *
  * LIGHT OR DARK is the clinic's saved choice and arrives the same way. It
  * becomes the data-theme attribute on the outermost element, and that is
@@ -76,19 +81,28 @@ import { AdminIcon, ArrowLeftIcon, BooksIcon, CloseIcon, HomeIcon, MenuIcon, Sea
  * a dark value and a light one. The server writes the attribute, so there
  * is no flash of the wrong mode. Pulse 3D's own mark sits at the foot of
  * the sidebar and the category pull-out, small, as "Powered by".
+ *
+ * THE QUICK TOUR (components/tour): the categories, the rail's Library
+ * button, the menu button and the search carry data-tour attributes so its
+ * first stop can find them, the account menu has "Take the tour", and
+ * TourHost at the end draws nothing (and loads none of the tour's code)
+ * unless the address asks for the tour.
  */
 
 /** One clinic's look, as plain values the server has already checked. */
 export type ShellBrand = {
   /** The brand colours, as CSS variables. */
   style: CSSProperties;
-  /** The class that sets the clinic's font. Empty for Inter. */
+  /** The class that sets the clinic's font. Empty for the default (the staff fonts, app/staff-fonts.ts). */
   fontClass: string;
   /** Light or dark, the clinic's saved choice. Written into the page by the server, so the first paint is already right. */
   theme: "dark" | "light";
   clinicName: string;
   logoUrl: string | null;
 };
+
+/** How far an office admin's clinic has got with setup, for the "Finish setup" card in the menu. */
+export type SetupReminder = { doneCount: number; total: number };
 
 /** Which pull-out is showing, if any: the full sidebar slid over the page, the categories, or the admin sections. */
 type Menu = "guide" | "library" | "admin" | null;
@@ -107,10 +121,13 @@ export function AppShell({
   showAdmin = false,
   brand,
   categories,
+  setup = null,
 }: {
   children: ReactNode;
   showAdmin?: boolean;
   brand?: ShellBrand;
+  /** "Finish setup" and how far it has got, for an office admin while their clinic's setup is under way; null for everyone else (members never see it). Decided on the server (ClinicShell). */
+  setup?: SetupReminder | null;
   /** The categories on the clinic's plan, for the navigation, in list order with their current names. Left out, none is listed. */
   categories?: NavCategory[];
 }) {
@@ -187,14 +204,14 @@ export function AppShell({
   );
 
   return (
-    <div data-theme={brand?.theme ?? "dark"} className={`flex min-h-screen flex-col bg-ground text-ink ${brand?.fontClass ?? ""}`} style={brand?.style}>
+    <div data-theme={brand?.theme ?? DEFAULT_BRAND_THEME} className={`flex min-h-screen flex-col bg-ground text-ink ${brand?.fontClass || "staff-headings"}`} style={brand?.style}>
       {/* The top bar, the full width of the screen */}
       <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-ground px-3 sm:px-4">
         <MenuButton open={menu === "guide"} onClick={pressMenu} />
         {logo}
         {/* The search box at the right of the bar, from a small tablet up (Evan, 2026-10-15). */}
         <div className="hidden min-w-0 flex-1 justify-end pl-4 sm:flex">
-          <SearchForm pathname={pathname} />
+          <SearchForm pathname={pathname} tourTarget />
         </div>
         {/* A phone has no rail, so the magnifier and the person's avatar ride in the bar there. */}
         <div className="ml-auto flex items-center gap-1 sm:ml-0 md:hidden">
@@ -203,12 +220,14 @@ export function AppShell({
             type="button"
             onClick={() => setSearching(true)}
             aria-label="Search the library"
+            data-tour="search"
+            data-tour-name="Search"
             className="flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-wash hover:text-ink sm:hidden"
           >
             <SearchIcon className="h-5 w-5" />
           </button>
           <div className="flex h-11 w-11 items-center justify-center">
-            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+            <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
           </div>
         </div>
         {searching && (
@@ -235,7 +254,12 @@ export function AppShell({
           <RailLink href="/library" label="Home" active={onHome}>
             <HomeIcon className="h-6 w-6" />
           </RailLink>
-          <RailButton label="Library" open={menu === "library"} onClick={() => toggle("library")} controls="category-menu">
+          {setup && (
+            <RailLink href={SETUP_PATH} label="Setup" active={false} title={`Finish setup, ${setup.doneCount} of ${setup.total} done`}>
+              <ClockIcon className="h-6 w-6" />
+            </RailLink>
+          )}
+          <RailButton label="Library" open={menu === "library"} onClick={() => toggle("library")} controls="category-menu" tourTarget>
             <BooksIcon className="h-6 w-6" />
           </RailButton>
           {showAdmin && (
@@ -245,16 +269,16 @@ export function AppShell({
           )}
           {/* Clerk's user button at the foot of the rail, as it always was: the signed-in person's avatar, with Sign out in its menu. The box keeps the rail lined up while Clerk loads. */}
           <div className="mt-auto flex h-11 w-11 items-center justify-center">
-            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+            <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
           </div>
         </nav>
 
         {/* The full sidebar, on a wide screen while it is not folded: every line an icon and a label, YouTube-style. */}
         <nav aria-label="Library" className={`sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 flex-col border-r border-line bg-sunken ${folded ? "" : "xl:flex"}`}>
-          <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} />
+          <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} />
           {/* The same avatar at the foot of the full sidebar, lined up with where it sits on the rail. */}
           <div className="flex h-14 shrink-0 items-center border-t border-line px-[1.375rem]">
-            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+            <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
           </div>
           {brand && <PoweredBy />}
         </nav>
@@ -274,7 +298,7 @@ export function AppShell({
                   <MenuButton open onClick={close} />
                   {logo}
                 </div>
-                <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} onChoose={close} />
+                <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} onChoose={close} />
                 {brand && <PoweredBy />}
               </aside>
             ) : menu === "library" ? (
@@ -287,6 +311,8 @@ export function AppShell({
 
         <div className="min-w-0 flex-1">{children}</div>
       </div>
+      {/* The quick tour: draws nothing, and loads none of its code, unless the address asks for it (components/tour). */}
+      <TourHost isAdmin={showAdmin} />
     </div>
   );
 }
@@ -304,6 +330,9 @@ function MenuButton({ open, onClick }: { open: boolean; onClick: () => void }) {
       aria-expanded={open}
       aria-label={open ? "Close the menu" : "Show or hide the menu"}
       title="Menu"
+      // On a phone, the tour's first stop points here, since the categories are inside this menu.
+      data-tour="menu"
+      data-tour-name="Menu, with the procedure categories"
       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft transition hover:bg-wash hover:text-ink"
     >
       <MenuIcon className="h-6 w-6" />
@@ -316,7 +345,7 @@ function MenuButton({ open, onClick }: { open: boolean; onClick: () => void }) {
  * that opens /library/search?q=..., so it works even before the page has
  * woken up. On the results page it shows what was searched for.
  */
-function SearchForm({ pathname, autoFocus = false }: { pathname: string; autoFocus?: boolean }) {
+function SearchForm({ pathname, autoFocus = false, tourTarget = false }: { pathname: string; autoFocus?: boolean; tourTarget?: boolean }) {
   const box = useRef<HTMLInputElement>(null);
 
   // Keep what was searched for in the box on the results page, and empty it everywhere else.
@@ -327,7 +356,15 @@ function SearchForm({ pathname, autoFocus = false }: { pathname: string; autoFoc
   }, [pathname]);
 
   return (
-    <form action={SEARCH_PATH} method="get" role="search" className="flex w-full max-w-xl">
+    <form
+      action={SEARCH_PATH}
+      method="get"
+      role="search"
+      className="flex w-full max-w-xl"
+      // What the tour's first stop highlights (components/tour). The phone's copy, opened from the magnifier, is not.
+      data-tour={tourTarget ? "search" : undefined}
+      data-tour-name={tourTarget ? "Search" : undefined}
+    >
       <input
         ref={box}
         type="search"
@@ -359,18 +396,27 @@ const RAIL_ITEM = "flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[1
 const RAIL_ON = "bg-wash-strong text-ink";
 const RAIL_OFF = "text-ink-soft hover:bg-wash hover:text-ink";
 
-function RailLink({ href, label, active, children }: { href: string; label: string; active: boolean; children: ReactNode }) {
+function RailLink({ href, label, active, title, children }: { href: string; label: string; active: boolean; title?: string; children: ReactNode }) {
   return (
-    <Link href={href} aria-current={active ? "page" : undefined} className={`${RAIL_ITEM} ${active ? RAIL_ON : RAIL_OFF}`}>
+    <Link href={href} title={title} aria-label={title} aria-current={active ? "page" : undefined} className={`${RAIL_ITEM} ${active ? RAIL_ON : RAIL_OFF}`}>
       {children}
       {label}
     </Link>
   );
 }
 
-function RailButton({ label, open, onClick, controls, children }: { label: string; open: boolean; onClick: () => void; controls: string; children: ReactNode }) {
+function RailButton({ label, open, onClick, controls, tourTarget = false, children }: { label: string; open: boolean; onClick: () => void; controls: string; tourTarget?: boolean; children: ReactNode }) {
   return (
-    <button type="button" onClick={onClick} aria-expanded={open} aria-controls={controls} className={`${RAIL_ITEM} ${open ? RAIL_ON : RAIL_OFF}`}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      aria-controls={controls}
+      // The rail's Library button holds the categories, so the tour's first stop points at it where there is a rail.
+      data-tour={tourTarget ? "categories" : undefined}
+      data-tour-name={tourTarget ? "Library, with the procedure categories" : undefined}
+      className={`${RAIL_ITEM} ${open ? RAIL_ON : RAIL_OFF}`}
+    >
       {children}
       {label}
     </button>
@@ -395,18 +441,20 @@ function SideLink({ href, active, icon, onClick, children }: { href: string; act
 }
 
 /** The full sidebar's lines: Home, the plan's categories, Admin for admins. Used on a wide screen and slid out on a smaller one. */
-function Guide({ pathname, categories, showAdmin, onChoose }: { pathname: string; categories: NavCategory[]; showAdmin: boolean; onChoose?: () => void }) {
+function Guide({ pathname, categories, showAdmin, setup, onChoose }: { pathname: string; categories: NavCategory[]; showAdmin: boolean; setup: SetupReminder | null; onChoose?: () => void }) {
   return (
     <div className="flex-1 overflow-y-auto px-3 py-3">
       <SideLink href="/library" onClick={onChoose} active={pathname === "/library"} icon={<HomeIcon className="h-6 w-6" />}>
         Home
       </SideLink>
+      {setup && <SetupCard setup={setup} onChoose={onChoose} />}
 
       {categories.length > 0 && (
-        <>
-          <p className="mt-4 border-t border-line px-3 pt-4 pb-1 text-sm font-semibold text-ink">{CATEGORY_GROUP}</p>
+        // The block the tour's first stop highlights in the full menu ("Navigate by specialty").
+        <div className="mt-4 border-t border-line pt-3" data-tour="categories" data-tour-name="Procedure categories">
+          <p className="px-3 pt-1 pb-1 text-sm font-semibold text-ink">{CATEGORY_GROUP}</p>
           <CategoryLines pathname={pathname} categories={categories} onChoose={onChoose} />
-        </>
+        </div>
       )}
 
       {showAdmin && (
@@ -533,5 +581,32 @@ function AdminMenu({ pathname, onClose }: { pathname: string; onClose: () => voi
         </ul>
       </nav>
     </aside>
+  );
+}
+
+/**
+ * "Finish setup" in the menu (the approved design, screen 06-library-reminder):
+ * a card under Home with a bar and "0 of 4 done", for an office admin while
+ * their clinic's setup is under way. It opens setup at the step the clinic
+ * is on. Only a link: it loads nothing and adds nothing to playing a video.
+ */
+function SetupCard({ setup, onChoose }: { setup: SetupReminder; onChoose?: () => void }) {
+  return (
+    <Link
+      href={SETUP_PATH}
+      onClick={onChoose}
+      className="mt-2 block rounded-xl border border-brand/40 bg-brand/10 px-3 py-3 text-ink transition hover:border-brand"
+    >
+      <span className="flex items-center gap-3 text-base font-semibold">
+        <ClockIcon className="h-5 w-5 shrink-0" />
+        Finish setup
+      </span>
+      <span role="progressbar" aria-label="Setup progress" aria-valuemin={0} aria-valuemax={setup.total} aria-valuenow={setup.doneCount} className="mt-3 block h-1.5 overflow-hidden rounded-full bg-wash-strong">
+        <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.round((setup.doneCount / setup.total) * 100)}%` }} />
+      </span>
+      <span className="mt-2 block text-sm text-ink-soft">
+        {setup.doneCount} of {setup.total} done
+      </span>
+    </Link>
   );
 }

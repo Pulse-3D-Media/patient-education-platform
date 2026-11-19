@@ -1,6 +1,6 @@
-import { StaffClerkProvider } from "@/components/ui/StaffClerkProvider";
+import { LandingProviders } from "@/components/landing/LandingFrame";
 
-/** The sign-up page needs Clerk's provider for the <SignUp /> component. */
+/** The sign-up page is the landing page with its "Set up a clinic" tab open: Clerk's provider and the staff fonts (components/landing/LandingFrame.tsx). */
 export default function SignUpLayout({ children }: LayoutProps<"/sign-up">) {
-  return <StaffClerkProvider>{children}</StaffClerkProvider>;
+  return <LandingProviders>{children}</LandingProviders>;
 }

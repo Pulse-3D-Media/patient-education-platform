@@ -98,7 +98,7 @@ async function saveBothAtOnce(clinicId: string, read: (tx: Prisma.TransactionCli
     return before;
   }) as never);
 
-  await updateClinicBranding(clinicId, { phone: null, brandColor: GREEN, brandFont: null, brandTheme: "light" }, "Admin A");
+  await updateClinicBranding(clinicId, { phone: null, brandColor: GREEN, brandFont: null, brandTheme: "dark" }, "Admin A");
   await other;
   return otherFinishedDuringWait;
 }
@@ -118,10 +118,10 @@ describe("two saves to one clinic at the same moment", () => {
     // B could not get through while A held the row.
     expect(otherFinishedDuringWait).toBe(false);
 
-    // A went first (red to green, dark to light). B then read A's green and A's light, and changed those.
+    // A went first (red to green, light to dark). B then read A's green and A's dark, and changed those.
     expect(await logOf(clinicId)).toEqual([
-      `Admin A: Branding changed: colour changed from ${RED} to ${GREEN}; mode changed from Dark to Light.`,
-      `Staff B: Branding changed: colour changed from ${GREEN} to ${BLUE}; mode changed from Light to Dark.`,
+      `Admin A: Branding changed: colour changed from ${RED} to ${GREEN}; mode changed from Light to Dark.`,
+      `Staff B: Branding changed: colour changed from ${GREEN} to ${BLUE}; mode changed from Dark to Light.`,
     ]);
 
     // The last save won, and the log's last line agrees with the row.
@@ -142,9 +142,9 @@ describe("two saves to one clinic at the same moment", () => {
     // overwritten with nothing in the log to show it happened in between.
     const log = await logOf(clinicId);
     expect(log).toContain(`Staff B: Branding changed: colour changed from ${RED} to ${BLUE}.`);
-    expect(log).toContain(`Admin A: Branding changed: colour changed from ${RED} to ${GREEN}; mode changed from Dark to Light.`);
+    expect(log).toContain(`Admin A: Branding changed: colour changed from ${RED} to ${GREEN}; mode changed from Light to Dark.`);
 
     const row = await prisma.clinic.findUnique({ where: { id: clinicId }, select: { brandColor: true, brandTheme: true } });
-    expect(row).toEqual({ brandColor: GREEN, brandTheme: "light" });
+    expect(row).toEqual({ brandColor: GREEN, brandTheme: "dark" });
   });
 });

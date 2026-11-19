@@ -9,6 +9,7 @@ import { getSeatClinic } from "./db/seats";
 import { getMember } from "./people";
 import { ADMIN_ROLE, isClinicAdmin } from "./roles";
 import { defaultSenderName } from "./sender-name";
+import { readSetupProgress, type SetupProgress } from "./setup";
 import type { ClinicStatus, PracticeType } from "@prisma/client";
 import type { Category } from "./categories";
 import { DEFAULT_CATEGORY_LIST } from "./categories";
@@ -60,6 +61,11 @@ export type CurrentClinic = {
    * show is always decided from getClinicAccess() and the access rule).
    */
   planCategories: { value: Category; label: string; slug: string }[];
+  /**
+   * Where the clinic's setup stands (lib/setup.ts), or null for a clinic made before setup existed, which counts as
+   * set up. Read with the clinic, so it costs nothing extra. Only admins are ever shown it.
+   */
+  setup: SetupProgress | null;
 };
 
 /**
@@ -149,6 +155,7 @@ export const getCurrentClinic = cache(async (): Promise<CurrentClinic | null> =>
     planCategories: list
       .filter((category) => clinic.categories.includes(category.value))
       .map((category) => ({ value: category.value, label: category.label, slug: category.slug })),
+    setup: readSetupProgress(clinic.setupStep, clinic.setupDone),
   };
 });
 

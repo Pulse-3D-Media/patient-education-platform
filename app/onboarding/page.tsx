@@ -5,6 +5,7 @@ import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { askClerk } from "@/lib/clerk-timeout";
 import { getCurrentClinic } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
+import { SIGN_UP_PATHS } from "@/lib/sign-up-steps";
 
 /**
  * Step one of onboarding: "Set up your clinic".
@@ -29,18 +30,25 @@ import { clinicIsOpen } from "@/lib/clinic-status";
  * ?create=1 and shows the create form on its own.
  *
  * Whoever creates a clinic becomes its account owner (recorded when the
- * clinic's row is made, in lib/clinic.ts) and goes straight to Billing to
- * choose a plan: nothing else works until the clinic is paid for. Whoever
+ * clinic's row is made, in lib/clinic.ts) and goes straight to the sign-up
+ * plan step (/onboarding/plan): nothing else works until the clinic is paid
+ * for. Where checkout is not open (the production deployment, or a preview
+ * without the settings), that step sends them on to Billing, whose "not open
+ * yet" card is where a new clinic always landed before. Whoever
  * joins through an invitation, or picks a clinic they already belong to,
- * goes to the library (a clinic that is not open yet shows them its "ask
- * your office admin" note there).
+ * goes to the join screen, which asks a newly invited person for their own
+ * name and credential and sends everyone else on to the library (a clinic
+ * that is not open yet shows them its "ask your office admin" note there).
  */
 export const dynamic = "force-dynamic";
 
-/** Where a new clinic's creator goes. */
-const AFTER_CREATE = "/admin/billing";
+/** Where a new clinic's creator goes: the plan step, which sends them to Billing when checkout is not open here. */
+const AFTER_CREATE = SIGN_UP_PATHS.plan;
 /** Where someone goes after picking a clinic or accepting an invitation. This page then sends them on. */
 const AFTER_SELECT = "/onboarding";
+
+/** The invited person's own screen (05-join). */
+const JOIN_PATH = "/onboarding/join";
 
 /** The quiet link's address, and the one value of ?create that shows the create form. */
 const CREATE_HREF = "/onboarding?create=1";
@@ -53,7 +61,10 @@ export default async function OnboardingPage({ searchParams }: { searchParams?: 
 
   if (orgId) {
     const clinic = await getCurrentClinic();
-    if (clinic) redirect(clinic.isOwner && !clinicIsOpen(clinic) ? AFTER_CREATE : "/library");
+    // An owner whose clinic is not paid for yet goes to the plan step; the owner of an open clinic to the library;
+    // anyone else to the join screen, which asks a newly invited person for their own name and credential and
+    // sends everyone else straight on to the library (app/onboarding/join).
+    if (clinic) redirect(clinic.isOwner ? (clinicIsOpen(clinic) ? "/library" : AFTER_CREATE) : JOIN_PATH);
   }
 
   // Does this person already have a clinic, or an invitation to one? Two

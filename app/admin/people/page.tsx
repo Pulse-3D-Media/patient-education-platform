@@ -1,57 +1,63 @@
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
+import { staffLook } from "@/app/brand-look";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
+import { PatientPhonePreview } from "@/components/ui/PatientPhonePreview";
 import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
 import { getSeatSummary } from "@/lib/db/seats";
+import { getShareTerms } from "@/lib/db/shares";
+import { afterFirstPlaySentence } from "@/lib/expiry";
 import { ROLE_WORDS } from "@/lib/role-names";
-import { checkSeats, listRemovablePeople } from "@/lib/seat-changes";
-import { seatCountWords, seatsFullMessage } from "@/lib/seats";
+import { checkSeats, listRemovablePeople, type SeatedPerson } from "@/lib/seat-changes";
+import { seatCountWords, seatsFullMessage, type SeatSummary } from "@/lib/seats";
 import { AdminFrame } from "../AdminFrame";
+import { DetailHeader, Rule, WithPreview, daysAgo, longDate } from "../DetailParts";
+import { SplitView, type SplitItem } from "../SplitView";
 import { AdminSwitch, InviteForm, OwnerHandoff, PatientNameEditor, RemoveButton, RevokeButton, SeatButton } from "./PeopleControls";
 
 /**
- * The People section of the clinic admin area, at /admin/people. Admins only.
+ * The People section of the clinic admin area, at /admin/people (the
+ * approved design, screen 10). Admins only.
  *
  * THE SEAT MODEL (lib/seats.ts): the account owner is the one person who
  * does not need a seat; everyone else holds one of the seats the clinic pays
  * for, and an open invitation holds one too. Admin on or off is a separate
  * switch and never changes the seat count.
  *
- *   1. "2 of 3 seats in use" at the top, and in plain words anything that
- *      needs settling: people waiting for a seat, a plan that pays for fewer
- *      seats than are taken, a clinic with no account owner.
- *   2. Everyone in the clinic, each with Member / Member with admin, where
- *      they stand with a seat, and Remove. The owner's row cannot be switched
- *      to Member or removed; the owner decides whether to take a seat. A
- *      person holding a seat sends links to patients, so their row also
- *      says the name patients see ("Jane Smith", or "Dr. Jane Smith, DO" once a title is chosen), with Change.
- *   3. Invite someone (holds a seat until accepted), and the open invitations
- *      with Revoke.
- *   4. For the owner: hand the account to another admin.
+ * A list on the left, the chosen item's detail on the right (SplitView):
+ *
+ *   - At the top, the seats bar ("4 of 4") and, in plain words, anything
+ *     that needs settling: people waiting for a seat, a plan that pays for
+ *     fewer seats than are taken, a clinic with no account owner.
+ *   - Everyone in the clinic. A person's detail: where they stand with a
+ *     seat, the name patients see on their links with Change (only someone
+ *     holding a seat sends links), the Admin switch, the seat buttons that
+ *     apply (Give a seat, Take a seat, Give up my seat), Remove from clinic
+ *     (asks first), and for the owner looking at themself, handing the
+ *     account to another admin. A picture of the patient page shows the name
+ *     a seated person's patients see.
+ *   - "Waiting to join": the open invitations, each with Revoke (asks first).
+ *   - "Invite" at the top: an email and Member or Member with admin.
  *
  * Clerk's own organization panel is NOT on this page (taken off in October
- * 2026): its Members tab invited, removed and changed roles around our seat
- * holds, owner protections and clinic log, and its General tab could offer
- * to delete the organization. The clinic's name and logo are changed on
- * Branding, on our own screen.
+ * 2026). The clinic's name and logo are changed on Clinic branding.
  *
- * Every button asks a Server Action (actions.ts), which checks on the server
- * who is asking and goes through lib/seat-changes.ts. Opening this page also
- * brings the seats into line with Clerk (checkSeats): an accepted invitation
- * becomes the person's seat, someone who left or an invitation revoked
- * elsewhere frees theirs, and a free seat goes to whoever has waited longest.
+ * Every control asks a Server Action (actions.ts), which checks on the
+ * server who is asking and goes through lib/seat-changes.ts. Opening this
+ * page also brings the seats into line with Clerk (checkSeats).
  *
- * Until the clinic is paid for (open), there is nothing to manage: the page
- * says "Choose a plan first" and offers no invitations.
+ * Until the clinic is paid for (open), the page says "Choose a plan first",
+ * offers no invitations, and lists the other people with Remove only.
  */
 export const dynamic = "force-dynamic";
 
 const LINK = "font-medium text-brand-bright underline underline-offset-2";
-const NOTICE = "rounded-xl border border-line bg-surface p-4 text-[15px]";
 
-export default async function PeoplePage() {
+type PeopleProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
+
+export default async function PeoplePage(props: PeopleProps = {}) {
   const clinic = await requireClinicPage();
 
   if (!clinic.isAdmin) {
@@ -92,9 +98,6 @@ export default async function PeoplePage() {
               <h2 id="remove-heading" className="text-lg font-semibold">
                 Remove someone who has left
               </h2>
-              <p className="mt-1 text-ink-soft">
-                While your clinic is closed, removing someone is the one change you can make here. Everything else comes back once your plan is paid for.
-              </p>
               <ul className="mt-3 flex flex-col gap-3">
                 {removable.map((person) => (
                   <li key={person.userId} className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -104,7 +107,7 @@ export default async function PeoplePage() {
                         {person.email} · {ROLE_WORDS[person.role]}
                       </p>
                     </div>
-                    <RemoveButton userId={person.userId} name={person.name} holdsSeat={false} />
+                    <RemoveButton userId={person.userId} name={person.name} holdsSeat={false} label="Remove from clinic" />
                   </li>
                 ))}
               </ul>
@@ -119,10 +122,15 @@ export default async function PeoplePage() {
   // people come from the clinic's own organization, which checkSeats() reads
   // from the clinic's row; no organization id is handled here.
   const { userId } = await auth();
-  const board = await checkSeats(clinic.id).catch((error) => {
-    console.error("People: the clinic's people could not be read", error instanceof Error ? error.name : "unknown error");
-    return null;
-  });
+  const [board, terms, params] = await Promise.all([
+    checkSeats(clinic.id).catch((error) => {
+      console.error("People: the clinic's people could not be read", error instanceof Error ? error.name : "unknown error");
+      return null;
+    }),
+    // Only for the line under the video in the picture of the patient page. A setting out of range leaves the line out.
+    getShareTerms(clinic.id).catch(() => null),
+    props.searchParams ?? Promise.resolve({} as Record<string, string | string[] | undefined>),
+  ]);
 
   if (!board) {
     // Clerk could not be read. The seats are in our own tables, so those are still known.
@@ -140,161 +148,217 @@ export default async function PeoplePage() {
   const { people, summary, invitations } = board;
   const iAmOwner = board.ownerUserId !== null && board.ownerUserId === userId;
   const otherAdmins = people.filter((person) => person.role === "admin" && person.userId !== userId).map(({ userId, name }) => ({ userId, name }));
-  const outsideInvites = invitations?.filter((invitation) => !invitation.holdsSeat).length ?? 0;
+  const look = staffLook(clinic);
+  const now = new Date();
+
+  const personItems: SplitItem[] = people.map((person) => {
+    const me = person.userId === userId;
+    const roleWord = person.isOwner ? "Owner" : person.role === "admin" ? "Admin" : "Member";
+    const seatWord = person.seat === "held" ? "sends videos" : person.seat === "waiting" ? "waiting for a seat" : null;
+    return {
+      key: `person-${person.userId}`,
+      dot: person.seat === "waiting",
+      title: (
+        <>
+          {person.name}
+          {me && <span className="ml-1.5 text-sm font-normal text-ink-muted">(you)</span>}
+        </>
+      ),
+      sub: seatWord ? `${roleWord} · ${seatWord}` : roleWord,
+      detail: (
+        <PersonDetail
+          person={person}
+          me={me}
+          summary={summary}
+          iAmOwner={iAmOwner}
+          otherAdmins={otherAdmins}
+          preview={
+            person.seat === "held" ? (
+              <PatientPhonePreview
+                clinicName={clinic.name}
+                logoUrl={look.logoUrl}
+                color={clinic.branding.color}
+                fontClass={look.fontClass}
+                senderName={person.patientName}
+                title="Total Knee Replacement"
+                deadline={terms ? afterFirstPlaySentence(terms.daysAfterFirstPlay) : null}
+              />
+            ) : null
+          }
+        />
+      ),
+    };
+  });
+
+  const invitationItems: SplitItem[] = (invitations ?? []).map((invitation) => {
+    const sent = new Date(invitation.createdAt);
+    return {
+      key: `invitation-${invitation.id}`,
+      dot: true,
+      title: invitation.email,
+      sub: `Sent ${daysAgo(sent, now)}`,
+      detail: (
+        <>
+          <DetailHeader title={invitation.email} sub={`Invited ${longDate(sent)} · ${ROLE_WORDS[invitation.role]}`} />
+          <div className="mt-8 max-w-xl">
+            <p className={`text-[16px] ${invitation.holdsSeat ? "text-ink" : "text-warn"}`}>
+              {invitation.holdsSeat
+                ? "Holds a seat until it is accepted, revoked or expires."
+                : "Sent from outside this page, so it holds no seat: they will arrive waiting for one. Please invite people from this page."}
+            </p>
+            <Rule />
+            <RevokeButton invitationId={invitation.id} email={invitation.email} holdsSeat={invitation.holdsSeat} label="Revoke invitation" />
+          </div>
+        </>
+      ),
+    };
+  });
+
+  const asked = typeof params.person === "string" ? params.person : null;
 
   return (
-    <AdminFrame
-      clinic={clinic}
-      title="People"
-      intro={
-        <>
-          Everyone who can sign in to {clinic.name}. Each person uses one of your clinic&apos;s seats, except the account owner, who can take one or not.
-          Admin is a separate switch: it adds the admin pages and never changes the seat count.
-        </>
-      }
-    >
-      <section aria-labelledby="people-heading" className="mt-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h2 id="people-heading" className="text-lg font-semibold">
-            {seatCountWords(summary)}
-            <span className="ml-3 text-base font-normal text-ink-muted">
-              {people.length} {people.length === 1 ? "person" : "people"} in the clinic
-            </span>
-          </h2>
-          <Link href="/admin/billing" className={`text-sm ${LINK}`}>
-            Seats and plan on Billing
-          </Link>
-        </div>
-
-        <div className="mt-3 flex flex-col gap-2 empty:hidden">
-          {board.ownerUserId === null && (
-            <p className={`${NOTICE} text-warn`}>
-              Your clinic has no account owner on record. Get in touch with Pulse 3D and we will set one for you.
-            </p>
-          )}
-          {board.ownerNotAdmin && (
-            <p className={`${NOTICE} text-warn`}>
-              The account owner&apos;s admin was switched off outside this page. The owner should always have admin: switch it back on below.
-            </p>
-          )}
-          {summary.overBy > 0 && (
-            <p className={`${NOTICE} text-warn`}>
-              {summary.inUse} seats are taken and your plan pays for {summary.seats}. Nobody has been removed and nothing extra is being charged. Nobody
-              else can be given a seat until someone is removed, an invitation is revoked, or seats are added.
-            </p>
-          )}
-          {board.waiting > 0 && (
-            <p className={`${NOTICE} text-ink-soft`}>
-              {board.waiting} {board.waiting === 1 ? "person is" : "people are"} waiting for a seat, because none was free. They can watch videos in the
-              library, but cannot send links to patients until they hold a seat. {board.waiting === 1 ? "They get" : "Each gets"} a seat as soon as one is free, whoever joined first going first. To settle it now,
-              remove someone, revoke an invitation, or add seats on the Billing page.
-            </p>
-          )}
-        </div>
-
-        <ul className="mt-3 flex flex-col gap-3">
-          {people.map((person) => {
-            const me = person.userId === userId;
-            return (
-              <li key={person.userId} className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex min-w-0 items-center gap-4">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- Clerk serves the avatar already sized */}
-                  <img src={person.imageUrl} alt="" className="h-11 w-11 shrink-0 rounded-full bg-wash-strong" />
-                  <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2 text-lg font-semibold">
-                      <span className="truncate">{person.name}</span>
-                      {me && <span className="text-sm font-normal text-ink-muted">(you)</span>}
-                      {person.isOwner && (
-                        <span className="rounded-md bg-brand/20 px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide text-brand-bright">
-                          Account owner
-                        </span>
-                      )}
-                    </p>
-                    <p className="mt-0.5 truncate text-sm text-ink-muted">{person.email}</p>
-                    <p className={`mt-1 text-sm ${person.seat === "waiting" ? "text-warn" : "text-ink-soft"}`}>
-                      {person.seat === "held" ? "Holds a seat" : person.seat === "waiting" ? "Waiting for a seat" : "No seat (the account owner does not need one)"}
-                    </p>
-                    {/* Only people with a seat send links, so only they have a name for patients. */}
-                    {person.seat === "held" && (
-                      <PatientNameEditor
-                        userId={person.userId}
-                        personName={person.name}
-                        patientName={person.patientName}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-start gap-3 lg:justify-end">
-                  {/* The key changes whenever the server's answer does, so the control starts again from it. */}
-                  <AdminSwitch key={`${person.userId}:${person.role}`} userId={person.userId} name={person.name} role={person.role} isOwner={person.isOwner} />
-                  {person.seat === "waiting" && summary.free > 0 && <SeatButton key={`${person.userId}:give`} userId={person.userId} mode="give" />}
-                  {person.isOwner && me && person.seat === "none" && summary.free > 0 && <SeatButton key={`${person.userId}:take`} userId={person.userId} mode="take" />}
-                  {person.isOwner && me && person.seat === "held" && <SeatButton key={`${person.userId}:release`} userId={person.userId} mode="release" />}
-                  {!person.isOwner && !me && <RemoveButton userId={person.userId} name={person.name} holdsSeat={person.seat === "held"} />}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-
-      <section aria-labelledby="invite-heading" className="mt-12">
-        <h2 id="invite-heading" className="text-lg font-semibold">
-          Invite someone
-        </h2>
-        <p className="mt-1 max-w-2xl text-ink-soft">
-          They get an email to join {clinic.name}. An invitation holds a seat until it is accepted, revoked or expires, so you can send as many as you
-          have free seats.
-        </p>
-        {summary.free > 0 ? (
-          <InviteForm />
-        ) : (
-          <p className={`mt-4 max-w-2xl ${NOTICE} text-ink-soft`}>
-            {seatsFullMessage(summary)}{" "}
-            <Link href="/admin/billing" className={LINK}>
-              Billing
-            </Link>
-          </p>
-        )}
-
-        <h3 className="mt-8 text-base font-semibold">Open invitations</h3>
-        {invitations === null ? (
-          <p className="mt-2 text-ink-soft">We could not read your open invitations just now. Reload this page in a moment.</p>
-        ) : invitations.length === 0 ? (
-          <p className="mt-2 text-ink-soft">None.</p>
-        ) : (
-          <ul className="mt-3 flex flex-col gap-3">
-            {invitations.map((invitation) => (
-              <li key={invitation.id} className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{invitation.email}</p>
-                  <p className={`text-sm ${invitation.holdsSeat ? "text-ink-muted" : "text-warn"}`}>
-                    {ROLE_WORDS[invitation.role]}. {invitation.holdsSeat ? "Holds a seat." : "Sent from outside this page, so it holds no seat: they will arrive waiting for one."}
-                  </p>
-                </div>
-                <RevokeButton invitationId={invitation.id} email={invitation.email} holdsSeat={invitation.holdsSeat} />
-              </li>
-            ))}
-          </ul>
-        )}
-        {outsideInvites > 0 && (
-          <p className="mt-3 max-w-2xl text-sm text-ink-muted">Please invite people from this page: an invitation sent from anywhere else does not hold a seat.</p>
-        )}
-      </section>
-
-      {iAmOwner && (
-        <section aria-labelledby="owner-heading" className="mt-12">
-          <h2 id="owner-heading" className="text-lg font-semibold">
-            Make someone else the account owner
-          </h2>
-          <p className="mt-1 max-w-2xl text-ink-soft">
-            You are the account owner. The owner cannot be removed or have admin switched off, so hand the account over first if you are leaving. Only
-            people with admin on can take it.
-          </p>
-          <OwnerHandoff admins={otherAdmins} />
-        </section>
-      )}
+    <AdminFrame clinic={clinic} title="People" bare>
+      <SplitView
+        title="People"
+        param="person"
+        initialKey={asked}
+        headerAction={{
+          key: "invite",
+          label: "Invite",
+          primary: true,
+          detail: (
+            <>
+              <DetailHeader title="Invite someone" sub="They get an email to join. An invitation holds a seat until it is accepted." />
+              {summary.free > 0 ? (
+                <InviteForm />
+              ) : (
+                <p className="mt-8 max-w-2xl rounded-xl border border-line-strong bg-surface p-4 text-[15px] text-ink-soft">
+                  {seatsFullMessage(summary)}{" "}
+                  <Link href="/admin/billing" className={LINK}>
+                    Billing
+                  </Link>
+                </p>
+              )}
+            </>
+          ),
+        }}
+        above={<SeatsBar summary={summary} board={board} invitationsUnread={invitations === null} />}
+        groups={[
+          { items: personItems },
+          { heading: "Waiting to join", items: invitationItems },
+        ]}
+      />
     </AdminFrame>
+  );
+}
+
+/** "Seats ▬▬▬ 4 of 4", and, in plain words, anything about the seats or the owner that needs settling. */
+function SeatsBar({ summary, board, invitationsUnread }: { summary: SeatSummary; board: { ownerUserId: string | null; ownerNotAdmin: boolean; waiting: number }; invitationsUnread: boolean }) {
+  const share = summary.seats > 0 ? Math.min(1, summary.inUse / summary.seats) : 0;
+  const warn = "mt-3 rounded-xl border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-ink";
+  return (
+    <div className="md:px-2">
+      <div className="mt-3 flex items-center gap-3" title={seatCountWords(summary)}>
+        <span className="text-sm font-semibold text-ink-soft">Seats</span>
+        <span aria-hidden="true" className="h-1.5 w-24 overflow-hidden rounded-full bg-wash-strong">
+          <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.round(share * 100)}%` }} />
+        </span>
+        <span className="text-sm font-semibold text-ink-soft">
+          {summary.inUse} of {summary.seats}
+          <span className="sr-only"> seats in use</span>
+        </span>
+      </div>
+      {board.ownerUserId === null && <p className={warn}>Your clinic has no account owner on record. Get in touch with Pulse 3D and we will set one for you.</p>}
+      {board.ownerNotAdmin && <p className={warn}>The account owner&apos;s admin was switched off outside this page. Switch it back on in their details.</p>}
+      {summary.overBy > 0 && (
+        <p className={warn}>
+          {summary.inUse} seats are taken and your plan pays for {summary.seats}. Nobody has been removed and nothing extra is being charged. Nobody else can be given a seat until someone is
+          removed, an invitation is revoked, or seats are added.
+        </p>
+      )}
+      {board.waiting > 0 && (
+        <p className={warn}>
+          {board.waiting} {board.waiting === 1 ? "person is" : "people are"} waiting for a seat. To settle it, remove someone, revoke an invitation, or add seats on the Billing page.
+        </p>
+      )}
+      {invitationsUnread && <p className="mt-3 text-sm text-ink-soft">We could not read your open invitations just now. Reload this page in a moment.</p>}
+    </div>
+  );
+}
+
+/** One person's detail: their seat, the name patients see, Admin, the seat buttons, Remove, and for the owner, the handoff. */
+function PersonDetail({
+  person,
+  me,
+  summary,
+  iAmOwner,
+  otherAdmins,
+  preview,
+}: {
+  person: SeatedPerson;
+  me: boolean;
+  summary: SeatSummary;
+  iAmOwner: boolean;
+  otherAdmins: { userId: string; name: string }[];
+  preview: React.ReactNode;
+}) {
+  const seatLine =
+    person.seat === "held"
+      ? "Sends videos to patients (uses a seat)"
+      : person.seat === "waiting"
+        ? "Waiting for a seat. They can watch videos in the library, and can send links once they hold a seat."
+        : "No seat. The account owner does not need one to use the admin pages.";
+  const showSeatButton =
+    (person.seat === "waiting" && summary.free > 0) || (person.isOwner && me && person.seat === "none" && summary.free > 0) || (person.isOwner && me && person.seat === "held");
+  const seatMode = person.seat === "waiting" ? "give" : person.seat === "none" ? "take" : "release";
+  return (
+    <>
+      <DetailHeader
+        title={person.name}
+        sub={`${person.email} · joined ${longDate(new Date(person.joinedAt))}`}
+        end={
+          person.isOwner ? (
+            <span className="rounded-md bg-brand/20 px-2 py-1 text-[13px] font-semibold uppercase tracking-wide text-brand-bright">Account owner</span>
+          ) : undefined
+        }
+      />
+      <WithPreview preview={preview}>
+        <p className={`text-[16px] ${person.seat === "waiting" ? "text-warn" : "text-ink"}`}>{seatLine}</p>
+        {showSeatButton && (
+          <div className="mt-3">
+            {/* The key changes whenever the server's answer does, so the control starts again from it. */}
+            <SeatButton key={`${person.userId}:${seatMode}`} userId={person.userId} mode={seatMode} />
+          </div>
+        )}
+
+        {/* Only people with a seat send links, so only they have a name for patients. */}
+        {person.seat === "held" && (
+          <div className="mt-6">
+            <p className="text-sm font-semibold text-ink-soft">Name patients see</p>
+            <PatientNameEditor userId={person.userId} personName={person.name} patientName={person.patientName} />
+          </div>
+        )}
+
+        <div className="mt-6">
+          <AdminSwitch key={`${person.userId}:${person.role}`} userId={person.userId} name={person.name} role={person.role} isOwner={person.isOwner} />
+        </div>
+
+        {!person.isOwner && !me && (
+          <>
+            <Rule />
+            <RemoveButton userId={person.userId} name={person.name} holdsSeat={person.seat === "held"} label="Remove from clinic" />
+          </>
+        )}
+
+        {person.isOwner && me && iAmOwner && (
+          <>
+            <Rule />
+            <h3 className="text-base font-semibold">Make someone else the account owner</h3>
+            <p className="mt-1 max-w-xl text-[15px] text-ink-soft">The owner cannot be removed or have admin switched off, so hand the account over first if you are leaving.</p>
+            <OwnerHandoff admins={otherAdmins} />
+          </>
+        )}
+      </WithPreview>
+    </>
   );
 }

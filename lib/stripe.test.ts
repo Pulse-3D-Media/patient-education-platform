@@ -8,11 +8,14 @@ import {
   addPaidEvidence,
   checkStripeIds,
   checkoutIsOpen,
+  checkoutIdempotencyKey,
   checkoutSessionParams,
   eventRefs,
   getStripe,
   getWebhookSecret,
+  historyFromInvoices,
   isHandledEventType,
+  paymentMethodFacts,
   isTestSecretKey,
   snapshotFromSubscription,
   stateFromSubscription,
@@ -493,5 +496,87 @@ describe("checkStripeIds: may the staff reset clear these ids?", () => {
   it("a failure to ask is thrown, never read as gone", async () => {
     const failing = { ...deps(), listOpenSessions: async () => Promise.reject(new Error("Stripe unreachable")) };
     await expect(checkStripeIds(ids, failing)).rejects.toThrow();
+  });
+});
+
+describe("historyFromInvoices and paymentMethodFacts (the Billing page's history and card, read only)", () => {
+  const invoice = (over: Record<string, unknown>) =>
+    ({
+      id: "in_madeup",
+      livemode: false,
+      created: Date.UTC(2026, 9, 5, 18) / 1000,
+      billing_reason: "subscription_cycle",
+      status: "paid",
+      amount_paid: 26700,
+      amount_due: 26700,
+      currency: "usd",
+      hosted_invoice_url: "https://invoice.stripe.com/i/madeup",
+      ...over,
+    }) as unknown as Stripe.Invoice;
+
+  it("keeps Stripe's amounts and dates, says what each invoice was for, and keeps only Stripe's own invoice page", () => {
+    const [renewal, first, change, other, foreign] = historyFromInvoices([
+      invoice({}),
+      invoice({ id: "in_2", billing_reason: "subscription_create" }),
+      invoice({ id: "in_3", billing_reason: "subscription_update", status: "open", amount_paid: 0, amount_due: 5000 }),
+      invoice({ id: "in_4", billing_reason: "manual", status: "something_new" }),
+      invoice({ id: "in_5", hosted_invoice_url: "https://evil.example.com/pay" }),
+    ]);
+    expect(renewal).toEqual({ id: "in_madeup", date: new Date(Date.UTC(2026, 9, 5, 18)), what: "Renewal", amountCents: 26700, currency: "usd", status: "paid", pageUrl: "https://invoice.stripe.com/i/madeup" });
+    expect(first.what).toBe("First payment");
+    // An unpaid invoice shows what is due, not the nothing that was paid.
+    expect(change).toMatchObject({ what: "Plan change", status: "open", amountCents: 5000 });
+    expect(other).toMatchObject({ what: "Invoice", status: "other" });
+    expect(foreign.pageUrl).toBeNull();
+  });
+
+  it("drops a live-mode invoice, as everywhere in the app", () => {
+    expect(historyFromInvoices([invoice({ livemode: true })])).toEqual([]);
+  });
+
+  it("reads a card's brand, last four digits and expiry, names other methods, and gives nothing for a bare id or none", () => {
+    expect(paymentMethodFacts({ type: "card", card: { brand: "visa", display_brand: "visa", last4: "4242", exp_month: 8, exp_year: 2029 } } as unknown as Stripe.PaymentMethod)).toEqual({
+      card: { brand: "visa", last4: "4242", expMonth: 8, expYear: 2029 },
+      method: null,
+    });
+    expect(paymentMethodFacts({ type: "us_bank_account" } as unknown as Stripe.PaymentMethod)).toEqual({ card: null, method: "Bank account" });
+    expect(paymentMethodFacts({ type: "something_new" } as unknown as Stripe.PaymentMethod)).toEqual({ card: null, method: "Another payment method" });
+    expect(paymentMethodFacts("pm_madeup")).toBeNull();
+    expect(paymentMethodFacts(null)).toBeNull();
+  });
+});
+
+describe("where Stripe sends the person back to (the sign-up steps or Billing)", () => {
+  const args = {
+    customerId: "cus_made_up",
+    clinicId: "clinic_made_up",
+    planId: "plan_made_up",
+    perSeatCents: 8900,
+    seats: 4,
+    interval: "MONTH" as const,
+    description: "Knee, Hip; 4 surgeon seats",
+    origin: "https://app.example.com",
+    expiresAt: new Date("2026-09-19T13:00:00.000Z"),
+  };
+
+  it("Billing, left out or named: the return page and Billing, exactly as before, with the same idempotency key as before", () => {
+    for (const params of [checkoutSessionParams(args), checkoutSessionParams({ ...args, flow: "billing" })]) {
+      expect(params.success_url).toBe("https://app.example.com/admin/billing/return");
+      expect(params.cancel_url).toBe("https://app.example.com/admin/billing?checkout=cancelled");
+    }
+    expect(checkoutIdempotencyKey("plan_made_up")).toBe("p3d:checkout:plan_made_up");
+  });
+
+  it("the sign-up steps: the sign-up return page, and the payment step with the not-finished state; its own idempotency key", () => {
+    const params = checkoutSessionParams({ ...args, flow: "signup" });
+    expect(params.success_url).toBe("https://app.example.com/onboarding/done");
+    expect(params.cancel_url).toBe("https://app.example.com/onboarding/payment?stopped=1");
+    expect(checkoutIdempotencyKey("plan_made_up", "signup")).toBe("p3d:checkout:plan_made_up:signup");
+  });
+
+  it("changes nothing about what is charged", () => {
+    const billing = checkoutSessionParams(args);
+    const signup = checkoutSessionParams({ ...args, flow: "signup" });
+    expect({ ...signup, success_url: "", cancel_url: "" }).toEqual({ ...billing, success_url: "", cancel_url: "" });
   });
 });

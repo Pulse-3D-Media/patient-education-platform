@@ -9,8 +9,8 @@
  *
  * Each font returns a predictable class name ("font-open-sans"), so a test
  * can check that a clinic's chosen font reached the page. One export per
- * font the app uses; add a line here when app/brand-fonts.ts or
- * app/layout.tsx gains a font.
+ * font the app uses; add a line here when app/brand-fonts.ts,
+ * app/staff-fonts.ts or app/layout.tsx gains a font.
  */
 
 function font(name: string) {
@@ -27,3 +27,5 @@ export const Source_Sans_3 = font("source-sans");
 export const Montserrat = font("montserrat");
 export const Nunito_Sans = font("nunito-sans");
 export const Merriweather = font("merriweather");
+export const Hanken_Grotesk = font("hanken-grotesk");
+export const Schibsted_Grotesk = font("schibsted-grotesk");

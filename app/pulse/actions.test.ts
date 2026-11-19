@@ -365,7 +365,7 @@ describe("saveDetailsAction and the clinic's branding", () => {
 });
 
 describe("saveBrandingAction", () => {
-  const good = { logoUrl: "https://cdn.prod.website-files.com/test/logo.png", brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "light", phone: "801-555-0123" };
+  const good = { logoUrl: "https://cdn.prod.website-files.com/test/logo.png", brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "dark", phone: "801-555-0123" };
 
   it("refuses a user who is not Pulse staff with not-found, and writes nothing", async () => {
     const clinicId = await makeClinic();
@@ -385,13 +385,13 @@ describe("saveBrandingAction", () => {
     expect(await saveBrandingAction(null, form({ clinicId, ...good }))).toMatchObject({ ok: expect.stringContaining("Branding saved") });
 
     const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, brandTheme: true, phone: true } });
-    expect(clinic).toEqual({ logoUrl: "https://cdn.prod.website-files.com/test/logo.png", brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light", phone: "8015550123" });
+    expect(clinic).toEqual({ logoUrl: "https://cdn.prod.website-files.com/test/logo.png", brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "dark", phone: "8015550123" });
 
     const notes = await prisma.clinicNote.findMany({ where: { clinicId }, select: { body: true, authorName: true, kind: true } });
     expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({ authorName: "Evan Miller", kind: "STATUS" });
     expect(notes[0].body).toBe(
-      "Branding changed: logo set to https://cdn.prod.website-files.com/test/logo.png; colour set to #7a1f2b; font changed from Inter to Merriweather; mode changed from Dark to Light; phone set to (801) 555-0123.",
+      "Branding changed: logo set to https://cdn.prod.website-files.com/test/logo.png; colour set to #7a1f2b; font changed from Pulse 3D default to Merriweather; mode changed from Light to Dark; phone set to (801) 555-0123.",
     );
 
     // The same form again changes nothing and logs nothing.
@@ -404,7 +404,7 @@ describe("saveBrandingAction", () => {
     signInAs("user_staff", { pulseStaff: true });
     await saveBrandingAction(null, form({ clinicId, ...good }));
 
-    await saveBrandingAction(null, form({ clinicId, logoUrl: "", brandColor: "", brandFont: "inter", brandTheme: "dark", phone: "" }));
+    await saveBrandingAction(null, form({ clinicId, logoUrl: "", brandColor: "", brandFont: "inter", brandTheme: "light", phone: "" }));
 
     const clinic = await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { logoUrl: true, brandColor: true, brandFont: true, brandTheme: true, phone: true } });
     expect(clinic).toEqual({ logoUrl: null, brandColor: null, brandFont: null, brandTheme: null, phone: null });

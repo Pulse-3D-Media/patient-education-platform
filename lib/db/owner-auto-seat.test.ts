@@ -12,9 +12,13 @@ import { createPricingVersion } from "./pricing";
 import { holdSeatForInvitation, releaseSeat, reserveSeat } from "./seats";
 
 /**
- * A solo owner is seated automatically (decided by the user on 2026-11-16),
- * against the real test database. The rule is ownerAutoSeatDue() in
- * lib/seats.ts; the write is seatSoloOwnerIfDue() in lib/db/seats.ts, run by
+ * The account owner is seated automatically when the clinic opens, against
+ * the real test database. Since 2026-11-19 (Evan) the person who signs up
+ * takes a seat at any clinic made from now on (Clinic.setupStep set: the
+ * "made from now on" tests below); a clinic made before keeps the rule of
+ * 2026-11-16/18 (a solo owner on exactly one seat), which the older tests
+ * here still prove. The rule is ownerAutoSeatDue() in
+ * lib/seats.ts; the write is seatOwnerIfDue() in lib/db/seats.ts, run by
  * both ways a clinic opens: a first confirmed payment (reconcileSubscription)
  * and Pulse staff (changeClinicWithLog: Open by hand, or setting the plan).
  *
@@ -58,9 +62,9 @@ afterAll(async () => {
 });
 
 /** A new, unpaid clinic, as /onboarding leaves it: PENDING, no seats, its creator the owner (or none). */
-async function newClinic(owner: string | null, surgeonSeats = 0) {
+async function newClinic(owner: string | null, surgeonSeats = 0, setupStep: string | null = null) {
   const clinic = await prisma.clinic.create({
-    data: { name: `Vitest owner seat ${tag} ${(serial += 1)}`, practiceType: "CLINIC", ownerClerkUserId: owner, surgeonSeats },
+    data: { name: `Vitest owner seat ${tag} ${(serial += 1)}`, practiceType: "CLINIC", ownerClerkUserId: owner, surgeonSeats, setupStep },
     select: { id: true },
   });
   clinicIds.push(clinic.id);
@@ -114,7 +118,7 @@ describe("a first confirmed payment", () => {
     expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { status: true } })).status).toBe("ACTIVE");
     expect(await seatHolders(clinicId)).toEqual([owner]);
     const notes = await autoSeatNotes(clinicId);
-    expect(notes).toEqual([{ body: `${OWNER_AUTO_SEAT_WORDS}, because nobody else holds or is invited to one. Now 1 of 1 seat in use.`, authorName: "seats" }]);
+    expect(notes).toEqual([{ body: `${OWNER_AUTO_SEAT_WORDS}, because the person who sets up a clinic takes a seat when one is free. Now 1 of 1 seat in use.`, authorName: "seats" }]);
 
     await look();
     await look();
@@ -224,6 +228,98 @@ describe("Pulse staff opening a clinic", () => {
     await setClinicStatusByStaff(clinicId, "OPEN", "Vitest: opened again.", "Vitest Staff");
     expect(await seatHolders(clinicId)).toEqual([]);
     expect(await autoSeatNotes(clinicId)).toHaveLength(1);
+  });
+});
+
+describe("a clinic made from now on (it goes through setup): the person who signs up takes a seat", () => {
+  it("seats the owner of a three-seat plan at the first payment, once: you and 2 more", async () => {
+    const owner = user();
+    const clinicId = await newClinic(owner, 0, "clinic");
+    const look = await firstPayment(clinicId, 3);
+    expect(await seatHolders(clinicId)).toEqual([owner]);
+    expect((await autoSeatNotes(clinicId)).map((note) => note.body)).toEqual([
+      `${OWNER_AUTO_SEAT_WORDS}, because the person who sets up a clinic takes a seat when one is free. Now 1 of 3 seats in use.`,
+    ]);
+    await look();
+    expect(await seatHolders(clinicId)).toEqual([owner]);
+    expect(await autoSeatNotes(clinicId)).toHaveLength(1);
+  });
+
+  it("seats the owner in a free seat beside others who already hold or were invited to one", async () => {
+    const owner = user();
+    const other = user();
+    const clinicId = await newClinic(owner, 3, "clinic");
+    expect((await reserveSeat(clinicId, other)).held).toBe(true);
+    expect((await holdSeatForInvitation(clinicId)).held).toBe(true);
+    await firstPayment(clinicId, 3);
+    expect((await seatHolders(clinicId)).sort()).toEqual([owner, other].sort());
+    expect(await prisma.seatInvitation.count({ where: { clinicId } })).toBe(1);
+  });
+
+  it("never takes a seat someone holds or was invited to: with every seat taken the owner is not seated, and nothing breaks", async () => {
+    const owner = user();
+    const clinicId = await newClinic(owner, 2, "clinic");
+    expect((await reserveSeat(clinicId, user())).held).toBe(true);
+    expect((await holdSeatForInvitation(clinicId)).held).toBe(true);
+    await firstPayment(clinicId, 2);
+    expect((await prisma.clinic.findUniqueOrThrow({ where: { id: clinicId }, select: { status: true } })).status).toBe("ACTIVE");
+    expect(await seatHolders(clinicId)).not.toContain(owner);
+    expect(await autoSeatNotes(clinicId)).toEqual([]);
+  });
+
+  it("Pulse staff opening a new clinic with five seats seats its owner", async () => {
+    const owner = user();
+    const clinicId = await newClinic(owner, 0, "finished");
+    await setClinicPlan(clinicId, ["KNEE"], 5, "Vitest Staff");
+    await setClinicStatusByStaff(clinicId, "OPEN", "Vitest: opened by hand.", "Vitest Staff");
+    expect(await seatHolders(clinicId)).toEqual([owner]);
+  });
+
+  it("the last seat taken by an invitation at the same moment as the opening: one of them gets it, never both", async () => {
+    const owner = user();
+    const clinicId = await newClinic(owner, 0, "clinic");
+    // Two seats, one already held, so exactly one is left for the owner or the invitation.
+    await setClinicPlan(clinicId, ["KNEE"], 2, "Vitest Staff");
+    expect((await reserveSeat(clinicId, user())).held).toBe(true);
+
+    let hold: Promise<Awaited<ReturnType<typeof holdSeatForInvitation>>> | null = null;
+    let holdFinishedDuringWait = false;
+    // The opening takes the clinic's lock; before it writes, the invitation reaches for the last seat on another connection.
+    vi.mocked(clinicLock.readClinicLocked).mockImplementationOnce((async (tx: Prisma.TransactionClient, id: string, select: Prisma.ClinicSelect) => {
+      const row = await real.readClinicLocked(tx, id, select);
+      let done = false;
+      hold = holdSeatForInvitation(clinicId).then((result) => {
+        done = true;
+        return result;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      holdFinishedDuringWait = done;
+      return row;
+    }) as typeof real.readClinicLocked);
+
+    await setClinicStatusByStaff(clinicId, "OPEN", "Vitest: opened by hand.", "Vitest Staff");
+    const held = await (hold as unknown as Promise<Awaited<ReturnType<typeof holdSeatForInvitation>>>);
+
+    expect(holdFinishedDuringWait, "the invitation waited for the opening's lock").toBe(false);
+    // The opening got there first, so the owner has the last seat and the invitation was refused.
+    expect(await seatHolders(clinicId)).toContain(owner);
+    expect(held.held).toBe(false);
+    const inUse = (await prisma.seatAllocation.count({ where: { clinicId } })) + (await prisma.seatInvitation.count({ where: { clinicId } }));
+    expect(inUse).toBe(2);
+  });
+
+  it("the same race left to run freely never puts the clinic over its seats", async () => {
+    for (let round = 0; round < 3; round++) {
+      const owner = user();
+      const clinicId = await newClinic(owner, 0, "clinic");
+      await setClinicPlan(clinicId, ["KNEE"], 2, "Vitest Staff");
+      expect((await reserveSeat(clinicId, user())).held).toBe(true);
+      const [, held] = await Promise.all([setClinicStatusByStaff(clinicId, "OPEN", "Vitest: opened by hand.", "Vitest Staff"), holdSeatForInvitation(clinicId)]);
+      const ownerSeated = (await seatHolders(clinicId)).includes(owner);
+      expect(ownerSeated !== held.held, `round ${round}: exactly one of them got the last seat`).toBe(true);
+      const inUse = (await prisma.seatAllocation.count({ where: { clinicId } })) + (await prisma.seatInvitation.count({ where: { clinicId } }));
+      expect(inUse).toBe(2);
+    }
   });
 });
 

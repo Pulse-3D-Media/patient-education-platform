@@ -7,7 +7,7 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
 
 /**
  * The name and credential editor: how a surgeon's name appears to patients
- * on the links they send. One form, used in two places: an office admin's
+ * on the links they send. One form, used in three places: an office admin's
  * Change on /admin/people (for anyone holding a seat), and a surgeon's own
  * Change in the library's Send panel.
  *
@@ -24,6 +24,10 @@ import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "./styles";
  * only to show them. What is saved is worked out again on the server from
  * the name and credential sent, never from those words (rule 8).
  *
+ * The join screen (app/onboarding/join) uses it a third time, for an invited
+ * person entering their own name and credential when they accept, with its
+ * own button words and no Cancel.
+ *
  * The draft stays in the boxes when the server says no, or the save cannot
  * be confirmed, with a plain sentence; the form closes only after the
  * server has saved.
@@ -35,6 +39,7 @@ export function SenderNameForm({
   onSave,
   onSaved,
   onCancel,
+  saveLabel = "Save name",
 }: {
   /** Makes the boxes' ids unique on a page with several forms. */
   idPrefix: string;
@@ -46,7 +51,10 @@ export function SenderNameForm({
   onSave: (choice: NameChoice) => Promise<{ error?: string; message?: string }>;
   /** Called with the server's sentence once the name is saved. */
   onSaved: (message: string | undefined) => void;
-  onCancel: () => void;
+  /** Left out where there is nothing to go back to (the join screen): then no Cancel button is drawn. */
+  onCancel?: () => void;
+  /** The save button's words. "Save name" unless the place it is used says otherwise ("Join and open the library"). */
+  saveLabel?: string;
 }) {
   const start = readSenderName(current);
   const [name, setName] = useState(start.choice.name);
@@ -149,11 +157,13 @@ export function SenderNameForm({
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="submit" disabled={pending} className={PRIMARY_BUTTON}>
-          {pending ? "Saving..." : "Save name"}
+          {pending ? "Saving..." : saveLabel}
         </button>
-        <button type="button" disabled={pending} onClick={onCancel} className={`${SECONDARY_BUTTON} disabled:opacity-60`}>
-          Cancel
-        </button>
+        {onCancel && (
+          <button type="button" disabled={pending} onClick={onCancel} className={`${SECONDARY_BUTTON} disabled:opacity-60`}>
+            Cancel
+          </button>
+        )}
       </div>
       {error && (
         <p role="alert" className="text-sm text-warn">

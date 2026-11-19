@@ -115,8 +115,9 @@ describe("parseBrandFont", () => {
     }
   });
 
-  it("has Inter as the default, and a label for every key", () => {
+  it("has the Pulse 3D default (key \"inter\") as the default, and a label for every key", () => {
     expect(DEFAULT_BRAND_FONT).toBe("inter");
+    expect(brandFontLabel("inter")).toBe("Pulse 3D default");
     expect(brandFontLabel("source-sans")).toBe("Source Sans");
   });
 });
@@ -194,13 +195,13 @@ describe("the fade behind the players' bottom row, and the middle buttons", () =
 
 describe("a clinic with no colour set", () => {
   it("gets the Pulse colours exactly as they were, not a computed version of them", () => {
-    expect(staffTheme(null)).toEqual(PULSE_STAFF_THEME);
-    expect(staffTheme(null)).toEqual({ accent: "#2a829b", accentHover: "#1e5668", accentBright: "#5fb8d4", onAccent: "#ffffff" });
+    expect(staffTheme(null, "dark")).toEqual(PULSE_STAFF_THEME);
+    expect(staffTheme(null, "dark")).toEqual({ accent: "#2a829b", accentHover: "#1e5668", accentBright: "#5fb8d4", onAccent: "#ffffff" });
     expect(patientTheme(null)).toEqual(PULSE_PATIENT_THEME);
   });
 
   it("gets them for a stored value that is not a colour, too", () => {
-    expect(staffTheme("not a colour")).toEqual(PULSE_STAFF_THEME);
+    expect(staffTheme("not a colour", "dark")).toEqual(PULSE_STAFF_THEME);
     expect(patientTheme("url(javascript:1)")).toEqual(PULSE_PATIENT_THEME);
   });
 });
@@ -208,7 +209,7 @@ describe("a clinic with no colour set", () => {
 describe("the staff screens, for every colour a clinic could pick", () => {
   it("keeps buttons visible, their text readable, and the bright shade readable as text", () => {
     for (const colour of everyColour()) {
-      const theme = staffTheme(colour);
+      const theme = staffTheme(colour, "dark");
       // A filled button stands out from the dark ground (and so from black, which is darker still).
       expect(contrastRatio(theme.accent, STAFF_GROUND), `${colour} accent on the ground`).toBeGreaterThanOrEqual(3);
       expect(contrastRatio(theme.accent, "#000000"), `${colour} accent on black`).toBeGreaterThanOrEqual(3);
@@ -223,17 +224,17 @@ describe("the staff screens, for every colour a clinic could pick", () => {
 
   it("leaves a colour that already works alone", () => {
     // A mid blue that clears 3:1 on the dark ground is used as picked.
-    expect(staffTheme("#3b82f6").accent).toBe("#3b82f6");
+    expect(staffTheme("#3b82f6", "dark").accent).toBe("#3b82f6");
   });
 
   it("lightens a colour too dark to see on the dark screens, such as navy or black", () => {
-    expect(staffTheme("#0a1f44").accent).not.toBe("#0a1f44");
-    expect(contrastRatio(staffTheme("#000000").accent, STAFF_GROUND)).toBeGreaterThanOrEqual(3);
+    expect(staffTheme("#0a1f44", "dark").accent).not.toBe("#0a1f44");
+    expect(contrastRatio(staffTheme("#000000", "dark").accent, STAFF_GROUND)).toBeGreaterThanOrEqual(3);
   });
 
   it("puts black text on a light colour and white on a dark one", () => {
-    expect(staffTheme("#ffe27a").onAccent).toBe("#000000");
-    expect(staffTheme("#7a1f2b").onAccent).toBe("#ffffff");
+    expect(staffTheme("#ffe27a", "dark").onAccent).toBe("#000000");
+    expect(staffTheme("#7a1f2b", "dark").onAccent).toBe("#ffffff");
   });
 });
 
@@ -271,12 +272,12 @@ describe("the LIGHT staff screens, for every colour a clinic could pick", () => 
     expect(staffTheme("#7a1f2b", "light").accent).toBe("#7a1f2b");
   });
 
-  it("gives the same colour different shades in the two modes, and dark when no mode is given", () => {
+  it("gives the same colour different shades in the two modes, and light when no mode is given (the default since 2026-11-18)", () => {
     expect(staffTheme("#0a1433", "light").accent).toBe("#0a1433"); // navy is fine on light
     expect(staffTheme("#0a1433", "dark").accent).not.toBe("#0a1433"); // and invisible on black
-    expect(staffTheme("#0a1433")).toEqual(staffTheme("#0a1433", "dark"));
+    expect(staffTheme("#0a1433")).toEqual(staffTheme("#0a1433", "light"));
     expect(staffTheme(null, "light")).toEqual(PULSE_STAFF_LIGHT_THEME);
-    expect(staffTheme(null)).toEqual(PULSE_STAFF_THEME);
+    expect(staffTheme(null)).toEqual(PULSE_STAFF_LIGHT_THEME);
   });
 
   it("keeps the dark-ground shades beside them, for the video player, which is black in both modes", () => {
@@ -368,7 +369,7 @@ describe("themeVars", () => {
 
   it("only ever holds plain hex, whatever went in", () => {
     for (const colour of [...everyColour(), "junk", "#fff; x"]) {
-      for (const value of Object.values(themeVars(staffTheme(colour)))) expect(value).toMatch(/^#[0-9a-f]{6}$/);
+      for (const value of Object.values(themeVars(staffTheme(colour, "dark")))) expect(value).toMatch(/^#[0-9a-f]{6}$/);
     }
   });
 });
@@ -385,24 +386,24 @@ describe("parseBrandTheme", () => {
     }
   });
 
-  it("names them for the form and the clinic log, and dark is the default", () => {
+  it("names them for the form and the clinic log, and light is the default (since 2026-11-18)", () => {
     expect(BRAND_THEMES.map((theme) => theme.key)).toEqual(["dark", "light"]);
     expect(brandThemeLabel("light")).toBe("Light");
-    expect(DEFAULT_BRAND_THEME).toBe("dark");
+    expect(DEFAULT_BRAND_THEME).toBe("light");
   });
 });
 
 describe("readBranding", () => {
   it("passes good stored values through", () => {
     expect(readBranding({ brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "light" })).toEqual({ color: "#7a1f2b", font: "merriweather", theme: "light" });
-    expect(readBranding({ brandColor: "#7A1F2B", brandFont: "merriweather" })).toEqual({ color: "#7a1f2b", font: "merriweather", theme: "dark" });
+    expect(readBranding({ brandColor: "#7A1F2B", brandFont: "merriweather" })).toEqual({ color: "#7a1f2b", font: "merriweather", theme: "light" });
   });
 
   it("falls back to the Pulse look for empty values, junk, and a font no longer on the list", () => {
-    expect(readBranding({ brandColor: null, brandFont: null, brandTheme: null })).toEqual({ color: null, font: "inter", theme: "dark" });
-    expect(readBranding({ brandColor: "blue", brandFont: "papyrus", brandTheme: "sepia" })).toEqual({ color: null, font: "inter", theme: "dark" });
-    expect(readBranding(null)).toEqual({ color: null, font: "inter", theme: "dark" });
-    expect(readBranding({})).toEqual({ color: null, font: "inter", theme: "dark" });
+    expect(readBranding({ brandColor: null, brandFont: null, brandTheme: null })).toEqual({ color: null, font: "inter", theme: "light" });
+    expect(readBranding({ brandColor: "blue", brandFont: "papyrus", brandTheme: "sepia" })).toEqual({ color: null, font: "inter", theme: "light" });
+    expect(readBranding(null)).toEqual({ color: null, font: "inter", theme: "light" });
+    expect(readBranding({})).toEqual({ color: null, font: "inter", theme: "light" });
   });
 });
 

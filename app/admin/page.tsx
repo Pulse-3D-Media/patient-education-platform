@@ -1,51 +1,66 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { staffLook } from "@/app/brand-look";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { ClinicClosed } from "@/components/ui/ClinicClosed";
-import { PLACEHOLDER_BADGE, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
-import { ADMIN_SECTIONS } from "@/lib/admin-nav";
-import { requireClinicPage } from "@/lib/clinic";
+import { PatientPhonePreview } from "@/components/ui/PatientPhonePreview";
+import { PLACEHOLDER_BADGE, SECONDARY_BUTTON } from "@/components/ui/styles";
+import { requireClinicPage, type CurrentClinic } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
-import {
-  listRecentSharesForClinic,
-  listRenewalRequestsForClinic,
-  summarizeSharesForClinic,
-  SUMMARY_RECENT_DAYS,
-  SUMMARY_SOON_DAYS,
-} from "@/lib/db/shares";
-import { getSettings } from "@/lib/db/settings";
-import { renewalState, shareExpiryState } from "@/lib/expiry";
+import { listLiveQrCodesForClinic } from "@/lib/db/qr-codes";
+import { listRenewalRequestsForClinic, summarizeSharesForClinic, type RenewalRequestRow } from "@/lib/db/shares";
+import { addDays } from "@/lib/expiry";
+import { describeLinkDate } from "@/lib/format";
+import { ROLE_WORDS } from "@/lib/role-names";
+import { listOpenInvitationsForClinic } from "@/lib/seat-changes";
 import { AdminFrame } from "./AdminFrame";
+import { DetailHeader, Facts, Rule, WithPreview, daysAgo, longDate, shortDate } from "./DetailParts";
+import { ReactivateForm } from "./reactivate/[id]/ReactivateForm";
+import { SplitView, type SplitItem } from "./SplitView";
 
 /**
  * The clinic admin overview, at /admin: the first thing an office manager
- * sees. It is not the full list of anything. It shows what needs a look,
- * a few totals about the clinic's links, the newest few links, and a card
- * for each section, so Shared links, People and Billing are one tap away.
+ * sees. Called Overview, never "Inbox" (the approved design, screen 08).
  *
- * Everything on it is bounded: four counts done in the database, and the
- * newest RECENT_LINKS links made by the office or a surgeon (not the ones
- * printed QR codes handed to patients). There is no full list of links anywhere on the
- * clinic side, on purpose: the office never needs to find a link again, and
- * /admin/links is where new ones are made.
+ * A list on the left, the chosen item's detail on the right (SplitView):
  *
- * Plan and price information is not here on purpose; it lives on
- * /admin/billing and nowhere else on the clinic side.
+ *   NEW, each with a dot, is what wants a look:
+ *     - a paused link a patient has asked to have turned back on, with the
+ *       link's details and the Confirm button right there (the same form
+ *       and Server Action as /admin/reactivate/<id>, which every check runs
+ *       again), beside a picture of the patient page it would bring back;
+ *     - an invitation nobody has accepted yet, with a way to it on People;
+ *     - a printed code that needs a look (its surgeon no longer holds a
+ *       seat, or its video is not available), with a way to it on Shared
+ *       links;
+ *     - links that point at a video that is not available, so they do not
+ *       work (one sentence, no list).
+ *   EARLIER: printed codes made in the last 30 days (at most three).
+ *
+ * NOT HERE, on purpose: a list of past patient links (there is none
+ * anywhere on the clinic side), play starts or any other usage number
+ * (clinics get none, Van 2026-10-08 and the user 2026-11-16), and plan or
+ * price information (that lives on /admin/billing and nowhere else). Every
+ * read is bounded: at most ten waiting links, one count of links that do not
+ * work, the clinic's live printed codes (at most a hundred, read once), and
+ * Clerk's list of open invitations.
  *
  * Admins only (org:admin). A member sees the plain admins-only note. An
- * admin of a clinic that is not open sees why, with a button to Billing,
- * which is the one page that stays open for them.
+ * admin of a clinic that is not open sees why, with a way to Billing, which
+ * is the one page that stays open for them.
  */
 export const dynamic = "force-dynamic";
-
-/** How many of the newest links the overview shows. */
-const RECENT_LINKS = 5;
 
 /** How many paused links a patient has asked about the overview lists at once (the most recently asked first). */
 const WAITING_LINKS = 10;
 
-export default async function AdminOverviewPage() {
+/** How far back "Printed code made" reaches, and how many it shows. */
+const RECENT_CODE_DAYS = 30;
+const RECENT_CODES = 3;
+
+type OverviewProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
+
+export default async function AdminOverviewPage(props: OverviewProps = {}) {
   const clinic = await requireClinicPage();
 
   if (!clinic.isAdmin) {
@@ -63,216 +78,241 @@ export default async function AdminOverviewPage() {
         <div className="mt-6">
           <ClinicClosed status={clinic.status} clinicName={clinic.name} billingLink inFrame />
         </div>
-        <SectionCards />
       </AdminFrame>
     );
   }
 
   const now = new Date();
-  const [summary, recent, waiting, settings] = await Promise.all([
+  const [summary, waiting, invitations, printed, params] = await Promise.all([
     summarizeSharesForClinic(clinic.id),
-    // Links the office and the surgeons made; the links printed QR codes gave patients would otherwise crowd them out.
-    listRecentSharesForClinic(clinic.id, RECENT_LINKS, { madeByHand: true }),
     listRenewalRequestsForClinic(clinic.id, WAITING_LINKS, now),
-    // For the word on a link that has run out: "Paused" while it can be turned back on, "Expired" once it cannot.
-    getSettings(),
+    listOpenInvitationsForClinic(clinic.id),
+    listLiveQrCodesForClinic(clinic.id),
+    props.searchParams ?? Promise.resolve({} as Record<string, string | string[] | undefined>),
   ]);
 
-  // What needs a look. Each line is one sentence. Nothing here has a button: there is no list of
-  // past links to send anyone to, and the office cannot change these links anyway.
-  const attention: { text: string }[] = [];
+  const look = staffLook(clinic);
+  const fresh: SplitItem[] = [];
+
+  for (const request of waiting) fresh.push(renewalItem(request, clinic, look, now));
+
+  for (const invitation of invitations ?? []) {
+    const sent = new Date(invitation.createdAt);
+    fresh.push({
+      key: `invitation-${invitation.id}`,
+      dot: true,
+      title: "Invitation not accepted yet",
+      sub: `${invitation.email} · sent ${daysAgo(sent, now)}`,
+      meta: shortDate(sent, now),
+      detail: (
+        <>
+          <DetailHeader title="Invitation not accepted yet" sub={`Sent ${daysAgo(sent, now)}`} />
+          <div className="mt-8 max-w-xl">
+            <Facts
+              rows={[
+                { label: "Email", value: invitation.email },
+                { label: "Can do", value: ROLE_WORDS[invitation.role] },
+                { label: "Sent", value: longDate(sent) },
+              ]}
+            />
+            <Rule />
+            <Link href={`/admin/people?person=invitation-${invitation.id}`} className={`${SECONDARY_BUTTON} h-11 px-5 text-[15px]`}>
+              Open on People
+            </Link>
+          </div>
+        </>
+      ),
+    });
+  }
+
+  for (const code of printed.rows) {
+    const problem = !code.surgeonSeated
+      ? `${code.surgeonName ?? "Its surgeon"} no longer holds a seat. The code still works, but the links it gives patients now name only the clinic. Retire it, and make a new one from a surgeon who holds a seat.`
+      : !code.isPublished
+        ? "Its video is not available right now, so the code gives patients nothing until it is back."
+        : null;
+    if (!problem) continue;
+    fresh.push({
+      key: `code-${code.id}`,
+      dot: true,
+      title: "A printed code needs a look",
+      sub: `${code.videoTitle} · ${code.surgeonName ?? "no surgeon name"}`,
+      meta: shortDate(code.createdAt, now),
+      detail: (
+        <>
+          <DetailHeader title="A printed code needs a look" sub={code.videoTitle} />
+          <div className="mt-8 max-w-xl">
+            <p className="text-[16px] text-ink">{problem}</p>
+            <Rule />
+            <Link href={`/admin/links?code=${code.id}`} className={`${SECONDARY_BUTTON} h-11 px-5 text-[15px]`}>
+              Open in Shared links
+            </Link>
+          </div>
+        </>
+      ),
+    });
+  }
+
   if (summary.notWorking > 0) {
-    attention.push({
-      text: `${summary.notWorking} ${summary.notWorking === 1 ? "link points" : "links point"} at a video that is not published right now, so ${summary.notWorking === 1 ? "it does" : "they do"} not work.`,
+    const words = `${summary.notWorking} ${summary.notWorking === 1 ? "link points" : "links point"} at a video that is not available right now, so ${summary.notWorking === 1 ? "it does" : "they do"} not work.`;
+    fresh.push({
+      key: "not-working",
+      dot: true,
+      title: summary.notWorking === 1 ? "A link does not work right now" : "Some links do not work right now",
+      sub: "Its video is not available",
+      detail: (
+        <>
+          <DetailHeader title={summary.notWorking === 1 ? "A link does not work right now" : "Some links do not work right now"} />
+          <p className="mt-8 max-w-xl text-[16px] text-ink">{words} Ask Pulse 3D about the video, or make a new link to another procedure on Shared links.</p>
+        </>
+      ),
     });
   }
-  if (summary.expiringSoon > 0) {
-    attention.push({
-      text: `${summary.expiringSoon} ${summary.expiringSoon === 1 ? "link stops" : "links stop"} working within ${SUMMARY_SOON_DAYS} days.`,
-    });
-  }
+
+  const recentSince = addDays(now, -RECENT_CODE_DAYS);
+  const earlier: SplitItem[] = printed.rows
+    .filter((code) => code.createdAt >= recentSince)
+    .slice(0, RECENT_CODES)
+    .map((code) => ({
+      key: `made-${code.id}`,
+      title: "Printed code made",
+      sub: `${code.videoTitle} · ${code.surgeonName ?? "no surgeon name"}`,
+      meta: shortDate(code.createdAt, now),
+      detail: (
+        <>
+          <DetailHeader title="Printed code made" sub={longDate(code.createdAt)} />
+          <div className="mt-8 max-w-xl">
+            <Facts
+              rows={[
+                { label: "Procedure", value: code.videoTitle },
+                { label: "From", value: code.surgeonName ?? "No surgeon name set" },
+                { label: "Made", value: longDate(code.createdAt) },
+              ]}
+            />
+            <Rule />
+            <Link href={`/admin/links?code=${code.id}`} className={`${SECONDARY_BUTTON} h-11 px-5 text-[15px]`}>
+              Open in Shared links
+            </Link>
+          </div>
+        </>
+      ),
+    }));
+
+  const asked = typeof params.item === "string" ? params.item : null;
 
   return (
-    <AdminFrame clinic={clinic} title="Overview" intro="What needs a look, how your links are doing, and the way into each section.">
-      <Notice text={clinic.noticeText} />
-
-      <section aria-labelledby="attention-heading" className="mt-6">
-        <h2 id="attention-heading" className="text-lg font-semibold">
-          Needs a look
-        </h2>
-        {attention.length === 0 ? (
-          <p className="mt-2 text-ink-soft">Nothing right now.</p>
-        ) : (
-          <ul className="mt-3 flex flex-col gap-3">
-            {attention.map((item) => (
-              <li key={item.text} className="rounded-2xl border border-warn/40 bg-warn/10 px-5 py-4">
-                <p className="text-[15px] text-ink">{item.text}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* A paused link a patient has asked about, until an admin turns it back on. This is where a request lands
-          when no email reached the office (email not set up, or one missed). Bounded, and never a list of past links:
-          a link leaves the moment it is turned back on or can no longer be. */}
-      <section aria-labelledby="waiting-heading" className="mt-8">
-        <h2 id="waiting-heading" className="text-lg font-semibold">
-          Links waiting to be reactivated
-        </h2>
-        <p className="mt-1 text-sm text-ink-muted">
-          A patient asked for one of these paused links to be turned back on. Each stays here until an admin does it.
-        </p>
-        {waiting.length === 0 ? (
-          <p className="mt-2 text-ink-soft">None right now.</p>
-        ) : (
-          <ul className="mt-3 divide-y divide-line rounded-2xl border border-line bg-surface">
-            {waiting.map((request) => (
-              <li key={request.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="flex flex-wrap items-center gap-2 text-[15px] text-ink">
-                    {request.videoTitle}
-                    {request.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
-                  </p>
-                  <p className="mt-1 text-sm text-ink-muted">
-                    {request.senderName ? `Surgeon: ${request.senderName}` : "No surgeon recorded"} &middot; made {formatDate(request.createdAt)} &middot; asked{" "}
-                    {formatDate(request.requestedAt)} &middot; {request.renewalsLeft} {request.renewalsLeft === 1 ? "renewal" : "renewals"} left
-                  </p>
-                </div>
-                {request.planBlock ? (
-                  // The plan no longer allows this video, so the link is marked, not offered. The page behind it says why and what would change that.
-                  <div className="flex flex-col gap-1 sm:items-end">
-                    <p className="text-sm text-warn">{request.planBlock === "not-on-plan" ? "Not on your plan" : "Placeholder hidden for your clinic"}</p>
-                    <Link href={`/admin/reactivate/${request.id}`} className={SECONDARY_BUTTON}>
-                      See why
-                    </Link>
-                  </div>
-                ) : (
-                  <Link href={`/admin/reactivate/${request.id}`} className={PRIMARY_BUTTON}>
-                    Turn it back on
-                  </Link>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section aria-labelledby="numbers-heading" className="mt-8">
-        <h2 id="numbers-heading" className="text-lg font-semibold">
-          Your links
-        </h2>
-        {/* No play numbers here: clinics get no usage numbers (Van, 2026-10-08; the play starts came off on 2026-11-16, the user's decision). */}
-        <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-          <Fact label="Working right now" value={summary.working} />
-          <Fact label={`Made in the last ${SUMMARY_RECENT_DAYS} days`} value={summary.madeRecently} />
-        </dl>
-      </section>
-
-      <section aria-labelledby="recent-heading" className="mt-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h2 id="recent-heading" className="text-lg font-semibold">
-            Newest links
-          </h2>
-          <Link href="/admin/links" className="text-sm text-brand-bright hover:text-ink">
-            Create a link
-          </Link>
-        </div>
-        {recent.length === 0 ? (
-          <p className="mt-2 text-ink-soft">
-            No links yet.{" "}
-            <Link href="/admin/links" className="text-brand-bright hover:text-ink">
-              Create the first one.
-            </Link>
-          </p>
-        ) : (
-          <ul className="mt-3 divide-y divide-line rounded-2xl border border-line bg-surface">
-            {recent.map((share) => {
-              const state = shareExpiryState(share, now);
-              const works = state.kind !== "expired" && share.video.isPublished;
-              // One short line per link; the full wording is on /admin/links. A link nobody has
-              // played yet shows the date it stops on if that stays true, since its deadline
-              // moves at the first play (lib/expiry.ts). A played link that ran out is "Paused"
-              // while the clinic can still turn it back on, and "Expired" once it cannot.
-              const when = !works
-                ? share.video.isPublished
-                  ? renewalState(share, settings.maxRenewals, now).kind === "paused"
-                    ? "Paused"
-                    : "Expired"
-                  : "Not working"
-                : state.kind === "awaiting"
-                  ? `Open until ${formatDate(state.unclaimedUntil)} if never played`
-                  : `Works until ${formatDate(share.expiresAt)}`;
-              return (
-                <li key={share.id} className="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <p className={`flex flex-wrap items-center gap-2 text-[15px] ${works ? "" : "text-ink-muted"}`}>
-                    {share.video.title}
-                    {share.video.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
-                  </p>
-                  <p className="text-sm text-ink-muted">
-                    {when} &middot;{" "}
-                    {/* Whether it has been played, in words, never how many times. */}
-                    {share.viewCount === 0 ? "Not played yet" : "Played"}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <SectionCards />
+    <AdminFrame clinic={clinic} title="Overview" bare>
+      <SplitView
+        title="Overview"
+        param="item"
+        initialKey={asked}
+        groups={[
+          { heading: "New", items: fresh },
+          { heading: "Earlier", items: earlier },
+        ]}
+        above={
+          <>
+            <Notice text={clinic.noticeText} />
+            {invitations === null && (
+              <p role="alert" className="mt-4 px-2 text-sm text-ink-soft">
+                We could not check for open invitations just now. Reload this page in a moment.
+              </p>
+            )}
+          </>
+        }
+        empty={<p className="mt-4 px-2 text-[15px] text-ink-soft">Nothing needs a look right now.</p>}
+        emptyDetail={
+          <>
+            <DetailHeader title="Nothing needs a look" />
+            <p className="mt-8 max-w-xl text-[16px] text-ink-soft">
+              Paused links a patient asks about, and invitations nobody has accepted, show up here. To send a patient a video, make a link on{" "}
+              <Link href="/admin/links" className="font-medium text-brand-bright underline underline-offset-2">
+                Shared links
+              </Link>
+              .
+            </p>
+          </>
+        }
+      />
     </AdminFrame>
   );
+}
+
+/**
+ * A paused link a patient has asked about: its details, the Confirm button
+ * (or why it cannot be turned back on), and the patient page it would bring
+ * back. The form is the reactivate page's own (ReactivateForm), so the
+ * Server Action and every check behind it are the same.
+ */
+function renewalItem(request: RenewalRequestRow, clinic: CurrentClinic, look: ReturnType<typeof staffLook>, now: Date): SplitItem {
+  const sameDay = shortDate(request.requestedAt, now) === shortDate(now, now);
+  const askedTime = request.requestedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Denver" });
+  const from = request.senderName ?? clinic.name;
+  return {
+    key: `request-${request.id}`,
+    dot: true,
+    title: "A paused link asks to come back",
+    sub: `${request.videoTitle} · ${from}`,
+    meta: sameDay ? askedTime : shortDate(request.requestedAt, now),
+    detail: (
+      <>
+        <DetailHeader title="A paused link asks to come back" sub={`${sameDay ? "Today" : shortDate(request.requestedAt, now)}, ${askedTime}`} />
+        <WithPreview
+          preview={
+            <PatientPhonePreview
+              clinicName={clinic.name}
+              logoUrl={look.logoUrl}
+              color={clinic.branding.color}
+              fontClass={look.fontClass}
+              senderName={request.senderName}
+              title={request.videoTitle}
+              deadline={`This link works until ${describeLinkDate(addDays(now, request.daysPerRenewal), now, "America/Denver")}.`}
+            />
+          }
+        >
+          <Facts
+            rows={[
+              {
+                label: "Procedure",
+                value: (
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    {request.videoTitle}
+                    {request.isPlaceholder && <span className={PLACEHOLDER_BADGE}>Placeholder</span>}
+                  </span>
+                ),
+              },
+              { label: "From", value: request.senderName ?? "No surgeon recorded" },
+              { label: "Paused", value: longDate(request.pausedAt) },
+              { label: "Asked", value: `${sameDay ? "Today" : longDate(request.requestedAt)}, from the patient's link` },
+            ]}
+          />
+          <Rule />
+          {request.planBlock ? (
+            // The plan no longer allows this video, so the link is marked, not offered. The page behind it says why and what would change that.
+            <div className="flex flex-col items-start gap-3">
+              <p className="text-[15px] text-warn">
+                {request.planBlock === "not-on-plan" ? "This procedure is not on your plan, so the link cannot be turned back on." : "Placeholder videos are hidden for your clinic, so the link cannot be turned back on."}
+              </p>
+              <Link href={`/admin/reactivate/${request.id}`} className={`${SECONDARY_BUTTON} h-11 px-5 text-[15px]`}>
+                See why
+              </Link>
+            </div>
+          ) : (
+            <ReactivateForm shareId={request.id} paused days={request.daysPerRenewal} renewalsLeft={request.renewalsLeft} whyNot="" />
+          )}
+        </WithPreview>
+      </>
+    ),
+  };
 }
 
 /** A line from Pulse 3D for this clinic, set on /pulse. Nothing shows when there is none. */
 function Notice({ text }: { text: string | null }) {
   if (!text) return null;
   return (
-    <p role="status" className="mt-6 rounded-xl border border-brand/50 bg-brand/15 px-4 py-3 text-[15px] text-ink">
+    <p role="status" className="mt-4 rounded-xl border border-brand/50 bg-brand/15 px-4 py-3 text-[15px] text-ink">
       <span className="mr-2 font-semibold text-brand-bright">From Pulse 3D:</span>
       {text}
     </p>
   );
-}
-
-/** One number with its label. The label says exactly what is counted. */
-function Fact({ label, value, note }: { label: string; value: number; note?: string }) {
-  return (
-    <div className="rounded-2xl border border-line bg-surface px-5 py-4">
-      <dt className="text-sm text-ink-muted">{label}</dt>
-      <dd className="mt-1 text-2xl font-semibold text-ink">{value.toLocaleString("en-US")}</dd>
-      {note && <dd className="mt-1 text-xs text-ink-muted">{note}</dd>}
-    </div>
-  );
-}
-
-/** A card for every section other than the overview itself, so each is one tap away. */
-function SectionCards(): ReactNode {
-  return (
-    <section aria-labelledby="sections-heading" className="mt-8">
-      <h2 id="sections-heading" className="text-lg font-semibold">
-        Sections
-      </h2>
-      <ul className="mt-3 grid gap-3 sm:grid-cols-2">
-        {ADMIN_SECTIONS.filter((section) => section.href !== "/admin").map((section) => (
-          <li key={section.href}>
-            <Link
-              href={section.href}
-              className="flex h-full flex-col rounded-2xl border border-line bg-surface p-5 transition hover:border-brand/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-bright"
-            >
-              <span className="text-lg font-semibold text-ink">{section.label}</span>
-              <span className="mt-1 text-sm text-ink-soft">{section.blurb}</span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/** "Sep 19, 2026". Utah time, like the rest of the admin area. */
-function formatDate(date: Date) {
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Denver" });
 }

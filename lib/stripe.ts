@@ -362,7 +362,31 @@ export type CheckoutSessionArgs = {
   /** A trusted origin (lib/trusted-origin.ts), such as https://example.vercel.app. */
   origin: string;
   expiresAt: Date;
+  /** Which page Stripe sends the person back to: Billing (left out) or the sign-up steps. Changes nothing about what is charged. */
+  flow?: CheckoutFlow;
 };
+
+/** Where a payment page was started from: the Billing page, or the sign-up steps for a new clinic (app/onboarding). */
+export type CheckoutFlow = "billing" | "signup";
+
+/**
+ * Where Stripe sends the person back to, after paying (success) or after
+ * leaving its page without paying (cancel). Neither address proves or grants
+ * anything: the return pages only read the clinic's billing record.
+ */
+export function checkoutReturnUrls(origin: string, flow: CheckoutFlow = "billing"): { success: string; cancel: string } {
+  if (flow === "signup") return { success: `${origin}/onboarding/done`, cancel: `${origin}/onboarding/payment?stopped=1` };
+  return { success: `${origin}/admin/billing/return`, cancel: `${origin}/admin/billing?checkout=cancelled` };
+}
+
+/**
+ * The idempotency key a payment page is made with. Built from the accepted plan's id, so a double click
+ * gets the same page. A page started from the sign-up steps has different return addresses, and Stripe
+ * refuses a repeated key whose request differs, so its key says so; Billing's key is unchanged.
+ */
+export function checkoutIdempotencyKey(planId: string, flow: CheckoutFlow = "billing"): string {
+  return flow === "signup" ? `p3d:checkout:${planId}:signup` : `p3d:checkout:${planId}`;
+}
 
 /**
  * The exact request a payment page is made with. Pure, so the tests read
@@ -407,8 +431,8 @@ export function checkoutSessionParams(args: CheckoutSessionArgs): Stripe.Checkou
     ],
     subscription_data: { metadata, description: args.description.slice(0, 480) },
     metadata,
-    success_url: `${args.origin}/admin/billing/return`,
-    cancel_url: `${args.origin}/admin/billing?checkout=cancelled`,
+    success_url: checkoutReturnUrls(args.origin, args.flow).success,
+    cancel_url: checkoutReturnUrls(args.origin, args.flow).cancel,
     expires_at: Math.floor(args.expiresAt.getTime() / 1000),
   };
 }
@@ -501,7 +525,7 @@ export const stripeGateway: CheckoutGateway = {
 
   async createSession(args) {
     await ensureProduct();
-    const session = await getStripe().checkout.sessions.create(checkoutSessionParams(args), { idempotencyKey: `p3d:checkout:${args.planId}` });
+    const session = await getStripe().checkout.sessions.create(checkoutSessionParams(args), { idempotencyKey: checkoutIdempotencyKey(args.planId, args.flow) });
     if (session.livemode) throw new StripeConfigError("Stripe made a live-mode checkout page. This app only runs Stripe in test mode.");
     return sessionInfo(session);
   },
@@ -982,3 +1006,102 @@ export const demoCleanupStripe: DemoCleanupStripe = {
     }
   },
 };
+
+// ---------------------------------------------------------------------------
+// Billing history and the card on file, for the Billing page. READ ONLY:
+// nothing here writes to Stripe or to the database. The Billing page asks
+// only where Stripe's own billing page may be opened (the same gate), and
+// shows what Stripe says, amounts and dates as Stripe reports them.
+// ---------------------------------------------------------------------------
+
+/** How many invoices the Billing page shows: the newest few. Older ones are on Stripe's billing page. */
+export const BILLING_HISTORY_LIMIT = 6;
+
+/** One invoice, as the Billing page lists it. */
+export type BillingHistoryEntry = {
+  id: string;
+  /** When Stripe made the invoice. */
+  date: Date;
+  /** What it was for, from Stripe's own reason: "First payment", "Renewal", "Plan change", "Invoice". */
+  what: string;
+  /** What was paid, for a paid invoice; what is due, for any other. In the smallest unit of the currency (cents). */
+  amountCents: number;
+  /** Stripe's three-letter currency code, lower case ("usd"). */
+  currency: string;
+  /** Stripe's own word for where it stands. */
+  status: "paid" | "open" | "void" | "uncollectible" | "draft" | "other";
+  /** Stripe's page for the invoice (with its receipt), or null. Only ever an address on invoice.stripe.com. */
+  pageUrl: string | null;
+};
+
+/** The card the subscription pays with, as the Billing page shows it. Never the number: Stripe gives the last four digits only. */
+export type CardOnFile = { brand: string; last4: string; expMonth: number; expYear: number };
+
+/** What the Billing page shows about how the clinic pays. `method` is set when the default payment method is something other than a card ("Bank account", "Link"). */
+export type BillingRecord = { card: CardOnFile | null; method: string | null; history: BillingHistoryEntry[] };
+
+const REASON_WORDS: Record<string, string> = {
+  subscription_create: "First payment",
+  subscription_cycle: "Renewal",
+  subscription_update: "Plan change",
+};
+
+/** Turn Stripe's invoices into the Billing page's rows. Pure, so it is tested without Stripe. Live-mode invoices are dropped, as everywhere. */
+export function historyFromInvoices(invoices: Stripe.Invoice[]): BillingHistoryEntry[] {
+  return invoices
+    .filter((invoice) => !invoice.livemode && typeof invoice.id === "string")
+    .map((invoice) => {
+      const known = ["paid", "open", "void", "uncollectible", "draft"] as const;
+      const status = (known as readonly string[]).includes(invoice.status ?? "") ? (invoice.status as BillingHistoryEntry["status"]) : "other";
+      return {
+        id: invoice.id as string,
+        date: new Date(invoice.created * 1000),
+        what: REASON_WORDS[invoice.billing_reason ?? ""] ?? "Invoice",
+        amountCents: status === "paid" ? invoice.amount_paid : invoice.amount_due,
+        currency: invoice.currency,
+        status,
+        pageUrl: invoice.hosted_invoice_url && invoice.hosted_invoice_url.startsWith(STRIPE_INVOICE_PREFIX) ? invoice.hosted_invoice_url : null,
+      };
+    });
+}
+
+/** The words for a payment method that is not a card. */
+const METHOD_WORDS: Record<string, string> = { us_bank_account: "Bank account", link: "Link", cashapp: "Cash App Pay", amazon_pay: "Amazon Pay" };
+
+/** The card (or the kind of method) from a payment method Stripe expanded. Pure. Null when there is none. */
+export function paymentMethodFacts(method: Stripe.PaymentMethod | string | null | undefined): { card: CardOnFile | null; method: string | null } | null {
+  if (!method || typeof method === "string") return null;
+  if (method.type === "card" && method.card) {
+    return { card: { brand: method.card.display_brand ?? method.card.brand, last4: method.card.last4, expMonth: method.card.exp_month, expYear: method.card.exp_year }, method: null };
+  }
+  return { card: null, method: METHOD_WORDS[method.type] ?? "Another payment method" };
+}
+
+/**
+ * The newest invoices and the card on file for one clinic's own Stripe
+ * customer (and its subscription, when there is one), read from Stripe at
+ * the moment of asking. Never stored. The ids come from the clinic's own
+ * billing record, never from a request. Throws when Stripe cannot be reached
+ * (or is not set up); the page then says so in a calm sentence.
+ *
+ * The card is the subscription's own default payment method (Stripe
+ * Checkout puts it there), or else the customer's default for invoices.
+ */
+export async function readBillingRecord(ids: { customerId: string; subscriptionId: string | null }): Promise<BillingRecord> {
+  const stripe = getStripe();
+  const [invoices, subscription] = await Promise.all([
+    stripe.invoices.list({ customer: ids.customerId, limit: BILLING_HISTORY_LIMIT }),
+    ids.subscriptionId
+      ? stripe.subscriptions.retrieve(ids.subscriptionId, { expand: ["default_payment_method"] }).catch((error: unknown) => {
+          if (isStripeRequestError(error, "resource_missing")) return null;
+          throw error;
+        })
+      : Promise.resolve(null),
+  ]);
+  let facts = subscription && !subscription.livemode ? paymentMethodFacts(subscription.default_payment_method) : null;
+  if (!facts) {
+    const customer = await stripe.customers.retrieve(ids.customerId, { expand: ["invoice_settings.default_payment_method"] });
+    if (!customer.deleted && !customer.livemode) facts = paymentMethodFacts(customer.invoice_settings?.default_payment_method);
+  }
+  return { card: facts?.card ?? null, method: facts?.method ?? null, history: historyFromInvoices(invoices.data) };
+}

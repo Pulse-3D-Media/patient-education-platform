@@ -132,12 +132,13 @@ export function WatchView({
           </span>
         </div>
 
-        {/* One row of buttons, each one tap and at least 48px tall. */}
-        <div className="mt-4 flex flex-wrap gap-3">
+        {/* One row of buttons, each one tap and at least 48px tall. The tour's second stop highlights this row (components/tour). */}
+        <div className="mt-4 flex flex-wrap gap-3" data-tour="video-actions">
           <button
             type="button"
             onClick={() => library.toggleFavorite(video)}
             aria-pressed={favorite}
+            data-tour-name="Favorite"
             aria-label={favorite ? `Remove ${video.title} from my favorites` : `Add ${video.title} to my favorites`}
             className={`${ACTION} ${favorite ? "border-transparent bg-brand/20 text-brand-bright" : ""}`}
           >
@@ -145,13 +146,13 @@ export function WatchView({
             {favorite ? "Favorited" : "Favorite"}
           </button>
           {library.send && (
-            <button type="button" onClick={() => library.send?.(video)} className={ACTION}>
+            <button type="button" onClick={() => library.send?.(video)} className={ACTION} data-tour-name="Send to patient" data-tour-send="">
               <ShareIcon className="h-5 w-5" />
               Send to patient
             </button>
           )}
           {library.showQr && (
-            <button type="button" onClick={() => library.showQr?.(video)} className={ACTION}>
+            <button type="button" onClick={() => library.showQr?.(video)} className={ACTION} data-tour-name="Show QR on screen">
               <QrIcon className="h-5 w-5" />
               Show QR on screen
             </button>

@@ -59,15 +59,15 @@ vi.mock("next/headers", () => ({
   headers: async () => new Map([["host", currentHost]]),
 }));
 
-// The real rows, with what the page handed them kept for the test to read: the address only shows in the browser, once a link is made.
-let linkRowsProps: { baseUrl: string; linksCanBeMade: boolean } | null = null;
-vi.mock("./links/LinkRows", async (importOriginal) => {
-  const real = await importOriginal<typeof import("./links/LinkRows")>();
+// The real form, with what the page handed it kept for the test to read: the address only shows in the browser, once a link is made.
+let linkFormProps: { baseUrl: string; blocked: string | null } | null = null;
+vi.mock("./links/LinkForms", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./links/LinkForms")>();
   return {
     ...real,
-    LinkRows: (props: Parameters<typeof real.LinkRows>[0]) => {
-      linkRowsProps = props;
-      return real.LinkRows(props);
+    NewLinkForm: (props: Parameters<typeof real.NewLinkForm>[0]) => {
+      linkFormProps = props;
+      return real.NewLinkForm(props);
     },
   };
 });
@@ -198,6 +198,12 @@ async function render(page: () => Promise<React.ReactElement>, path: string) {
   return renderToStaticMarkup(await page());
 }
 
+/** Render a list page opened on one item, the way an address like /admin/people?person=... does. */
+async function renderWith(page: (props: { searchParams: Promise<Record<string, string>> }) => Promise<React.ReactElement>, path: string, params: Record<string, string>) {
+  currentPath = path;
+  return renderToStaticMarkup(await page({ searchParams: Promise.resolve(params) }));
+}
+
 /** A page's HTML after the shell's top bar (which holds the library search box), so a check about the page's own forms is about the page. */
 function afterTopBar(html: string): string {
   const end = html.indexOf("</header>");
@@ -244,7 +250,7 @@ describe("an admin of a PENDING clinic", () => {
     expect(html).toContain("Your plan");
     expect(html).toContain("Knee");
     expect(html).toContain("Shoulder");
-    expect(html).toContain("1 seat");
+    expect(html).toMatch(/0 of 1 in use|1 seat/);
     expect(html).toContain("Estimate");
     expect(html).toContain("not an invoice");
     expect(html).toContain("nothing has been charged");
@@ -270,7 +276,7 @@ describe("an admin of a PENDING clinic", () => {
     expect(html).toContain("Choose a plan first");
     expect(html).toContain("Remove someone who has left");
     expect(html).toContain("Jane Smith");
-    expect(html).toContain(">Remove<");
+    expect(html).toContain(">Remove from clinic<");
     // The person looking is never offered to themselves.
     expect(html).not.toContain("Vi Test");
     expect(html).not.toContain("Member with admin</option>");
@@ -305,17 +311,21 @@ describe("an admin of a PENDING clinic", () => {
 });
 
 describe("an admin of an ACTIVE clinic", () => {
-  it("gets the overview on /admin: counts, the sections, no links workspace and no plan words", async () => {
+  it("gets the overview on /admin: what needs a look, never Inbox, no counts of links, no links workspace and no plan words", async () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(AdminOverviewPage, "/admin");
     expect(html).toContain("Overview");
-    expect(html).toContain("Needs a look");
-    expect(html).toContain("Working right now");
+    expect(html).not.toContain("Inbox");
+    // Nothing waits at this clinic, and the page says so and where links are made.
+    expect(html).toContain("Nothing needs a look right now.");
     // No usage numbers for clinics (2026-10-08, and the play starts taken off on 2026-11-16), and no word of cancelling a link, which clinics cannot do.
     expect(html).not.toContain("Play starts");
     expect(html).not.toContain("play start");
     expect(html).not.toContain("cancelled");
-    expect(html).toContain("Made in the last 30 days");
+    // The counts of links and the newest links came off with the new design: no list of past links, and no numbers.
+    expect(html).not.toContain("Working right now");
+    expect(html).not.toContain("Made in the last 30 days");
+    expect(html).not.toContain("Newest links");
     expect(html).not.toContain("all links");
     for (const href of ["/admin/links", "/admin/people", "/admin/billing"]) expect(html).toContain(`href="${href}"`);
     // No Reports section, in the navigation or the cards: clinics get no reports (Van, 2026-10-08).
@@ -332,13 +342,15 @@ describe("an admin of an ACTIVE clinic", () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(LinksPage, "/admin/links");
     expect(html).toContain("Shared links");
-    expect(html).toContain("Procedures");
-    expect(html).toContain("Search procedures");
+    expect(html).toContain("New patient link");
+    expect(html).toContain(">Procedure<");
+    expect(html).toContain(">From<");
+    expect(html).toContain("Printed code");
     expect(html).not.toContain("Existing links");
     expect(html).not.toContain("Cancel link");
-    // Nobody at this clinic holds a seat, so there is nobody a link can be from, and it says where to fix that.
-    expect(html).toContain("Nobody in your clinic holds a seat yet");
-    expect(html).toContain('href="/admin/people"');
+    // Nothing can be made here yet (no seats, or nothing on the plan to share), and the page says why and where to fix it.
+    expect(html).toMatch(/Nobody in your clinic holds a seat yet|categories on your clinic/);
+    expect(html).toMatch(/href="\/admin\/(people|billing)"/);
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/links"/);
     for (const word of PLAN_WORDS) expect(html).not.toContain(word);
     expect(showsAnAmount(html)).toBe(false);
@@ -349,32 +361,31 @@ describe("an admin of an ACTIVE clinic", () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const kneeHtml = await render(LinksPage, "/admin/links");
     expect(kneeHtml).not.toContain(hipVideoTitle);
-    expect(kneeHtml).toContain("categories on your clinic");
 
     // Hip clinic: it is, with its placeholder mark and its Create button.
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
     const hipHtml = await render(LinksPage, "/admin/links");
     expect(hipHtml).toContain(hipVideoTitle);
-    expect(hipHtml).toContain("Placeholder");
+    expect(hipHtml).toContain("(placeholder)");
     expect(hipHtml).toContain(">Create link<");
   });
 
-  it("draws no doctor picker up front: the choice is made on a row, for each link, with nothing picked in advance", async () => {
+  it("asks which doctor every link is from, with nothing picked in advance", async () => {
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
     const html = await render(LinksPage, "/admin/links");
-    // The dropdown only opens when Create link is pressed (checked in the browser); the first draw has none.
-    expect(html).not.toContain("<select");
+    // Both dropdowns open on their "Choose..." line, which cannot be sent: nothing is picked for the admin.
+    expect(html).toMatch(/<select id="link-from"[^>]*>(<option value="" disabled="" selected="">|<option selected="" value="" disabled="">|<option value="" selected="" disabled="">)Choose a doctor/);
+    expect(html).not.toMatch(/<select id="link-from"[\s\S]*?<option[^>]*selected=""[^>]*value="user_/);
     expect(html).not.toContain("Links are from");
-    expect(html).toContain("choose the doctor it is from");
     expect(html).toContain(">Create link<");
-    // Nobody's account id is sent into the page's markup.
+    // Only people holding a seat are offered: the owner, who holds none, is not.
     expect(html).not.toContain(HIP_OWNER.userId);
   });
 
   it("says how long a new link works, in the words createShare uses, and lists none of the links already made", async () => {
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
     const html = await render(LinksPage, "/admin/links");
-    expect(html).toMatch(/A link works for \d+ days? after the patient first plays it/);
+    expect(html).toMatch(/Stops working \d+ days? after the first play/);
     // The Hip clinic has two links (made above); the page shows neither.
     expect(html).not.toContain("2 play starts");
     expect(html).not.toContain("Not played yet");
@@ -391,7 +402,7 @@ describe("an admin of an ACTIVE clinic", () => {
       const html = await render(LinksPage, "/admin/links");
       expect(html).toContain("Links cannot be made right now");
       expect(html).toContain("Ask Pulse 3D");
-      expect(html).not.toContain("after the patient first plays it");
+      expect(html).not.toContain("after the first play");
       // The rest of the page is still there: the procedure and its button, which says why when pressed (and the action refuses too).
       expect(html).toContain(hipVideoTitle);
       expect(html).toContain(">Create link<");
@@ -402,22 +413,24 @@ describe("an admin of an ACTIVE clinic", () => {
     }
   });
 
-  it("gets the same honest words on the overview's newest links", async () => {
+  it("lists none of the clinic's patient links on the overview, and no play numbers", async () => {
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
     const html = await render(AdminOverviewPage, "/admin");
-    expect(html).toContain("if never played");
-    expect(html).toContain("Not played yet");
-    // A played link says so in a word, never how many times.
-    expect(html).toContain("Played");
-    expect(html).not.toContain("2 play starts");
+    // The Hip clinic has links (made above); the overview names none of them and counts nothing about them.
+    expect(html).not.toContain("Not played yet");
+    expect(html).not.toContain("if never played");
+    expect(html).not.toContain("play start");
+    expect(html).not.toContain("/watch/");
   });
 
   it("sees an estimate on Billing that is labelled as one", async () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(BillingPage, "/admin/billing");
     expect(html).toContain("Active");
-    expect(html).toContain("2 seats");
-    expect(html).toContain("Per month");
+    expect(html).toMatch(/0 of 2 in use|2 seats/);
+    expect(html).toContain(">Estimate<");
+    expect(html).toContain("per month");
+    expect(html).toContain("Test mode, no card is charged");
     expect(showsAnAmount(html)).toBe(true);
     expect(html).toContain("not an invoice");
     expect(html).not.toContain("managed by Pulse 3D");
@@ -429,22 +442,23 @@ describe("an admin of an ACTIVE clinic", () => {
 
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/branding"/);
     // The name and the logo are changed here, on our own forms: the clinic's name in its box, and a file box for pictures only.
+    expect(html).toContain(">Clinic branding<");
     expect(html).toContain("No logo yet");
-    expect(html).toContain('name="name" value="Vitest pages clinic (active)"');
-    expect(html).toContain("Save name");
+    expect(html).toMatch(/<input id="clinic-name"[^>]*value="Vitest pages clinic \(active\)"/);
     expect(html).toMatch(/<input[^>]*name="logo"[^>]*type="file"|<input[^>]*type="file"[^>]*name="logo"/);
     expect(html).toContain('accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"');
     expect(html).toContain("Upload logo");
     expect(html).not.toContain("Update profile");
-    // The form: one colour, the six fonts, the phone.
-    expect(html).toContain('name="brandColor"');
-    expect(html.match(/name="brandFont"/g)).toHaveLength(6);
-    // Dark or light: two choices, and a clinic that never chose opens on Dark.
-    expect(html.match(/name="brandTheme"/g)).toHaveLength(2);
-    expect(html).toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="dark"/);
-    expect(html).not.toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="light"/);
-    expect(html).toContain('name="phone"');
-    expect(html).toContain("Save branding");
+    // The form: one colour (swatches and a hex box), the six fonts in one list, the phone.
+    expect(html).toContain('aria-label="Brand colour as a hex code"');
+    expect(html.match(/<option value="(inter|open-sans|source-sans|montserrat|nunito-sans|merriweather)"/g)).toHaveLength(6);
+    // Dark or light: two choices, and a clinic that never chose opens on Light (the default since 2026-11-18).
+    expect(html).toMatch(/role="radio" aria-checked="true"[^>]*>Light</);
+    expect(html).toMatch(/role="radio" aria-checked="false"[^>]*>Dark</);
+    expect(html).toContain('id="clinic-phone"');
+    expect(html).toContain(">Save<");
+    // The phone beside the form shows the patient page, with its "for education only" box.
+    expect(html).toContain("I understand this video is for education only.");
     // Only Pulse staff can type a logo address, and the clinic never sends its own id.
     expect(html).not.toContain('name="logoUrl"');
     expect(html).not.toContain('name="clinicId"');
@@ -463,16 +477,20 @@ describe("an admin of an ACTIVE clinic", () => {
       ] as const) {
         signInAs(orgActive, "admin", "Vitest pages clinic (active)");
         const html = await render(page, path);
-        // A dark red is too dark to see on the near-black screens, so the shell gets a lightened shade of it, never the raw value.
-        expect(html).toMatch(/--brand-accent:#[0-9a-f]{6}/);
+        // A dark red reads on the white screens as it is, so the shell carries the clinic's own colour, not the Pulse teal.
+        expect(html).toContain("--brand-accent:#7a1f2b");
         expect(html).not.toContain("--brand-accent:#2a829b");
+        // The clinic's own font on the console, and so no Schibsted Grotesk headings.
         expect(html).toContain("font-montserrat");
-        // The clinic's name is always in the banner, on every admin page: it labels the logo's link home, and stands in as words until the logo has loaded.
-        expect(html).toContain('aria-label="Vitest pages clinic (active), library home"');
+        expect(html).not.toContain("staff-headings");
+        // The clinic's name is always in the banner, on every admin page: it labels the logo's link to the overview, and stands in as words until the logo has loaded.
+        expect(html).toContain('aria-label="Vitest pages clinic (active), admin overview"');
         expect(html).toMatch(/<header\b[\s\S]*?Vitest pages clinic \(active\)[\s\S]*?<\/header>/);
-        // The admin menu's icon is offered to an admin; the menu itself stays shut until it is pressed.
-        expect(html).toContain('aria-controls="admin-menu"');
-        expect(html).not.toContain('id="admin-menu"');
+        // The console's section navigation (the rail, and the phone's row of pills), with this page marked, and the way to the library.
+        expect(html.match(/<nav aria-label="Clinic admin"/g)).toHaveLength(2);
+        // React writes attributes in prop order, and Link puts href last, so the mark comes before the address.
+        expect(html).toMatch(new RegExp(`aria-current="page"[^>]*href="${path}"`));
+        expect(html).toContain('href="/library"');
       }
       // The Branding form opens on what is saved.
       signInAs(orgActive, "admin", "Vitest pages clinic (active)");
@@ -484,8 +502,8 @@ describe("an admin of an ACTIVE clinic", () => {
     }
   });
 
-  it("a clinic that chose light gets light screens, for its admin and its members alike, and no other clinic does", async () => {
-    await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: "light" } });
+  it("a clinic that chose dark gets dark screens, for its admin and its members alike, and no other clinic does", async () => {
+    await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: "dark" } });
     try {
       for (const [page, path] of [
         [AdminOverviewPage, "/admin"],
@@ -495,54 +513,54 @@ describe("an admin of an ACTIVE clinic", () => {
         signInAs(orgActive, "admin", "Vitest pages clinic (active)");
         const html = await render(page, path);
         // The mode is on the shell's outermost element, written by the server: nothing is switched after the page loads.
-        expect(html).toMatch(/^<div data-theme="light"/);
-        expect(html).not.toContain('data-theme="dark"');
-        // The Pulse look on a light ground is the deep teal, and the link shade is a dark one, not the pale blue used on black.
-        expect(html).toContain("--brand-accent:#1e5668");
-        expect(html).toContain("--brand-accent-bright:#1e5668");
-        expect(html).not.toContain("--brand-accent-bright:#5fb8d4");
-        // The dark-ground shades ride along, for the video player, which is black in both modes.
-        expect(html).toContain("--brand-dark-accent-bright:#5fb8d4");
+        expect(html).toMatch(/^<div data-theme="dark"/);
+        expect(html).not.toContain('data-theme="light"');
+        // The Pulse look on a dark ground is the Pulse teal, and the link shade is the pale blue, not the deep teal used on white.
+        expect(html).toContain("--brand-accent:#2a829b");
+        expect(html).toContain("--brand-accent-bright:#5fb8d4");
+        expect(html).not.toContain("--brand-accent-bright:#1e5668");
       }
 
       // A member cannot change it and sees it all the same (here on the page that tells them admin is not for them).
       signInAs(orgActive, "member", "Vitest pages clinic (active)");
-      expect(await render(AdminOverviewPage, "/admin")).toMatch(/^<div data-theme="light"/);
+      expect(await render(AdminOverviewPage, "/admin")).toMatch(/^<div data-theme="dark"/);
 
-      // The Branding form opens on Light, and its "what your team sees" card is light too.
+      // The Branding form opens on Dark.
       signInAs(orgActive, "admin", "Vitest pages clinic (active)");
       const branding = await render(BrandingPage, "/admin/branding");
-      expect(branding).toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="light"/);
-      expect(branding.match(/data-theme="light"/g)).toHaveLength(2);
+      expect(branding).toMatch(/role="radio" aria-checked="true"[^>]*>Dark</);
+      expect(branding.match(/data-theme="dark"/g)).toHaveLength(1);
 
-      // Another clinic, asked in the same breath, is still dark.
+      // Another clinic, asked in the same breath, is light: it never chose, and light is the default.
       signInAs(orgManaged, "admin", "Vitest pages clinic (managed)");
       const other = await render(BillingPage, "/admin/billing");
-      expect(other).toMatch(/^<div data-theme="dark"/);
-      expect(other).not.toContain('data-theme="light"');
+      expect(other).toMatch(/^<div data-theme="light"/);
+      expect(other).not.toContain('data-theme="dark"');
     } finally {
       await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: null } });
     }
   });
 
-  it("falls back to dark for a stored mode it does not understand, and the junk never reaches the page", async () => {
+  it("falls back to light for a stored mode it does not understand, and the junk never reaches the page", async () => {
     await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: 'sepia" onload="x' } });
     try {
       signInAs(orgActive, "admin", "Vitest pages clinic (active)");
       const html = await render(AdminOverviewPage, "/admin");
-      expect(html).toMatch(/^<div data-theme="dark"/);
+      expect(html).toMatch(/^<div data-theme="light"/);
       expect(html).not.toContain("sepia");
     } finally {
       await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: null } });
     }
   });
 
-  it("with no branding set, looks exactly as it did: the Pulse colours and Inter, in dark", async () => {
+  it("with no branding set, gets the default: the Pulse colours in light, in the staff fonts with Schibsted Grotesk headings", async () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(AdminOverviewPage, "/admin");
-    expect(html).toMatch(/^<div data-theme="dark"/);
-    expect(html).toContain("--brand-accent:#2a829b");
-    expect(html).toContain("--brand-accent-bright:#5fb8d4");
+    expect(html).toMatch(/^<div data-theme="light" class="[^"]*staff-headings/);
+    expect(html).toContain("--brand-accent:#1e5668");
+    expect(html).toContain("--brand-accent-bright:#1e5668");
+    // The dark-ground shades ride along, for the video player, which is black in both modes.
+    expect(html).toContain("--brand-dark-accent-bright:#5fb8d4");
     expect(html).not.toMatch(/font-(merriweather|open-sans|source-sans|montserrat|nunito-sans)/);
   });
 });
@@ -626,11 +644,19 @@ describe("who a link is from, on People and on the pamphlet", () => {
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {}); // the stand-in has no invitation list; the page says so
     try {
-      const html = await render(PeoplePage, "/admin/people");
+      const html = await renderWith(PeoplePage, "/admin/people", { person: `person-${HIP_SURGEON.userId}` });
       expect(html).toContain("Patients see: <span");
       expect(html).toContain("Jane Smith, PA-C");
-      expect(html).toContain("Vi Test</span>");
       expect(html).toContain("Change the name patients see for Jane Smith");
+      // Everyone is in the list; the surgeon's detail is the one open.
+      expect(html).toContain("Vi Test");
+      expect(html).toContain("Olive Owner");
+      expect(html).toContain("Remove from clinic");
+      expect(html).toContain("Sends videos to patients (uses a seat)");
+      // The owner's detail, opened, has no name for patients: the owner holds no seat.
+      const owner = await renderWith(PeoplePage, "/admin/people", { person: `person-${HIP_OWNER.userId}` });
+      expect(owner).toContain("No seat.");
+      expect(owner).not.toContain("Change the name patients see for Olive Owner");
       // Clerk's organization panel is gone: its Members tab went around our seats and its General tab could delete the clinic.
       expect(html).not.toContain("Clinic name and logo");
       expect(html).not.toContain("clerk-heading");
@@ -693,7 +719,7 @@ describe("the address on a link's page and its pamphlet", () => {
       expect(html.toLowerCase()).not.toContain("test only");
 
       await render(LinksPage, "/admin/links");
-      expect(linkRowsProps).toMatchObject({ baseUrl: PERMANENT_QR_ORIGIN });
+      expect(linkFormProps).toMatchObject({ baseUrl: PERMANENT_QR_ORIGIN });
     }
   });
 
@@ -712,7 +738,7 @@ describe("the address on a link's page and its pamphlet", () => {
       expect(html).toContain("Never hand it to a patient");
 
       await render(LinksPage, "/admin/links");
-      expect(linkRowsProps).toMatchObject({ baseUrl: "https://example-git-branch.vercel.app", linksCanBeMade: true });
+      expect(linkFormProps).toMatchObject({ baseUrl: "https://example-git-branch.vercel.app", blocked: null });
     }
   });
 
@@ -737,7 +763,7 @@ describe("the address on a link's page and its pamphlet", () => {
 
     const links = await render(LinksPage, "/admin/links");
     expect(links).toContain("does not know its own address");
-    expect(linkRowsProps).toMatchObject({ baseUrl: "", linksCanBeMade: false });
+    expect(linkFormProps).toMatchObject({ baseUrl: "", blocked: expect.stringContaining("does not know its own address") });
   });
 });
 
@@ -768,21 +794,22 @@ describe("a paused link a patient has asked about", () => {
   it("is listed on the overview under 'Links waiting to be reactivated', with a way to the page that turns it back on", async () => {
     const { id, code } = await makeAskedAbout();
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
-    const html = await render(AdminOverviewPage, "/admin");
+    const html = await renderWith(AdminOverviewPage, "/admin", { item: `request-${id}` });
 
-    expect(html).toContain("Links waiting to be reactivated");
+    expect(html).toContain("A paused link asks to come back");
     expect(html).toContain(hipVideoTitle);
-    expect(html).toContain("Surgeon: Dr. Jane Smith");
-    expect(html).toContain(`href="/admin/reactivate/${id}"`);
-    expect(html).toContain("Turn it back on");
-    // The button names the link by its id; the code, which plays the video, is nowhere on the page.
+    expect(html).toContain("Dr. Jane Smith");
+    // The Confirm form is right there, naming the link by its id, with the same Server Action as the reactivate page.
+    expect(html).toContain("Confirm: turn this link back on");
+    expect(html).toMatch(/<form[^>]*>[\s\S]*name="shareId"[^>]*value="/);
+    expect(html).toContain(`value="${id}"`);
+    // The code, which plays the video, is nowhere on the page.
     expect(html).not.toContain(code);
     // Another clinic sees none of it.
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const other = await render(AdminOverviewPage, "/admin");
-    expect(other).toContain("Links waiting to be reactivated");
-    expect(other).toContain("None right now.");
-    expect(other).not.toContain(`/admin/reactivate/${id}`);
+    expect(other).toContain("Nothing needs a look right now.");
+    expect(other).not.toContain(id);
   });
 
   it("gets its own page for the clinic's admin: the details, where it stands, and one Confirm button that is a form, nothing else", async () => {
@@ -840,13 +867,12 @@ describe("a paused link a patient has asked about", () => {
     const { id, code } = await makeAskedAbout({ videoId: knee.id }); // the Hip clinic has only Hip on its plan
     signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
 
-    const overview = await render(AdminOverviewPage, "/admin");
-    const start = overview.indexOf(knee.title);
-    const row = overview.slice(start, overview.indexOf("</li>", start));
-    expect(row).toContain("Not on your plan");
-    expect(row).toContain(`href="/admin/reactivate/${id}"`);
-    expect(row).toContain("See why");
-    expect(row).not.toContain("Turn it back on");
+    const overview = await renderWith(AdminOverviewPage, "/admin", { item: `request-${id}` });
+    expect(overview).toContain(knee.title);
+    expect(overview).toContain("not on your plan");
+    expect(overview).toContain(`href="/admin/reactivate/${id}"`);
+    expect(overview).toContain("See why");
+    expect(overview).not.toContain("Confirm: turn this link back on");
 
     const html = await render(reactivate(id), `/admin/reactivate/${id}`);
     expect(html).toContain("This video is no longer on your plan, so this link can&#x27;t be turned back on.");
@@ -869,8 +895,9 @@ describe("a paused link a patient has asked about", () => {
     await prisma.clinic.update({ where: { id: hipClinic }, data: { showPlaceholders: false } });
     try {
       signInAs(orgHip, "admin", "Vitest pages clinic (hip)");
-      const overview = await render(AdminOverviewPage, "/admin");
-      expect(overview).toContain("Placeholder hidden for your clinic");
+      const overview = await renderWith(AdminOverviewPage, "/admin", { item: `request-${id}` });
+      expect(overview).toContain("Placeholder videos are hidden for your clinic");
+      expect(overview).not.toContain("Confirm: turn this link back on");
 
       const html = await render(reactivate(id), `/admin/reactivate/${id}`);
       expect(html).toContain("your clinic is set to use finished animations only, so this link can&#x27;t be turned back on.");

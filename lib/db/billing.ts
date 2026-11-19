@@ -19,7 +19,7 @@ import { BILLING_SYNC_LOCK, PLAN_CHANGE_LOCK, takeNamedBillingLock } from "./bil
 import { readClinicLocked } from "./clinic-lock";
 import { getCategoryList } from "./category-config";
 import { prisma } from "./client";
-import { countSeatsInUseIn, seatSoloOwnerIfDue } from "./seats";
+import { countSeatsInUseIn, seatOwnerIfDue } from "./seats";
 import { readSettingsIn } from "./settings";
 
 /**
@@ -1030,10 +1030,10 @@ async function applyDecision(
     }
 
     // 5. A clinic that has just opened with seats (a first confirmed payment,
-    //    or a recovery) seats its owner when nobody else holds or is invited
-    //    to a seat (ownerAutoSeatDue() in lib/seats.ts). Same lock, same
+    //    or a recovery) seats its owner when a seat is free and the rule says
+    //    so (ownerAutoSeatDue() in lib/seats.ts). Same lock, same
     //    transaction, its own log entry.
-    await seatSoloOwnerIfDue(tx, clinicId, clinic, now);
+    await seatOwnerIfDue(tx, clinicId, clinic, now);
 
     const words = entries.length > 0 ? entries.join(" ") : recordChanged ? "Dates updated from Stripe." : "Checked against Stripe. Nothing had changed.";
     const outcome = strangePlan

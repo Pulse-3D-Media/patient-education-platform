@@ -54,12 +54,13 @@ export function readBrandingForm(formData: FormData): { values: BrandingFormValu
   const font = fontText ? parseBrandFont(fontText) : DEFAULT_BRAND_FONT;
   if (!font) return { error: "Choose one of the fonts on the list." };
 
-  // An empty mode means the default (dark). Anything else has to be one of the two.
+  // An empty mode means the default (light, since 2026-11-18). Anything else has to be one of the two.
   const themeText = field(formData, "brandTheme");
   const theme = themeText ? parseBrandTheme(themeText) : DEFAULT_BRAND_THEME;
   if (!theme) return { error: "Choose Dark or Light." };
 
-  // The defaults are stored as "nothing set", so a clinic that never chose and a clinic that chose Inter, or dark, are the same row.
+  // The defaults are stored as "nothing set", so a clinic that never chose and a clinic that chose the default font, or light, are the same row.
+  // Dark, no longer the default, is written down as "dark".
   return {
     values: {
       phone,
@@ -68,6 +69,34 @@ export function readBrandingForm(formData: FormData): { values: BrandingFormValu
       brandTheme: theme === DEFAULT_BRAND_THEME ? null : theme,
     },
   };
+}
+
+/** One text value for `name`, or null when the form sent it more than once or not as text. */
+function single(formData: FormData, name: string): string | null {
+  const values = formData.getAll(name);
+  if (values.length > 1 || values.some((value) => typeof value !== "string")) return null;
+  return field(formData, name);
+}
+
+/**
+ * Only the phone, for setup step 1 (the clinic's name and phone). The same
+ * rule as the full form above: ten US digits in any format, or empty for none.
+ */
+export function readPhoneField(formData: FormData): { phone: string | null } | { error: string } {
+  const text = single(formData, "phone");
+  if (text === null) return { error: "Send one text value for each branding field." };
+  const phone = text ? normalizeUsPhone(text) : null;
+  if (text && !phone) return { error: "That does not look like a US phone number. Ten digits, any format." };
+  return { phone };
+}
+
+/** Only the colour, for setup step 2 (logo and colour). The same rule as the full form above: a hex colour, or empty for the Pulse 3D colour. */
+export function readColorField(formData: FormData): { brandColor: string | null } | { error: string } {
+  const text = single(formData, "brandColor");
+  if (text === null) return { error: "Send one text value for each branding field." };
+  const brandColor = text ? parseBrandColor(text) : null;
+  if (text && !brandColor) return { error: "The colour must be a hex colour, like #2a829b." };
+  return { brandColor };
 }
 
 /**

@@ -1,32 +1,36 @@
 import { SignIn } from "@clerk/nextjs";
-import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
+import { BOX_APPEARANCE } from "@/components/landing/clerk-look";
+import { LandingFrame } from "@/components/landing/LandingFrame";
+import { SignInExtras } from "@/components/landing/SignInExtras";
 
 /**
- * The sign-in page, at /sign-in, built from Clerk's prebuilt component.
+ * The sign-in page, at /sign-in: the landing page with its Sign in tab open,
+ * and Clerk's own prebuilt sign-in form in the box, styled to the design
+ * (components/landing/clerk-look.ts).
  *
- * The folder is a catch-all ([[...sign-in]]) because Clerk's component moves
+ * The folder is a catch-all ([[...sign-in]]) because Clerk's form moves
  * between steps on its own sub-paths (/sign-in/factor-one and so on) and
  * this one page has to answer all of them.
  *
- * Signed-out visitors of /admin or /library are sent here by proxy.ts with
- * the page they wanted in the address (redirect_url). After signing in,
- * Clerk takes them back there. Someone who opens /sign-in directly lands on
- * the library.
+ * Signed-out visitors of /admin, /library, /pulse or /onboarding are sent
+ * here by proxy.ts with the page they wanted in the address (redirect_url).
+ * After signing in, Clerk takes them back there, and the "Set up a clinic"
+ * tab carries the same redirect_url, so a sign-up started here returns there
+ * too. Someone who opens /sign-in directly goes to /onboarding, which routes
+ * them.
  *
- * If a clinic requires the user to pick an organization after signing in
- * (a "session task" in Clerk's words), this same component shows that step
- * too. Nothing extra to build for it.
+ * Clerk's form also does everything else a sign-in can need, with nothing
+ * extra built for it: the email code, a second step if an account has one,
+ * "Continue with Google", an invitation for someone who already has an
+ * account (handed over from /sign-up), and choosing a clinic when Clerk asks
+ * for one (a "session task" in Clerk's words).
  */
-export default function SignInPage() {
+export default async function SignInPage({ searchParams }: PageProps<"/sign-in/[[...sign-in]]">) {
+  const params = await searchParams;
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-[#e4ebf3] px-4 py-10">
-      {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
-      <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" className="h-12 w-auto" />
-      <SignIn path="/sign-in" />
-      <p className="max-w-sm text-center text-sm text-[#667085]">
-        Staff sign-in for the Pulse 3D Patient Education Library. Patients do not need an account:
-        the link from your clinic opens on its own.
-      </p>
-    </main>
+    <LandingFrame tab="sign-in" redirectUrl={params.redirect_url}>
+      <SignIn path="/sign-in" appearance={BOX_APPEARANCE} />
+      <SignInExtras />
+    </LandingFrame>
   );
 }

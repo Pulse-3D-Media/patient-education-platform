@@ -95,6 +95,7 @@ describe("paths that never need a signed-in user are not handed to Clerk", () =>
     ["/api/health", "GET"],
     ["/api/webhooks/stripe", "POST"],
     ["/api/webhooks/mux", "POST"],
+    ["/api/cron/setup-reminders", "GET"],
   ];
 
   for (const [path, method] of PATHS) {

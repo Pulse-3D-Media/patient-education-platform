@@ -22,8 +22,10 @@ import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server
  * getCurrentClinicId()). Keep both.
  *
  * Everything not listed in STAFF_PATHS is public. That covers the patient
- * page (/watch), the sign-in and sign-up pages, the health check
- * (/api/health, for an uptime monitor), /api/webhooks, and /q (a printed QR
+ * page (/watch), the landing page at the bare address (/), the sign-in
+ * and sign-up pages, the health check
+ * (/api/health, for an uptime monitor), /api/webhooks, /api/cron (the daily
+ * jobs Vercel calls, which check CRON_SECRET themselves), and /q (a printed QR
  * code's page, and the route its Play tap posts to).
  *
  * Fewer outside calls on public paths (CLAUDE.md, "Auth"). Clerk's middleware
@@ -35,7 +37,10 @@ import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server
  *   - The paths in NO_CLERK_PATHS never reach Clerk's middleware at all. None
  *     of them needs to know who is signed in: the patient page and its
  *     routes, a printed code's page and its routes, the health check and the
- *     webhooks (Stripe and Mux prove themselves with their own signatures).
+ *     webhooks (Stripe and Mux prove themselves with their own signatures), and
+ *     the daily jobs under /api/cron, which Vercel calls with
+ *     "Authorization: Bearer <CRON_SECRET>": that header must reach the route,
+ *     which checks it (lib/cron-secret.ts), rather than be refused below.
  *     The renewal email a paused link's "Ask my clinic" sends still works:
  *     Clerk's backend client reads its keys from the environment when the
  *     middleware did not run.
@@ -51,7 +56,7 @@ import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server
 const STAFF_PATHS = ["/admin", "/library", "/pulse", "/onboarding"];
 
 /** Path prefixes that never need to know who is signed in, so Clerk is not asked. Everything under them too. */
-const NO_CLERK_PATHS = ["/watch", "/q", "/api/health", "/api/webhooks"];
+const NO_CLERK_PATHS = ["/watch", "/q", "/api/health", "/api/webhooks", "/api/cron"];
 
 function isUnder(pathname: string, prefixes: string[]) {
   return prefixes.some((path) => pathname === path || pathname.startsWith(`${path}/`));

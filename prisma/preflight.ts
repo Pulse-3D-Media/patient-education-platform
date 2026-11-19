@@ -2,13 +2,16 @@
  * The check every operator script in prisma/ runs before it touches the
  * database: which database is this, and is it production?
  *
- * Why: the scripts load .env (package.json passes --env-file=.env), and the
- * main checkout's .env is production. Without a check, running one of them
- * "to try it" changes real clinics. So a script refuses to run against
- * production unless the person running it says so, in as many words, with
- * --production on the command line:
+ * Why: the scripts load .env (package.json passes --env-file=.env), but a
+ * DATABASE_URL already set in the environment wins over that file, which is
+ * how "npm run on-production" points one at production (the main checkout's
+ * .env is the testing branch; production's strings are in .env.release).
+ * Without a check, a script could change real clinics without anyone having
+ * said so. So a script refuses to run against production unless the person
+ * running it says so, in as many words, with --production on the command
+ * line:
  *
- *   npm run db:set-status -- <clinicId> PAUSED "reason" --production
+ *   npm run on-production -- npm run db:set-status -- <clinicId> PAUSED "reason" --production
  *
  * How production is recognised: .env names it with PRODUCTION_DATABASE_HOST,
  * the host name of the production database (no password, no user, just the
@@ -72,7 +75,7 @@ function productionEndpoint(value: string | undefined): string | null {
  * what unknown means; for anything that matters it means production).
  *
  * Also asked by checkoutIsOpen() in lib/stripe.ts, so the app run on a
- * computer with the production .env never opens test-mode checkout. Pure,
+ * computer against the production database never opens test-mode checkout. Pure,
  * and never returns or prints a connection string or a host.
  */
 export function databaseKind(env: { DATABASE_URL?: string; PRODUCTION_DATABASE_HOST?: string }): "production" | "not-production" | "unknown" {

@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "db:generate": "prisma generate",
+    "on-production": "tsx --conditions=react-server prisma/release-env.ts",
     "db:seed": "tsx --conditions=react-server --env-file=.env prisma/seed.ts",
     "db:seed-video": "tsx --conditions=react-server --env-file=.env prisma/seed-video.ts",
     "db:seed-placeholders": "tsx --conditions=react-server --env-file=.env prisma/seed-placeholders.ts",

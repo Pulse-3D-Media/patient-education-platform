@@ -10,7 +10,7 @@
  * in that many hours (24 unless told), and several clinics can be kept with
  * --keep id1,id2 or DEMO_KEEP_CLINIC_IDS.
  *
- * It reads .env.demo, never .env (the main checkout's .env is production):
+ * It reads .env.demo, never .env or .env.release (which is production):
  * the demo site's database (the Neon testing branch), its Stripe test key, its
  * Clerk test-instance secret key, PRODUCTION_DATABASE_HOST and
  * DEMO_DATABASE_HOST (it must not be the first and must be the second), and

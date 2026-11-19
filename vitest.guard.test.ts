@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkTestDatabase, endpointOf } from "./vitest.guard";
+import { checkTestDatabase, endpointOf, productionStrings } from "./vitest.guard";
 
 /**
  * The test-database guard, checked with made-up connection strings. No real
@@ -151,6 +151,86 @@ describe("checkTestDatabase", () => {
     for (const result of results) {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).not.toContain("secret");
+    }
+  });
+});
+
+/**
+ * What names production now that .env points at the testing branch and the
+ * production strings live in .env.release (November 2026).
+ */
+describe("productionStrings", () => {
+  const prodHost = "ep-prod-example-123.us-east-2.aws.neon.tech";
+  const testDirect = "postgresql://user:secret@ep-tst-example-456.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  const local = "postgresql://user:secret@localhost:5432/pulse_test";
+  // The new arrangement: .env is the testing branch and names the production host.
+  const newEnv = { DATABASE_URL: testPooled, DIRECT_URL: testDirect, PRODUCTION_DATABASE_HOST: prodHost };
+  const release = { DATABASE_URL: prodPooled, DIRECT_URL: prodDirect };
+
+  function check(testUrl: string, sources: Parameters<typeof productionStrings>[0]) {
+    return checkTestDatabase(testUrl, productionStrings(sources));
+  }
+
+  it("refuses production when only PRODUCTION_DATABASE_HOST names it, pooled or direct", () => {
+    const sources = { appEnv: newEnv, releaseEnv: {}, processEnv: {} };
+    expect(check(prodPooled, sources).ok).toBe(false);
+    expect(check(prodDirect, sources).ok).toBe(false);
+  });
+
+  it("refuses production when only .env.release names it", () => {
+    // The host line is missing, and .env is the testing branch.
+    const sources = { appEnv: { DATABASE_URL: testPooled, DIRECT_URL: testDirect }, releaseEnv: release, processEnv: {} };
+    expect(check(prodPooled, sources).ok).toBe(false);
+    expect(check(prodDirect, sources).ok).toBe(false);
+  });
+
+  it("lets the tests run on the local database and on the testing branch .env points at", () => {
+    const sources = { appEnv: newEnv, releaseEnv: release, processEnv: {} };
+    expect(check(local, sources).ok).toBe(true);
+    // .env's own DATABASE_URL is the testing branch, which is not production.
+    expect(check(testPooled, sources).ok).toBe(true);
+  });
+
+  it("reads a production host that was pasted with a database name and options after it", () => {
+    const pasted = `${prodHost}/neondb?sslmode=require`;
+    const sources = { appEnv: { ...newEnv, PRODUCTION_DATABASE_HOST: pasted }, releaseEnv: {}, processEnv: {} };
+    expect(check(prodPooled, sources).ok).toBe(false);
+    expect(check(local, sources).ok).toBe(true);
+  });
+
+  it("with no host line, still treats .env's own strings as production, as it always did", () => {
+    // A checkout whose .env is the old production one, and GitHub's checks.
+    const oldEnv = { appEnv: { DATABASE_URL: prodPooled, DIRECT_URL: prodDirect }, releaseEnv: {}, processEnv: {} };
+    expect(check(prodDirect, oldEnv).ok).toBe(false);
+    expect(check(testPooled, oldEnv).ok).toBe(true);
+    const github = { appEnv: {}, releaseEnv: {}, processEnv: { DATABASE_URL: prodPooled, DIRECT_URL: prodPooled } };
+    expect(check(prodDirect, github).ok).toBe(false);
+    expect(check(local, github).ok).toBe(true);
+  });
+
+  it("takes the host line from the environment when .env has none", () => {
+    const sources = { appEnv: {}, releaseEnv: {}, processEnv: { PRODUCTION_DATABASE_HOST: prodHost } };
+    expect(check(prodPooled, sources).ok).toBe(false);
+    expect(check(local, sources).ok).toBe(true);
+  });
+
+  it("refuses when nothing names production at all", () => {
+    expect(check(local, { appEnv: {}, releaseEnv: {}, processEnv: {} }).ok).toBe(false);
+  });
+
+  it("refuses when something that names production cannot be read", () => {
+    const badHost = { appEnv: { ...newEnv, PRODUCTION_DATABASE_HOST: "not a host" }, releaseEnv: {}, processEnv: {} };
+    expect(check(local, badHost).ok).toBe(false);
+    const badRelease = { appEnv: newEnv, releaseEnv: { DATABASE_URL: "nonsense" }, processEnv: {} };
+    expect(check(local, badRelease).ok).toBe(false);
+  });
+
+  it("never puts a connection string in a refusal", () => {
+    const result = check(prodPooled, { appEnv: newEnv, releaseEnv: release, processEnv: {} });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).not.toContain("secret");
+      expect(result.reason).not.toContain("neon.tech");
     }
   });
 });

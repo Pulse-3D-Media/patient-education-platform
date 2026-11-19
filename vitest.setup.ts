@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseEnv } from "node:util";
 import { PrismaClient } from "@prisma/client";
-import { checkTestDatabase } from "./vitest.guard";
+import { checkTestDatabase, productionStrings } from "./vitest.guard";
 
 /**
  * Runs before every test file. Points the database at the Neon "testing"
@@ -13,10 +13,11 @@ import { checkTestDatabase } from "./vitest.guard";
  * database for the length of the test run.
  *
  * The decision itself lives in vitest.guard.ts, which has its own tests.
- * In short: the test string must be readable, every production string that
- * is set must be readable, at least one must be set, and none may name the
- * same Neon endpoint as the test string, pooled or direct. Anything less
- * than that is a refusal, not a pass.
+ * In short: the test string must be readable, everything that names
+ * production (PRODUCTION_DATABASE_HOST, and .env.release when it is there)
+ * must be readable, at least one must be set, and none may name the same
+ * Neon endpoint as the test string, pooled or direct. Anything less than
+ * that is a refusal, not a pass.
  */
 
 function readEnvFile(path: string): Record<string, string> {
@@ -29,12 +30,12 @@ const appEnv = readEnvFile(".env");
 
 const testUrl = testEnv.TEST_DATABASE_URL?.trim() || process.env.TEST_DATABASE_URL?.trim();
 
-// The app's own strings come from .env first, then the environment, so a
-// production value set either way is compared against.
-const production = (["DATABASE_URL", "DIRECT_URL"] as const).map((name) => ({
-  name,
-  value: appEnv[name] ?? process.env[name],
-}));
+// What names production on this computer: PRODUCTION_DATABASE_HOST and the
+// strings in .env.release (which only the release command reads). .env itself
+// points at the testing branch, so it is not "production" any more; see
+// productionStrings() in vitest.guard.ts for the whole rule.
+const releaseEnv = readEnvFile(".env.release");
+const production = productionStrings({ appEnv, releaseEnv, processEnv: process.env });
 
 const result = checkTestDatabase(testUrl, production);
 if (!result.ok) {

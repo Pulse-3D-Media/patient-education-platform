@@ -1,14 +1,6 @@
-import { StaffClerkProvider } from "@/components/ui/StaffClerkProvider";
-import { STAFF_TEXT_FAMILY, STAFF_TYPE_CLASS } from "@/app/staff-fonts";
+import { LandingProviders } from "@/components/landing/LandingFrame";
 
-/** The sign-up page needs Clerk's provider for the <SignUp /> component. */
+/** The sign-up page is the landing page with its "Set up a clinic" tab open: Clerk's provider and the staff fonts (components/landing/LandingFrame.tsx). */
 export default function SignUpLayout({ children }: LayoutProps<"/sign-up">) {
-  // Light, like every staff screen by default, in the staff screens' fonts (app/staff-fonts.ts).
-  return (
-    <StaffClerkProvider theme="light" fontFamily={STAFF_TEXT_FAMILY}>
-      <div data-theme="light" className={`${STAFF_TYPE_CLASS} staff-headings contents`}>
-        {children}
-      </div>
-    </StaffClerkProvider>
-  );
+  return <LandingProviders>{children}</LandingProviders>;
 }

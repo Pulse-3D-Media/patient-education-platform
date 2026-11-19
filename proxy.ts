@@ -22,7 +22,8 @@ import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server
  * getCurrentClinicId()). Keep both.
  *
  * Everything not listed in STAFF_PATHS is public. That covers the patient
- * page (/watch), the sign-in and sign-up pages, the health check
+ * page (/watch), the landing page at the bare address (/), the sign-in
+ * and sign-up pages, the health check
  * (/api/health, for an uptime monitor), /api/webhooks, and /q (a printed QR
  * code's page, and the route its Play tap posts to).
  *

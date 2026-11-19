@@ -9,7 +9,7 @@ Clerk guards the staff surfaces.
 The patient surface is never behind it.
 
 - **`/admin`, `/library`, `/pulse` and `/onboarding`, and everything under them, need a signed-in user.**
-  `/watch`, `/q`, `/api/webhooks`, `/api/health`, `/sign-in`, `/sign-up` and static files are always public.
+  `/watch`, `/q`, `/api/webhooks`, `/api/health`, the bare address `/` (the landing page), `/sign-in`, `/sign-up` and static files are always public.
   The list of guarded prefixes lives in `proxy.ts` (Next.js 16's name for the middleware file).
 - **`proxy.ts` is a convenience, not the security boundary.**
   It sends signed-out visitors to `/sign-in` and back again.
@@ -42,17 +42,32 @@ The patient surface is never behind it.
 - **`CLINIC_ID` is retired.**
   Nothing reads it.
   Remove it from `.env` and from Vercel.
-- **Clerk's provider wraps only the staff side** (`StaffClerkProvider` in the layouts of `app/library`, `app/admin`, `app/onboarding`, `app/sign-in` and `app/sign-up`).
+- **Clerk's provider wraps only the staff side** (`StaffClerkProvider` in the layouts of `app/library`, `app/admin` and `app/onboarding`, and, through `LandingProviders` in `components/landing/LandingFrame.tsx`, the landing page at `/`, `app/sign-in` and `app/sign-up`).
   Never put it in the root layout: that would load Clerk's script on every patient's phone.
   `auth()` on the server works without it.
-- The sign-in and sign-up paths, `/sign-in` and `/sign-up`, are set in code in three places that must agree: `proxy.ts`, `StaffClerkProvider` and the `<SignIn path>` / `<SignUp path>` props.
+- The sign-in and sign-up paths, `/sign-in` and `/sign-up`, are set in code in three places that must agree: `proxy.ts`, `StaffClerkProvider` and the `<SignIn path>` / `<SignUp path>` props (and `/sign-up/sso-callback`, where `SetUpClinicForm` sends Google back to).
   No `NEXT_PUBLIC_CLERK_*_URL` variables are used.
   **Clerk may only send someone on to this deployment's own addresses** after signing in or up (`allowedRedirectOrigins` in `StaffClerkProvider`, from `clerkRedirectOrigins()` in `lib/trusted-origin.ts`: the addresses Vercel and `APP_ORIGINS` name, never the request, wildcards left out, localhost when nothing is known; Clerk always allows the page's own address too, so a preview returns to itself).
   Left unset, Clerk would also allow every address under our Clerk instance's root domain, the marketing site included.
   After signing up or in with no page asked for, `StaffClerkProvider` sends people to `/onboarding` (`signUpFallbackRedirectUrl`, `signInFallbackRedirectUrl`), which routes them: the creator of an unpaid clinic to Billing, everyone else to the library.
-  The root address `/` redirects to `/onboarding` too (never straight to the library), so someone who opened the root, was sent to sign up, and is brought back to the address they asked for, is routed the same way.
+  The root address `/` sends a signed-in person to `/onboarding` too (never straight to the library), so someone who signed up from there is routed the same way.
+  A signed-out visitor at `/` gets the landing page instead (see "The landing page and sign-up" below).
   Anyone who still lands on the library's closed-clinic page gets a Go to billing button if they are an admin (a member is told to ask one).
   Invitations sent from `/admin/people` carry this deployment's `/sign-up` as their return address (from `pickTrustedOrigin()`, never the browser), so the email's link comes back to our pages rather than Clerk's hosted ones; `/sign-up` hands a person who already has an account (`__clerk_status=sign_in`) to `/sign-in` with the invitation status and ticket unchanged and nothing else (`signInHandoffHref()` in `lib/invitation-handoff.ts`).
+- **The landing page and sign-up** (the approved design of 2026-11-19, screens 01, 02-signup-1 and 1b; built in the landing PR, stacked on the admin-pages PR).
+  The bare address, `/sign-in` and `/sign-up` draw one page (`LandingFrame`): the website's navigation, a heading and the website's "three ways" pictures, and a box with two tabs, Sign in and Set up a clinic.
+  The tabs carry only `redirect_url` between them (`tabHref()` in `lib/landing.ts`), never an invitation ticket.
+  **Sign in is Clerk's prebuilt `<SignIn />`**, restyled through Clerk's own `appearance` hooks (`components/landing/clerk-look.ts`): hash routing at `/`, path routing at `/sign-in`.
+  It still does everything a sign-in can need: the email code, a second step, Continue with Google, an invited person with an account, and choosing a clinic when Clerk asks.
+  **Set up a clinic is our form on Clerk's sign-up object** (`SetUpClinicForm`, a Clerk "custom flow" through `useSignUp()` from `@clerk/nextjs`, no new package), because the prebuilt `<SignUp />` cannot be limited to the two boxes the design asks for: Your name and Work email, then the six-digit code Clerk emails.
+  The steps and their sentences are in `lib/sign-up-flow.ts`; Clerk's own error text is never shown.
+  Clerk keeps everything: nothing typed is stored by us, and there is still no users table, password field or session cookie of our own.
+  **Clerk's dashboard still asks for a password** at sign-up (and a first and last name; the one name box is split at its last word), checked on Clerk's development instance on 2026-11-19, so the form shows a third box, "Choose a password", after the code, which goes straight to Clerk; turning "Password" off in the Clerk dashboard (Evan's setting, both instances) removes that box with no code change, and sign-in already uses the email code only.
+  When Clerk asks for a clinic to be set up first (its "choose an organization" step, on while the dashboard requires an organization), the box shows Clerk's own `TaskChooseOrganization`, the same step the prebuilt form showed; the clinic is still made by Clerk there or on `/onboarding`, never by the landing page.
+  Then the new account goes where a new account always went: the page it was sent from when that page is on this site (`safeReturnPath()`), otherwise `/onboarding`.
+  An invitation's link still gets Clerk's prebuilt `<SignUp />`, unchanged, and so do Clerk's later sign-up steps under `/sign-up/...`; `/sign-up/sso-callback` is Clerk's `AuthenticateWithRedirectCallback`.
+  Someone already signed in who opens `/sign-up` goes to `/onboarding`.
+  Under Clerk's form, `ClerkLoading` and `ClerkFailed` say "Loading sign-in" or "We could not reach sign-in just now", so the box is never blank.
 - **The Clerk forward is off, as an explicit choice** (Prompt B of the 2026-10-30 list, decided after the 2026-11-04 dashboard checks showed the browser never uses it).
   Clerk's middleware can pass requests under `/__clerk` on to Clerk's servers, and left to itself turns that on for a live key on a `*.vercel.app` address.
   `proxy.ts` sets `frontendApiProxy: { enabled: false }`, so it is off whatever the key or address, and the browser talks to Clerk directly, as it always has.

@@ -1,6 +1,7 @@
 import type { ClinicStatus } from "@prisma/client";
 import type { Category } from "@/lib/categories";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { AdminsOnly } from "@/components/ui/AdminsOnly";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { PRIMARY_BUTTON } from "@/components/ui/styles";
@@ -12,10 +13,13 @@ import { requireClinicPage } from "@/lib/clinic";
 import { clinicIsOpen, type ClinicOpenFacts } from "@/lib/clinic-status";
 import { planLibraryGap } from "@/lib/plan-change";
 import { formatCents } from "@/lib/pricing";
+import { BILLING_HISTORY_LIMIT, type BillingHistoryEntry } from "@/lib/stripe";
 import { AdminFrame } from "../AdminFrame";
+import { DetailHeader, Facts } from "../DetailParts";
 import { getBillingView } from "./billing";
 import { CancelChangeButton, CheckWithStripeButton, PayInvoiceButton, PortalButton } from "./BillingButtons";
 import { getCheckoutView, type CheckoutOffer, type CheckoutView, type PlanFacts } from "./checkout-view";
+import { getBillingHistory, type BillingHistoryView } from "./history";
 import { PlanChanger } from "./PlanChanger";
 import { PlanPicker } from "./PlanPicker";
 
@@ -90,17 +94,15 @@ export default async function BillingPage(props: BillingPageProps = {}) {
   const view = await getBillingView(clinic.id);
   const checkout = view ? await getCheckoutView(clinic.id, view.plan) : null;
   // Each category's current name (Pulse staff can rename one): plans already bought say the new name too.
-  const list = await getCategoryList();
+  const [list, history] = await Promise.all([getCategoryList(), getBillingHistory(clinic.id, Boolean(checkout?.portal))]);
   const offer: CheckoutOffer = checkout?.offer ?? { kind: "closed", message: "Your clinic could not be found. Try again in a moment." };
   const params = props.searchParams ? await props.searchParams : {};
   const cameBackWithoutPaying = params.checkout === "cancelled";
   const cameBackFromStripe = params.from === "stripe";
 
-  const labels = view ? labelsInOrder(list, view.plan.categories) : [];
   const managed = view?.plan.managedByPulse ?? false;
   const subscription = checkout?.subscription ?? null;
   const canPayHere = offer.kind === "picker";
-  const live = checkout?.billingStatus === "ACTIVE" || checkout?.billingStatus === "PAST_DUE";
   // Can a missed payment be settled from this page? Only where Stripe's pages can be opened.
   const canRepair = Boolean(checkout?.portal);
   // The category the library's "Add to your plan" link asked for, if there is a form here it can be ticked in.
@@ -113,158 +115,92 @@ export default async function BillingPage(props: BillingPageProps = {}) {
         : null;
   // The category in the address, read only to say something about it when it cannot be ticked because it is already paid for.
   const asked = typeof params[ADD_PARAM] === "string" ? (findCategoryBySlug(list, params[ADD_PARAM])?.category.value ?? null) : null;
+  // The change form opens from "Change plan", or from the library's "Add to your plan" link; otherwise the page stays short.
+  const canChange = offer.kind === "subscribed" && !managed && offer.change.kind === "changer";
+  const changing = canChange && (params.change === "1" || params[ADD_PARAM] !== undefined);
+
+  const open = clinicIsOpen(clinic);
+  const inGrace = open && clinic.status === "PAST_DUE";
+  const statusLabel = inGrace ? GRACE_COPY.label : STATUS_COPY[clinic.status].label;
+  const renews = subscription && !subscription.cancelAt && checkout?.billingStatus === "ACTIVE" ? subscription.currentPeriodEnd : null;
+  // The card about where the clinic stands is only drawn when it has something to say beyond the line under the title.
+  const plainlyOpen = open && clinic.status === "ACTIVE";
 
   return (
-    <AdminFrame clinic={clinic} title="Billing" intro="Your plan, and what it comes to.">
-      {cameBackWithoutPaying && (
-        <p role="status" className="mt-6 rounded-xl border border-line-strong bg-surface px-5 py-4 text-[15px] text-ink-soft">
-          You left Stripe&rsquo;s page before paying, so nothing was charged. Your picks are still below.
-        </p>
-      )}
+    <AdminFrame clinic={clinic} title="Billing" bare>
+      <div className="px-4 py-6 md:px-9 md:py-8">
+        <DetailHeader
+          as="h1"
+          title="Billing"
+          sub={`${statusLabel}${renews ? ` · next payment ${renews.toLocaleDateString("en-US", DAY_WORDS)}` : ""}`}
+          end={
+            <p className="flex items-center gap-2 text-sm font-medium text-warn">
+              <span aria-hidden="true" className="h-2 w-2 rounded-sm bg-warn" />
+              Test mode, no card is charged
+            </p>
+          }
+        />
 
-      {cameBackFromStripe && (
-        <p role="status" className="mt-6 rounded-xl border border-line-strong bg-surface px-5 py-4 text-[15px] text-ink-soft">
-          You are back from Stripe. If you changed something there and this page does not show it yet, press Check with Stripe at the bottom.
-        </p>
-      )}
+        <div className="max-w-3xl">
+          {cameBackWithoutPaying && (
+            <p role="status" className="mt-6 rounded-xl border border-line-strong bg-surface px-5 py-4 text-[15px] text-ink-soft">
+              You left Stripe&rsquo;s page before paying, so nothing was charged. Your picks are still below.
+            </p>
+          )}
 
-      <StatusCard clinic={clinic} managed={managed} canPayHere={canPayHere} firstPayment={offer.kind === "first-payment"} repair={checkout?.portal ? "here" : "none"} />
+          {cameBackFromStripe && (
+            <p role="status" className="mt-6 rounded-xl border border-line-strong bg-surface px-5 py-4 text-[15px] text-ink-soft">
+              You are back from Stripe. If you changed something there and this page does not show it yet, press Check with Stripe.
+            </p>
+          )}
 
-      {checkout?.billingStatus === "PAST_DUE" && canRepair && !managed && (
-        <section aria-labelledby="missed-heading" className="mt-6 rounded-2xl border border-warn/40 bg-warn/10 p-5 sm:p-6">
-          <h2 id="missed-heading" className="text-lg font-semibold">
-            Settle the missed payment
-          </h2>
-          <p className="mt-2 text-[15px] text-ink-soft">
-            Pay it on Stripe&rsquo;s page with any card. If the card on file is the problem, update it on Stripe&rsquo;s billing page (at the bottom of this page) as well, so the next
-            renewal goes through.
-          </p>
-          <div className="mt-4">
-            <PayInvoiceButton label="Pay the missed payment" />
-          </div>
-        </section>
-      )}
+          {!plainlyOpen && (
+            <StatusCard clinic={clinic} managed={managed} canPayHere={canPayHere} firstPayment={offer.kind === "first-payment"} repair={checkout?.portal ? "here" : "none"} />
+          )}
 
-      {checkout?.waiting && !cameBackWithoutPaying && offer.kind !== "first-payment" && (
-        <p className="mt-6 rounded-xl border border-line bg-surface px-5 py-4 text-[15px] text-ink-soft">
-          A checkout was started for your clinic and no payment has been confirmed for it. Paid already?{" "}
-          <Link href="/admin/billing/return" className="font-medium text-brand-bright underline underline-offset-2">
-            Check on your payment
-          </Link>
-          .
-        </p>
-      )}
-
-      {subscription && <SubscriptionCard list={list} plan={subscription.plan} status={checkout?.billingStatus ?? "NONE"} renewsAt={subscription.currentPeriodEnd} endsAt={subscription.cancelAt} />}
-
-      {checkout && <WaitingChanges list={list} view={checkout} />}
-
-      <section aria-labelledby="plan-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
-        <h2 id="plan-heading" className="text-lg font-semibold">
-          Your plan
-        </h2>
-        {!view || !view.hasPlan ? (
-          <p className="mt-2 text-ink-soft">{managed ? "Pulse 3D is setting your plan up with you." : canPayHere ? "No plan yet. Choose one below." : "No plan yet."}</p>
-        ) : (
-          <div className="mt-3 grid gap-4 sm:grid-cols-2">
-            <div>
-              <p className="text-sm text-ink-muted">Categories</p>
-              <ul className="mt-2 flex flex-wrap gap-2">
-                {labels.map((label) => (
-                  <li key={label} className="rounded-full border border-line-strong px-3 py-1 text-sm text-ink">
-                    {label}
-                  </li>
-                ))}
-              </ul>
-              {view.estimate?.fullLibrary && <p className="mt-2 text-sm text-ink-soft">That is the full library: all current categories.</p>}
-            </div>
-            <div>
-              <p className="text-sm text-ink-muted">Surgeon seats</p>
-              <p className="mt-1 text-[15px] text-ink">
-                {view.plan.surgeonSeats} {view.plan.surgeonSeats === 1 ? "seat" : "seats"}
-                {view.seatsInUse !== null && <span className="text-ink-soft">, {view.seatsInUse} in use</span>}
+          {checkout?.billingStatus === "PAST_DUE" && canRepair && !managed && (
+            <section aria-labelledby="missed-heading" className="mt-6 rounded-2xl border border-warn/40 bg-warn/10 p-5 sm:p-6">
+              <h2 id="missed-heading" className="text-lg font-semibold">
+                Settle the missed payment
+              </h2>
+              <p className="mt-2 text-[15px] text-ink-soft">
+                Pay it on Stripe&rsquo;s page with any card. If the card on file is the problem, update it on Stripe as well, so the next renewal goes through.
               </p>
-              {view.seatsInUse !== null && view.seatsInUse > view.plan.surgeonSeats && (
-                <p className="mt-1 text-sm text-warn">
-                  More seats are taken than your plan pays for. Nothing extra is being charged. Nobody else can be given a seat until someone is
-                  removed or an invitation is revoked on the People page, or a seat is added.
-                </p>
-              )}
-              <p className="mt-1 text-sm text-ink-muted">
-                Everyone in your clinic uses a seat except the account owner, who can take one or not. Open invitations hold a seat too. Who holds
-                one is on the{" "}
-                <Link href="/admin/people" className="font-medium text-brand-bright underline underline-offset-2">
-                  People page
-                </Link>
-                .
-              </p>
-            </div>
-          </div>
-        )}
-        {managed && (
-          <p className="mt-4 text-sm text-ink-soft">
-            Your plan is managed by Pulse 3D and invoiced by agreement. To change categories or seats, get in touch with Pulse 3D.
-          </p>
-        )}
-      </section>
+              <div className="mt-4">
+                <PayInvoiceButton label="Pay the missed payment" />
+              </div>
+            </section>
+          )}
 
-      {/* An estimate is only shown while nothing is being paid for. Once there is a subscription, the card above has the real amounts. */}
-      {view?.hasPlan && !subscription && (
-        <section aria-labelledby="estimate-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 id="estimate-heading" className="text-lg font-semibold">
-              What it comes to
-            </h2>
-            <span className="rounded-md bg-wash-strong px-2 py-0.5 text-[13px] font-medium uppercase tracking-wide text-ink-soft">Estimate</span>
+          {checkout?.waiting && !cameBackWithoutPaying && offer.kind !== "first-payment" && (
+            <p className="mt-6 rounded-xl border border-line bg-surface px-5 py-4 text-[15px] text-ink-soft">
+              A checkout was started for your clinic and no payment has been confirmed for it. Paid already?{" "}
+              <Link href="/admin/billing/return" className="font-medium text-brand-bright underline underline-offset-2">
+                Check on your payment
+              </Link>
+              .
+            </p>
+          )}
+
+          {checkout && <WaitingChanges list={list} view={checkout} />}
+
+          <PlanSection list={list} view={view} subscription={subscription} status={checkout?.billingStatus ?? "NONE"} managed={managed} canPayHere={canPayHere} canChange={canChange && !changing} />
+
+          {/* Where the library's "Add to your plan" link lands: the picker, the change form, or the words that stand in for them. */}
+          {/* The scroll margin keeps the card's heading clear of the banner across the top (64px tall). */}
+          <div id={ADD_ANCHOR} className="scroll-mt-20">
+            {(!canChange || changing) && <OfferSection list={list} offer={offer} managed={managed} suggested={suggested} asked={asked} />}
           </div>
 
-          {view.problem ? (
-            <p className="mt-2 text-ink-soft">{view.problem}</p>
-          ) : view.estimate?.band === "enterprise" ? (
-            <p className="mt-2 text-ink-soft">Priced by agreement with Pulse 3D. {view.estimate.notes.join(" ")}</p>
-          ) : view.estimate ? (
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
-              <div>
-                <p className="text-sm text-ink-muted">Per month</p>
-                <p className="mt-1 text-2xl font-semibold text-brand-bright">{formatCents(view.estimate.monthlyCents ?? 0)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-ink-muted">Per year</p>
-                <p className="mt-1 text-2xl font-semibold text-brand-bright">{formatCents(view.estimate.yearlyCents ?? 0)}</p>
-              </div>
+          {history.kind !== "none" && <PaymentSection history={history} live={checkout?.billingStatus === "ACTIVE" || checkout?.billingStatus === "PAST_DUE"} />}
+
+          {checkout?.portal && (
+            <div className="mt-8 flex flex-col gap-3 border-t border-line pt-6">
+              <CheckWithStripeButton />
             </div>
-          ) : null}
-
-          <p className="mt-4 text-sm text-ink-muted">
-            {managed
-              ? "An estimate from the plan on file, not your invoice. Pulse 3D invoices your clinic by agreement."
-              : "An estimate from the plan Pulse 3D put on file for you. It is not an invoice, and nothing has been charged for it."}
-          </p>
-        </section>
-      )}
-
-      {/* Where the library's "Add to your plan" link lands: the picker, the change form, or the words that stand in for them. */}
-      {/* The scroll margin keeps the card's heading clear of the banner across the top (64px tall). */}
-      <div id={ADD_ANCHOR} className="scroll-mt-20">
-        <OfferSection list={list} offer={offer} managed={managed} suggested={suggested} asked={asked} />
+          )}
+        </div>
       </div>
-
-      {checkout?.portal && (
-        <section aria-labelledby="stripe-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
-          <h2 id="stripe-heading" className="text-lg font-semibold">
-            Card, invoices and cancelling
-          </h2>
-          <p className="mt-2 text-ink-soft">
-            These are on Stripe&rsquo;s own billing page: the card you pay with, every invoice so far, and cancelling.
-            {live && " If you cancel there, your plan stays on until the end of the period you have already paid for, and you can undo it there before then."}{" "}
-            Seats and categories are changed on this page, not there.
-          </p>
-          <div className="mt-4 flex flex-col gap-3">
-            <PortalButton />
-            <CheckWithStripeButton />
-          </div>
-        </section>
-      )}
     </AdminFrame>
   );
 }
@@ -494,56 +430,257 @@ function wordList(words: string[]): string {
   return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
 
-/** The plan the clinic is paying for, with the amounts it accepted. These are real amounts, not an estimate. */
-function SubscriptionCard({
+/** "December 5". Utah time, like the rest of the admin area. */
+const DAY_WORDS = { month: "long", day: "numeric", timeZone: "America/Denver" } as const;
+
+/**
+ * "Your plan": the categories, the seats, how often it is billed and the
+ * next payment. With a subscription the amounts are the real ones it
+ * accepted; without one, the plan on file is quoted as an estimate,
+ * labelled as one. "Change plan" opens the change form below it.
+ */
+function PlanSection({
   list,
-  plan,
+  view,
+  subscription,
   status,
-  renewsAt,
-  endsAt,
+  managed,
+  canPayHere,
+  canChange,
 }: {
   list: CategoryDetails[];
-  plan: PlanFacts;
+  view: Awaited<ReturnType<typeof getBillingView>>;
+  subscription: { plan: PlanFacts; currentPeriodEnd: Date | null; cancelAt: Date | null } | null;
   status: string;
-  renewsAt: Date | null;
-  endsAt: Date | null;
+  managed: boolean;
+  canPayHere: boolean;
+  /** True when the change form can be opened and is not open yet. */
+  canChange: boolean;
 }) {
-  const per = plan.interval === "YEAR" ? "year" : "month";
-  const included = labelsInOrder(list, plan.included);
-  const ended = status === "CANCELED";
+  const seatsInUse = view?.seatsInUse ?? null;
+  const rows: { label: string; value: ReactNode }[] = [];
+  let note: ReactNode = null;
+
+  if (subscription) {
+    const { plan } = subscription;
+    const per = plan.interval === "YEAR" ? "year" : "month";
+    const ended = status === "CANCELED";
+    rows.push({ label: "Categories", value: labelsInOrder(list, plan.included).join(", ") });
+    rows.push({ label: "Seats", value: seatsInUse !== null ? `${seatsInUse} of ${plan.seats} in use` : `${plan.seats} ${plan.seats === 1 ? "seat" : "seats"}` });
+    rows.push({ label: "Billed", value: plan.interval === "YEAR" ? "Yearly" : "Monthly" });
+    rows.push({
+      label: ended ? "Ended" : subscription.cancelAt ? "Ends" : status === "PAST_DUE" ? "Missed payment" : "Next payment",
+      value: ended ? (
+        `You paid ${formatCents(plan.totalCents)} per ${per}`
+      ) : subscription.cancelAt ? (
+        `${subscription.cancelAt.toLocaleDateString("en-US", DATE_WORDS)}. A cancellation is scheduled; the plan stays active until then.`
+      ) : subscription.currentPeriodEnd ? (
+        <>
+          <strong className="font-semibold">{formatCents(plan.totalCents)}</strong> {status === "PAST_DUE" ? "due on" : "on"} {subscription.currentPeriodEnd.toLocaleDateString("en-US", DATE_WORDS)}
+          {status === "PAST_DUE" ? ", which did not go through" : ""}
+        </>
+      ) : (
+        `${formatCents(plan.totalCents)} per ${per}`
+      ),
+    });
+    note = (
+      <>
+        {formatCents(plan.perSeatCents)} per surgeon seat per {per}, times {plan.seats} {plan.seats === 1 ? "seat" : "seats"}, in US dollars. Accepted by {plan.acceptedByName} on{" "}
+        {plan.acceptedAt.toLocaleDateString("en-US", DATE_WORDS)} at the prices on offer then (price list {plan.version}).
+      </>
+    );
+  } else if (view?.hasPlan) {
+    rows.push({ label: "Categories", value: labelsInOrder(list, view.plan.categories).join(", ") });
+    rows.push({
+      label: "Seats",
+      value: seatsInUse !== null ? `${seatsInUse} of ${view.plan.surgeonSeats} in use` : `${view.plan.surgeonSeats} ${view.plan.surgeonSeats === 1 ? "seat" : "seats"}`,
+    });
+    rows.push({
+      label: "Estimate",
+      value: view.problem ? (
+        view.problem
+      ) : view.estimate?.band === "enterprise" ? (
+        `Priced by agreement with Pulse 3D. ${view.estimate.notes.join(" ")}`
+      ) : view.estimate ? (
+        <>
+          <strong className="font-semibold">{formatCents(view.estimate.monthlyCents ?? 0)}</strong> per month, or{" "}
+          <strong className="font-semibold">{formatCents(view.estimate.yearlyCents ?? 0)}</strong> per year
+        </>
+      ) : (
+        "None yet"
+      ),
+    });
+    note = managed
+      ? "An estimate from the plan on file, not your invoice. Pulse 3D invoices your clinic by agreement."
+      : "An estimate from the plan Pulse 3D put on file for you. It is not an invoice, and nothing has been charged for it.";
+  }
+
+  const paidSeats = subscription?.plan.seats ?? view?.plan.surgeonSeats ?? null;
+  const over = seatsInUse !== null && paidSeats !== null && seatsInUse > paidSeats;
+
   return (
-    <section aria-labelledby="subscription-heading" className="mt-6 rounded-2xl border border-line bg-surface p-5 sm:p-6">
-      <h2 id="subscription-heading" className="text-lg font-semibold">
-        {ended ? "Your last subscription" : "Your subscription"}
-      </h2>
-      <div className="mt-3 grid gap-4 sm:grid-cols-2">
-        <div>
-          <p className="text-sm text-ink-muted">{ended ? "What you paid" : `What you pay, ${plan.interval === "YEAR" ? "yearly" : "monthly"}`}</p>
-          <p className="mt-1 text-2xl font-semibold text-brand-bright">
-            {formatCents(plan.totalCents)} <span className="text-base font-medium text-ink-soft">per {per}</span>
-          </p>
-          <p className="mt-1 text-sm text-ink-muted">
-            {formatCents(plan.perSeatCents)} per surgeon seat per {per}, times {plan.seats} {plan.seats === 1 ? "seat" : "seats"}. In US dollars.
-          </p>
-        </div>
-        <div>
-          <p className="text-sm text-ink-muted">Includes</p>
-          <p className="mt-1 text-[15px] text-ink">{included.join(", ")}</p>
-          <p className="mt-1 text-sm text-ink-muted">
-            Accepted by {plan.acceptedByName} on {plan.acceptedAt.toLocaleDateString("en-US", DATE_WORDS)}, at the prices on offer then (price list {plan.version}). Your price
-            stays on that list unless you choose to move.
-          </p>
-        </div>
+    <section aria-labelledby="plan-heading" className="mt-6 border-b border-line pb-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 id="plan-heading" className="text-lg font-semibold">
+          Your plan
+        </h2>
+        {canChange && (
+          <Link
+            href={`/admin/billing?change=1#${ADD_ANCHOR}`}
+            className="inline-flex h-11 items-center rounded-xl bg-brand px-5 text-[15px] font-semibold text-on-brand transition hover:bg-brand-hover"
+          >
+            Change plan
+          </Link>
+        )}
       </div>
-      {!ended && endsAt ? (
-        <p className="mt-4 text-[15px] text-ink-soft">A cancellation is scheduled. The subscription stays active until {endsAt.toLocaleDateString("en-US", DATE_WORDS)}.</p>
-      ) : !ended && renewsAt ? (
-        <p className="mt-4 text-[15px] text-ink-soft">
-          {status === "PAST_DUE" ? "The payment due on" : "Renews on"} {renewsAt.toLocaleDateString("en-US", DATE_WORDS)}
-          {status === "PAST_DUE" ? " did not go through." : "."}
+      {rows.length === 0 ? (
+        <p className="mt-3 text-ink-soft">{managed ? "Pulse 3D is setting your plan up with you." : canPayHere ? "No plan yet. Choose one below." : "No plan yet."}</p>
+      ) : (
+        <div className="mt-4">
+          <Facts rows={rows} />
+        </div>
+      )}
+      {view?.estimate?.fullLibrary && !subscription && <p className="mt-3 text-sm text-ink-soft">That is the full library: all current categories.</p>}
+      {over && (
+        <p className="mt-3 text-sm text-warn">
+          More seats are taken than your plan pays for. Nothing extra is being charged. Nobody else can be given a seat until someone is removed or an invitation is revoked on the{" "}
+          <Link href="/admin/people" className="font-medium underline underline-offset-2">
+            People page
+          </Link>
+          , or a seat is added.
         </p>
-      ) : null}
+      )}
+      {note && <p className="mt-3 text-sm text-ink-muted">{note}</p>}
+      {managed && <p className="mt-3 text-sm text-ink-soft">Your plan is managed by Pulse 3D and invoiced by agreement. To change categories or seats, get in touch with Pulse 3D.</p>}
     </section>
+  );
+}
+
+/** "Visa", "Mastercard": Stripe's brand word, as a person writes it. */
+function brandWords(brand: string): string {
+  const known: Record<string, string> = {
+    visa: "Visa",
+    mastercard: "Mastercard",
+    amex: "American Express",
+    american_express: "American Express",
+    discover: "Discover",
+    jcb: "JCB",
+    diners: "Diners Club",
+    diners_club: "Diners Club",
+    unionpay: "UnionPay",
+    union_pay: "UnionPay",
+  };
+  return known[brand] ?? "Card";
+}
+
+/** "$120.00", in the invoice's own currency, as Stripe reported it. */
+function invoiceAmount(cents: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
+const STATUS_WORDS: Record<BillingHistoryEntry["status"], string> = {
+  paid: "Paid",
+  open: "Not paid yet",
+  void: "Cancelled",
+  uncollectible: "Not collected",
+  draft: "Draft",
+  other: "See Stripe",
+};
+
+/** The payment method and the billing history, both read from Stripe just now (history.ts). */
+function PaymentSection({ history, live }: { history: Exclude<BillingHistoryView, { kind: "none" }>; live: boolean }) {
+  return (
+    <>
+      <section aria-labelledby="method-heading" className="mt-6 border-b border-line pb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="method-heading" className="text-lg font-semibold">
+            Payment method
+          </h2>
+          <PortalButton label="Update on Stripe" />
+        </div>
+        <p className="mt-3 text-[16px] text-ink-soft">
+          {history.kind === "unreachable"
+            ? "We could not reach Stripe just now, so the card on file is not shown. Reload this page in a moment."
+            : history.record.card
+              ? `${brandWords(history.record.card.brand)} ending ${history.record.card.last4} · expires ${String(history.record.card.expMonth).padStart(2, "0")}/${String(history.record.card.expYear).slice(-2)}`
+              : history.record.method
+                ? `${history.record.method}. Its details are on Stripe.`
+                : "No payment method on file. Add one on Stripe."}
+        </p>
+        {/* A money disclosure, so it stays: cancelling happens on Stripe's page too. */}
+        {live && (
+          <p className="mt-2 text-sm text-ink-muted">
+            Cancelling is on Stripe&rsquo;s page too. If you cancel, your plan stays on until the end of the period you have already paid for, and you can undo it there before then.
+          </p>
+        )}
+      </section>
+
+      <section aria-labelledby="history-heading" className="mt-6">
+        <h2 id="history-heading" className="text-lg font-semibold">
+          Billing history
+        </h2>
+        {history.kind === "unreachable" ? (
+          <p className="mt-3 text-[15px] text-ink-soft">We could not reach Stripe just now, so your billing history is not shown. Reload this page in a moment.</p>
+        ) : history.record.history.length === 0 ? (
+          <p className="mt-3 text-[15px] text-ink-soft">No invoices yet.</p>
+        ) : (
+          <>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[34rem] text-left text-[15px]">
+                <thead>
+                  <tr className="border-b border-line text-[13px] text-ink-muted">
+                    <th scope="col" className="py-2 pr-4 font-medium">
+                      Date
+                    </th>
+                    <th scope="col" className="py-2 pr-4 font-medium">
+                      What
+                    </th>
+                    <th scope="col" className="py-2 pr-4 text-right font-medium">
+                      Amount
+                    </th>
+                    <th scope="col" className="py-2 pr-4 font-medium">
+                      Status
+                    </th>
+                    <th scope="col" className="py-2 font-medium">
+                      <span className="sr-only">Receipt</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.record.history.map((entry) => (
+                    <tr key={entry.id} className="border-b border-line">
+                      <td className="py-4 pr-4 whitespace-nowrap text-ink">
+                        {entry.date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Denver" })}
+                      </td>
+                      <td className="py-4 pr-4 text-ink">{entry.what}</td>
+                      <td className="py-4 pr-4 text-right whitespace-nowrap text-ink">{invoiceAmount(entry.amountCents, entry.currency)}</td>
+                      <td className="py-4 pr-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center gap-2 text-sm font-medium ${entry.status === "paid" ? "text-ink" : "text-warn"}`}>
+                          <span aria-hidden="true" className={`h-2 w-2 rounded-sm ${entry.status === "paid" ? "bg-brand" : "bg-warn"}`} />
+                          {STATUS_WORDS[entry.status]}
+                        </span>
+                      </td>
+                      <td className="py-4 text-right">
+                        {entry.pageUrl && (
+                          <a href={entry.pageUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-brand-bright underline underline-offset-2">
+                            {entry.status === "paid" ? "Receipt" : "View"}
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-sm text-ink-muted">The newest {BILLING_HISTORY_LIMIT} at most. Every invoice is on Stripe.</p>
+          </>
+        )}
+      </section>
+    </>
   );
 }
 

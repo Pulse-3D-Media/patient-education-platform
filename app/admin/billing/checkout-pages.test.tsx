@@ -8,7 +8,7 @@ import { prisma } from "@/lib/db/client";
 import { getCategoryAvailability } from "@/lib/db/category-config";
 import { createPricingVersion, getActivePricing } from "@/lib/db/pricing";
 import { DEFAULT_PRICING_CONFIG } from "@/lib/pricing";
-import { checkoutIsOpen } from "@/lib/stripe";
+import { checkoutIsOpen, readBillingRecord } from "@/lib/stripe";
 import BillingPage from "./page";
 import ReturnPage from "./return/page";
 
@@ -43,7 +43,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/stripe", async (original) => ({ ...(await original<typeof import("@/lib/stripe")>()), checkoutIsOpen: vi.fn() }));
+vi.mock("@/lib/stripe", async (original) => ({ ...(await original<typeof import("@/lib/stripe")>()), checkoutIsOpen: vi.fn(), readBillingRecord: vi.fn() }));
 vi.mock("@/lib/db/pricing", async (original) => ({ ...(await original<typeof import("@/lib/db/pricing")>()), getActivePricing: vi.fn() }));
 vi.mock("@/lib/db/category-config", async (original) => ({ ...(await original<typeof import("@/lib/db/category-config")>()), getCategoryAvailability: vi.fn() }));
 
@@ -148,6 +148,13 @@ beforeAll(async () => {
 
 beforeEach(() => {
   vi.mocked(checkoutIsOpen).mockReturnValue(true);
+  vi.mocked(readBillingRecord).mockResolvedValue({
+    card: { brand: "visa", last4: "4242", expMonth: 8, expYear: 2029 },
+    method: null,
+    history: [
+      { id: "in_vitest_1", date: new Date("2026-10-05T18:00:00.000Z"), what: "First payment", amountCents: 26700, currency: "usd", status: "paid", pageUrl: "https://invoice.stripe.com/i/vitest_madeup" },
+    ],
+  });
   vi.mocked(getActivePricing).mockResolvedValue({
     source: { kind: "version", pinned: false, version: { id: versionId, version: 7, note: "", createdAt: new Date(), createdBy: "", createdByName: "", active: true } },
     config: { ...DEFAULT_PRICING_CONFIG, foundingDiscountBp: 2500 },
@@ -285,24 +292,28 @@ describe("/admin/billing: a clinic that already has a subscription", () => {
     signInAs(await makeClinic({ status: "ACTIVE", categories: ["KNEE", "HIP"], surgeonSeats: 3, billing: { status: "ACTIVE", plan: "current" } }), "admin");
     const html = await renderBilling();
 
-    expect(html).toContain("Your subscription");
+    expect(html).toContain("Your plan");
     expect(html).toContain("$267.00");
     expect(html).toContain("$89.00 per surgeon seat per month, times 3 seats");
     expect(html).toContain("Knee, Hip");
     expect(html).toContain("Accepted by Jane Smith");
-    expect(html).toContain("Renews on November 1, 2026");
+    expect(html).toContain("Next payment");
+    expect(html).toContain("on November 1, 2026");
+    expect(html).toContain("Active · next payment November 1");
     // No estimate card for the plan in force: the card above has the real amounts. (The change form's running total
     // is labelled an estimate, but that is about a change, not the plan being paid for.)
     expect(html).not.toContain('id="estimate-heading"');
     expect(html).not.toContain("What it comes to");
     expect(html).not.toContain("Continue to payment");
-    expect(html).toContain("Change your plan");
+    // The change form opens from "Change plan"; until then the page stays short.
+    expect(html).toContain('href="/admin/billing?change=1#change"');
+    expect(html).not.toContain("Review change");
   });
 
   it("past due: the same plan, and that the payment did not go through", async () => {
     signInAs(await makeClinic({ status: "PAST_DUE", categories: ["KNEE", "HIP"], surgeonSeats: 3, billing: { status: "PAST_DUE", plan: "current" } }), "admin");
     const html = await renderBilling();
-    expect(html).toContain("Your subscription");
+    expect(html).toContain("Your plan");
     expect(html).toContain("did not go through");
     expect(html).not.toContain("Continue to payment");
   });
@@ -342,7 +353,8 @@ describe("/admin/billing: a first payment still under way", () => {
     expect(html).toContain("23 hours");
     expect(html).not.toContain("Continue to payment");
     expect(html).not.toContain("Get in touch with Pulse 3D and we will turn yours on.");
-    expect(html).not.toContain("Card, invoices and cancelling");
+    expect(html).not.toContain("Update on Stripe");
+    expect(html).not.toContain("Billing history");
     expect(html).not.toContain("Pay now");
     // Said once, not twice.
     expect(html).not.toContain("A checkout was started for your clinic");
@@ -419,7 +431,7 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
 
   it("the account owner gets the change form, opened on the plan they have, and the way to Stripe's billing page", async () => {
     signInAs(await paying({ owner: true }), "admin");
-    const html = await renderBilling();
+    const html = await renderBilling({ change: "1" });
 
     expect(html).toContain("Change your plan");
     expect(html).toContain("Review change");
@@ -431,9 +443,12 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
     expect(html).toMatch(/name="seats"[^>]*value="3"|value="3"[^>]*name="seats"/);
     expect(html).toContain("On your plan");
     expect(html).toContain("This is the plan you have now.");
-    // Stripe's own page, and a way to ask Stripe where things stand.
-    expect(html).toContain("Card, invoices and cancelling");
-    expect(html).toContain("Open Stripe’s billing page");
+    // The card on file, the newest invoices, Stripe's own page, and a way to ask Stripe where things stand.
+    expect(html).toContain("Payment method");
+    expect(html).toContain("Visa ending 4242 · expires 08/29");
+    expect(html).toContain("Update on Stripe");
+    expect(html).toContain("If you cancel, your plan stays on until the end of the period you have already paid for");
+    expect(html).toContain("Billing history");
     expect(html).toContain("Check with Stripe");
     expect(html).toContain("Test mode.");
     // It is not a second checkout, and no founding number reaches the browser.
@@ -446,13 +461,13 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
     const orgId = await paying();
     await addWaitingPlan(orgId, "scheduled", { categories: ["KNEE"], seats: 3, perSeatCents: 5900 });
     signInAs(orgId, "admin");
-    const html = await renderBilling();
+    const html = await renderBilling({ change: "1" });
 
-    expect(html).toContain("Your subscription");
+    expect(html).toContain("Your plan");
     expect(html).toContain("$267.00");
     expect(html).toContain("Change your plan");
     expect(html).toContain("Review change");
-    expect(html).toContain("Open Stripe’s billing page");
+    expect(html).toContain("Update on Stripe");
     expect(html).toContain("A change that is waiting");
     expect(html).toContain("Cancel this change");
     expect(html).toContain("Check with Stripe");
@@ -465,7 +480,8 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
     signInAs(await paying({ owner: true }), "member");
     const html = await renderBilling();
     expect(html).not.toContain("Review change");
-    expect(html).not.toContain("Open Stripe’s billing page");
+    expect(html).not.toContain("Update on Stripe");
+    expect(html).not.toContain("Billing history");
     expect(showsAnAmount(html)).toBe(false);
   });
 
@@ -489,7 +505,7 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
     const orgId = await paying({ owner: true });
     await addWaitingPlan(orgId, "unpaid", { categories: ["KNEE", "HIP"], seats: 5, perSeatCents: 8900 });
     signInAs(orgId, "admin");
-    const html = await renderBilling();
+    const html = await renderBilling({ change: "1" });
 
     expect(html).toContain("Waiting for its payment:");
     expect(html).toContain("5 surgeon seats; $445.00 per month");
@@ -502,11 +518,11 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
 
   it("past due: the owner is offered the missed payment and Stripe's billing page, and no plan change until it is settled", async () => {
     signInAs(await paying({ owner: true, status: "PAST_DUE", billing: { status: "PAST_DUE", plan: "current" } }), "admin");
-    const html = await renderBilling();
+    const html = await renderBilling({ change: "1" });
 
     expect(html).toContain("Settle the missed payment");
     expect(html).toContain("Pay the missed payment");
-    expect(html).toContain("Open Stripe’s billing page");
+    expect(html).toContain("Update on Stripe");
     expect(html).not.toContain("Review change");
     expect(html).toContain("Your last payment did not go through. Settle that first, then change your plan.");
     expect(html).not.toContain("is coming");
@@ -517,14 +533,15 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
     const html = await renderBilling();
     expect(html).toContain("Settle it below.");
     expect(html).toContain("Pay the missed payment");
-    expect(html).toContain("Open Stripe’s billing page");
+    expect(html).toContain("Update on Stripe");
   });
 
   it("an ended subscription: the owner can still reach Stripe's billing page for invoices, and starts again with the picker", async () => {
     signInAs(await paying({ owner: true, status: "CANCELED", billing: { status: "CANCELED", plan: "current" } }), "admin");
     const html = await renderBilling();
-    expect(html).toContain("Your last subscription");
-    expect(html).toContain("Open Stripe’s billing page");
+    expect(html).toContain("You paid $267.00 per month");
+    expect(html).toContain("Update on Stripe");
+    expect(html).toContain("Billing history");
     expect(html).toContain("Continue to payment");
     expect(html).not.toContain("Review change");
   });
@@ -535,25 +552,29 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
     let html = await renderBilling();
     expect(html).toContain("Changing a plan here is not open yet.");
     expect(html).not.toContain("Review change");
-    expect(html).not.toContain("Open Stripe’s billing page");
+    expect(html).not.toContain("Update on Stripe");
+    // Nothing is asked of Stripe where its pages are not offered.
+    expect(html).not.toContain("Billing history");
+    expect(readBillingRecord).not.toHaveBeenCalled();
 
     vi.mocked(checkoutIsOpen).mockReturnValue(true);
     signInAs(await paying({ owner: true, managedByPulse: true }), "admin");
     html = await renderBilling();
     expect(html).toContain("Pulse 3D manages this plan");
     expect(html).not.toContain("Review change");
-    expect(html).not.toContain("Open Stripe’s billing page");
+    expect(html).not.toContain("Update on Stripe");
+    expect(html).not.toContain("Billing history");
   });
 
   it("'Move to current pricing' is offered only when the prices on offer are a different version from the clinic's own", async () => {
     signInAs(await paying({ owner: true }), "admin");
-    expect(await renderBilling()).not.toContain("Move to current pricing");
+    expect(await renderBilling({ change: "1" })).not.toContain("Move to current pricing");
 
     vi.mocked(getActivePricing).mockResolvedValue({
       source: { kind: "version", pinned: false, version: { id: "cmversionnewer00000000001", version: 8, note: "", createdAt: new Date(), createdBy: "", createdByName: "", active: true } },
       config: { ...DEFAULT_PRICING_CONFIG, perSeatByCountCents: [6400, 9400, 11400, 13000, 14400, 14400] },
     });
-    const html = await renderBilling();
+    const html = await renderBilling({ change: "1" });
     expect(html).toContain("Move to current pricing");
     expect(html).toContain("it stays on them unless you tick this");
     // Unticked, the form still shows the clinic's own prices: three seats of two categories at $89.
@@ -564,6 +585,59 @@ describe("/admin/billing: a clinic that is paying, whose billing any office admi
   it("coming back from Stripe's billing page says how to bring this page up to date", async () => {
     signInAs(await paying({ owner: true }), "admin");
     expect(await renderBilling({ from: "stripe" })).toContain("You are back from Stripe.");
+  });
+});
+
+describe("/admin/billing: the payment method and billing history, read from Stripe", () => {
+  const paying = () => makeClinic({ status: "ACTIVE", categories: ["KNEE", "HIP"], surgeonSeats: 3, billing: { status: "ACTIVE", plan: "current" }, owner: true });
+
+  it("lists the newest invoices as Stripe reports them: date, what, amount, status and Stripe's own page", async () => {
+    signInAs(await paying(), "admin");
+    const html = await renderBilling();
+    expect(html).toContain("Billing history");
+    expect(html).toContain("Oct 5, 2026");
+    expect(html).toContain("First payment");
+    expect(html).toContain("$267.00");
+    expect(html).toContain(">Paid<");
+    expect(html).toContain('href="https://invoice.stripe.com/i/vitest_madeup"');
+    expect(html).toContain(">Receipt<");
+    // Asked once, with the clinic's own customer and subscription, never anything from the request.
+    expect(readBillingRecord).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(readBillingRecord).mock.calls[0][0]).toMatchObject({ customerId: expect.stringMatching(/^cus_vitestpage/), subscriptionId: expect.stringMatching(/^sub_vitestpage/) });
+  });
+
+  it("says so plainly when there are no invoices yet, or no card on file", async () => {
+    vi.mocked(readBillingRecord).mockResolvedValue({ card: null, method: null, history: [] });
+    signInAs(await paying(), "admin");
+    const html = await renderBilling();
+    expect(html).toContain("No invoices yet.");
+    expect(html).toContain("No payment method on file. Add one on Stripe.");
+  });
+
+  it("names a method that is not a card without inventing details", async () => {
+    vi.mocked(readBillingRecord).mockResolvedValue({ card: null, method: "Bank account", history: [] });
+    signInAs(await paying(), "admin");
+    expect(await renderBilling()).toContain("Bank account. Its details are on Stripe.");
+  });
+
+  it("when Stripe cannot be reached, says so calmly, keeps the rest of the page, and logs only the kind of failure", async () => {
+    vi.mocked(readBillingRecord).mockRejectedValue(Object.assign(new Error("connect ECONNREFUSED sk_test_madeup"), { name: "StripeConnectionError" }));
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      signInAs(await paying(), "admin");
+      const html = await renderBilling();
+      expect(html).toContain("We could not reach Stripe just now, so your billing history is not shown.");
+      expect(html).toContain("We could not reach Stripe just now, so the card on file is not shown.");
+      expect(html).toContain("Your plan");
+      expect(html).toContain("$267.00");
+      expect(html).not.toContain("ECONNREFUSED");
+      const logged = quiet.mock.calls.flat().join(" ");
+      expect(logged).toContain("StripeConnectionError");
+      expect(logged).not.toContain("ECONNREFUSED");
+      expect(logged).not.toContain("sk_test_");
+    } finally {
+      quiet.mockRestore();
+    }
   });
 });
 

@@ -370,3 +370,41 @@ export function ChartIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** A plus sign: "Invite" and "Printed code" on the admin lists. */
+export function PlusIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+/** Two overlapping sheets: Copy. */
+export function CopyIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <rect x="8.5" y="8.5" width="11" height="11" rx="2" />
+      <path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5" />
+    </svg>
+  );
+}
+
+/** A printer: Print. */
+export function PrinterIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M7 9V4.5h10V9M7 17H5a1.5 1.5 0 0 1-1.5-1.5v-5A1.5 1.5 0 0 1 5 9h14a1.5 1.5 0 0 1 1.5 1.5v5A1.5 1.5 0 0 1 19 17h-2" />
+      <rect x="7" y="14" width="10" height="5.5" rx="1" />
+    </svg>
+  );
+}
+
+/** A box with an arrow leaving it: a button that opens a page somewhere else (Stripe's). */
+export function ExternalIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M13.5 4.5h6v6M19.5 4.5 11 13M17 13.5v5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 4 18.5v-10A1.5 1.5 0 0 1 5.5 7h5" />
+    </svg>
+  );
+}

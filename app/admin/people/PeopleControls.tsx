@@ -41,45 +41,65 @@ function Note({ pending, result }: { pending: boolean; result: ActionResult | nu
   return null;
 }
 
-/** "Member" or "Member with admin", as two buttons. The owner's is fixed at admin. */
+/**
+ * The "Admin" switch on a person's detail: on adds the admin pages, off takes
+ * them away, and neither changes the seat count. It saves the moment it is
+ * flipped (the server checks who is asking and protects the account owner);
+ * a refusal flips it back and says why. The owner's switch stays on.
+ */
 export function AdminSwitch({ userId, name, role, isOwner }: { userId: string; name: string; role: Role; isOwner: boolean }) {
   const [current, setCurrent] = useState<Role>(role);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [pending, startTransition] = useTransition();
+  const on = current === "admin";
 
-  function choose(next: Role) {
-    if (pending || next === current) return;
+  function flip() {
+    if (pending || isOwner) return;
+    const next: Role = on ? "member" : "admin";
     setResult(null);
     startTransition(async () => {
-      const answer = await setAdminAction(userId, next === "admin");
+      const answer = await safeAction(() => setAdminAction(userId, next === "admin"));
       setResult(answer);
       if (!answer.error) setCurrent(next);
     });
   }
 
   return (
-    <div className="flex flex-col items-start gap-1 sm:items-end">
-      <div role="group" aria-label={`What ${name} can do`} className="flex overflow-hidden rounded-lg border border-line-strong">
-        {(["member", "admin"] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            aria-pressed={current === option}
-            // The owner always has admin: switching it off is refused on the server, so it is not offered here.
-            disabled={pending || (isOwner && option === "member")}
-            onClick={() => choose(option)}
-            className={`h-10 px-4 text-sm font-medium transition disabled:opacity-60 ${
-              current === option ? "bg-brand text-on-brand" : "text-ink-soft hover:bg-wash hover:text-ink"
-            }`}
-          >
-            {ROLE_WORDS[option]}
-          </button>
-        ))}
+    <div className="flex flex-col items-start gap-1">
+      <Toggle on={on} disabled={pending || isOwner} onFlip={flip} label="Admin" describedBy={name} />
+      {isOwner && !pending && !result && <p className="pl-[3.75rem] text-sm text-ink-muted">The account owner always has admin.</p>}
+      <div className="pl-[3.75rem]">
+        <Note pending={pending} result={result} />
       </div>
-      {isOwner && !pending && !result && <p className="text-xs text-ink-muted">The account owner always has admin.</p>}
-      <Note pending={pending} result={result} />
     </div>
   );
+}
+
+/** A switch with its words beside it, as in the approved design. A real checkbox underneath, so keyboards and screen readers know it. */
+function Toggle({ on, disabled, onFlip, label, describedBy }: { on: boolean; disabled: boolean; onFlip: () => void; label: string; describedBy?: string }) {
+  return (
+    <label className={`flex min-h-11 items-center gap-3 ${disabled ? "cursor-default" : "cursor-pointer"}`}>
+      <input type="checkbox" role="switch" checked={on} disabled={disabled} onChange={onFlip} aria-label={describedBy ? `Admin, for ${describedBy}` : undefined} className="peer sr-only" />
+      <span
+        aria-hidden="true"
+        className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-brand-bright ${
+          on ? "border-transparent bg-brand" : "border-line-strong bg-wash-strong"
+        } ${disabled ? "opacity-60" : ""}`}
+      >
+        <span className={`absolute h-5 w-5 rounded-full shadow transition-[left] ${on ? "left-[1.4rem] bg-on-brand" : "left-1 bg-ink-soft"}`} />
+      </span>
+      <span className="text-[16px] text-ink">{label}</span>
+    </label>
+  );
+}
+
+/** Run a Server Action; a request that fails outright (a lost connection) becomes a plain sentence, never an exception on screen. */
+async function safeAction(run: () => Promise<ActionResult>): Promise<ActionResult> {
+  try {
+    return await run();
+  } catch {
+    return { error: "We could not confirm the change. Check the connection, then try again." };
+  }
 }
 
 /**
@@ -95,7 +115,7 @@ export function SeatButton({ userId, mode }: { userId: string; mode: "give" | "t
   function press() {
     if (pending) return;
     setResult(null);
-    startTransition(async () => setResult(mode === "release" ? await releaseMySeatAction() : await giveSeatAction(userId)));
+    startTransition(async () => setResult(await safeAction(() => (mode === "release" ? releaseMySeatAction() : giveSeatAction(userId)))));
   }
 
   return (
@@ -109,10 +129,10 @@ export function SeatButton({ userId, mode }: { userId: string; mode: "give" | "t
 }
 
 /** "Remove", with a popup first. Not offered for the account owner or for yourself (both refused on the server too). */
-export function RemoveButton({ userId, name, holdsSeat }: { userId: string; name: string; holdsSeat: boolean }) {
+export function RemoveButton({ userId, name, holdsSeat, label = "Remove" }: { userId: string; name: string; holdsSeat: boolean; label?: string }) {
   return (
     <ConfirmButton
-      label="Remove"
+      label={label}
       title={`Remove ${name}?`}
       body={
         <p>
@@ -128,10 +148,10 @@ export function RemoveButton({ userId, name, holdsSeat }: { userId: string; name
 }
 
 /** "Revoke" on one open invitation, with a popup first. */
-export function RevokeButton({ invitationId, email, holdsSeat }: { invitationId: string; email: string; holdsSeat: boolean }) {
+export function RevokeButton({ invitationId, email, holdsSeat, label = "Revoke" }: { invitationId: string; email: string; holdsSeat: boolean; label?: string }) {
   return (
     <ConfirmButton
-      label="Revoke"
+      label={label}
       title="Revoke this invitation?"
       body={
         <p>
@@ -161,14 +181,14 @@ export function InviteForm() {
     if (pending) return;
     setResult(null);
     startTransition(async () => {
-      const answer = await inviteAction(email, role);
+      const answer = await safeAction(() => inviteAction(email, role));
       setResult(answer);
       if (!answer.error) setEmail("");
     });
   }
 
   return (
-    <form onSubmit={submit} className="mt-4 flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5 sm:flex-row sm:flex-wrap sm:items-end">
+    <form onSubmit={submit} className="mt-8 flex max-w-2xl flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
       <div className="flex-1">
         <label htmlFor="invite-email" className={LABEL}>
           Email address

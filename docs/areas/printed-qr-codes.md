@@ -13,7 +13,7 @@ Read the top of `lib/qr-code.ts` first.
 
 - **One live code per procedure per surgeon per clinic**, printed or downloaded as often as the office likes (the same code every time).
   `QrCode.liveKey` is unique while a code is live, so five presses at once end with one code.
-  Made with **Printed QR code** on `/admin/links` (`createQrCode()` in `lib/db/qr-codes.ts`): admins of an open clinic, the clinic from the session, the surgeon checked with Clerk (`resolveSender()`) and, under the same locks as `createShare()`, holding a seat here, and the clinic able to use the video.
+  Made with **+ Printed code** on `/admin/links` (`createQrCode()` in `lib/db/qr-codes.ts`): admins of an open clinic, the clinic from the session, the surgeon checked with Clerk (`resolveSender()`) and, under the same locks as `createShare()`, holding a seat here, and the clinic able to use the video.
   Logged in the clinic log, without the code.
 - **Unguessable.** 25 characters from Node's cryptographic generator, about 128 bits; a clash on the unique column is tried again.
   The code is a secret like a key: never in a log, a log entry, a file name or an admin address (the admin pages use the row id).
@@ -39,7 +39,7 @@ Read the top of `lib/qr-code.ts` first.
   Retire (`retireQrCode()`) stops every printed copy at once and is never undone; Replace (`replaceQrCode()`) retires it and makes a new one for the same procedure and surgeon in one transaction, or changes nothing if the new one cannot be made.
   A link a code already handed out keeps working by its own rules after the code is retired, the category leaves the plan or the clinic closes, like every issued link.
 - **The surgeon leaves or loses their seat** (decided by Evan on 2026-10-08): the code keeps working, and the links it hands out from then on name only the clinic (no surgeon id, no name).
-  `/admin/links` marks the code "Needs a look" and offers Retire but not Replace (a new code would be in the same surgeon's name); the clinic makes a new code from a surgeon who holds a seat.
+  `/admin/links` marks the code "needs a look" (and the overview lists it under New) and offers Retire but not Replace (a new code would be in the same surgeon's name); the clinic makes a new code from a surgeon who holds a seat.
   The pamphlet then names only the clinic too.
 - **Abuse.**
   Requests to `/q` count against the Vercel firewall rule (see "Security headers and link guessing").
@@ -57,7 +57,7 @@ Read the top of `lib/qr-code.ts` first.
 - **Counted honestly.**
   The clinic side shows no numbers about codes (clinics get no usage numbers; see "The Pulse reports").
   On the clinic's `/pulse` page each code shows the links it handed out today (UTC) and in the last 30 days (30 times 24 hours): links made by a tap on Play, not scans and not people.
-  The reports count every link, these included; the overview's newest five leave them out.
+  The reports count every link, these included.
 - **Caching.**
   Both `/q/<code>` and the issue route are never cached (`force-dynamic`, `no-store`), carry `X-Robots-Tag: noindex` (`next.config.ts`), and nothing links to them or prefetches them.
 - **What it does not protect against:** anyone holding the paper can watch that one procedure, which is what printing it is for.

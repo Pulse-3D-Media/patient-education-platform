@@ -64,7 +64,7 @@ export default async function PrintedCodePamphletPage({ params }: PageProps<"/ad
 
       {/* Toolbar: on screen only, never on paper */}
       <div className="mx-auto flex w-[8.5in] items-center justify-between py-4 print:hidden">
-        <Link href="/admin/links#printed-codes" className="text-sm font-medium text-[#1e5668] hover:underline">
+        <Link href={`/admin/links?code=${id}`} className="text-sm font-medium text-[#1e5668] hover:underline">
           Back to shared links
         </Link>
         <PrintButton />

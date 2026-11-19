@@ -24,6 +24,7 @@ vi.mock("@clerk/nextjs", () => ({
   TaskChooseOrganization: () => <span data-testid="clerk-choose-organization" />,
   useSignUp: () => ({ signUp: {} }),
   useAuth: () => ({ isLoaded: false }),
+  useClerk: () => ({}),
 }));
 vi.mock("next/navigation", () => ({
   redirect: (to: string) => {

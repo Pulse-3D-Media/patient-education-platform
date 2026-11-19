@@ -195,3 +195,71 @@ export async function addPassword(api: SignUpApi, password: string): Promise<Ste
   const step = nextStep(api);
   return step === "finish" ? { step } : { problem: { message: SIGN_UP_WORDS.failed, field: null } };
 }
+
+// ---------------------------------------------------------------------------
+// The clinic, after the account: a provisional name, corrected later
+// ---------------------------------------------------------------------------
+
+/**
+ * The design asks for the clinic's name AFTER payment (setup, pull request #5),
+ * but Clerk needs a clinic (an organization) with a name before the new
+ * person can go any further. So a brand-new owner's clinic is made with a
+ * provisional name taken from their own name ("Jane Smith's clinic"), and
+ * the real name is typed later: today on Clinic branding, where the existing
+ * name sync sends it to Clerk and our database.
+ *
+ * Made through Clerk's own browser client (createOrganization, then
+ * setActive), the same two calls Clerk's own "set up your clinic" form makes.
+ * Clerk records the person as its creator, so they become the account owner
+ * exactly as before (lib/clinic.ts). Our database row is still made the first
+ * time the clinic is used, so there is nothing of ours that can fail halfway.
+ *
+ * Never a second clinic:
+ *   - Someone who already belongs to a clinic, or has an invitation waiting,
+ *     is never given one: they get Clerk's own list to pick from ("choose").
+ *   - If Clerk cannot be asked, the answer is "choose" too: Clerk's own form,
+ *     which shows any clinic that exists and lets them name one if none does.
+ *   - The form runs this once per Continue (it refuses a second press while
+ *     one is running), and a refresh afterwards finds the clinic already made
+ *     and so lands on Clerk's list with that one clinic in it.
+ */
+export interface ClinicApi {
+  /** Does this person already belong to a clinic, or have an invitation to one? */
+  hasClinicOrInvitation(): Promise<boolean>;
+  /** Make a clinic with this name; its id. */
+  createClinic(name: string): Promise<string>;
+  /** Make it the clinic this session is working in. */
+  makeActive(clinicId: string): Promise<void>;
+}
+
+/** "Jane Smith's clinic", from the name typed at sign-up. "Your clinic" when there is none. */
+export function provisionalClinicName(typedName: string): string {
+  const name = splitFullName(typedName);
+  if (!name) return "Your clinic";
+  return `${name.firstName} ${name.lastName}'s clinic`.slice(0, 100);
+}
+
+/** "made": the clinic exists and is active, go on. "choose": show Clerk's own form instead. */
+export async function setUpProvisionalClinic(api: ClinicApi, typedName: string): Promise<"made" | "choose"> {
+  let belongs: boolean;
+  try {
+    belongs = await api.hasClinicOrInvitation();
+  } catch {
+    return "choose";
+  }
+  if (belongs) return "choose";
+
+  let clinicId: string;
+  try {
+    clinicId = await api.createClinic(provisionalClinicName(typedName));
+  } catch {
+    return "choose";
+  }
+  try {
+    await api.makeActive(clinicId);
+  } catch {
+    // The clinic exists; Clerk's list shows it, and picking it finishes the step.
+    return "choose";
+  }
+  return "made";
+}

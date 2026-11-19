@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addPassword, checkCode, clerkErrorCode, problemFor, resendCode, SIGN_UP_WORDS, startSignUp, type SignUpApi } from "./sign-up-flow";
+import { addPassword, checkCode, clerkErrorCode, problemFor, provisionalClinicName, resendCode, setUpProvisionalClinic, SIGN_UP_WORDS, startSignUp, type ClinicApi, type SignUpApi } from "./sign-up-flow";
 
 /**
  * The steps of "Set up a clinic", against a stand-in for Clerk's sign-up
@@ -168,5 +168,59 @@ describe("Clerk's errors", () => {
 
   it("no sentence has an em dash", () => {
     for (const words of Object.values(SIGN_UP_WORDS)) expect(words).not.toContain("—");
+  });
+});
+
+describe("the clinic after the account: a provisional name, never a second clinic", () => {
+  function clinicApi(belongs: boolean | Error, fail: { create?: boolean; activate?: boolean } = {}) {
+    const calls: string[] = [];
+    const api: ClinicApi = {
+      async hasClinicOrInvitation() {
+        calls.push("ask");
+        if (belongs instanceof Error) throw belongs;
+        return belongs;
+      },
+      async createClinic(name) {
+        calls.push(`create:${name}`);
+        if (fail.create) throw new Error("made-up refusal");
+        return "org_made_up";
+      },
+      async makeActive(id) {
+        calls.push(`active:${id}`);
+        if (fail.activate) throw new Error("made-up network failure");
+      },
+    };
+    return { api, calls };
+  }
+
+  it("names it from the person's own name", () => {
+    expect(provisionalClinicName("Jane Smith")).toBe("Jane Smith's clinic");
+    expect(provisionalClinicName("  Mary Ann   Lee ")).toBe("Mary Ann Lee's clinic");
+    expect(provisionalClinicName("Cher")).toBe("Your clinic");
+  });
+
+  it("a brand-new person: one clinic made, made active, and on they go", async () => {
+    const { api, calls } = clinicApi(false);
+    expect(await setUpProvisionalClinic(api, "Jane Smith")).toBe("made");
+    expect(calls).toEqual(["ask", "create:Jane Smith's clinic", "active:org_made_up"]);
+  });
+
+  it("someone who already belongs to a clinic or holds an invitation is never given a new one: Clerk's own list instead", async () => {
+    const { api, calls } = clinicApi(true);
+    expect(await setUpProvisionalClinic(api, "Jane Smith")).toBe("choose");
+    expect(calls).toEqual(["ask"]);
+  });
+
+  it("Clerk cannot be asked: nothing is made, Clerk's own form decides", async () => {
+    const { api, calls } = clinicApi(new Error("made-up outage"));
+    expect(await setUpProvisionalClinic(api, "Jane Smith")).toBe("choose");
+    expect(calls).toEqual(["ask"]);
+  });
+
+  it("Clerk refuses to make it, or makes it and cannot make it active: Clerk's own form, which shows any clinic that exists", async () => {
+    expect(await setUpProvisionalClinic(clinicApi(false, { create: true }).api, "Jane Smith")).toBe("choose");
+    const later = clinicApi(false, { activate: true });
+    expect(await setUpProvisionalClinic(later.api, "Jane Smith")).toBe("choose");
+    expect(later.calls.filter((call) => call.startsWith("create:"))).toHaveLength(1);
   });
 });

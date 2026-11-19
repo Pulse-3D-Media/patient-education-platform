@@ -15,7 +15,7 @@ import { getCategoryList, libraryForQuote, listSellableCategories } from "./db/c
 import { getActivePricing } from "./db/pricing";
 import { categoryLabel, formatCents, quote } from "./pricing";
 import { PULSE_CONTACT_WORDS } from "./brand";
-import type { CheckoutGateway, FetchSubscription } from "./stripe";
+import type { CheckoutFlow, CheckoutGateway, FetchSubscription } from "./stripe";
 import { STRIPE_CHECKOUT_PREFIX } from "./stripe-pages";
 
 /**
@@ -94,9 +94,11 @@ export async function startCheckout(args: {
   actor: { id: string; name: string };
   /** A trusted origin for Stripe's return addresses (lib/trusted-origin.ts). */
   origin: string;
+  /** Which page Stripe sends the person back to (checkoutReturnUrls in lib/stripe.ts). Left out, Billing. Nothing else depends on it. */
+  flow?: CheckoutFlow;
   deps: CheckoutDeps;
 }): Promise<StartCheckoutResult> {
-  const { clinicId, selection, actor, origin, deps } = args;
+  const { clinicId, selection, actor, origin, flow, deps } = args;
   const { gateway } = deps;
 
   if (!deps.isOpen) return { kind: "refused", message: CHECKOUT_CLOSED_MESSAGE };
@@ -219,6 +221,7 @@ export async function startCheckout(args: {
       description,
       origin,
       expiresAt: sessionExpiresAt(createdAt),
+      flow,
     });
 
   const open = await gateway.listOpenSessions(customerId);

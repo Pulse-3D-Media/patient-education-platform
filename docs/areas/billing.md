@@ -162,6 +162,34 @@ The flow is `startCheckout()` in `lib/checkout.ts` (server only); its pure rules
 - **Before live payments**, Evan and Van approve: the prices, founding terms, tax, refund and cancellation terms, and the customer-facing wording about recurring charges.
   The words on the picker today are test-mode placeholders.
 
+## Sign-up's plan and payment steps
+
+Built with the design of 2026-11-19 (screens 02-signup-2, 3, 3b and 03-welcome): after the email code, a new clinic's owner chooses a plan and pays without first landing in the admin console.
+Stripe test mode only, like everything above, and offered only where Billing's own plan picker is.
+
+- **The pages.**
+  `/onboarding/plan` ("Choose your plan": category tiles, seats with minus and plus, Monthly or Yearly, "Your plan" with the total), `/onboarding/payment` ("Payment method", no subtitle) and `/onboarding/done` (the return from Stripe), all inside `SignUpFrame` (`components/sign-up`): the logo and "Finish later" across the top and the progress list on the left (Email, Plan, Payment), never the app's menu.
+  "Finish later" goes to `/admin/billing`.
+- **Offered only where Billing's picker is.**
+  `requireSignUpPicker()` (`app/onboarding/sign-up-view.ts`) draws the steps only when `getCheckoutView()` would draw Billing's plan picker for the clinic, so `checkoutIsOpen()` (not edited), a missing pricing version, a first payment under way, a hospital, a managed clinic, a hand pause and a live subscription all keep them shut.
+  In every one of those cases the person is sent to `/admin/billing`, which is exactly where a new clinic's owner went before (its "not open yet" card on production), so there is never a dead end and never a payment form; a member, or a clinic already open, goes to the library.
+  There is no practice question to answer first: it was dropped from Billing (see "Who may pay by card").
+  `app/onboarding/sign-up-pages.test.tsx` proves that with `VERCEL_ENV=production` and the real `checkoutIsOpen()`, neither step is offered and Pay is refused before anything is written.
+- **The server prices it (rule 8).**
+  The plan step only moves to the payment step with the picks in the address (`lib/sign-up-steps.ts`, read back by `readPlanFromAddress()`, which refuses anything it does not recognise).
+  The payment page works the total out again on the server from the active version (`quotePlan()`, the same engine and inputs as Billing's picker), and "Pay $X and start" sends the picks and that total to `startSignUpCheckoutAction`, which is Billing's checkout (`checkoutFor()` in `app/admin/billing/actions.ts`) with only two differences: Stripe's return addresses, and a sentence for a sign-in that ran out mid-flow.
+  Every guard above (one customer, one attempt, one page, one first payment at a time) is the same code.
+- **The card is entered on Stripe's own hosted page**, not inside ours.
+  The design draws Stripe's embedded form with express checkout buttons; that needs Stripe's browser script, a new package and a wider content policy, which were not added without asking (rule 6).
+  The payment page shows the plan, the total, the money sentence and the test-mode line, and the button opens Stripe's page as Billing does.
+- **Coming back.**
+  `checkoutSessionParams()` takes `flow: "signup"`: Stripe sends a payment to `/onboarding/done` and a person who leaves its page to `/onboarding/payment?stopped=1` (`checkoutReturnUrls()`); its idempotency key ends `:signup` so Stripe never sees one key with two sets of return addresses (`checkoutIdempotencyKey()`); Billing's addresses and key are unchanged.
+  A page already open for the same accepted plan is reused whichever flow made it, so its return address may be the other flow's; both return pages only read the record.
+  `?stopped=1` shows "The payment was not finished. Nothing was charged. Try again, with another card or payment method if yours was declined." with the plan kept (from the attempt on record) and Try again: Stripe's own page says when a card is declined, and our page cannot know which it was, so it does not claim a decline.
+- **The return grants nothing**, like `/admin/billing/return`: `/onboarding/done` reads the record, shows "Confirming your payment" with the same `Confirming` part (bounded looks, then Check again), and only once the record says ACTIVE and the clinic is open does it send the owner to `/library?welcome=1` (any other admin to `/library`).
+- **The welcome dialog** ("Thanks for signing up.", `app/library/WelcomeDialog.tsx`) shows over the library only for the account owner, only when the clinic is open, and only with `?welcome=1`, which it takes out of the address as it opens, so a refresh or a second notification never shows it again; no schema.
+  "Finish setting up (recommended)" goes to Clinic branding until setup exists (pull request #5), "Take a quick tour" to the library until the tour exists (pull request #6), and "Go to the library" closes it.
+
 ## Plan changes and billing recovery
 
 A clinic that is paying changes its plan on `/admin/billing`, and uses Stripe's own billing page for its card, its invoices and cancelling.

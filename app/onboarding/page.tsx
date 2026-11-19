@@ -5,6 +5,7 @@ import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { askClerk } from "@/lib/clerk-timeout";
 import { getCurrentClinic } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
+import { SIGN_UP_PATHS } from "@/lib/sign-up-steps";
 
 /**
  * Step one of onboarding: "Set up your clinic".
@@ -29,16 +30,19 @@ import { clinicIsOpen } from "@/lib/clinic-status";
  * ?create=1 and shows the create form on its own.
  *
  * Whoever creates a clinic becomes its account owner (recorded when the
- * clinic's row is made, in lib/clinic.ts) and goes straight to Billing to
- * choose a plan: nothing else works until the clinic is paid for. Whoever
+ * clinic's row is made, in lib/clinic.ts) and goes straight to the sign-up
+ * plan step (/onboarding/plan): nothing else works until the clinic is paid
+ * for. Where checkout is not open (the production deployment, or a preview
+ * without the settings), that step sends them on to Billing, whose "not open
+ * yet" card is where a new clinic always landed before. Whoever
  * joins through an invitation, or picks a clinic they already belong to,
  * goes to the library (a clinic that is not open yet shows them its "ask
  * your office admin" note there).
  */
 export const dynamic = "force-dynamic";
 
-/** Where a new clinic's creator goes. */
-const AFTER_CREATE = "/admin/billing";
+/** Where a new clinic's creator goes: the plan step, which sends them to Billing when checkout is not open here. */
+const AFTER_CREATE = SIGN_UP_PATHS.plan;
 /** Where someone goes after picking a clinic or accepting an invitation. This page then sends them on. */
 const AFTER_SELECT = "/onboarding";
 

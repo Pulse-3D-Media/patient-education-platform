@@ -18,6 +18,7 @@ import { CategoryTabs } from "./CategoryTabs";
 import { toLibraryItems } from "./items";
 import { LibraryBrowser } from "./LibraryBrowser";
 import { FavoritesRow, VideoRow } from "./VideoRow";
+import { WelcomeDialog } from "./WelcomeDialog";
 
 /**
  * The library home, laid out like Netflix (decided by Evan on 2026-10-15;
@@ -58,7 +59,7 @@ import { FavoritesRow, VideoRow } from "./VideoRow";
  */
 export const dynamic = "force-dynamic";
 
-export default async function LibraryPage() {
+export default async function LibraryPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
   // Signed out, or no clinic: sent to the right step. A clinic that is not
   // open (not on a plan yet) sees a calm page instead of the library.
   const clinic = await requireClinicPage();
@@ -103,8 +104,13 @@ export default async function LibraryPage() {
   }));
   const canAdd = more.some((row) => row.offer !== "none");
 
+  // The welcome dialog after a new clinic's first payment (WelcomeDialog.tsx): only the account owner, only once the
+  // clinic is open (checked above), and only when /onboarding/done sent them here. No extra read: all three are known.
+  const welcome = clinic.isOwner && (await searchParams)?.welcome === "1";
+
   return (
     <main className="py-6">
+      {welcome && <WelcomeDialog />}
       {/* No headline on the page (Evan, 2026-10-15): the pills say where you are. A screen reader still gets one. */}
       <h1 className="sr-only">My Procedure Library</h1>
       {mine.length === 0 && (

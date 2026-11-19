@@ -148,7 +148,11 @@ describe("the operator scripts", () => {
   const commands = [...Object.values(pkg.scripts), pkg.prisma?.seed ?? ""];
 
   it("every script run from package.json calls preflight() before its first query", () => {
-    const files = commands.flatMap((command) => command.match(/prisma\/[\w-]+\.ts/g) ?? []);
+    // release-env.ts ("npm run on-production") is left out: it makes no query
+    // of its own, it only runs another command with production's strings, and
+    // its own check is planRelease() (release-plan.test.ts). The next test
+    // makes sure it stays that way.
+    const files = commands.flatMap((command) => command.match(/prisma\/[\w-]+\.ts/g) ?? []).filter((file) => file !== "prisma/release-env.ts");
     expect(files.length).toBeGreaterThan(0);
     for (const file of new Set(files)) {
       const source = readFileSync(file, "utf8");
@@ -157,6 +161,14 @@ describe("the operator scripts", () => {
       const firstQuery = source.search(/\bprisma\.\w+\.|\b(linkClinicToClerkOrg|setClinicPlan|setClinicStatusByStaff|getCategoryList|findSeedClinic|listClinicsNamed|runDemoCleanup)\(/);
       expect(firstQuery, `${file} must call preflight() before it touches the database`).toBeGreaterThan(check);
     }
+  });
+
+  it("the on-production runner touches no database itself and checks .env.release before it runs anything", () => {
+    const source = readFileSync("prisma/release-env.ts", "utf8");
+    expect(source).not.toMatch(/@prisma\/client|lib\/db|\bprisma\.\w+\./);
+    const check = source.indexOf("planRelease(");
+    expect(check).toBeGreaterThan(-1);
+    expect(source.indexOf("spawnSync(")).toBeGreaterThan(check);
   });
 
   it("no npm script runs a Prisma command that changes a database's shape (rule 3)", () => {

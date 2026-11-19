@@ -64,7 +64,7 @@ if [ "$HAS_LABEL" = "true" ]; then
   exit 0
 fi
 
-message="This PR changes the database. Migrate production with npx.cmd prisma migrate deploy from the main checkout on this branch, then add the production-migrated label."
+message="This PR changes the database. Migrate production with npm.cmd run on-production -- npx.cmd prisma migrate deploy from the main checkout on this branch, then add the production-migrated label."
 
 # "::error::" is how a GitHub Actions step puts a message at the top of the
 # check's page and on the pull request itself.

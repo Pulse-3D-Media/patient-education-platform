@@ -306,7 +306,7 @@ export const fetchSubscriptionSnapshot: FetchSubscription = async (subscriptionI
  *      sets VERCEL_ENV itself; a value pasted into the Production settings
  *      by mistake cannot open checkout there.
  *   4. the database is NOT the production one. A computer running the app
- *      with the main checkout's .env (which is production's) plus a test key
+ *      against the production database (through .env.release, say) plus a test key
  *      and the switch would otherwise sell test-card plans against real
  *      clinics. The database is compared with PRODUCTION_DATABASE_HOST the way
  *      the operator scripts compare it (databaseKind() in prisma/preflight.ts),

@@ -11,8 +11,9 @@
  *
  * - no test connection string, or one that cannot be read
  * - a production connection string that is set but cannot be read
- * - no production connection string at all, so there is nothing to compare
- *   against (a worktree with no .env, for example)
+ * - nothing that names production at all, so there is nothing to compare
+ *   against (a worktree with no .env, for example). What names production
+ *   is worked out by productionStrings(), at the end of this file
  * - the test string names the same Neon endpoint as production, however
  *   either side spells it: through Neon's connection pooler or not, with a
  *   port or a trailing dot or without
@@ -97,9 +98,59 @@ export function checkTestDatabase(testUrl: string | undefined, production: Produ
     return {
       ok: false,
       reason:
-        "Refusing to run: no DATABASE_URL or DIRECT_URL is set (in .env or the environment), so the tests cannot confirm the test database is not production. Copy .env from the main checkout, or set them.",
+        "Refusing to run: nothing here says which database is production (no PRODUCTION_DATABASE_HOST in .env or the environment, no .env.release, and no DATABASE_URL or DIRECT_URL), so the tests cannot confirm the test database is not production. Copy .env from the main checkout, or set PRODUCTION_DATABASE_HOST.",
     };
   }
 
   return { ok: true, endpoint: testEndpoint };
+}
+
+/** A set of settings read from a file or the environment. */
+type Settings = Record<string, string | undefined>;
+
+/**
+ * Everything on this computer that names the production database, as the list
+ * checkTestDatabase() compares the test database against.
+ *
+ * Since November 2026 the main checkout's .env points at the TESTING branch,
+ * and production's two connection strings live in .env.release, which only
+ * the release command reads. So ".env's DATABASE_URL" no longer means
+ * production, and production is named two other ways instead:
+ *
+ * - PRODUCTION_DATABASE_HOST (in .env, or the environment): the production
+ *   host name, the same line the operator scripts compare with.
+ * - .env.release: its DATABASE_URL and DIRECT_URL, when the file is there.
+ *
+ * When PRODUCTION_DATABASE_HOST is not set anywhere, .env's (or the
+ * environment's) DATABASE_URL and DIRECT_URL are compared as well, the way
+ * they always were. That covers GitHub's checks, which set a stand-in
+ * DATABASE_URL and nothing else, and a checkout whose .env is still the old
+ * production one with the host line missing.
+ *
+ * When PRODUCTION_DATABASE_HOST is set, .env's DATABASE_URL is NOT treated as
+ * production: it is the testing branch, and the tests are allowed to run
+ * there.
+ *
+ * Pure: it only reads what it is given. Never returns anything but the
+ * values it was handed, and checkTestDatabase() never prints them.
+ */
+export function productionStrings(sources: { appEnv: Settings; releaseEnv: Settings; processEnv: Settings }): ProductionUrl[] {
+  const { appEnv, releaseEnv, processEnv } = sources;
+  const list: ProductionUrl[] = [];
+
+  const host = (appEnv.PRODUCTION_DATABASE_HOST ?? processEnv.PRODUCTION_DATABASE_HOST)?.trim();
+  if (host) {
+    // A bare host name is turned into an address so it can be read like one.
+    list.push({ name: "PRODUCTION_DATABASE_HOST", value: host.includes("://") ? host : `postgresql://${host}` });
+  }
+
+  list.push({ name: "DATABASE_URL in .env.release", value: releaseEnv.DATABASE_URL });
+  list.push({ name: "DIRECT_URL in .env.release", value: releaseEnv.DIRECT_URL });
+
+  if (!host) {
+    list.push({ name: "DATABASE_URL", value: appEnv.DATABASE_URL ?? processEnv.DATABASE_URL });
+    list.push({ name: "DIRECT_URL", value: appEnv.DIRECT_URL ?? processEnv.DIRECT_URL });
+  }
+
+  return list;
 }

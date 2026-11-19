@@ -29,7 +29,13 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }), usePathname: () => "/q/vitest" }));
 vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
 
-const tag = () => randomBytes(5).toString("hex");
+// A random tag for the made-up clinic's name, in letters only (a to p). The name
+// is shown on the page, and a tag with digits in it would now and then spell
+// "403" or "404" by chance, which the calm-page check below looks for.
+const tag = () =>
+  randomBytes(5)
+    .toString("hex")
+    .replace(/\d/g, (digit) => "ghijklmnop"[Number(digit)]);
 const createdClinicIds: string[] = [];
 let video = "";
 
@@ -75,11 +81,25 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+/**
+ * The words a patient can read on the page: the markup with every tag (and so
+ * every address and id inside a tag) taken out. The page's code holds random
+ * ids, and one of them containing "403" or "404" by chance is not something a
+ * patient ever sees.
+ */
+function wordsOnPage(html: string) {
+  // Words a screen reader says although they are not drawn: the labels and
+  // picture descriptions written inside tags. Kept, so they are checked too.
+  const spoken = [...html.matchAll(/\s(?:aria-label|alt|title)="([^"]*)"/g)].map((match) => match[1]);
+  const drawn = html.replace(/<(script|style)[\s\S]*?<\/\1>/g, " ").replace(/<[^>]*>/g, " ");
+  return [drawn, ...spoken].join(" ");
+}
+
 /** The calm-page rules: no Play button and no box, nothing alarming. */
 function expectCalm(html: string) {
   expect(html).not.toContain("Tick the box above to play");
   expect(html).not.toContain('type="checkbox"');
-  expect(html.toLowerCase()).not.toMatch(/error|invalid|403|404/);
+  expect(wordsOnPage(html).toLowerCase()).not.toMatch(/error|invalid|403|404/);
 }
 
 describe("a live printed code", () => {

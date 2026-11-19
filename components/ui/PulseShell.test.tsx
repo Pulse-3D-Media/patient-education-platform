@@ -26,3 +26,22 @@ describe("PulseShell's Open demo site link", () => {
     expect(html).not.toContain('target="_blank"');
   });
 });
+
+describe("PulseShell's look", () => {
+  it("is always dark, said on its own outermost element, so it never depends on the staff screens' default (light)", () => {
+    const html = renderToStaticMarkup(<PulseShell demoSiteUrl={null}>page</PulseShell>).replace(/^(<link [^>]*>)+/, ""); // React puts the logo's preload hint first
+    expect(html).toMatch(/^<div data-theme="dark"/);
+    expect(html).not.toContain('data-theme="light"');
+    // The staff fonts' headings, and no clinic's colours.
+    expect(html).toMatch(/^<div [^>]*class="[^"]*staff-headings/);
+    expect(html).not.toContain("--brand-accent");
+  });
+
+  it("lists the six sections on the rail and in the phone's row of pills, with the current one marked, and the way to the library", () => {
+    const html = renderToStaticMarkup(<PulseShell demoSiteUrl={null}>page</PulseShell>);
+    expect(html.match(/<nav aria-label="Dashboard"/g)).toHaveLength(2);
+    for (const label of ["Clinics", "Videos", "Pricing", "Settings", "Billing", "Reports"]) expect(html.match(new RegExp(`>${label}<`, "g"))).toHaveLength(2);
+    expect(html.match(/aria-current="page"[^>]*href="\/pulse"/g)).toHaveLength(2);
+    expect(html).toContain('href="/library"');
+  });
+});

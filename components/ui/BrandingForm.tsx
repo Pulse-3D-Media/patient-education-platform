@@ -299,7 +299,7 @@ export function BrandingForm({
       <div aria-hidden="true" className="flex flex-col gap-4">
         <p className="text-sm font-medium text-ink-soft">Preview</p>
 
-        <div className={`overflow-hidden rounded-2xl bg-white text-[#12202a] ${fontClasses[font]}`} style={themeVars(patient) as CSSProperties}>
+        <div className={`overflow-hidden rounded-2xl bg-white text-[#12202a] ${fontClasses[font] || "patient-type"}`} style={themeVars(patient) as CSSProperties}>
           <div className="h-1.5 bg-brand" />
           <div className="px-5 pb-5 pt-4">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-[#46555e]">What a patient sees</p>
@@ -339,7 +339,7 @@ export function BrandingForm({
         </div>
 
         {/* data-theme gives the tokens inside this card the chosen mode's values, whatever the page around the form is. text-ink is set here, not inherited, for the same reason. */}
-        <div data-theme={mode} className={`rounded-2xl border border-line bg-surface p-5 text-ink ${fontClasses[font]}`} style={themeVars(staff) as CSSProperties}>
+        <div data-theme={mode} className={`rounded-2xl border border-line bg-surface p-5 text-ink ${fontClasses[font] || "staff-headings"}`} style={themeVars(staff) as CSSProperties}>
           <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-ink-muted">What your team sees</p>
           <div className="flex flex-wrap items-center gap-3">
             <span className={`${PRIMARY_BUTTON} h-11`}>Create link</span>

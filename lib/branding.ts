@@ -48,7 +48,11 @@
  * patient page's 20px body size. No script or display faces.
  */
 export const BRAND_FONTS = [
-  { key: "inter", label: "Inter", note: "The Pulse 3D default. Clean and neutral." },
+  // "inter" is the default's key (it was the default before the staff screens moved to the
+  // design's two fonts on 2026-11-18). It is never stored: the default is stored as "nothing set".
+  // Chosen, the staff screens use Hanken Grotesk with Schibsted Grotesk headings (app/staff-fonts.ts)
+  // and the patient page keeps Inter, as it always had.
+  { key: "inter", label: "Pulse 3D default", note: "Hanken Grotesk for your team, Inter for patients." },
   { key: "open-sans", label: "Open Sans", note: "Friendly and very widely used." },
   { key: "source-sans", label: "Source Sans", note: "Calm and clinical." },
   { key: "montserrat", label: "Montserrat", note: "Modern, a little wider." },
@@ -90,8 +94,15 @@ export const BRAND_THEMES = [
 
 export type BrandTheme = (typeof BRAND_THEMES)[number]["key"];
 
-/** The mode a clinic has until it chooses the other. Stored as "nothing set". */
-export const DEFAULT_BRAND_THEME: BrandTheme = "dark";
+/**
+ * The mode a clinic has until it chooses the other, stored as "nothing set".
+ * Light since 2026-11-18 (Evan, with the approved design); it was dark before.
+ * So a clinic that chooses Dark now has "dark" written down, and a clinic that
+ * never chose, or chose Light, is stored as nothing. A clinic that chose Dark
+ * BEFORE that day was stored as nothing too (dark was the default then), so
+ * it reads as Light now; choosing Dark again on its Branding page keeps it.
+ */
+export const DEFAULT_BRAND_THEME: BrandTheme = "light";
 
 /** "dark" or "light", or null when the value is anything else. */
 export function parseBrandTheme(input: unknown): BrandTheme | null {

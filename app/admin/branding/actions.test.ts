@@ -86,7 +86,7 @@ let mine = "";
 let theirs = "";
 let pending = "";
 
-const good = { brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "light", phone: "(801) 555-0123" };
+const good = { brandColor: "#7A1F2B", brandFont: "merriweather", brandTheme: "dark", phone: "(801) 555-0123" };
 
 async function makeClinic(name: string, clerkOrgId: string, status: "ACTIVE" | "PENDING") {
   const clinic = await prisma.clinic.create({ data: { name, clerkOrgId, status, logoUrl: "https://example.com/their-own-logo.png" }, select: { id: true } });
@@ -146,14 +146,14 @@ describe("who may save a clinic's branding", () => {
 
     expect(await saveClinicBrandingAction(null, form(good))).toMatchObject({ ok: expect.stringContaining("Saved") });
 
-    expect(await brandingOf(mine)).toEqual({ brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light", phone: "8015550123", logoUrl: "https://example.com/their-own-logo.png" });
+    expect(await brandingOf(mine)).toEqual({ brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "dark", phone: "8015550123", logoUrl: "https://example.com/their-own-logo.png" });
 
     const notes = await prisma.clinicNote.findMany({ where: { clinicId: mine }, select: { authorName: true, kind: true, body: true } });
     expect(notes).toEqual([
       {
         authorName: "Jane Smith (clinic admin)",
         kind: "STATUS",
-        body: "Branding changed: colour set to #7a1f2b; font changed from Inter to Merriweather; mode changed from Dark to Light; phone set to (801) 555-0123.",
+        body: "Branding changed: colour set to #7a1f2b; font changed from Pulse 3D default to Merriweather; mode changed from Light to Dark; phone set to (801) 555-0123.",
       },
     ]);
   });
@@ -204,11 +204,11 @@ describe("what a clinic admin may set", () => {
     signInAs(orgMine, "admin");
     await saveClinicBrandingAction(null, form(good));
 
-    expect(await saveClinicBrandingAction(null, form({ brandColor: "", brandFont: "inter", brandTheme: "dark", phone: "" }))).toMatchObject({ ok: expect.stringContaining("Saved") });
+    expect(await saveClinicBrandingAction(null, form({ brandColor: "", brandFont: "inter", brandTheme: "light", phone: "" }))).toMatchObject({ ok: expect.stringContaining("Saved") });
     expect(await brandingOf(mine)).toEqual(UNTOUCHED);
 
     // Sent again (a double tap, a retry after a dropped connection): nothing more is written.
-    expect(await saveClinicBrandingAction(null, form({ brandColor: "", brandFont: "inter", brandTheme: "dark", phone: "" }))).toEqual({ ok: "Nothing changed, so nothing was saved." });
+    expect(await saveClinicBrandingAction(null, form({ brandColor: "", brandFont: "inter", brandTheme: "light", phone: "" }))).toEqual({ ok: "Nothing changed, so nothing was saved." });
     expect(await prisma.clinicNote.count({ where: { clinicId: mine } })).toBe(2);
   });
 });

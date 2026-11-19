@@ -39,7 +39,7 @@ describe("activeAdminSection", () => {
 
   it("has Branding between People and Billing, and nothing after Billing", () => {
     const labels = ADMIN_SECTIONS.map((section) => section.label);
-    expect(labels).toEqual(["Overview", "Shared links", "People", "Branding", "Billing"]);
+    expect(labels).toEqual(["Overview", "Shared links", "People", "Clinic branding", "Billing"]);
   });
 
   it("lists every section with an address under /admin", () => {

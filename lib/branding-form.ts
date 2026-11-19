@@ -54,12 +54,13 @@ export function readBrandingForm(formData: FormData): { values: BrandingFormValu
   const font = fontText ? parseBrandFont(fontText) : DEFAULT_BRAND_FONT;
   if (!font) return { error: "Choose one of the fonts on the list." };
 
-  // An empty mode means the default (dark). Anything else has to be one of the two.
+  // An empty mode means the default (light, since 2026-11-18). Anything else has to be one of the two.
   const themeText = field(formData, "brandTheme");
   const theme = themeText ? parseBrandTheme(themeText) : DEFAULT_BRAND_THEME;
   if (!theme) return { error: "Choose Dark or Light." };
 
-  // The defaults are stored as "nothing set", so a clinic that never chose and a clinic that chose Inter, or dark, are the same row.
+  // The defaults are stored as "nothing set", so a clinic that never chose and a clinic that chose the default font, or light, are the same row.
+  // Dark, no longer the default, is written down as "dark".
   return {
     values: {
       phone,

@@ -295,3 +295,32 @@ body {
     background-color: transparent;
   }
 }
+
+/*
+ * THE STAFF SCREENS' FONTS (Evan, 2026-11-18): Hanken Grotesk for text and
+ * Schibsted Grotesk for headings. The two font variables come from
+ * app/staff-fonts.ts, on the element each staff layout wraps its pages in,
+ * so these rules only ever apply inside a staff page. The patient's pages
+ * keep Inter (the body rule above).
+ *
+ * "staff-type" is in the base layer on purpose: a clinic's own font (a
+ * class from app/brand-fonts.ts, which is not in a layer) then wins over it
+ * without a fight. "staff-headings" is added by the shell only when the
+ * clinic kept the default font, so a clinic that chose Merriweather gets
+ * Merriweather in its headings too.
+ */
+@layer base {
+  .staff-type {
+    font-family: var(--font-hanken), "Hanken Grotesk", system-ui, sans-serif;
+  }
+
+  .staff-headings :where(h1, h2, h3) {
+    font-family: var(--font-schibsted), "Schibsted Grotesk", var(--font-hanken), system-ui, sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Something on a staff page that shows the PATIENT page (the Branding form's preview) uses the patient page's font. */
+  .patient-type {
+    font-family: var(--font-inter), Inter, system-ui, sans-serif;
+  }
+}

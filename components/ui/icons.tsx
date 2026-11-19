@@ -282,3 +282,91 @@ export function ChaptersIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+// The console's rail (admin and /pulse), drawn after the approved design (2026-11-18).
+
+const RAIL_ICON = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
+
+/** Two chain links: Shared links. */
+export function LinkIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    </svg>
+  );
+}
+
+/** Two people: People. */
+export function PeopleIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5" />
+      <path d="M16 4.6a3.5 3.5 0 0 1 0 6.8" />
+      <path d="M18 14.8c1.8.8 3 2.6 3.5 5.2" />
+    </svg>
+  );
+}
+
+/** A painter's palette: Clinic branding. */
+export function PaletteIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-1-1.5-1-2.5 1-1.5 2-1.5h2a4 4 0 0 0 4-4C21 6.5 17 3 12 3z" />
+      <circle cx="7.5" cy="11" r="1.2" />
+      <circle cx="10" cy="7" r="1.2" />
+      <circle cx="15" cy="7" r="1.2" />
+    </svg>
+  );
+}
+
+/** A payment card: Billing, and Pricing on /pulse. */
+export function CardIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 10h18" />
+    </svg>
+  );
+}
+
+/** An outlined play triangle: Videos on /pulse. (PlayIcon is the player's filled one.) */
+export function VideoIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M7 4.5v15l12-7.5z" />
+    </svg>
+  );
+}
+
+/** Three dots: Settings on /pulse. */
+export function DotsIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <circle cx="5" cy="12" r="1.2" />
+      <circle cx="12" cy="12" r="1.2" />
+      <circle cx="19" cy="12" r="1.2" />
+    </svg>
+  );
+}
+
+/** A warning triangle: Billing diagnostics on /pulse, where notifications that need attention are. */
+export function AlertIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M12 3.5 21.5 20h-19z" />
+      <path d="M12 10v4.5M12 17.5v.01" />
+    </svg>
+  );
+}
+
+/** Three rising bars: Reports on /pulse. */
+export function ChartIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M4 20h16" />
+      <path d="M7 16v-4M12 16V7M17 16v-7" />
+    </svg>
+  );
+}

@@ -11,8 +11,8 @@ function form(fields: Record<string, string>) {
 
 describe("readBrandingForm", () => {
   it("tidies good values: lowercase hex, ten-digit phone, the font's key", () => {
-    expect(readBrandingForm(form({ brandColor: " #7A1F2B ", brandFont: "Merriweather", brandTheme: " Light ", phone: "+1 (801) 555-0123" }))).toEqual({
-      values: { brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light", phone: "8015550123" },
+    expect(readBrandingForm(form({ brandColor: " #7A1F2B ", brandFont: "Merriweather", brandTheme: " Dark ", phone: "+1 (801) 555-0123" }))).toEqual({
+      values: { brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "dark", phone: "8015550123" },
     });
   });
 
@@ -24,8 +24,8 @@ describe("readBrandingForm", () => {
 
   it("stores the default font as nothing set", () => {
     expect(readBrandingForm(form({ brandFont: "inter" }))).toEqual({ values: { brandColor: null, brandFont: null, brandTheme: null, phone: null } });
-    // Dark is the default too, so choosing it is stored as nothing set.
-    expect(readBrandingForm(form({ brandTheme: "dark" }))).toEqual({ values: { brandColor: null, brandFont: null, brandTheme: null, phone: null } });
+    // Light is the default too (since 2026-11-18; dark before), so choosing it is stored as nothing set.
+    expect(readBrandingForm(form({ brandTheme: "light" }))).toEqual({ values: { brandColor: null, brandFont: null, brandTheme: null, phone: null } });
   });
 
   it("refuses a value it does not understand rather than guessing or dropping it", () => {

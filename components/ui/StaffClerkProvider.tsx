@@ -21,9 +21,11 @@ import { clerkRedirectOrigins } from "@/lib/trusted-origin";
  * readable (staffTheme in lib/branding.ts). Left out, on the sign-in and
  * onboarding pages where there is no clinic yet, it is the Pulse teal.
  *
- * `theme` is the clinic's light-or-dark choice. Clerk's pieces are light
- * panels either way (that is Clerk's own default, and what they were before
- * the choice existed). In a DARK clinic they are left exactly as they were.
+ * `theme` is the clinic's light-or-dark choice, light when nothing says
+ * otherwise (the staff screens' default since 2026-11-18); /pulse passes dark.
+ * Clerk's pieces are light panels either way (that is Clerk's own default,
+ * and what they were before the choice existed). In DARK they are left
+ * exactly as they were.
  * In a LIGHT clinic they are given the light screens' own white, ink and
  * accent (with the right text colour on the accent), so they match the page
  * around them instead of only resembling it. The values are the same ones
@@ -33,8 +35,9 @@ export function StaffClerkProvider({
   children,
   accent = "#2a829b",
   onAccent = "#ffffff",
-  fontFamily = "var(--font-inter), Inter, sans-serif",
-  theme = "dark",
+  // Every layout passes the font: the staff text font (app/staff-fonts.ts), or the clinic's own. This is only a fallback.
+  fontFamily = "var(--font-hanken), var(--font-inter), system-ui, sans-serif",
+  theme = "light",
 }: {
   children: ReactNode;
   accent?: string;

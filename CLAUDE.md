@@ -340,12 +340,16 @@ docs/decisions.md    Dated decisions: who decided what, and when.
 Match the live Pulse 3D site.
 Do not invent a new palette.
 
-- Font: **Inter** by default.
-  A clinic may choose one of the approved fonts (listed under "Clinic branding and dependable playback") for its own surfaces; Pulse's own screens keep Inter
+- Fonts on the staff screens (`/admin`, `/library`, `/pulse`, sign-in, sign-up and onboarding): **Schibsted Grotesk** for headings and **Hanken Grotesk** for text (Evan, 2026-11-18), loaded with `next/font/google` in `app/staff-fonts.ts`, which only the staff layouts import, and never preloaded (the production build shares its CSS across every page, so a preload would reach the patient's phone too).
+  A clinic may choose one of the approved fonts (listed under "Clinic branding and dependable playback") for its own surfaces, and then that font is used for headings and text alike.
+  The patient's pages (`app/watch`, `app/q`) and the calm error and not-found pages keep **Inter**, so a patient's phone never downloads the staff fonts.
 - Accent: `#2a829b` · Accent deep: `#1e5668` · Accent bright (on dark): `#5fb8d4`
 - Light band: `#e4ebf3` · Black: `#000000`
-- **Dark staff screens (the default, and all of `/pulse`):** page `#000000` · cards `#0d1113` · rail and text boxes `#07090b` · menus `#0a0d0f` · headings `#ffffff` · body text `#bfbfbf` · muted `#667085` · hairlines white at 10%, button and text-box edges white at 15% · amber `#f3b94d`
-- **Light staff screens (a clinic's choice):** pure white with cool, neutral greys, no warm tint (Van asked for white, not beige, on 2026-09-21) · page, cards, menus and text boxes `#ffffff` · rail `#f3f5f7` · headings `#12202a` · body text `#3a4c56` · muted `#52616a` · hairlines `#e3e7eb`, button and text-box edges `#737b83` · amber text `#684400` · Pulse accent `#1e5668`, which is also the link shade
+- **The staff screens are light by default** (Evan, 2026-11-18): a clinic that never chose gets light, and a clinic that chooses Dark on its Branding page gets dark.
+  **`/pulse` is always dark**, and says so itself rather than relying on any default.
+- **The console layout** (the approved design of 2026-11-18): `/admin` and `/pulse` share one frame, `ConsoleShell` in `components/ui`, with a left rail of sections, Library and the signed-in person at the bottom of the rail, and on a phone a top bar with the library and the avatar over a row of section pills.
+- **Dark staff screens (a clinic's choice, and all of `/pulse`):** page `#000000` · cards `#0d1113` · rail and text boxes `#07090b` · menus `#0a0d0f` · headings `#ffffff` · body text `#bfbfbf` · muted `#667085` · hairlines white at 10%, button and text-box edges white at 15% · amber `#f3b94d`
+- **Light staff screens (the default, and sign-in, sign-up and onboarding):** pure white with cool, neutral greys, no warm tint (Van asked for white, not beige, on 2026-09-21) · page, cards, menus and text boxes `#ffffff` · rail `#f3f5f7` · headings `#12202a` · body text `#3a4c56` · muted `#52616a` · hairlines `#e3e7eb`, button and text-box edges `#737b83` · amber text `#684400` · Pulse accent `#1e5668`, which is also the link shade
 - **The patient page (always light, whatever the clinic chose), its calm error and not-found pages, and the Branding form's preview of it:** plain white too (Van, 2026-10-05) · page `#ffffff` · headings `#12202a` · body text `#3a4c56` · small text `#46555e` · hairlines `#e3e7eb` · the soft circle behind an icon `#eef1f4` with the icon `#52616a` · the clinic's colour only as the thin top band and the call button, adjusted against white (`PATIENT_GROUND` in `lib/branding.ts`) · the placeholder bar stays amber
 - In code these are never written as hex: use the token classes (see "Light and dark staff screens").
   The values live in `app/globals.css`.

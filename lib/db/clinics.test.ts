@@ -430,16 +430,16 @@ describe("updateClinicBranding", () => {
 
     const { clinic, logged } = await updateClinicBranding(
       clinicId,
-      { phone: "8015550123", brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "light" },
+      { phone: "8015550123", brandColor: "#7a1f2b", brandFont: "merriweather", brandTheme: "dark" },
       "Jane Smith (clinic admin)",
     );
 
     expect(clinic.phone).toBe("8015550123");
     expect(clinic.brandColor).toBe("#7a1f2b");
     expect(clinic.brandFont).toBe("merriweather");
-    expect(clinic.brandTheme).toBe("light");
+    expect(clinic.brandTheme).toBe("dark");
     expect(logged).toBe(
-      "Branding changed: colour set to #7a1f2b; font changed from Inter to Merriweather; mode changed from Dark to Light; phone set to (801) 555-0123.",
+      "Branding changed: colour set to #7a1f2b; font changed from Pulse 3D default to Merriweather; mode changed from Light to Dark; phone set to (801) 555-0123.",
     );
 
     const notes = await listNotesForClinic(clinicId);
@@ -471,29 +471,29 @@ describe("updateClinicBranding", () => {
     expect(await listNotesForClinic(clinicId)).toHaveLength(1);
   });
 
-  it("logs a change of mode on its own, and treats nothing stored and dark as the same thing", async () => {
+  it("logs a change of mode on its own, and treats nothing stored and light as the same thing", async () => {
     const clinicId = await makeClinic("mode");
 
-    // Nothing stored is dark, so saving "dark" over it is no change at all.
-    const same = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: "dark" }, "Evan Miller");
+    // Nothing stored is light (the default since 2026-11-18), so saving "light" over it is no change at all.
+    const same = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: "light" }, "Evan Miller");
     expect(same.logged).toBeNull();
     expect(await listNotesForClinic(clinicId)).toHaveLength(0);
 
-    const toLight = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: "light" }, "Jane Smith (clinic admin)");
-    expect(toLight.clinic.brandTheme).toBe("light");
-    expect(toLight.logged).toBe("Branding changed: mode changed from Dark to Light.");
+    const toDark = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: "dark" }, "Jane Smith (clinic admin)");
+    expect(toDark.clinic.brandTheme).toBe("dark");
+    expect(toDark.logged).toBe("Branding changed: mode changed from Light to Dark.");
 
     const back = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: null }, "Evan Miller");
     expect(back.clinic.brandTheme).toBeNull();
-    expect(back.logged).toBe("Branding changed: mode changed from Light to Dark.");
+    expect(back.logged).toBe("Branding changed: mode changed from Dark to Light.");
   });
 
-  it("going back to the Pulse look reads as removed, and Inter is the word for no font", async () => {
+  it("going back to the Pulse look reads as removed, and \"Pulse 3D default\" is the word for no font", async () => {
     const clinicId = await makeClinic("reset");
     await updateClinicBranding(clinicId, { phone: "8015550123", brandColor: "#112233", brandFont: "montserrat", brandTheme: null }, "Evan Miller");
 
     const { logged } = await updateClinicBranding(clinicId, { phone: null, brandColor: null, brandFont: null, brandTheme: null }, "Evan Miller");
-    expect(logged).toBe("Branding changed: colour removed (was #112233); font changed from Montserrat to Inter; phone removed (was (801) 555-0123).");
+    expect(logged).toBe("Branding changed: colour removed (was #112233); font changed from Montserrat to Pulse 3D default; phone removed (was (801) 555-0123).");
   });
 
   it("changes only the clinic it was asked to change", async () => {

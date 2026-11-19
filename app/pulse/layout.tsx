@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { PulseShell } from "@/components/ui/PulseShell";
 import { StaffClerkProvider } from "@/components/ui/StaffClerkProvider";
+import { STAFF_TEXT_FAMILY, STAFF_TYPE_CLASS } from "@/app/staff-fonts";
 import { demoSiteUrl } from "@/lib/demo-site";
 import { isPulseStaff } from "@/lib/pulse";
 
@@ -14,6 +15,9 @@ import { isPulseStaff } from "@/lib/pulse";
  * requirePulseStaff() for itself as well.
  *
  * Clerk's provider goes around the shell so the user button works.
+ * The dashboard is always dark (the shell says so itself, so it never
+ * depends on the staff screens' default, which is light), and it uses the
+ * staff screens' fonts (app/staff-fonts.ts).
  *
  * The demo site's address (DEMO_SITE_URL, see lib/demo-site.ts) is read here,
  * on the server and only after the staff check, and handed to the shell for
@@ -23,8 +27,10 @@ export default async function PulseLayout({ children }: LayoutProps<"/pulse">) {
   if (!(await isPulseStaff())) notFound();
 
   return (
-    <StaffClerkProvider>
-      <PulseShell demoSiteUrl={demoSiteUrl()}>{children}</PulseShell>
+    <StaffClerkProvider theme="dark" fontFamily={STAFF_TEXT_FAMILY}>
+      <div className={`${STAFF_TYPE_CLASS} contents`}>
+        <PulseShell demoSiteUrl={demoSiteUrl()}>{children}</PulseShell>
+      </div>
     </StaffClerkProvider>
   );
 }

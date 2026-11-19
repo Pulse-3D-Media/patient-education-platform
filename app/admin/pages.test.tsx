@@ -439,10 +439,10 @@ describe("an admin of an ACTIVE clinic", () => {
     // The form: one colour, the six fonts, the phone.
     expect(html).toContain('name="brandColor"');
     expect(html.match(/name="brandFont"/g)).toHaveLength(6);
-    // Dark or light: two choices, and a clinic that never chose opens on Dark.
+    // Dark or light: two choices, and a clinic that never chose opens on Light (the default since 2026-11-18).
     expect(html.match(/name="brandTheme"/g)).toHaveLength(2);
-    expect(html).toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="dark"/);
-    expect(html).not.toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="light"/);
+    expect(html).toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="light"/);
+    expect(html).not.toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="dark"/);
     expect(html).toContain('name="phone"');
     expect(html).toContain("Save branding");
     // Only Pulse staff can type a logo address, and the clinic never sends its own id.
@@ -463,16 +463,20 @@ describe("an admin of an ACTIVE clinic", () => {
       ] as const) {
         signInAs(orgActive, "admin", "Vitest pages clinic (active)");
         const html = await render(page, path);
-        // A dark red is too dark to see on the near-black screens, so the shell gets a lightened shade of it, never the raw value.
-        expect(html).toMatch(/--brand-accent:#[0-9a-f]{6}/);
+        // A dark red reads on the white screens as it is, so the shell carries the clinic's own colour, not the Pulse teal.
+        expect(html).toContain("--brand-accent:#7a1f2b");
         expect(html).not.toContain("--brand-accent:#2a829b");
+        // The clinic's own font on the console, and so no Schibsted Grotesk headings.
         expect(html).toContain("font-montserrat");
-        // The clinic's name is always in the banner, on every admin page: it labels the logo's link home, and stands in as words until the logo has loaded.
-        expect(html).toContain('aria-label="Vitest pages clinic (active), library home"');
+        expect(html).not.toContain("staff-headings");
+        // The clinic's name is always in the banner, on every admin page: it labels the logo's link to the overview, and stands in as words until the logo has loaded.
+        expect(html).toContain('aria-label="Vitest pages clinic (active), admin overview"');
         expect(html).toMatch(/<header\b[\s\S]*?Vitest pages clinic \(active\)[\s\S]*?<\/header>/);
-        // The admin menu's icon is offered to an admin; the menu itself stays shut until it is pressed.
-        expect(html).toContain('aria-controls="admin-menu"');
-        expect(html).not.toContain('id="admin-menu"');
+        // The console's section navigation (the rail, and the phone's row of pills), with this page marked, and the way to the library.
+        expect(html.match(/<nav aria-label="Clinic admin"/g)).toHaveLength(2);
+        // React writes attributes in prop order, and Link puts href last, so the mark comes before the address.
+        expect(html).toMatch(new RegExp(`aria-current="page"[^>]*href="${path}"`));
+        expect(html).toContain('href="/library"');
       }
       // The Branding form opens on what is saved.
       signInAs(orgActive, "admin", "Vitest pages clinic (active)");
@@ -484,8 +488,8 @@ describe("an admin of an ACTIVE clinic", () => {
     }
   });
 
-  it("a clinic that chose light gets light screens, for its admin and its members alike, and no other clinic does", async () => {
-    await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: "light" } });
+  it("a clinic that chose dark gets dark screens, for its admin and its members alike, and no other clinic does", async () => {
+    await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: "dark" } });
     try {
       for (const [page, path] of [
         [AdminOverviewPage, "/admin"],
@@ -495,54 +499,54 @@ describe("an admin of an ACTIVE clinic", () => {
         signInAs(orgActive, "admin", "Vitest pages clinic (active)");
         const html = await render(page, path);
         // The mode is on the shell's outermost element, written by the server: nothing is switched after the page loads.
-        expect(html).toMatch(/^<div data-theme="light"/);
-        expect(html).not.toContain('data-theme="dark"');
-        // The Pulse look on a light ground is the deep teal, and the link shade is a dark one, not the pale blue used on black.
-        expect(html).toContain("--brand-accent:#1e5668");
-        expect(html).toContain("--brand-accent-bright:#1e5668");
-        expect(html).not.toContain("--brand-accent-bright:#5fb8d4");
-        // The dark-ground shades ride along, for the video player, which is black in both modes.
-        expect(html).toContain("--brand-dark-accent-bright:#5fb8d4");
+        expect(html).toMatch(/^<div data-theme="dark"/);
+        expect(html).not.toContain('data-theme="light"');
+        // The Pulse look on a dark ground is the Pulse teal, and the link shade is the pale blue, not the deep teal used on white.
+        expect(html).toContain("--brand-accent:#2a829b");
+        expect(html).toContain("--brand-accent-bright:#5fb8d4");
+        expect(html).not.toContain("--brand-accent-bright:#1e5668");
       }
 
       // A member cannot change it and sees it all the same (here on the page that tells them admin is not for them).
       signInAs(orgActive, "member", "Vitest pages clinic (active)");
-      expect(await render(AdminOverviewPage, "/admin")).toMatch(/^<div data-theme="light"/);
+      expect(await render(AdminOverviewPage, "/admin")).toMatch(/^<div data-theme="dark"/);
 
-      // The Branding form opens on Light, and its "what your team sees" card is light too.
+      // The Branding form opens on Dark, and its "what your team sees" card is dark too.
       signInAs(orgActive, "admin", "Vitest pages clinic (active)");
       const branding = await render(BrandingPage, "/admin/branding");
-      expect(branding).toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="light"/);
-      expect(branding.match(/data-theme="light"/g)).toHaveLength(2);
+      expect(branding).toMatch(/<input[^>]*name="brandTheme"[^>]*checked=""[^>]*value="dark"/);
+      expect(branding.match(/data-theme="dark"/g)).toHaveLength(2);
 
-      // Another clinic, asked in the same breath, is still dark.
+      // Another clinic, asked in the same breath, is light: it never chose, and light is the default.
       signInAs(orgManaged, "admin", "Vitest pages clinic (managed)");
       const other = await render(BillingPage, "/admin/billing");
-      expect(other).toMatch(/^<div data-theme="dark"/);
-      expect(other).not.toContain('data-theme="light"');
+      expect(other).toMatch(/^<div data-theme="light"/);
+      expect(other).not.toContain('data-theme="dark"');
     } finally {
       await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: null } });
     }
   });
 
-  it("falls back to dark for a stored mode it does not understand, and the junk never reaches the page", async () => {
+  it("falls back to light for a stored mode it does not understand, and the junk never reaches the page", async () => {
     await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: 'sepia" onload="x' } });
     try {
       signInAs(orgActive, "admin", "Vitest pages clinic (active)");
       const html = await render(AdminOverviewPage, "/admin");
-      expect(html).toMatch(/^<div data-theme="dark"/);
+      expect(html).toMatch(/^<div data-theme="light"/);
       expect(html).not.toContain("sepia");
     } finally {
       await prisma.clinic.update({ where: { id: createdClinicIds[0] }, data: { brandTheme: null } });
     }
   });
 
-  it("with no branding set, looks exactly as it did: the Pulse colours and Inter, in dark", async () => {
+  it("with no branding set, gets the default: the Pulse colours in light, in the staff fonts with Schibsted Grotesk headings", async () => {
     signInAs(orgActive, "admin", "Vitest pages clinic (active)");
     const html = await render(AdminOverviewPage, "/admin");
-    expect(html).toMatch(/^<div data-theme="dark"/);
-    expect(html).toContain("--brand-accent:#2a829b");
-    expect(html).toContain("--brand-accent-bright:#5fb8d4");
+    expect(html).toMatch(/^<div data-theme="light" class="[^"]*staff-headings/);
+    expect(html).toContain("--brand-accent:#1e5668");
+    expect(html).toContain("--brand-accent-bright:#1e5668");
+    // The dark-ground shades ride along, for the video player, which is black in both modes.
+    expect(html).toContain("--brand-dark-accent-bright:#5fb8d4");
     expect(html).not.toMatch(/font-(merriweather|open-sans|source-sans|montserrat|nunito-sans)/);
   });
 });

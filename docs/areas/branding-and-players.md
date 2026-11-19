@@ -25,7 +25,10 @@ A repeat of a saved value adds no duplicate log entry.
 
 The approved additions are nullable Clinic.brandColor and Clinic.brandFont, in migration 20260918184417_add_clinic_branding.
 One hex brand colour produces readable staff and patient shades.
-Choices are Inter (default), Open Sans, Source Sans, Montserrat, Nunito Sans and Merriweather.
+Choices are the Pulse 3D default, Open Sans, Source Sans, Montserrat, Nunito Sans and Merriweather.
+The default is Hanken Grotesk for text with Schibsted Grotesk headings on the staff screens (`app/staff-fonts.ts`, Evan, 2026-11-18) and Inter on the patient page; its key in the code is still `"inter"`, and it is stored as nothing set.
+A clinic that chooses one of the others gets that font for headings and text alike, on its staff screens and its patient page.
+The staff fonts are imported only by the staff layouts and are never preloaded: the production build puts the app's CSS in files every page shares, so a preload would have sent both files (about 80 KB) to a patient's phone too, as the build showed on 2026-11-19. Without it a browser fetches a font only when text on the page uses it, so the patient's pages and the calm error pages, which keep Inter, never download them.
 Fonts are built into the deployment and served from our own origin with display: swap; optional fonts are not preloaded.
 Text and playback never wait for them.
 The patient page retains its light background, 18px body copy (20px until the player refresh: every patient-page text size went down one small step on 2026-11-17, line heights unchanged, with a little more space between blocks) and minimum 15px text.
@@ -111,23 +114,26 @@ These features are branding, never copy protection.
 ## Light and dark staff screens
 
 A clinic chooses **Dark or Light** on its Branding form (the same form in both places, so also on the Branding tab of `/pulse/clinics/[id]`).
-It is stored in the nullable `Clinic.brandTheme` (migration `20260919212810_add_clinic_brand_theme`), a short text key like `brandFont`, never a database enum: `"light"`, or nothing for dark, so a clinic that never chose and a clinic that chose dark are the same row.
-`parseBrandTheme()` in `lib/branding.ts` checks it when it is saved and again when it is read; anything else reads as dark.
+It is stored in the nullable `Clinic.brandTheme` (migration `20260919212810_add_clinic_brand_theme`), a short text key like `brandFont`, never a database enum.
+**Light is the default** (Evan, 2026-11-18, with the approved design; dark was the default before): a save of Dark writes `"dark"`, a save of Light writes nothing, so a clinic that never chose and a clinic that chose light are the same row.
+`parseBrandTheme()` in `lib/branding.ts` checks it when it is saved and again when it is read; anything else reads as light (`DEFAULT_BRAND_THEME`).
+No migration and no backfill came with the change.
+Until 2026-11-18 a save of Dark wrote nothing (dark was the default then), so a clinic that chose Dark before that day cannot be told apart from one that never chose: both read as light now, and choosing Dark again on Branding keeps it dark.
 
 - **It is the clinic's setting.**
   Not each person's, not the computer's own dark-mode setting, and nothing is stored in the browser.
   A member sees their clinic's mode and cannot change it.
   Saving it follows every other branding rule (who may save, the clinic id from the session, the whole form refused on a bad value, the draft kept, "Branding changed: mode changed from Dark to Light." in the clinic log, nothing written when nothing changed).
 - **It covers the staff screens only:** everything inside the app shell, meaning `/library` and `/admin` with their menus, the Send panel, the cancel popup and Clerk's own pieces.
-  **Not affected, on purpose:** the patient page (always light), `/pulse` (always dark), sign-in, sign-up and onboarding, the printed pamphlet, and the inside of the library's video player, which is black in both modes.
+  **Not affected, on purpose:** the patient page (always light), `/pulse` (always dark, marked `data-theme="dark"` by its own shell so it never depends on the default), sign-in, sign-up and onboarding (always light, marked `data-theme="light"` by their layouts), the printed pamphlet, and the inside of the library's video player, which is black in both modes.
 - **How it works: named colour tokens, one attribute.**
   No page under `app/library`, `app/admin` or the shared staff pieces in `components/ui` holds a hex code or `white/10` for a surface, a border or text.
   They use the token classes (`bg-ground`, `bg-surface`, `bg-sunken`, `bg-overlay`, `bg-field`, `bg-well`, `border-line`, `border-line-strong`, `text-ink`, `text-ink-soft`, `text-ink-muted`, `hover:bg-wash`, `bg-wash-strong`, `bg-scrim`, `text-warn`, `text-problem`, `text-danger`, `shadow-panel`, `shadow-drawer`, `shadow-lift`), defined in `app/globals.css`.
-  The dark values there are exactly the colours the screens had before tokens existed and apply by default, which is why `/pulse` and sign-in are untouched.
-  `data-theme="light"` on the app shell's outermost element gives the same names their light values.
+  The dark values there are exactly the colours the screens had before tokens existed and are what `:root` holds, so anything outside a shell (a panel drawn straight into the page's body) is dark unless it says otherwise.
+  Every shell writes its mode on its outermost element: `data-theme="light"` gives the same names their light values, `data-theme="dark"` the dark ones.
   **New staff UI uses the tokens; a literal colour there is a bug in light mode.**
   The exceptions are things that sit on a picture or a fill and stay as they are in both modes: the labels and chips over a library tile or a thumbnail, the white box behind a QR code, the red "Yes, cancel it" button, the amber placeholder badge, and the clinic's mark on the video (the round logo and the dark chips) with the players' controls.
-- **The server writes the attribute** (`staffLook()` in `app/brand-look.ts`, through `ClinicShell` to `AppShell`), so the first paint is already right.
+- **The server writes the attribute** (`staffLook()` in `app/brand-look.ts`, through `ClinicShell` to `AppShell` in the library and through `AdminFrame` to `AdminConsole` in the admin area), so the first paint is already right.
   Never set it from a script after load.
 - **The accent is worked out per mode.**
   `staffTheme(color, mode)` lightens the clinic's colour until it stands out from near-black, or darkens it until it stands out from the darkest light surface (`STAFF_LIGHT_GROUND`, the icon rail).
@@ -136,7 +142,7 @@ It is stored in the nullable `Clinic.brandTheme` (migration `20260919212810_add_
 - **Clerk's pieces** get their colours from `StaffClerkProvider`: left exactly as they were in a dark clinic, given the light screens' white, ink and accent in a light one.
 - **The logo sits on the banner with nothing behind it,** so a dark logo suits Light and a white or pale one suits Dark.
   The form says so in one sentence; no chip comes back behind the logo.
-  The banner is 64px tall (the rail's width), the page's own colour, with one hairline under it.
+  The banner is 64px tall, the page's own colour, with one hairline under it, in the library and in the admin console alike.
   A logo saved with a background of its own still shows it: a white one vanishes on the white Light banner and shows as a white rectangle on the Dark one.
 - **Readable by test, not by eye.**
   `lib/branding.test.ts` reads the light block of `app/globals.css` itself and checks every kind of text (4.5:1) and every button or text-box edge (3:1) on every light surface, plain and under a hover wash, plus the accent for all 216 grid colours in both modes.

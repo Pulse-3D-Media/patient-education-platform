@@ -2,7 +2,8 @@ import { AppShell } from "@/components/ui/AppShell";
 import { brandFontFamily } from "@/app/brand-fonts";
 import { ClinicShell } from "@/components/ui/ClinicShell";
 import { StaffClerkProvider } from "@/components/ui/StaffClerkProvider";
-import { staffTheme } from "@/lib/branding";
+import { STAFF_TEXT_FAMILY, STAFF_TYPE_CLASS } from "@/app/staff-fonts";
+import { DEFAULT_BRAND_FONT, DEFAULT_BRAND_THEME, staffTheme } from "@/lib/branding";
 import { getClinicForShell } from "@/lib/clinic";
 import { RememberLibraryPages } from "./watch/[videoId]/BackLink";
 
@@ -39,18 +40,23 @@ import { RememberLibraryPages } from "./watch/[videoId]/BackLink";
 export default async function LibraryLayout({ children }: LayoutProps<"/library">) {
   const clinic = await getClinicForShell();
   // Clerk's own pieces take the accent worked out for the clinic's mode, light or dark.
-  const accent = staffTheme(clinic?.branding.color ?? null, clinic?.branding.theme);
+  const theme = clinic?.branding.theme ?? DEFAULT_BRAND_THEME;
+  const font = clinic?.branding.font ?? DEFAULT_BRAND_FONT;
+  const accent = staffTheme(clinic?.branding.color ?? null, theme);
   return (
-    <StaffClerkProvider accent={accent.accent} onAccent={accent.onAccent} theme={clinic?.branding.theme ?? "dark"} fontFamily={brandFontFamily(clinic?.branding.font ?? "inter")}>
-      {/* Counts the library pages shown in this tab, so the watch page's back arrow knows whether there is one to go back to. Draws nothing. */}
-      <RememberLibraryPages />
-      {clinic ? (
-        <ClinicShell clinic={clinic} showAdmin={clinic.isAdmin}>
-          {children}
-        </ClinicShell>
-      ) : (
-        <AppShell>{children}</AppShell>
-      )}
+    <StaffClerkProvider accent={accent.accent} onAccent={accent.onAccent} theme={theme} fontFamily={font === DEFAULT_BRAND_FONT ? STAFF_TEXT_FAMILY : brandFontFamily(font)}>
+      {/* The staff screens' fonts (app/staff-fonts.ts), for every library page. */}
+      <div className={`${STAFF_TYPE_CLASS} contents`}>
+        {/* Counts the library pages shown in this tab, so the watch page's back arrow knows whether there is one to go back to. Draws nothing. */}
+        <RememberLibraryPages />
+        {clinic ? (
+          <ClinicShell clinic={clinic} showAdmin={clinic.isAdmin}>
+            {children}
+          </ClinicShell>
+        ) : (
+          <AppShell>{children}</AppShell>
+        )}
+      </div>
     </StaffClerkProvider>
   );
 }

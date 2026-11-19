@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ADMIN_SECTIONS, activeAdminSection } from "@/lib/admin-nav";
+import { DEFAULT_BRAND_THEME } from "@/lib/branding";
 import { CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
@@ -68,7 +69,9 @@ import { AdminIcon, ArrowLeftIcon, BooksIcon, CloseIcon, HomeIcon, MenuIcon, Sea
  * on the server (ClinicShell, app/brand-look.ts): the colours as CSS
  * variables and the font's class, both set on the outermost element so
  * every page inside picks them up, plus the clinic's name and logo. Without
- * it the shell is the plain Pulse 3D one, in dark.
+ * it the shell is the plain Pulse 3D one, in light (the staff screens'
+ * default since 2026-11-18), in the staff fonts with Schibsted Grotesk
+ * headings ("staff-headings"; a clinic's own font replaces both).
  *
  * LIGHT OR DARK is the clinic's saved choice and arrives the same way. It
  * becomes the data-theme attribute on the outermost element, and that is
@@ -82,7 +85,7 @@ import { AdminIcon, ArrowLeftIcon, BooksIcon, CloseIcon, HomeIcon, MenuIcon, Sea
 export type ShellBrand = {
   /** The brand colours, as CSS variables. */
   style: CSSProperties;
-  /** The class that sets the clinic's font. Empty for Inter. */
+  /** The class that sets the clinic's font. Empty for the default (the staff fonts, app/staff-fonts.ts). */
   fontClass: string;
   /** Light or dark, the clinic's saved choice. Written into the page by the server, so the first paint is already right. */
   theme: "dark" | "light";
@@ -187,7 +190,7 @@ export function AppShell({
   );
 
   return (
-    <div data-theme={brand?.theme ?? "dark"} className={`flex min-h-screen flex-col bg-ground text-ink ${brand?.fontClass ?? ""}`} style={brand?.style}>
+    <div data-theme={brand?.theme ?? DEFAULT_BRAND_THEME} className={`flex min-h-screen flex-col bg-ground text-ink ${brand?.fontClass || "staff-headings"}`} style={brand?.style}>
       {/* The top bar, the full width of the screen */}
       <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-ground px-3 sm:px-4">
         <MenuButton open={menu === "guide"} onClick={pressMenu} />

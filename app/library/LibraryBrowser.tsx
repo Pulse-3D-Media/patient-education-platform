@@ -70,6 +70,7 @@ export function LibraryBrowser({
   heartedIds = [],
   canSend,
   seatHelp = "ask",
+  clinicName,
 }: {
   children: ReactNode;
   /** "My favorites" as the server read it, most recently hearted first. Only the home page shows the row. */
@@ -80,6 +81,8 @@ export function LibraryBrowser({
   canSend: boolean;
   /** For someone without a seat: Take a seat (the owner, a seat free), a link to People (an admin), or ask an admin. From seatHelpFor() on the server. */
   seatHelp?: NoSeatHelp;
+  /** The clinic's name, for the ready-made message when a link names only the clinic. */
+  clinicName: string;
 }) {
   const [favorites, setFavorites] = useState<LibraryItem[]>(initialFavorites);
   const [hearted, setHearted] = useState<Set<string>>(() => new Set([...initialFavorites.map((item) => item.id), ...heartedIds]));
@@ -194,6 +197,7 @@ export function LibraryBrowser({
           title={sending.video.title}
           placeholder={sending.video.isPlaceholder}
           result={sending.result}
+          clinicName={clinicName}
           onRetry={() => makeLink(sending.video, "send")}
           onClose={closePanel}
         />

@@ -427,6 +427,7 @@ Simplest honest version first, then a concrete example.
   On the patient page it is the box before the video: "I understand this video is for education only. It is not medical advice, and I will ask my doctor about anything I am unsure of." (`DISCLAIMER`).
   On the printed pamphlet it is "This video is for education only. It is not medical advice. Ask your doctor about anything you are unsure of." (`EDUCATION_ONLY`).
   Both are in `lib/education-note.ts`, never mention consent, and are not reworded without asking.
+- **The ready-made message staff copy or share with a new link is fixed too:** "Here is a short video about your procedure from <the name on the link>: <link>" (`patientMessage()` in `lib/patient-message.ts`), not reworded without asking.
   Ticking the box is never called consent, never said to replace or satisfy informed consent, and a count of ticks is never described as proof that anyone understood.
 - **A number is labelled by what it measures.**
   A play start is a play start.

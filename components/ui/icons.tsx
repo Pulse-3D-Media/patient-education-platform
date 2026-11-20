@@ -408,3 +408,22 @@ export function ExternalIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/** A speech bubble: Copy message and Text message, beside a new patient link. */
+export function MessageIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <path d="M5.5 4.5h13A1.5 1.5 0 0 1 20 6v9a1.5 1.5 0 0 1-1.5 1.5H10L6 20v-3.5h-.5A1.5 1.5 0 0 1 4 15V6a1.5 1.5 0 0 1 1.5-1.5z" />
+    </svg>
+  );
+}
+
+/** An envelope: Email, beside a new patient link. */
+export function MailIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL_ICON} className={className}>
+      <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" />
+      <path d="m4 6.5 8 6 8-6" />
+    </svg>
+  );
+}

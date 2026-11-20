@@ -2,7 +2,9 @@
 
 import { useRef, useState, type FormEvent } from "react";
 import { CloseIcon, CopyIcon, PrinterIcon, QrIcon } from "@/components/ui/icons";
+import { PatientMessageButtons } from "@/components/ui/PatientMessageButtons";
 import { useModalFocus } from "@/components/ui/useModalFocus";
+import { patientMessage } from "@/lib/patient-message";
 import { INPUT, LABEL } from "@/components/ui/styles";
 import type { Sender } from "@/lib/sender-name";
 import { watchLink } from "@/lib/share-link";
@@ -51,6 +53,8 @@ type Choices = {
 
 const BIG_PRIMARY = "inline-flex h-11 shrink-0 items-center gap-2 rounded-xl bg-brand px-5 text-[15px] font-semibold text-on-brand transition hover:bg-brand-hover disabled:cursor-wait disabled:opacity-60";
 const BIG_SECONDARY = "inline-flex h-11 shrink-0 items-center gap-2 rounded-xl border border-line-strong px-4 text-[15px] font-semibold text-ink transition hover:bg-wash";
+/** The same button for a moment after Copy message worked. */
+const BIG_SECONDARY_DONE = "inline-flex h-11 shrink-0 items-center gap-2 rounded-xl border border-transparent bg-brand/20 px-4 text-[15px] font-semibold text-brand-bright";
 
 /**
  * What a doctor is called in the dropdown: their name for the office, and,
@@ -133,7 +137,7 @@ function Picks({
 /** The link the form just made. */
 type MadeLink = { code: string; senderName: string | null; title: string; isPlaceholder: boolean };
 
-export function NewLinkForm({ procedures, senders, blocked, baseUrl }: Choices & { baseUrl: string }) {
+export function NewLinkForm({ procedures, senders, blocked, baseUrl, clinicName }: Choices & { baseUrl: string; clinicName: string }) {
   const [procedure, setProcedure] = useState("");
   const [sender, setSender] = useState("");
   const [pending, setPending] = useState(false);
@@ -181,13 +185,13 @@ export function NewLinkForm({ procedures, senders, blocked, baseUrl }: Choices &
           </p>
         )}
       </div>
-      {made && <LinkReady key={made.code} link={made} baseUrl={baseUrl} />}
+      {made && <LinkReady key={made.code} link={made} baseUrl={baseUrl} clinicName={clinicName} />}
     </form>
   );
 }
 
 /** The new link: its QR code, its address, and what can be done with it. Making another link replaces it here; this one keeps working. */
-function LinkReady({ link, baseUrl }: { link: MadeLink; baseUrl: string }) {
+function LinkReady({ link, baseUrl, clinicName }: { link: MadeLink; baseUrl: string; clinicName: string }) {
   const address = watchLink(baseUrl, link.code);
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
@@ -233,6 +237,11 @@ function LinkReady({ link, baseUrl }: { link: MadeLink; baseUrl: string }) {
           <a href={`/admin/qr/${link.code}`} download className={BIG_SECONDARY}>
             Download QR
           </a>
+        </div>
+        {/* The ready-made message with the link in it, for the office's own texting, email or patient portal.
+            Made here in the browser; nothing about it goes to the server, and there is no box for the patient (lib/patient-message.ts). */}
+        <div className="mt-3">
+          <PatientMessageButtons message={patientMessage({ link: address, senderName: link.senderName, clinicName })} buttonClass={BIG_SECONDARY} doneClass={BIG_SECONDARY_DONE} />
         </div>
       </div>
       {showQr && <QrOnScreen title={link.title} image={`/admin/qr/${link.code}`} onClose={() => setShowQr(false)} />}

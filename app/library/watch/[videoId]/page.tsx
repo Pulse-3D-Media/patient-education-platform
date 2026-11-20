@@ -88,7 +88,7 @@ export default async function WatchPage({ params }: PageProps<"/library/watch/[v
         <BackLink fallback={`/library/${category.slug}`} label="Back" />
       </div>
       {/* A key per video, so moving from one watch page to the next starts the hearts and the player afresh. */}
-      <LibraryBrowser key={video.id} heartedIds={heartedIds} canSend={seat !== null} seatHelp={await seatHelpFor(clinic, seat)}>
+      <LibraryBrowser key={video.id} heartedIds={heartedIds} canSend={seat !== null} clinicName={clinic.name} seatHelp={await seatHelpFor(clinic, seat)}>
         <WatchView
           video={item}
           category={{ label: category.label, slug: category.slug, image: category.image }}

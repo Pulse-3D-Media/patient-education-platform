@@ -25,8 +25,7 @@ import PrintedCodePage from "./page";
 
 // The player imports the play count, a Server Action; rendering never calls it.
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-// The share button reads the address: on a printed code's page it is /q/<code> until the Play tap has made the visit's link.
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }), usePathname: () => "/q/vitest" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
 vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
 
 // A random tag for the made-up clinic's name, in letters only (a to p). The name
@@ -123,7 +122,7 @@ describe("a live printed code", () => {
     expect(html.match(/<link[^>]*rel="preconnect"[^>]*>/g)).toEqual(['<link rel="preconnect" href="https://example.com"/>']);
     // No patient link exists yet, and none is in the page.
     expect(html).not.toContain("/watch/");
-    // So there is nothing of the patient's own to share yet: "Save or share this link" waits for the Play tap's link.
+    // And no "Save or share this link" (taken off the patient page on 2026-11-20, Evan).
     expect(html).not.toContain("Save or share this link");
     expect(await prisma.share.count({ where: { clinicId: clinic.id } })).toBe(0);
   });

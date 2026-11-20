@@ -366,3 +366,44 @@ describe("the welcome dialog on the library", () => {
     expect(await drawLibrary({ welcome: "1" })).not.toContain("Thanks for signing up.");
   });
 });
+
+describe("yearly promoted as months free (Evan, 2026-11-19), only when the prices make it true", () => {
+  it("the plan step marks Yearly with 2 months free under the default prices (yearly = 10 months)", async () => {
+    signInAs(await makeClinic(), "admin");
+    const html = await drawPlan(KNEE_HIP_3);
+    expect(html).toContain("2 months free");
+    // Monthly is chosen, so the summary card does not repeat it: the one mark is beside Yearly.
+    expect(html.match(/data-free-months=""/g)).toHaveLength(1);
+  });
+
+  it("with yearly chosen, the summary card says it too", async () => {
+    signInAs(await makeClinic(), "admin");
+    const html = await drawPlan({ ...KNEE_HIP_3, interval: "YEAR" });
+    expect(html.match(/data-free-months=""/g)).toHaveLength(2);
+  });
+
+  it("a pricing version where a year costs twelve months makes no claim at all", async () => {
+    vi.mocked(getActivePricing).mockResolvedValue({
+      source: { kind: "version", pinned: false, version: { id: versionId, version: 8, note: "", createdAt: new Date(), createdBy: "", createdByName: "", active: true } },
+      config: { ...DEFAULT_PRICING_CONFIG, yearlyMonths: 12 },
+    });
+    signInAs(await makeClinic(), "admin");
+    const html = await drawPlan({ ...KNEE_HIP_3, interval: "YEAR" });
+    expect(html).not.toContain("free");
+  });
+
+  it("a version at eleven months says 1 month free, worked out from its own prices", async () => {
+    vi.mocked(getActivePricing).mockResolvedValue({
+      source: { kind: "version", pinned: false, version: { id: versionId, version: 9, note: "", createdAt: new Date(), createdBy: "", createdByName: "", active: true } },
+      config: { ...DEFAULT_PRICING_CONFIG, yearlyMonths: 11 },
+    });
+    signInAs(await makeClinic(), "admin");
+    expect(await drawPlan(KNEE_HIP_3)).toContain("1 month free");
+  });
+
+  it("the payment step's summary says it for a yearly plan, and not for a monthly one", async () => {
+    signInAs(await makeClinic(), "admin");
+    expect(await drawPayment({ ...KNEE_HIP_3, interval: "YEAR" })).toContain("2 months free");
+    expect(await drawPayment(KNEE_HIP_3)).not.toContain("months free");
+  });
+});

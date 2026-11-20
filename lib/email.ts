@@ -50,6 +50,11 @@ export type EmailMessage = {
    * the first send under a key and answers a repeat with it, for a day.
    */
   idempotencyKey?: string;
+  /**
+   * Where a reply goes, when it should not go to the sending address (which
+   * may be a no-reply one). Empty or missing means replies go to EMAIL_FROM.
+   */
+  replyTo?: string;
 };
 
 /** What sendEmail() did. `sent: true` means the service accepted the message, not that it was read. */
@@ -84,7 +89,15 @@ export async function sendEmail(message: EmailMessage, options: { env?: EmailEnv
   if (to.length === 0) return { sent: false, reason: "no-recipients" };
 
   const from = env.EMAIL_FROM!.trim();
-  const email = (recipients: string[]) => ({ from, to: recipients, subject: message.subject, text: message.text, html: message.html });
+  const replyTo = message.replyTo?.trim();
+  const email = (recipients: string[]) => ({
+    from,
+    to: recipients,
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+    ...(replyTo ? { reply_to: replyTo } : {}),
+  });
 
   // What goes out, as one or more requests to Resend. Normally one email to
   // everyone. Sent separately, one copy per recipient, in batches of at most

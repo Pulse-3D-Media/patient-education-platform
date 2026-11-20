@@ -9,7 +9,7 @@ Clerk guards the staff surfaces.
 The patient surface is never behind it.
 
 - **`/admin`, `/library`, `/pulse` and `/onboarding`, and everything under them, need a signed-in user.**
-  `/watch`, `/q`, `/api/webhooks`, `/api/health`, the bare address `/` (the landing page), `/sign-in`, `/sign-up` and static files are always public.
+  `/watch`, `/q`, `/api/webhooks`, `/api/health`, `/api/cron` (the daily jobs, which check `CRON_SECRET` themselves), the bare address `/` (the landing page), `/sign-in`, `/sign-up` and static files are always public.
   The list of guarded prefixes lives in `proxy.ts` (Next.js 16's name for the middleware file).
 - **`proxy.ts` is a convenience, not the security boundary.**
   It sends signed-out visitors to `/sign-in` and back again.
@@ -81,10 +81,11 @@ The patient surface is never behind it.
   If the forward is ever wanted (Clerk can recommend it to get past ad blockers), it is a change of its own: turn it on here, and widen the Vercel firewall rule to cover `/__clerk` before it ships.
 - **Public paths make fewer outside calls** (Prompt C of the 2026-10-30 list).
   Clerk's middleware looks at a request before our code does, and can ask Clerk's servers about what it finds there.
-  So `proxy.ts` hands `/watch`, `/q`, `/api/health` and `/api/webhooks` (and everything under them) straight on without Clerk at all (`NO_CLERK_PATHS`): none of them needs to know who is signed in, and a paused link's renewal email still reaches Clerk's backend client, which reads its keys from the environment.
+  So `proxy.ts` hands `/watch`, `/q`, `/api/health`, `/api/webhooks` and `/api/cron` (and everything under them) straight on without Clerk at all (`NO_CLERK_PATHS`): none of them needs to know who is signed in, and a paused link's renewal email and the setup reminder job still reach Clerk's backend client, which reads its keys from the environment.
+  `/api/cron` is on the list also because Vercel calls it with an `Authorization` header carrying `CRON_SECRET`, which must reach the route (it checks the header itself) rather than be refused by the rule below.
   On every other path, a request carrying an `Authorization` header is answered 401 before Clerk sees it, because nobody signs in to this app with a header (staff use Clerk's cookie).
   `lib/proxy-clerk-calls.test.ts` counts the calls to Clerk and fails if either goes.
-  **Never call `auth()` or `currentUser()` under those four paths**: without the middleware they throw.
+  **Never call `auth()` or `currentUser()` under those five paths**: without the middleware they throw.
   A path added there must be one that never needs a signed-in user.
   **What is left:** a sign-in "handshake" on `/`, the sign-in and sign-up pages and the staff pages is still checked with Clerk, because a real browser's sign-in uses it; a firewall rule is where it would be limited, a vendor setting for Evan.
 - Clerk dashboard settings this depends on: Organizations enabled, and "Allow users to create organizations" on (so a new sign-up can set up a clinic).
@@ -100,6 +101,7 @@ The patient surface is never behind it.
   Two more that are settings, not secrets: `BILLING_CHECKOUT` (`"test"` opens test-mode checkout, for Preview and a developer's computer only; it is ignored on the production deployment, and against the production database) and the optional `APP_ORIGINS` (a custom domain Stripe may send people back to).
   Email has two of its own: `RESEND_API_KEY` (a secret) and `EMAIL_FROM` (the sender, on a domain verified in Resend; a setting, not a secret).
   With either missing no email is sent and nothing else changes.
+  The optional `EMAIL_REPLY_TO` (a setting) is where a reply to the setup reminder goes, and `CRON_SECRET` (a secret, Production only) is what the daily job checks (see "The daily job: setup reminder emails").
 - **Previews and production are kept apart** (set up by Evan in the 2026-11-04 dashboard checks, finished on 2026-11-05).
   **The database:** Vercel's Preview `DATABASE_URL` and `DIRECT_URL` point at the Neon `testing` branch, and Production's at production.
   Neon's Vercel integration used to make a copy of production for every preview and point that preview at it, which quietly overrode the testing address; the Vercel project was disconnected in Neon (Settings, Vercel, Disconnect) on 2026-11-05, so no `preview/...` branches and no per-branch `DATABASE_URL` rows are made any more.

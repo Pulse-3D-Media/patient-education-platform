@@ -9,7 +9,6 @@ import type { EarlyConnections } from "@/lib/playback-auth";
 import { senderLines } from "@/lib/sender-name";
 import { CallButton } from "./[code]/CallButton";
 import { LinkDeadline } from "./LinkDeadline";
-import { ShareLinkButton } from "./ShareLinkButton";
 
 /**
  * The patient's page, drawn the same way for a patient link (/watch/<code>)
@@ -38,10 +37,9 @@ import { ShareLinkButton } from "./ShareLinkButton";
  * lib/expiry.ts). When the "stops working in a few minutes" note is showing,
  * that note says it and this line is left out.
  *
- * Under those lines, one quiet button, "Save or share this link" (decided on
- * 2026-11-16; ShareLinkButton), on a patient link's page from the
- * start and on a printed code's page once the Play tap has made the visit's
- * own link (`share`). It is below the player, so it never moves the video.
+ * Nothing to press comes after those lines: the "Save or share this link"
+ * button that sat there (added 2026-11-16) was taken off on 2026-11-20 at
+ * Evan's request. A patient can still forward the message the link came in.
  *
  * Without JavaScript (switched off, or a browser too old to run the page)
  * the box would tick and nothing would happen. A <noscript> sentence above
@@ -58,7 +56,6 @@ export function PatientViewer({
   now,
   player,
   early,
-  share,
 }: {
   look: Look;
   clinicName: string;
@@ -74,8 +71,6 @@ export function PatientViewer({
   player: ReactNode;
   /** The hosts the video will come from, for early-connection hints (earlyConnectionsFor in lib/playback-auth.ts). Host names only. */
   early: EarlyConnections;
-  /** When "Save or share this link" shows: "now" on a patient link's page, "once-own-link" on a printed code's page. */
-  share: "now" | "once-own-link";
 }) {
   const length = describeDuration(video.durationSeconds);
   return (
@@ -136,8 +131,6 @@ export function PatientViewer({
 
         {/* Only for a browser that cannot run the page: the box and Play need JavaScript. Calm, never "error". */}
         <noscript>
-          {/* The share button needs JavaScript too: hide it rather than leave a button that does nothing. */}
-          <style>{"[data-needs-script]{display:none}"}</style>
           <div className="mt-5 rounded-xl bg-[#eef1f4] px-4 py-3 text-[18px] leading-[1.5] text-[#3a4c56]">
             <p>To play this video, your browser needs JavaScript turned on. Turn it on in your browser&apos;s settings, or call {clinicName} and they can help.</p>
             {look.call && <CallButton call={look.call} />}
@@ -169,8 +162,6 @@ export function PatientViewer({
             </span>
           </p>
         )}
-
-        <ShareLinkButton title={video.title} when={share} />
 
         {/* The logo is a picture, not a link: the patient has nowhere else to go. */}
         <div className="mt-auto pt-10">

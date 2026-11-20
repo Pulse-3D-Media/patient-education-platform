@@ -385,7 +385,8 @@ If a change would delay the first frame or add a step, flag it before building.
   Large tap targets, high contrast, no small text.
 - **Nothing to click except the box and play.**
   No navigation, no menu, no related videos, no footer links, no sales.
-  The exceptions are named, never added quietly: Ask my clinic on a paused link, and "Save or share this link" under the video on a working one (decided by the user on 2026-11-16), which is quiet, below the player, and never starts or stops the video.
+  The one exception is named, and no other is added quietly: Ask my clinic on a paused link.
+  There is no "Save or share this link" button (taken off on 2026-11-20 at Evan's request).
 - **The expired state is a real design job, not an error page.**
   Calm, plain language, tells them to ask their doctor for a new link.
   Never technical, never red, never the words "error", "invalid" or "403".

@@ -28,17 +28,23 @@ export async function renameClerkOrganization(clerkOrgId: string, name: string) 
  * The bytes have already been checked (checkLogoBytes in
  * lib/clinic-identity.ts); Clerk is told the kind those bytes are, never what
  * the browser claimed. The file goes to Clerk and nowhere else.
+ *
+ * NO UPLOADER IS NAMED (fixed 2026-11-19). Clerk's call takes an optional
+ * uploaderUserId, and with one Clerk checks that person's organization
+ * permissions itself: on our Clerk instance it refused with 403
+ * "missing_organization_permission" even for the admin who created the
+ * organization, so every logo upload failed (tried against Clerk's
+ * development instance with a made-up organization; without the uploader the
+ * same upload succeeded). Who may upload is decided here, not by Clerk: the
+ * action has already asked Clerk, live, that the person is an admin of this
+ * clinic (confirmAdminWithClerk), and the upload is logged under their name.
  */
-export async function uploadClerkOrganizationLogo(
-  clerkOrgId: string,
-  logo: { bytes: Uint8Array; kind: LogoKind },
-  uploaderUserId: string,
-): Promise<{ logoUrl: string | null }> {
+export async function uploadClerkOrganizationLogo(clerkOrgId: string, logo: { bytes: Uint8Array; kind: LogoKind }): Promise<{ logoUrl: string | null }> {
   const { mimeType, extension } = LOGO_KINDS[logo.kind];
   const file = new File([logo.bytes as Uint8Array<ArrayBuffer>], `logo.${extension}`, { type: mimeType });
   const client = await clerkClient();
   const organization = await askClerk(
-    client.organizations.updateOrganizationLogo(clerkOrgId, { file, uploaderUserId }),
+    client.organizations.updateOrganizationLogo(clerkOrgId, { file }),
     "uploading the clinic logo",
     // An upload takes longer than a question.
     20_000,

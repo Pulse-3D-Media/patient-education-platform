@@ -1,4 +1,4 @@
-import { formatCents } from "@/lib/pricing";
+import { formatCents, freeMonthsWords } from "@/lib/pricing";
 
 /**
  * The "Your plan" card on the right of the plan and payment steps (on a phone,
@@ -10,7 +10,10 @@ export function PlanSummary({
   seats,
   interval,
   totalCents,
+  freeMonths = null,
 }: {
+  /** Months a yearly plan gives free, already worked out from the prices (freeMonthsOnYearly in lib/pricing.ts). Shown only when yearly is chosen. */
+  freeMonths?: number | null;
   /** "Knee, Shoulder, Hip". Empty when nothing is picked yet. */
   names: string;
   seats: number;
@@ -26,6 +29,11 @@ export function PlanSummary({
       <p className="mt-1 text-[15px] font-semibold text-ink">
         {seats} {seats === 1 ? "seat" : "seats"} · {interval === "YEAR" ? "yearly" : "monthly"}
       </p>
+      {interval === "YEAR" && freeMonths !== null && (
+        <p data-free-months="" className="mt-1 text-sm font-semibold text-brand-bright">
+          {freeMonthsWords(freeMonths)}
+        </p>
+      )}
       <div className="mt-4 flex items-baseline justify-between border-t border-line pt-4">
         <span className="text-sm text-ink-soft">Total</span>
         <span aria-live="polite">

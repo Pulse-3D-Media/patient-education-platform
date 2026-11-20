@@ -10,7 +10,10 @@
  *   3. Your team       one invitation box per seat nobody holds yet.
  *   4. Test link       pick a procedure, then "Generate QR code".
  *
- * Every step can be skipped ("Skip for now"). Where a clinic stands is kept
+ * Every step can be skipped ("Skip for now"). Pressing a step's Continue
+ * (or Finish) counts it as done, with whatever was saved; skipping is the
+ * only thing that leaves a step undone, apart from a logo upload that failed
+ * (decided 2026-11-19 after Evan's walkthrough). Where a clinic stands is kept
  * on its row, so whoever leaves comes back to the step they were on
  * ("Welcome back."), and any admin of the clinic sees the same place.
  *
@@ -147,4 +150,41 @@ export function nextSetupState(
 /** Where to send an admin after a step: the next step while setup is under way, else the finished page. */
 export function hrefAfterSave(setupStep: string | null): string {
   return isSetupStep(setupStep) ? setupStepHref(setupStep) : SETUP_DONE_PATH;
+}
+
+/** What the library's reminder says for a step left undone once the steps are behind the clinic (Evan, 2026-11-19). */
+export const SETUP_STEP_TODO: Record<SetupStepKey, string> = {
+  clinic: "Add your clinic's name",
+  branding: "Add your logo",
+  team: "Invite your team",
+  test: "Try a test link",
+};
+
+/** The reminder in the library's menu: its words, where it opens, and the count. */
+export type SetupReminder = { title: string; href: string; doneCount: number; total: number };
+
+/**
+ * The library's "Finish setup" reminder for an office admin, or null when
+ * there is nothing left (decided 2026-11-19, after Evan's walkthrough).
+ *
+ * A step counts as done when the admin pressed its Continue (or Finish), with
+ * whatever was saved; "Skip for now" is the only thing that leaves a step
+ * undone (and a logo upload that failed, which leaves branding undone).
+ *
+ *   - while the steps are under way: "Finish setup", "1 of 4 done", opening
+ *     setup at the step the clinic is on, as drawn;
+ *   - once the last step is passed with something left undone: the first
+ *     thing left, named ("Add your logo"), opening that step;
+ *   - nothing left undone: no reminder.
+ *
+ * This is wider than setupIsDue() above, which is about the steps still being
+ * under way, and which the reminder emails read; those stop once the steps
+ * are behind the clinic, even with something skipped.
+ */
+export function setupReminder(progress: SetupProgress | null): SetupReminder | null {
+  if (!progress || progress.doneCount >= progress.total) return null;
+  const counts = { doneCount: progress.doneCount, total: progress.total };
+  if (!progress.finished) return { title: "Finish setup", href: SETUP_PATH, ...counts };
+  const left = progress.steps.find((step) => step.state !== "done");
+  return left ? { title: SETUP_STEP_TODO[left.key], href: setupStepHref(left.key), ...counts } : null;
 }

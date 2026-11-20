@@ -39,3 +39,28 @@ describe("telHref", () => {
     }
   });
 });
+
+describe("typedUsPhone and typedPhoneProblem: the phone box as someone types (Evan, 2026-11-19)", () => {
+  it("takes ten digits and no more, shown as they arrive", async () => {
+    const { typedUsPhone } = await import("./phone");
+    expect(typedUsPhone("8")).toBe("(8");
+    expect(typedUsPhone("8015")).toBe("(801) 5");
+    expect(typedUsPhone("8015550123")).toBe("(801) 555-0123");
+    // What Evan typed: an eleventh digit and more are simply not taken.
+    expect(typedUsPhone("80184454545 124")).toBe("(801) 844-5454");
+  });
+
+  it("handles spaces, dashes, brackets, dots and a leading +1 or 1, typed or pasted", async () => {
+    const { typedUsPhone } = await import("./phone");
+    for (const typed of ["+1 801 555 0123", "1-801-555-0123", "(801) 555-0123", "801.555.0123", "  801 555 0123  "]) expect(typedUsPhone(typed), typed).toBe("(801) 555-0123");
+    expect(typedUsPhone("")).toBe("");
+    expect(typedUsPhone("abc")).toBe("");
+  });
+
+  it("says what is wrong before Enter, and nothing for an empty or complete box", async () => {
+    const { typedPhoneProblem } = await import("./phone");
+    expect(typedPhoneProblem("(801) 55")).toBe("That is 5 of the 10 digits. Enter the whole number, like (801) 555-0123.");
+    expect(typedPhoneProblem("")).toBeNull();
+    expect(typedPhoneProblem("(801) 555-0123")).toBeNull();
+  });
+});

@@ -201,13 +201,13 @@ export async function uploadClinicLogoAction(_previous: BrandingFormState, formD
   const clerkOrgId = await getClerkOrgIdForClinic(clinicId);
   if (!clerkOrgId) return { error: NO_ORGANIZATION };
 
-  // Also who Clerk records as the uploader.
+  // Asked of Clerk live before the upload: Clerk itself is not told who uploads (see lib/organization.ts).
   const live = await liveAdmin(clinicId);
   if (!live.ok) return { error: live.error };
 
   let logoUrl: string | null;
   try {
-    ({ logoUrl } = await uploadClerkOrganizationLogo(clerkOrgId, { bytes, kind: checked.kind }, live.userId));
+    ({ logoUrl } = await uploadClerkOrganizationLogo(clerkOrgId, { bytes, kind: checked.kind }));
   } catch (error) {
     console.error("Uploading a clinic logo to Clerk failed", errorKind(error));
     return { error: "We could not upload the logo just now, so nothing was changed. Try again in a moment." };

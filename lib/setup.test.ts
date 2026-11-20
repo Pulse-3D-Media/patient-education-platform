@@ -75,3 +75,26 @@ describe("the step order and addresses", () => {
     expect(hrefAfterSave(null)).toBe(SETUP_DONE_PATH);
   });
 });
+
+describe("setupReminder: the library's reminder (decided 2026-11-19, after Evan's walkthrough)", () => {
+  it("says Finish setup with the count while the steps are under way", async () => {
+    const { setupReminder } = await import("./setup");
+    expect(setupReminder(readSetupProgress("team", ["clinic"]))).toEqual({ title: "Finish setup", href: "/onboarding/setup", doneCount: 1, total: 4 });
+  });
+
+  it("once the steps are passed, names what is left and opens that step", async () => {
+    const { setupReminder } = await import("./setup");
+    expect(setupReminder(readSetupProgress("finished", ["clinic", "team", "test"]))).toEqual({ title: "Add your logo", href: "/onboarding/setup/branding", doneCount: 3, total: 4 });
+    expect(setupReminder(readSetupProgress("finished", ["branding", "test"]))?.title).toBe("Add your clinic's name");
+  });
+
+  it("goes away only when nothing is left undone, and never shows for a clinic made before setup", async () => {
+    const { setupReminder } = await import("./setup");
+    expect(setupReminder(readSetupProgress("finished", ["clinic", "branding", "team", "test"]))).toBeNull();
+    expect(setupReminder(readSetupProgress(null, []))).toBeNull();
+  });
+
+  it("leaves setupIsDue (which the reminder emails read) about the steps being under way", () => {
+    expect(setupIsDue(readSetupProgress("finished", ["clinic"]))).toBe(false);
+  });
+});

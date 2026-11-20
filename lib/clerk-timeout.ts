@@ -60,8 +60,20 @@ export async function askClerk<T>(work: Promise<T>, what: string, ms: number = C
   try {
     return await withTimeout(work, ms, `Clerk (${what})`);
   } catch (error) {
-    // The kind of failure goes to the server log; the browser sees only the digest.
-    console.error("Clerk could not be reached:", what, error instanceof Error ? error.name : "unknown error");
+    // The kind of failure goes to the server log; the browser sees only the digest. When Clerk answered with a
+    // refusal, its status and its own error code are added (a number and a word such as
+    // "missing_organization_permission", never a message), so a refusal is not mistaken for Clerk being down:
+    // that once hid why every logo upload failed (lib/organization.ts).
+    console.error("Clerk could not be reached:", what, error instanceof Error ? error.name : "unknown error", clerkRefusal(error));
     throw new SignInUnavailableError(what, error);
   }
+}
+
+/** "status 403 missing_organization_permission" when Clerk answered with a refusal, else an empty string. Only a number and Clerk's code word. */
+export function clerkRefusal(error: unknown): string {
+  if (typeof error !== "object" || error === null) return "";
+  const status = (error as { status?: unknown }).status;
+  const first = (error as { errors?: { code?: unknown }[] }).errors?.[0]?.code;
+  const code = typeof first === "string" && /^[a-z_]{1,60}$/.test(first) ? ` ${first}` : "";
+  return typeof status === "number" ? `status ${status}${code}` : "";
 }

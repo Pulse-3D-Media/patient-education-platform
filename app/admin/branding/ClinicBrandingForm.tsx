@@ -14,7 +14,7 @@ import {
 } from "@/lib/branding";
 import { CLINIC_NAME_MAX, readClinicName } from "@/lib/clinic-identity";
 import { safeSave } from "@/lib/form-save";
-import { formatUsPhone, normalizeUsPhone } from "@/lib/phone";
+import { formatUsPhone, normalizeUsPhone, typedPhoneProblem, typedUsPhone } from "@/lib/phone";
 import type { BrandingFormState } from "./actions";
 
 /**
@@ -183,14 +183,15 @@ export function ClinicBrandingForm({
                 inputMode="tel"
                 autoComplete="tel"
                 value={phone}
-                onChange={(event) => setPhone(event.target.value)}
+                // Ten digits at most, shown as (801) 555-0123 as they are typed (lib/phone.ts); the server checks again.
+                onChange={(event) => setPhone(typedUsPhone(event.target.value))}
                 placeholder="(801) 555-0123"
                 aria-invalid={phoneIsBad}
                 className={INPUT}
               />
               {phoneIsBad && (
                 <p className="mt-1 text-sm text-warn">
-                  A US number has ten digits. Any format is fine.
+                  {typedPhoneProblem(phone) ?? "A US number has ten digits. Any format is fine."}
                 </p>
               )}
             </div>

@@ -4,7 +4,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkPayment, startCheckout } from "@/lib/checkout";
 import { ADMIN_CHECK_UNREACHABLE } from "@/lib/clinic";
 import { prisma } from "@/lib/db/client";
-import { checkPaymentAction, startCheckoutAction } from "./actions";
+import { checkPaymentAction, startCheckoutAction, startSignUpCheckoutAction } from "./actions";
 
 /**
  * The two checkout Server Actions at the permission boundary, with Clerk
@@ -232,6 +232,61 @@ describe("checkPaymentAction", () => {
     vi.mocked(checkPayment).mockRejectedValueOnce(new Error("socket hang up"));
 
     expect(await checkPaymentAction()).toEqual({ error: "We could not reach Stripe just now. Nothing has changed. Try again in a moment." });
+    logged.mockRestore();
+  });
+});
+
+describe("startSignUpCheckoutAction (the sign-up steps' Pay button)", () => {
+  it("says the sign-in has ended, and offers signing in again, when nobody is signed in; nothing is started", async () => {
+    signInAs(null, "member");
+    expect(await startSignUpCheckoutAction(null, form(GOOD))).toEqual({
+      error: "Your sign-in has ended, so nothing was started. Sign in again and your plan will be here.",
+      signIn: true,
+    });
+    expect(startCheckout).not.toHaveBeenCalled();
+  });
+
+  it("refuses a member exactly as Billing does", async () => {
+    const { orgId } = await makeClinic();
+    signInAs(orgId, "member");
+    expect(await startSignUpCheckoutAction(null, form(GOOD))).toMatchObject({ error: expect.stringContaining("office admins") });
+    expect(startCheckout).not.toHaveBeenCalled();
+  });
+
+  it("starts the same checkout as Billing for the admin's own clinic, asking Stripe to send them back to the sign-up steps", async () => {
+    const { clinicId, orgId } = await makeClinic();
+    signInAs(orgId, "admin");
+    const forged = form({ ...GOOD, clinicId: "someone-elses-clinic", totalCents: "1", flow: "billing" });
+    expect(await startSignUpCheckoutAction(null, forged)).toEqual({ redirectTo: "https://checkout.stripe.com/c/pay/cs_test_made_up" });
+
+    const handed = vi.mocked(startCheckout).mock.lastCall?.[0];
+    expect(handed?.clinicId).toBe(clinicId);
+    expect(handed?.flow).toBe("signup");
+    expect(handed?.selection).toEqual({ categories: ["KNEE", "HIP"], seats: 3, interval: "MONTH", seenVersionId: GOOD.seenVersionId, seenTotalCents: 26700 });
+  });
+
+  it("an attempt already paid goes to the sign-up return page, not Billing's", async () => {
+    const { orgId } = await makeClinic();
+    signInAs(orgId, "admin");
+    vi.mocked(startCheckout).mockResolvedValueOnce({ kind: "confirming" });
+    expect(await startSignUpCheckoutAction(null, form(GOOD))).toEqual({ redirectTo: "/onboarding/done" });
+  });
+
+  it("Billing's own button still asks for Billing's return addresses", async () => {
+    const { orgId } = await makeClinic();
+    signInAs(orgId, "admin");
+    await startCheckoutAction(null, form(GOOD));
+    expect(vi.mocked(startCheckout).mock.lastCall?.[0].flow).toBe("billing");
+  });
+
+  it("answers Stripe being unreachable with a plain sentence that says nothing was charged", async () => {
+    const { orgId } = await makeClinic();
+    signInAs(orgId, "admin");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(startCheckout).mockRejectedValueOnce(new Error("made-up connection reset"));
+    expect(await startSignUpCheckoutAction(null, form(GOOD))).toEqual({ error: "Checkout could not be started just now. Nothing was charged. Try again in a moment." });
+    // Only the kind of failure is logged, never the message.
+    expect(logged.mock.calls.flat().join(" ")).not.toContain("made-up connection reset");
     logged.mockRestore();
   });
 });

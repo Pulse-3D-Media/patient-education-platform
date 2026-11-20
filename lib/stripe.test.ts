@@ -8,6 +8,7 @@ import {
   addPaidEvidence,
   checkStripeIds,
   checkoutIsOpen,
+  checkoutIdempotencyKey,
   checkoutSessionParams,
   eventRefs,
   getStripe,
@@ -542,5 +543,40 @@ describe("historyFromInvoices and paymentMethodFacts (the Billing page's history
     expect(paymentMethodFacts({ type: "something_new" } as unknown as Stripe.PaymentMethod)).toEqual({ card: null, method: "Another payment method" });
     expect(paymentMethodFacts("pm_madeup")).toBeNull();
     expect(paymentMethodFacts(null)).toBeNull();
+  });
+});
+
+describe("where Stripe sends the person back to (the sign-up steps or Billing)", () => {
+  const args = {
+    customerId: "cus_made_up",
+    clinicId: "clinic_made_up",
+    planId: "plan_made_up",
+    perSeatCents: 8900,
+    seats: 4,
+    interval: "MONTH" as const,
+    description: "Knee, Hip; 4 surgeon seats",
+    origin: "https://app.example.com",
+    expiresAt: new Date("2026-09-19T13:00:00.000Z"),
+  };
+
+  it("Billing, left out or named: the return page and Billing, exactly as before, with the same idempotency key as before", () => {
+    for (const params of [checkoutSessionParams(args), checkoutSessionParams({ ...args, flow: "billing" })]) {
+      expect(params.success_url).toBe("https://app.example.com/admin/billing/return");
+      expect(params.cancel_url).toBe("https://app.example.com/admin/billing?checkout=cancelled");
+    }
+    expect(checkoutIdempotencyKey("plan_made_up")).toBe("p3d:checkout:plan_made_up");
+  });
+
+  it("the sign-up steps: the sign-up return page, and the payment step with the not-finished state; its own idempotency key", () => {
+    const params = checkoutSessionParams({ ...args, flow: "signup" });
+    expect(params.success_url).toBe("https://app.example.com/onboarding/done");
+    expect(params.cancel_url).toBe("https://app.example.com/onboarding/payment?stopped=1");
+    expect(checkoutIdempotencyKey("plan_made_up", "signup")).toBe("p3d:checkout:plan_made_up:signup");
+  });
+
+  it("changes nothing about what is charged", () => {
+    const billing = checkoutSessionParams(args);
+    const signup = checkoutSessionParams({ ...args, flow: "signup" });
+    expect({ ...signup, success_url: "", cancel_url: "" }).toEqual({ ...billing, success_url: "", cancel_url: "" });
   });
 });

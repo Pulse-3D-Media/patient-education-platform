@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
 import { errorKind } from "@/lib/error-kind";
 import { checkPayment, startCheckout } from "@/lib/checkout";
@@ -17,7 +18,7 @@ import {
   type ChangeSummary,
   type PlanChangeDeps,
 } from "@/lib/plan-changes";
-import { checkoutIsOpen, fetchSubscriptionSnapshot, stripeGateway, stripePlanGateway } from "@/lib/stripe";
+import { checkoutIsOpen, fetchSubscriptionSnapshot, stripeGateway, stripePlanGateway, type CheckoutFlow } from "@/lib/stripe";
 import { pickTrustedOrigin } from "@/lib/trusted-origin";
 
 /**
@@ -55,9 +56,37 @@ import { pickTrustedOrigin } from "@/lib/trusted-origin";
  *   changed      the total differs from the one on screen; nothing was made
  *   error        a plain sentence; nothing was made, and the picks stay as they are
  */
-export type CheckoutFormState = { redirectTo?: string; changed?: string; error?: string } | null;
+export type CheckoutFormState = {
+  redirectTo?: string;
+  changed?: string;
+  error?: string;
+  /** The sign-in has ended: the sign-up payment step offers a way to sign in again. */
+  signIn?: boolean;
+} | null;
 
 export async function startCheckoutAction(_previous: CheckoutFormState, formData: FormData): Promise<CheckoutFormState> {
+  return checkoutFor(formData, "billing");
+}
+
+/**
+ * "Pay and start" on the sign-up steps' payment page (app/onboarding/payment).
+ * Exactly the same checkout as Billing's (checkoutFor below: the same checks,
+ * the same server pricing, the same gate, checkoutIsOpen()), with only two
+ * differences: Stripe sends the person back to the sign-up steps instead of
+ * Billing, and a sign-in that has ended gets its own sentence.
+ */
+export async function startSignUpCheckoutAction(_previous: CheckoutFormState, formData: FormData): Promise<CheckoutFormState> {
+  // Signed out since the page was drawn (the sign-in ran out mid-flow): say so plainly, nothing was made.
+  const { userId } = await auth();
+  if (!userId) return { error: SIGNED_OUT, signIn: true };
+  return checkoutFor(formData, "signup");
+}
+
+/** What the payment step says when the sign-in has run out since the page was drawn. */
+const SIGNED_OUT = "Your sign-in has ended, so nothing was started. Sign in again and your plan will be here.";
+
+/** The one checkout, for both forms. The clinic is the signed-in admin's own; the form only says what was picked. */
+async function checkoutFor(formData: FormData, flow: CheckoutFlow): Promise<CheckoutFormState> {
   const clinicId = await getBillingClinicId();
   if (!clinicId) return { error: "Only your clinic's office admins can choose a plan." };
 
@@ -76,13 +105,14 @@ export async function startCheckoutAction(_previous: CheckoutFormState, formData
       selection: read.selection,
       actor: { id: live.userId, name: live.name },
       origin,
+      flow,
       deps: { gateway: stripeGateway, fetchSubscription: fetchSubscriptionSnapshot, isOpen: checkoutIsOpen() },
     });
 
     if (result.kind === "redirect") return { redirectTo: result.url };
-    if (result.kind === "confirming") return { redirectTo: "/admin/billing/return" };
+    if (result.kind === "confirming") return { redirectTo: flow === "signup" ? "/onboarding/done" : "/admin/billing/return" };
     if (result.kind === "changed") {
-      revalidatePath("/admin/billing");
+      revalidatePath(flow === "signup" ? "/onboarding/payment" : "/admin/billing");
       return { changed: result.message };
     }
     return { error: result.message };

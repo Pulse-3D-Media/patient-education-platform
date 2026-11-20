@@ -22,7 +22,7 @@ The patient surface is never behind it.
   **A Clerk organization id (`org_...`) is not a clinic id** and must never be passed to a `lib/db` function that takes a `clinicId`.
 - **`requireClinicPage()` is what every staff page calls first.**
   Signed out goes to `/sign-in`; no organization goes to `/onboarding` (Clerk's CreateOrganization form, or, for someone with an invitation or a clinic already, only Clerk's list of those: its own "Create organization" button is hidden through Clerk's styling hook for it, `appearance.elements.organizationListCreateOrganizationActionButton`, because `OrganizationList` has no setting to turn it off, and creating a new clinic is one quiet link under the list, `/onboarding?create=1`; decided by the user on 2026-11-16, audit C4, after an invited person could make a second, empty clinic by accident).
-  A new clinic's creator is sent from there to `/admin/billing`; someone who joined by invitation goes to `/library`. (`/onboarding/kind`, the retired surgeon question, only redirects to `/onboarding`.)
+  A new clinic's creator is sent from there to the sign-up plan step, `/onboarding/plan`, which sends them on to `/admin/billing` wherever checkout is not open (see "Sign-up's plan and payment steps" in `docs/areas/billing.md`); someone who joined by invitation goes to `/library`. (`/onboarding/kind`, the retired surgeon question, only redirects to `/onboarding`.)
   It returns the clinic (id, name, status, logoUrl, isOwner, isAdmin).
   Each page then checks `clinicIsOpen(clinic.status)` and shows `<ClinicClosed />` if not (with `billingLink` for an admin, on the library as on the admin pages, so an admin is always one tap from Billing); admin pages also check `clinic.isAdmin` and show `<AdminsOnly />` if not.
   Never crash, never a blank page.
@@ -49,7 +49,7 @@ The patient surface is never behind it.
   No `NEXT_PUBLIC_CLERK_*_URL` variables are used.
   **Clerk may only send someone on to this deployment's own addresses** after signing in or up (`allowedRedirectOrigins` in `StaffClerkProvider`, from `clerkRedirectOrigins()` in `lib/trusted-origin.ts`: the addresses Vercel and `APP_ORIGINS` name, never the request, wildcards left out, localhost when nothing is known; Clerk always allows the page's own address too, so a preview returns to itself).
   Left unset, Clerk would also allow every address under our Clerk instance's root domain, the marketing site included.
-  After signing up or in with no page asked for, `StaffClerkProvider` sends people to `/onboarding` (`signUpFallbackRedirectUrl`, `signInFallbackRedirectUrl`), which routes them: the creator of an unpaid clinic to Billing, everyone else to the library.
+  After signing up or in with no page asked for, `StaffClerkProvider` sends people to `/onboarding` (`signUpFallbackRedirectUrl`, `signInFallbackRedirectUrl`), which routes them: the creator of an unpaid clinic to the plan step (or Billing where checkout is not open), everyone else to the library.
   The root address `/` sends a signed-in person to `/onboarding` too (never straight to the library), so someone who signed up from there is routed the same way.
   A signed-out visitor at `/` gets the landing page instead (see "The landing page and sign-up" below).
   Anyone who still lands on the library's closed-clinic page gets a Go to billing button if they are an admin (a member is told to ask one).
@@ -63,7 +63,11 @@ The patient surface is never behind it.
   The steps and their sentences are in `lib/sign-up-flow.ts`; Clerk's own error text is never shown.
   Clerk keeps everything: nothing typed is stored by us, and there is still no users table, password field or session cookie of our own.
   **Clerk's dashboard still asks for a password** at sign-up (and a first and last name; the one name box is split at its last word), checked on Clerk's development instance on 2026-11-19, so the form shows a third box, "Choose a password", after the code, which goes straight to Clerk; turning "Password" off in the Clerk dashboard (Evan's setting, both instances) removes that box with no code change, and sign-in already uses the email code only.
-  When Clerk asks for a clinic to be set up first (its "choose an organization" step, on while the dashboard requires an organization), the box shows Clerk's own `TaskChooseOrganization`, the same step the prebuilt form showed; the clinic is still made by Clerk there or on `/onboarding`, never by the landing page.
+  When Clerk asks for a clinic to be set up first (its "choose an organization" step, on while the dashboard requires an organization), a brand-new person who belongs to no clinic and holds no invitation gets one made for them with a **provisional name** from their own name ("Jane Smith's clinic"), through Clerk's own browser client (`createOrganization`, then `setActive`, the two calls Clerk's own form makes; `setUpProvisionalClinic()` in `lib/sign-up-flow.ts`), because the design asks for the clinic's real name after payment.
+  Clerk records them as its creator, so they become the account owner exactly as before, and our Clinic row is still made on first use.
+  The real name is typed on Clinic branding (the existing name sync sends it to Clerk), until setup (pull request #5) asks for it in its first step.
+  Anyone who already belongs to a clinic or holds an invitation, or when Clerk cannot be asked or refuses, gets Clerk's own `TaskChooseOrganization` in the box, the same step the prebuilt form showed, so nobody is pushed into a second clinic; a refresh after the clinic was made finds it in that list.
+  A Google sign-up, and anyone who reaches `/onboarding` with no clinic, still names the clinic in Clerk's form there.
   Then the new account goes where a new account always went: the page it was sent from when that page is on this site (`safeReturnPath()`), otherwise `/onboarding`.
   An invitation's link still gets Clerk's prebuilt `<SignUp />`, unchanged, and so do Clerk's later sign-up steps under `/sign-up/...`; `/sign-up/sso-callback` is Clerk's `AuthenticateWithRedirectCallback`.
   Someone already signed in who opens `/sign-up` goes to `/onboarding`.

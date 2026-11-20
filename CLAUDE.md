@@ -283,7 +283,7 @@ Read `docs/areas/library.md`.
 
 **`app/admin` is the back-office surface**, and each page has a fixed job: `/admin` (overview), `/admin/links` (making a link, and printed QR codes), `/admin/people`, `/admin/billing`, `/admin/branding`; `/admin/reports` only redirects to `/admin`.
 Never move a job to another page or merge two.
-**Never put a list of past links back on the clinic side, and never put plan or billing detail anywhere but `/admin/billing`.**
+**Never put a list of past links back on the clinic side, and never put plan or billing detail anywhere but `/admin/billing`** and the sign-up steps a new clinic's owner goes through before the clinic opens (`/onboarding/plan` and `/onboarding/payment`, never the library).
 Billing stays reachable when the clinic is closed.
 Clinics get no reports or usage numbers at all.
 Read `docs/areas/admin-area.md`.

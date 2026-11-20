@@ -362,7 +362,31 @@ export type CheckoutSessionArgs = {
   /** A trusted origin (lib/trusted-origin.ts), such as https://example.vercel.app. */
   origin: string;
   expiresAt: Date;
+  /** Which page Stripe sends the person back to: Billing (left out) or the sign-up steps. Changes nothing about what is charged. */
+  flow?: CheckoutFlow;
 };
+
+/** Where a payment page was started from: the Billing page, or the sign-up steps for a new clinic (app/onboarding). */
+export type CheckoutFlow = "billing" | "signup";
+
+/**
+ * Where Stripe sends the person back to, after paying (success) or after
+ * leaving its page without paying (cancel). Neither address proves or grants
+ * anything: the return pages only read the clinic's billing record.
+ */
+export function checkoutReturnUrls(origin: string, flow: CheckoutFlow = "billing"): { success: string; cancel: string } {
+  if (flow === "signup") return { success: `${origin}/onboarding/done`, cancel: `${origin}/onboarding/payment?stopped=1` };
+  return { success: `${origin}/admin/billing/return`, cancel: `${origin}/admin/billing?checkout=cancelled` };
+}
+
+/**
+ * The idempotency key a payment page is made with. Built from the accepted plan's id, so a double click
+ * gets the same page. A page started from the sign-up steps has different return addresses, and Stripe
+ * refuses a repeated key whose request differs, so its key says so; Billing's key is unchanged.
+ */
+export function checkoutIdempotencyKey(planId: string, flow: CheckoutFlow = "billing"): string {
+  return flow === "signup" ? `p3d:checkout:${planId}:signup` : `p3d:checkout:${planId}`;
+}
 
 /**
  * The exact request a payment page is made with. Pure, so the tests read
@@ -407,8 +431,8 @@ export function checkoutSessionParams(args: CheckoutSessionArgs): Stripe.Checkou
     ],
     subscription_data: { metadata, description: args.description.slice(0, 480) },
     metadata,
-    success_url: `${args.origin}/admin/billing/return`,
-    cancel_url: `${args.origin}/admin/billing?checkout=cancelled`,
+    success_url: checkoutReturnUrls(args.origin, args.flow).success,
+    cancel_url: checkoutReturnUrls(args.origin, args.flow).cancel,
     expires_at: Math.floor(args.expiresAt.getTime() / 1000),
   };
 }
@@ -501,7 +525,7 @@ export const stripeGateway: CheckoutGateway = {
 
   async createSession(args) {
     await ensureProduct();
-    const session = await getStripe().checkout.sessions.create(checkoutSessionParams(args), { idempotencyKey: `p3d:checkout:${args.planId}` });
+    const session = await getStripe().checkout.sessions.create(checkoutSessionParams(args), { idempotencyKey: checkoutIdempotencyKey(args.planId, args.flow) });
     if (session.livemode) throw new StripeConfigError("Stripe made a live-mode checkout page. This app only runs Stripe in test mode.");
     return sessionInfo(session);
   },

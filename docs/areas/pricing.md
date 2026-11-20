@@ -17,6 +17,8 @@ The numbers are placeholders to edit on `/pulse/pricing`; the model is settled.
   `quote(config, input)` returns exact whole cents.
   The one rounding is the per-seat amount for the interval, after the founding offer if there is one, and the total is that times the seats; Stripe will be given that per-seat amount as the unit price.
   The monthly equivalent of a yearly price is for display only and is never charged.
+  A yearly plan costs exactly `yearlyMonths` monthly payments (the rung times the months; no founding offer is ever applied to a clinic), so "N months free" is always a whole number: `freeMonthsOnYearly()` works it out from the monthly and yearly totals of the same plan and says nothing unless it is a whole number of months above zero (nothing at `yearlyMonths` 12).
+  The sign-up plan step shows it beside Yearly, and in "Your plan" when Yearly is chosen (Evan, 2026-11-19, "promote yearly as two months free"); Billing's own picker keeps its existing line, "A year for the price of N months."
 - **The numbers live in `PricingVersion` rows, never in code.**
   `getActivePricing()` in `lib/db/pricing.ts` is the only way to read them, and `getPricingForClinic(clinicId)` uses the clinic's pin when it has one.
   With no active version it returns `DEFAULT_PRICING_CONFIG` marked as an estimate; checkout refuses an estimate and insists on a saved, active version, so nothing is for sale until Pulse staff have made one active.

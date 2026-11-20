@@ -1,9 +1,20 @@
 "use client";
 
-import { ClerkFailed, TaskChooseOrganization, useAuth, useSignUp } from "@clerk/nextjs";
+import { ClerkFailed, TaskChooseOrganization, useAuth, useClerk, useSignUp } from "@clerk/nextjs";
 import { useState, type FormEvent } from "react";
 import { safeReturnPath, tabHref } from "@/lib/landing";
-import { addPassword, checkCode, resendCode, SIGN_UP_WORDS, startSignUp, type Problem, type SignUpApi, type SignUpStep } from "@/lib/sign-up-flow";
+import {
+  addPassword,
+  checkCode,
+  resendCode,
+  setUpProvisionalClinic,
+  SIGN_UP_WORDS,
+  startSignUp,
+  type ClinicApi,
+  type Problem,
+  type SignUpApi,
+  type SignUpStep,
+} from "@/lib/sign-up-flow";
 import { BOX_APPEARANCE } from "./clerk-look";
 
 /**
@@ -25,11 +36,15 @@ import { BOX_APPEARANCE } from "./clerk-look";
  *
  * When the account is made, Clerk starts the session and the new person goes
  * where a new account always went: the page they were sent from, if they
- * came from one, otherwise /onboarding. If Clerk asks them to set up their
- * clinic first (the "choose an organization" step Clerk adds when the
- * dashboard requires an organization), Clerk's own form for that is shown in
- * the box, exactly the step Clerk's ready-made form showed before. Nothing
- * here creates the clinic.
+ * came from one, otherwise /onboarding (which sends a new owner on to the plan
+ * step). If Clerk asks for a clinic first (the "choose an organization" step
+ * Clerk adds when the dashboard requires an organization), a brand-new person
+ * gets a clinic with a provisional name taken from their own ("Jane Smith's
+ * clinic"), because the design asks for the clinic's real name after payment
+ * (setUpProvisionalClinic in lib/sign-up-flow.ts explains, and why it never
+ * makes a second clinic). Anyone who already belongs to a clinic or has an
+ * invitation, or if Clerk cannot be asked, gets Clerk's own form in the box,
+ * exactly the step Clerk's ready-made form showed before.
  *
  * Every box keeps what was typed when something goes wrong: the boxes hold
  * their own values here (React only empties a form it sent as an action, and
@@ -42,6 +57,7 @@ import { BOX_APPEARANCE } from "./clerk-look";
 export function SetUpClinicForm({ redirectUrl }: { redirectUrl?: string }) {
   const { signUp } = useSignUp();
   const { isLoaded } = useAuth();
+  const clerk = useClerk();
 
   const [step, setStep] = useState<SignUpStep | "clinic">("details");
   const [name, setName] = useState("");
@@ -56,6 +72,28 @@ export function SetUpClinicForm({ redirectUrl }: { redirectUrl?: string }) {
 
   // Clerk's sign-up object is shaped like SignUpApi (lib/sign-up-flow.ts lists the parts used).
   const api = signUp as unknown as SignUpApi;
+
+  /** Clerk's browser client, as the three calls the provisional clinic needs (ClinicApi in lib/sign-up-flow.ts). */
+  function clinicApi(): ClinicApi {
+    return {
+      async hasClinicOrInvitation() {
+        const user = clerk.user;
+        // No user to ask about: count it as "belongs somewhere", so Clerk's own form decides (never a second clinic).
+        if (!user) return true;
+        const [memberships, invitations] = await Promise.all([
+          user.getOrganizationMemberships({ pageSize: 1 }),
+          user.getOrganizationInvitations({ status: "pending", pageSize: 1 }),
+        ]);
+        return memberships.total_count > 0 || invitations.total_count > 0;
+      },
+      async createClinic(clinicName) {
+        return (await clerk.createOrganization({ name: clinicName })).id;
+      },
+      async makeActive(clinicId) {
+        await clerk.setActive({ organization: clinicId });
+      },
+    };
+  }
 
   /** Runs one step, one at a time, keeping every box as typed. */
   async function run(work: () => Promise<void>) {
@@ -82,8 +120,19 @@ export function SetUpClinicForm({ redirectUrl }: { redirectUrl?: string }) {
     setDestination(goTo);
     const { error } = await signUp.finalize({
       navigate: async ({ session, decorateUrl }) => {
+        if (session?.currentTask?.key === "choose-organization") {
+          // Clerk wants a clinic first. A brand-new owner gets one with a provisional name (lib/sign-up-flow.ts,
+          // setUpProvisionalClinic); anyone who already belongs somewhere or has an invitation gets Clerk's own form.
+          const made = await setUpProvisionalClinic(clinicApi(), name);
+          if (made === "made") {
+            window.location.assign(decorateUrl(goTo));
+            return;
+          }
+          setStep("clinic");
+          return;
+        }
         if (session?.currentTask) {
-          // Clerk wants the clinic set up first: its own form, in the box (see the top of this file).
+          // Any other step Clerk asks for: its own form, in the box (see the top of this file).
           setStep("clinic");
           return;
         }

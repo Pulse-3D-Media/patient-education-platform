@@ -39,25 +39,39 @@ No price is ever shown in the library.
 Everyone in the clinic can browse and play; **only someone holding a seat gets Send**, and a link they send is from them automatically, with no picker (the page hides the button from everyone else, and the action checks the seat again).
 Someone without a seat gets one line under the videos instead (`NoSeatNote`, chosen by `noSeatHelp()` in `lib/seats.ts`; decided by the user on 2026-11-16, audit C3): the account owner with a seat free gets a **Take a seat** button, any other office admin (or the owner when none is free) a link to People, and a member the old "ask your clinic's office admin".
 A plan with no categories says so, and an office admin also gets a **Go to Billing** link.
-**"Finish setup" in the menu** (the approved design, screens 06-library-reminder and 06-library-collapsed): an office admin sees a card under Home in the full menu and a clock in the narrow rail until nothing in setup is left undone (`setupReminder()` in `lib/setup.ts`, decided 2026-11-19 after Evan's walkthrough).
+**"Finish setup" in the menu** (the approved design, screens 06-library-reminder and 06-library-collapsed): an office admin sees a card under Home in the open side rail and a clock on the closed one, on the library and the admin pages alike, until nothing in setup is left undone (`setupReminder()` in `lib/setup.ts`, decided 2026-11-19 after Evan's walkthrough).
 While the steps are under way it says "Finish setup", a bar and "1 of 4 done", and opens setup at the step the clinic is on; once the last step is passed with something skipped, it names what is left ("Add your logo") and opens that step.
 A step counts as done when its Continue (or Finish) was pressed, with whatever was saved; "Skip for now" is the only thing that leaves a step undone, apart from a logo upload that failed.
 Members never see it, and a clinic made before setup never shows it.
 Every setup save redraws the library's frame (`revalidatePath("/library", "layout")`), because the browser keeps a layout between pages and the card once went on showing an older count.
 It is drawn from the clinic row the shell already reads (`Clinic.setupStep`, `setupDone`), so it costs no extra request and adds nothing to playing a video.
-**The menu folds to icons and stays as it was left:** on a wide screen the menu button switches between the full menu and the narrow rail, and the choice is remembered in that browser (local storage, nothing on the server); a tablet keeps the rail with the full menu sliding out over the page, and a phone slides it out.
+**The side rail** (Evan, 2026-11-20; `components/ui/SideRail.tsx`, the rules in `lib/rail.ts`) is the same on the library and the admin pages.
+At rest it is a narrow rail of icons at every width from a tablet up: the three lines at its top, then Home, Library and Admin (Admin for office admins only), the setup clock, "Take the tour", and the signed-in person's picture at the foot.
+Open, it is the full menu, laid over the page: the three lines and the clinic's logo, Home, Library with the specialty ("Orthopedic Surgery") under it and the plan's categories, Admin with Overview, Shared links, People, Clinic branding and Billing, the setup card, "Take the tour", the picture with the person's name, and "Powered by Pulse 3D"; the page you are on is marked.
+Home is the library home on both surfaces, and the clinic's logo in the top bar leads there too.
+**With a mouse** it opens when the pointer rests on it for 150ms and closes 300ms after the pointer leaves, so a pointer passing across does not make it flap; a click on the three lines opens it until a click outside, and closes it when it is open.
+**With touch** (a phone, a tablet, any device that reports no hover) only the three lines or the Library icon open it, and a tap outside, which presses nothing underneath, closes it.
+Mouse or touch is told apart by what the pointer reports each time (a touch on a laptop's touch screen counts as touch), never by the screen's width, because a tablet has no hover.
+**With the keyboard** it opens when the focus moves into it, Escape closes it and puts the focus on the three lines, and tabbing out of it closes it; the narrow rail and the full menu are the same links, restyled, so the focus never jumps.
+**Nothing underneath moves:** the rail is fixed to the left edge and the page keeps a 64px margin for it, both drawn by the server, so opening it shifts nothing on the page (measured as zero layout shift) and the first paint is final.
+**It never opens on hover while a video on the page is playing**, so it never covers the player's controls; the three lines still open it.
+Choosing a link closes it, and a new page starts with it closed.
+It replaced the menu that folded between a full sidebar and a rail and was remembered in the browser (2026-11-19): with hover there is nothing to remember, so the rail always starts closed and nothing is stored.
+A phone has no rail: the three lines in its top bar slide the full menu out from the left, and the admin pages also keep their row of pills under the top bar.
+Its width transition is switched off for anyone whose device asks for reduced motion.
 
 ## The quick tour
 
 **The tour** (the approved design, screens 07-tour-1 to 3; `lib/tour.ts` for the rules, `components/tour/` for the code) is two stops for everyone and a third for office admins.
-Stop 1, "Navigate by specialty", on the library home: the categories and the search box highlighted together, title only (on a phone, the menu button that holds the categories and the search magnifier; on a tablet, the rail's Library button and the search box).
+Stop 1, "Navigate by specialty", on the library home: the side rail opened for the stop, with its Library block (the specialty and the categories) and the search box highlighted together, title only (on a phone, which has no rail, the three lines that hold the categories and the search magnifier).
 Stop 2, "Send it or save it", on an open video's watch page: the row with Favorite, Send to patient and Show QR on screen.
-Stop 3, "Your admin pages", on the admin overview: the list of admin pages, for office admins only.
+Stop 3, "Your admin pages", on the admin overview: the side rail opened for the stop, with Admin and its pages highlighted (on a phone, the row of admin pills), for office admins only.
+The tour asks the shell to open the rail (`RAIL_OPEN_EVENT` in `lib/rail.ts`) and waits for it; a press anywhere outside the rail, Escape, or the next stop's page closes it again.
 The video at stop 2 is the first card on the library home, so one the clinic's plan allows (the home page names it in a hidden attribute, from lists it already read through the access rule); a clinic with no video it can open skips that stop, and the count says "1 of 2".
 **Someone without a seat** has no Send or Show QR on the page, so stop 2 highlights only Favorite and reads "Save it", with nothing about seats or plans.
 The tour only points at what the page already drew for this person; hiding or showing something in it decides nothing about who may do what.
 **How it starts:** from the welcome dialog's "Take a quick tour" (after the first payment, and again after the last setup step), from "Take the tour" in the account menu (Clerk's user button, on every library and admin page) at any time, and from the "Take the tour" notice.
-**The notice** (Evan, 2026-11-20, `components/tour/TourNotice.tsx`): a small, quiet "Take the tour" at the foot of the library's menu, just above the account picture (an icon with "Tour" in the narrow rail, a line in the full menu, and at the foot of the menu that slides out on a tablet or phone, where the avatar is in the top bar).
+**The notice** (Evan, 2026-11-20, `components/tour/TourNotice.tsx`): a small, quiet "Take the tour" at the foot of the side rail, on the library and the admin pages, just above the account picture (an icon with "Tour" on the closed rail, a line in the open one and in the menu that slides out on a phone).
 It shows until this browser starts the tour, by any way in, and never while the tour is on screen.
 It is a plain link in the menu, never over the page, so it covers nothing, Play included; it imports none of the tour's code, and the server draws nothing for it, so it appears just after the page wakes.
 It replaced the one-time "Take a quick tour?" card for someone who had just joined, which would have shown alongside it: the join screen and an invited person with no seat now land on the plain library home, and an old `?tour=offer` address is read as no tour at all.

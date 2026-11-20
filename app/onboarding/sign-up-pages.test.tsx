@@ -169,6 +169,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  // No publishable key unless a test sets one: the payment step then uses Stripe's hosted page, as before.
+  vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "");
   vi.mocked(checkoutIsOpen).mockReturnValue(true);
   vi.mocked(getActivePricing).mockResolvedValue({
     source: { kind: "version", pinned: false, version: { id: versionId, version: 7, note: "", createdAt: new Date(), createdBy: "", createdByName: "", active: true } },
@@ -235,6 +237,8 @@ describe("where checkout is NOT open, a new owner still gets somewhere: Billing,
     vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("BILLING_CHECKOUT", "test");
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_vitest_made_up_not_a_key");
+    // A test publishable key set too: the card form, and Stripe's script with it, still never appear.
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_vitestMadeUpNotAKey");
     expect(realCheckoutIsOpen()).toBe(false);
 
     const orgId = await makeClinic();
@@ -438,5 +442,60 @@ describe("yearly promoted as months free (Evan, 2026-11-19), only when the price
     signInAs(await makeClinic(), "admin");
     expect(await drawPayment({ ...KNEE_HIP_3, interval: "YEAR" })).toContain("2 months free");
     expect(await drawPayment(KNEE_HIP_3)).not.toContain("months free");
+  });
+});
+
+describe("Stripe's card form on the payment step (Evan, 2026-11-20), test mode only", () => {
+  it("with a TEST publishable key: the card form is on the page, in place of the hosted page's box and our Pay button; the plan and Back stay", async () => {
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_vitestMadeUpNotAKey");
+    signInAs(await makeClinic(), "admin");
+    const html = await drawPayment(KNEE_HIP_3);
+    expect(html).toContain("Payment method");
+    expect(html).toContain("data-card-form");
+    expect(html).toContain("Loading the secure card form...");
+    expect(html).toContain("Test mode: no card is charged");
+    expect(html).toContain("3 seats · monthly");
+    expect(html).toContain(">Back<");
+    expect(html).not.toContain("secure page");
+    expect(html).not.toMatch(/Pay \$[\d,.]+ and start/);
+    // The page itself never writes Stripe's script tag or the key into the HTML; the form loads the script once it is on screen.
+    expect(html).not.toContain("js.stripe.com");
+    expect(html).not.toContain("pk_test_vitestMadeUpNotAKey");
+  });
+
+  it("with a LIVE publishable key: never the card form, the hosted page as before", async () => {
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_live_vitestMadeUpNotAKey");
+    signInAs(await makeClinic(), "admin");
+    const html = await drawPayment(KNEE_HIP_3);
+    expect(html).not.toContain("data-card-form");
+    expect(html).toContain("secure page.");
+    expect(html).toMatch(/Pay \$[\d,.]+ and start/);
+  });
+
+  it("with no publishable key (the demo site until it is added): the hosted page as before, nothing broken", async () => {
+    signInAs(await makeClinic(), "admin");
+    const html = await drawPayment(KNEE_HIP_3);
+    expect(html).not.toContain("data-card-form");
+    expect(html).toMatch(/Pay \$[\d,.]+ and start/);
+  });
+
+  it("Stripe's script is named in exactly one browser file, the card form, and only the payment step draws that form", async () => {
+    const { readdirSync, readFileSync, statSync } = await import("node:fs");
+    const path = await import("node:path");
+    const root = process.cwd();
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const full = path.join(dir, name);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (/\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name)) files.push(path.relative(root, full).split(path.sep).join("/"));
+      }
+    };
+    for (const dir of ["app", "components", "lib"]) walk(path.join(root, dir));
+
+    const usesScript = files.filter((file) => readFileSync(path.join(root, file), "utf8").includes("STRIPE_JS_URL"));
+    expect(usesScript.sort()).toEqual(["components/sign-up/CardForm.tsx", "lib/stripe-pages.ts"]);
+    const drawsForm = files.filter((file) => /from "@\/components\/sign-up\/CardForm"/.test(readFileSync(path.join(root, file), "utf8")));
+    expect(drawsForm).toEqual(["app/onboarding/payment/page.tsx"]);
   });
 });

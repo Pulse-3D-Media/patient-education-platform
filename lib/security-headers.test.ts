@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { checkClerkKeyForBuild, clerkFrontendOrigin, contentSecurityPolicy, COOP_ENFORCED, CSP_ENFORCED, MISSING_CLERK_KEY_MESSAGE, securityHeaders } from "./security-headers";
+import {
+  CARD_FORM_PATH,
+  checkClerkKeyForBuild,
+  clerkFrontendOrigin,
+  contentSecurityPolicy,
+  COOP_ENFORCED,
+  CSP_ENFORCED,
+  headerRules,
+  MISSING_CLERK_KEY_MESSAGE,
+  securityHeaders,
+  type HeaderRule,
+} from "./security-headers";
 
 /**
  * The headers every response carries. Made-up Clerk keys only: a key is
@@ -166,5 +177,81 @@ describe("contentSecurityPolicy", () => {
     for (const name of ["script-src", "connect-src", "frame-src", "style-src", "font-src"]) {
       expect(directive(preview, name)).toContain("https://vercel.live");
     }
+  });
+});
+
+/**
+ * What one address ends up with, worked out the way Next.js does it: every rule whose pattern matches
+ * applies, in order, and a later rule that sets the same header replaces the earlier one. The patterns
+ * used here are the three kinds headerRules writes: everything, a folder and what is under it, one page.
+ */
+function headersFor(rules: HeaderRule[], pathname: string) {
+  const out: Record<string, string> = {};
+  for (const rule of rules) {
+    const folder = rule.source.endsWith("/:path*") ? rule.source.slice(0, -"/:path*".length) : null;
+    const matches = folder === null ? pathname === rule.source : folder === "" || pathname === folder || pathname.startsWith(`${folder}/`);
+    if (matches) for (const header of rule.headers) out[header.key] = header.value;
+  }
+  return out;
+}
+
+describe("Stripe's card form: only the sign-up payment step's policy lets Stripe in (Evan, 2026-11-20)", () => {
+  const preview = { clerkPublishableKey: KEY, vercelEnv: "preview" };
+  const STRIPE_HOSTS = ["js.stripe.com", "checkout.stripe.com", "hooks.stripe.com", "api.stripe.com", "stripe.com", "link.com"];
+  const mentionsStripe = (policy: string) => STRIPE_HOSTS.some((host) => policy.includes(host));
+
+  it("the payment step gets exactly Stripe's documented hosts for script, frame, connect and pictures", () => {
+    const policy = headersFor(headerRules(preview), CARD_FORM_PATH)["Content-Security-Policy"];
+    expect(CARD_FORM_PATH).toBe("/onboarding/payment");
+    expect(directive(policy, "script-src")).toEqual(expect.arrayContaining(["https://js.stripe.com", "https://*.js.stripe.com", "https://checkout.stripe.com"]));
+    expect(directive(policy, "frame-src")).toEqual(
+      expect.arrayContaining(["https://js.stripe.com", "https://*.js.stripe.com", "https://checkout.stripe.com", "https://hooks.stripe.com", "https://link.com", "https://*.link.com"]),
+    );
+    expect(directive(policy, "connect-src")).toEqual(expect.arrayContaining(["https://api.stripe.com", "https://checkout.stripe.com", "https://link.com", "https://*.link.com"]));
+    expect(directive(policy, "img-src")).toEqual(expect.arrayContaining(["https://*.stripe.com", "https://*.link.com"]));
+    // Nothing wider: no style or font host, no Google Maps, no "any https", still no framing of our page by anyone.
+    expect(directive(policy, "style-src").some((source) => source.includes("stripe"))).toBe(false);
+    expect(directive(policy, "font-src").some((source) => source.includes("stripe"))).toBe(false);
+    expect(policy).not.toContain("maps.googleapis.com");
+    expect(policy).not.toMatch(/(^|\s)https:(\s|;|$)/);
+    expect(policy).toContain("frame-ancestors 'none'");
+  });
+
+  it("the wider policy is the usual one plus Stripe's hosts, nothing removed", () => {
+    const usual = contentSecurityPolicy(preview);
+    const card = contentSecurityPolicy(preview, { stripeCardForm: true });
+    for (const name of ["default-src", "script-src", "style-src", "img-src", "media-src", "font-src", "connect-src", "frame-src", "worker-src", "form-action", "frame-ancestors", "object-src", "base-uri"]) {
+      expect(directive(card, name)).toEqual(expect.arrayContaining(directive(usual, name)));
+    }
+  });
+
+  it("the patient's pages, the plan step, Billing, the library and the bare address keep the usual policy, with no Stripe host at all", () => {
+    const rules = headerRules(preview);
+    const usual = contentSecurityPolicy(preview);
+    for (const path of ["/watch/made-up-code", "/watch", "/q/made-up-code", "/q", "/onboarding/plan", "/onboarding/done", "/admin/billing", "/library", "/"]) {
+      const policy = headersFor(rules, path)["Content-Security-Policy"];
+      expect(policy, path).toBe(usual);
+      expect(mentionsStripe(policy), path).toBe(false);
+    }
+    // And the patient's pages still say "not in search engines".
+    expect(headersFor(rules, "/watch/made-up-code")["X-Robots-Tag"]).toBe("noindex, nofollow");
+    expect(headersFor(rules, "/q/made-up-code")["X-Robots-Tag"]).toBe("noindex, nofollow");
+  });
+
+  it("the payment step keeps every other security header unchanged", () => {
+    const rules = headerRules(preview);
+    const pay = headersFor(rules, CARD_FORM_PATH);
+    const plan = headersFor(rules, "/onboarding/plan");
+    for (const key of ["X-Frame-Options", "Referrer-Policy", "Strict-Transport-Security", "X-Content-Type-Options", "Permissions-Policy", "Cross-Origin-Opener-Policy"]) {
+      expect(pay[key], key).toBe(plan[key]);
+    }
+  });
+
+  it("on the production deployment, where the payment step is never offered, no page's policy mentions Stripe", () => {
+    const rules = headerRules({ clerkPublishableKey: KEY, vercelEnv: "production" });
+    for (const path of [CARD_FORM_PATH, "/watch/made-up-code", "/q/made-up-code", "/admin/billing", "/"]) {
+      expect(mentionsStripe(headersFor(rules, path)["Content-Security-Policy"]), path).toBe(false);
+    }
+    expect(rules.some((rule) => rule.source === CARD_FORM_PATH)).toBe(false);
   });
 });

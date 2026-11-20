@@ -47,3 +47,25 @@ export function stripeInvoicePage(address: string | null | undefined): string | 
   if (!address || HAS_TAB_OR_LINE_BREAK.test(address)) return null;
   return address.startsWith(STRIPE_INVOICE_PREFIX) ? address : null;
 }
+
+/**
+ * Stripe's browser script, for the card form on the sign-up payment step
+ * (components/sign-up/CardForm.tsx). Loaded straight from Stripe, as Stripe
+ * requires (it must never be copied into our own files), and only on that one
+ * page, only once the server has said checkout is open there. The "dahlia" in
+ * the address is the Stripe.js version that matches the API version the server
+ * is pinned to (STRIPE_API_VERSION in lib/stripe.ts, 2026-08-26.dahlia); move
+ * the two together.
+ */
+export const STRIPE_JS_URL = "https://js.stripe.com/dahlia/stripe.js";
+
+/**
+ * Is this a publishable key the card form may use? TEST keys only ("pk_test_"),
+ * to match the server, which refuses any secret key that is not a test key
+ * (isTestSecretKey in lib/stripe.ts). A publishable key is public by design (it
+ * is in the page), so this is not about secrecy: it is so a live key pasted into
+ * a setting by mistake can never draw a form that takes real cards.
+ */
+export function isTestPublishableKey(key: string | undefined | null): key is string {
+  return typeof key === "string" && /^pk_test_[A-Za-z0-9]+$/.test(key);
+}

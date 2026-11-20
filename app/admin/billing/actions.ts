@@ -61,6 +61,8 @@ import { pickTrustedOrigin } from "@/lib/trusted-origin";
  */
 export type CheckoutFormState = {
   redirectTo?: string;
+  /** The sign-up card form only: the one-time value Stripe's script needs to draw the form on our page. Never logged. */
+  clientSecret?: string;
   changed?: string;
   error?: string;
   /** The sign-in has ended: the sign-up payment step offers a way to sign in again. */
@@ -83,6 +85,20 @@ export async function startSignUpCheckoutAction(_previous: CheckoutFormState, fo
   const { userId } = await auth();
   if (!userId) return { error: SIGNED_OUT, signIn: true };
   return checkoutFor(formData, "signup");
+}
+
+/**
+ * The card form on the sign-up payment step (components/sign-up/CardForm.tsx), when the page opens.
+ * The very same checkout again (checkoutFor below), asking for Stripe's card form inside our page
+ * ("signup-card") instead of the address of Stripe's hosted page. The answer is the one-time value
+ * Stripe's script needs to draw the form; the card itself is typed into Stripe's own frame and never
+ * reaches this server. Opening the page twice, or in two tabs, gets the same payment page back (the
+ * same attempt, the same idempotency key), so this is safe to repeat.
+ */
+export async function startSignUpCardAction(formData: FormData): Promise<CheckoutFormState> {
+  const { userId } = await auth();
+  if (!userId) return { error: SIGNED_OUT, signIn: true };
+  return checkoutFor(formData, "signup-card");
 }
 
 /** What the payment step says when the sign-in has run out since the page was drawn. */
@@ -112,10 +128,12 @@ async function checkoutFor(formData: FormData, flow: CheckoutFlow): Promise<Chec
       deps: { gateway: stripeGateway, fetchSubscription: fetchSubscriptionSnapshot, isOpen: checkoutIsOpen() },
     });
 
+    const signUp = flow === "signup" || flow === "signup-card";
     if (result.kind === "redirect") return { redirectTo: result.url };
-    if (result.kind === "confirming") return { redirectTo: flow === "signup" ? "/onboarding/done" : "/admin/billing/return" };
+    if (result.kind === "embedded") return { clientSecret: result.clientSecret };
+    if (result.kind === "confirming") return { redirectTo: signUp ? "/onboarding/done" : "/admin/billing/return" };
     if (result.kind === "changed") {
-      revalidatePath(flow === "signup" ? "/onboarding/payment" : "/admin/billing");
+      revalidatePath(signUp ? "/onboarding/payment" : "/admin/billing");
       return { changed: result.message };
     }
     return { error: result.message };

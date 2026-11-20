@@ -8,8 +8,10 @@ import { getCheckoutFacts } from "@/lib/db/billing";
 import { SIGN_UP_PATHS } from "@/lib/sign-up-steps";
 
 /**
- * Where Stripe sends a new clinic's owner after paying on the sign-up steps:
- * /onboarding/done. The sign-up twin of /admin/billing/return.
+ * Where a new clinic's owner lands after paying on the sign-up steps:
+ * /onboarding/done. The sign-up twin of /admin/billing/return. The card form on
+ * the payment step comes here itself when Stripe says the payment went through
+ * (no trip to Stripe's site); the hosted page's fallback is sent here by Stripe.
  *
  * ARRIVING HERE PROVES NOTHING AND CHANGES NOTHING. Anybody can type this
  * address. The page reads the clinic's billing record on the server and:
@@ -63,11 +65,11 @@ export default async function SignUpDonePage() {
             </h1>
             <Confirming />
             <p className="mt-6 text-sm text-ink-soft">
-              Did not pay, or closed Stripe&rsquo;s page?{" "}
+              Did not finish paying?{" "}
               <Link href={`${SIGN_UP_PATHS.payment}?stopped=1`} className="font-medium text-brand-bright underline underline-offset-2">
                 Go back to payment
               </Link>
-              . Nothing is charged unless you finish on Stripe&rsquo;s page.
+              . Nothing is charged unless the payment goes through.
             </p>
           </>
         )}

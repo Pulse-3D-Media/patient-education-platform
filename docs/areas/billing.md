@@ -110,7 +110,8 @@ The state table, first rule that fits wins:
 ## Self-serve checkout
 
 An admin of an eligible clinic picks categories, surgeon seats and monthly or yearly on `/admin/billing`, sees the total, and is sent to a payment page hosted by Stripe.
-Card details never touch this app.
+A new clinic's owner on the sign-up payment step types the card into Stripe's own form drawn inside our page instead (see "Sign-up's plan and payment steps"); everything in this section applies to both.
+Card details never touch this app: on Stripe's page, or in Stripe's frame on ours, they go from the browser straight to Stripe.
 The flow is `startCheckout()` in `lib/checkout.ts` (server only); its pure rules are `lib/checkout-rules.ts`; everything it asks of Stripe goes through the `CheckoutGateway` in `lib/stripe.ts`.
 **No schema was added for it:** the `BillingPlan` row from the billing foundation is the durable purchase attempt.
 
@@ -132,14 +133,15 @@ The flow is `startCheckout()` in `lib/checkout.ts` (server only); its pure rules
   The clinic's Stripe customer is made with an idempotency key built from the clinic id and stored by `setStripeCustomer()` **before** anything else exists in Stripe.
   The attempt is written by `acceptPlanForCheckout()` under the clinic's row lock, where eligibility and "no live subscription" are checked again and an identical recent attempt is found instead of a second one being written (the clock is read after the lock is held, and a small negative age still counts as recent, or a double click would make two attempts).
   The payment page is made with an idempotency key built from the attempt's id, so identical requests get the same page.
-  Every other open page of that customer is closed.
+  Each kind of page has its own key (`checkoutIdempotencyKey()`), and a flow only ever reuses its own kind: Stripe's hosted page for Billing and the hosted sign-up fallback, the card form for the sign-up card form.
+  Every other open page of that customer is closed, so a hosted page and a card form are never both payable.
   If a different attempt became the waiting one while this request ran (two tabs, different picks), this request closes its own page and says so.
   Stripe answers a repeated key with its **first** answer, so for a reused attempt the page's current state is asked for: already paid sends the admin to the return page, closed starts a fresh attempt.
 - **What Stripe is asked to charge** is `checkoutSessionParams()`, pure and tested: one line, the engine's per-seat amount for the interval as the unit price and the seats as the quantity.
   **A yearly plan is a yearly price of the whole year's amount**, never the monthly amount with "year" on it.
   One fixed product (`PRODUCT_ID`); Stripe generates a Price object for each page, which is fine: our versioned engine is the pricing authority, not Stripe's price list.
   The only payment method type asked for is `card`, with a fixed quantity, no promotion codes, no trial and no tax.
-  (Stripe's page can still offer the card wallets and Link, including Link's bank option, that are switched on in the Stripe account's own settings; that is a Stripe setting to decide before live payments, and whatever is used, nothing opens until the invoice is paid.)
+  (Stripe's page, and Stripe's card form on the sign-up step, can still offer the card wallets and Link, including Link's bank option (seen as "Bank, $5 back" in the card form on 2026-11-20), that are switched on in the Stripe account's own settings; that is a Stripe setting to decide before live payments, and whatever is used, nothing opens until the invoice is paid.)
   The accepted plan's id goes on the **subscription's own metadata**, the only place the webhook looks.
 - **Return addresses are trusted origins.**
   `pickTrustedOrigin()` in `lib/trusted-origin.ts` uses the request's Host header only to choose among addresses the deployment already knows are its own (Vercel's own variables, the optional `APP_ORIGINS` list, localhost on a developer's computer).
@@ -179,10 +181,19 @@ Stripe test mode only, like everything above, and offered only where Billing's o
   The plan step only moves to the payment step with the picks in the address (`lib/sign-up-steps.ts`, read back by `readPlanFromAddress()`, which refuses anything it does not recognise).
   The payment page works the total out again on the server from the active version (`quotePlan()`, the same engine and inputs as Billing's picker), and "Pay $X and start" sends the picks and that total to `startSignUpCheckoutAction`, which is Billing's checkout (`checkoutFor()` in `app/admin/billing/actions.ts`) with only two differences: Stripe's return addresses, and a sentence for a sign-in that ran out mid-flow.
   Every guard above (one customer, one attempt, one page, one first payment at a time) is the same code.
-- **The card is entered on Stripe's own hosted page**, not inside ours.
-  The design draws Stripe's embedded form with express checkout buttons; that needs Stripe's browser script, a new package and a wider content policy, which were not added without asking (rule 6).
-  The payment page shows the plan, the total, the money sentence and the test-mode line, and the button opens Stripe's page as Billing does.
-- **Coming back.**
+- **The card is entered on our page, in Stripe's own frame** (Evan, 2026-11-20, approving the content policy change and the package question; no package was needed in the end).
+  `CardForm` (`components/sign-up/CardForm.tsx`) asks `startSignUpCardAction` for a payment page as the page opens; it is Billing's checkout again (`checkoutFor()`) with `flow: "signup-card"`, which asks Stripe for its embedded mode (`ui_mode: "embedded_page"`) instead of a hosted page.
+  The answer is the one-time value Stripe's script needs to draw that one page (`clientSecret`), never logged or stored.
+  Stripe's script is loaded from `https://js.stripe.com/dahlia/stripe.js` (`STRIPE_JS_URL` in `lib/stripe-pages.ts`; "dahlia" matches the pinned API version and the two move together), only on this page, and draws the form in Stripe's frame: the order line, Link and the wallets the Stripe account offers, the card boxes, its own Subscribe button, its own sentence for a declined card, and the bank check (3-D Secure) some cards ask for.
+  The card number, date and digits go from the browser straight to Stripe; our page, server, logs and database never see them.
+  When Stripe says the payment went through it calls the page back (`redirect_on_completion: "if_required"`, so a card never leaves our page), and the page goes to `/onboarding/done`, which still waits for the record to say paid.
+  Opening the page again, a second tab, or a refresh gets the same attempt and the same payment page; after paying, the server answers "confirming" and the page goes straight to `/onboarding/done`; a first payment under way is refused as above.
+  If the script or the server fails, the page says "The card form could not be loaded just now. Nothing was charged. Try again in a moment." with Try again, and the plan stays on the page.
+  **Test mode only:** the form needs `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, read on the server and accepted only as a `pk_test_` key (`isTestPublishableKey()`), to match the server's refusal of a live secret key.
+  With no key, or a live one, the payment step falls back to Stripe's hosted page exactly as before (the box "You enter your card on Stripe's secure page." and "Pay $X and start").
+  The page is offered only where checkout is open, so on the production deployment neither the form nor Stripe's script is ever loaded, and the content policy there names no Stripe host (see "Security headers and link guessing").
+  Stripe's frame repeats the plan's name and total at its top, and that cannot be switched off from our side; how it looks inside is Stripe's (its Branding settings in the Stripe dashboard), because our page's styles cannot reach into Stripe's frame.
+- **Coming back from the hosted fallback.**
   `checkoutSessionParams()` takes `flow: "signup"`: Stripe sends a payment to `/onboarding/done` and a person who leaves its page to `/onboarding/payment?stopped=1` (`checkoutReturnUrls()`); its idempotency key ends `:signup` so Stripe never sees one key with two sets of return addresses (`checkoutIdempotencyKey()`); Billing's addresses and key are unchanged.
   A page already open for the same accepted plan is reused whichever flow made it, so its return address may be the other flow's; both return pages only read the record.
   `?stopped=1` shows "The payment was not finished. Nothing was charged. Try again, with another card or payment method if yours was declined." with the plan kept (from the attempt on record) and Try again: Stripe's own page says when a card is declined, and our page cannot know which it was, so it does not claim a decline.

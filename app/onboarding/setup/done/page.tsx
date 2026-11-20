@@ -31,7 +31,7 @@ export default async function SetupDonePage() {
     <SetupFrame clinic={clinic} progress={progress} step={null}>
       <StepBody
         step={null}
-        preview={<PatientPhonePreview {...preview} title="Total Knee Replacement" />}
+        preview={<PatientPhonePreview {...preview} />}
         actions={
           <>
             <Link href={TOUR_HREF} className={SETUP_SECONDARY}>

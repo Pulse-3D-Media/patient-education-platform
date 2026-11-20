@@ -11,7 +11,7 @@ import { CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
 import { ClinicLogo } from "./ClinicLogo";
-import { SETUP_PATH } from "@/lib/setup";
+import type { SetupReminder } from "@/lib/setup";
 import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
 
 /**
@@ -94,8 +94,6 @@ export type ShellBrand = {
   logoUrl: string | null;
 };
 
-/** How far an office admin's clinic has got with setup, for the "Finish setup" card in the menu. */
-export type SetupReminder = { doneCount: number; total: number };
 
 /** Which pull-out is showing, if any: the full sidebar slid over the page, the categories, or the admin sections. */
 type Menu = "guide" | "library" | "admin" | null;
@@ -246,7 +244,7 @@ export function AppShell({
             <HomeIcon className="h-6 w-6" />
           </RailLink>
           {setup && (
-            <RailLink href={SETUP_PATH} label="Setup" active={false} title={`Finish setup, ${setup.doneCount} of ${setup.total} done`}>
+            <RailLink href={setup.href} label="Setup" active={false} title={`${setup.title}, ${setup.doneCount} of ${setup.total} done`}>
               <ClockIcon className="h-6 w-6" />
             </RailLink>
           )}
@@ -554,20 +552,21 @@ function AdminMenu({ pathname, onClose }: { pathname: string; onClose: () => voi
 
 /**
  * "Finish setup" in the menu (the approved design, screen 06-library-reminder):
- * a card under Home with a bar and "0 of 4 done", for an office admin while
- * their clinic's setup is under way. It opens setup at the step the clinic
- * is on. Only a link: it loads nothing and adds nothing to playing a video.
+ * a card under Home with a bar and "0 of 4 done", for an office admin until
+ * nothing in setup is left undone. While the steps are under way it says
+ * "Finish setup" and opens setup at the step the clinic is on; after them, it
+ * names what is left ("Add your logo") and opens that step (lib/setup.ts). Only a link: it loads nothing and adds nothing to playing a video.
  */
 function SetupCard({ setup, onChoose }: { setup: SetupReminder; onChoose?: () => void }) {
   return (
     <Link
-      href={SETUP_PATH}
+      href={setup.href}
       onClick={onChoose}
       className="mt-2 block rounded-xl border border-brand/40 bg-brand/10 px-3 py-3 text-ink transition hover:border-brand"
     >
       <span className="flex items-center gap-3 text-base font-semibold">
         <ClockIcon className="h-5 w-5 shrink-0" />
-        Finish setup
+        {setup.title}
       </span>
       <span role="progressbar" aria-label="Setup progress" aria-valuemin={0} aria-valuemax={setup.total} aria-valuenow={setup.doneCount} className="mt-3 block h-1.5 overflow-hidden rounded-full bg-wash-strong">
         <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.round((setup.doneCount / setup.total) * 100)}%` }} />

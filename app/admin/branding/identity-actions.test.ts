@@ -222,7 +222,8 @@ describe("uploading a logo", () => {
     expect(updateOrganizationLogo).toHaveBeenCalledTimes(1);
     const [orgId, params] = updateOrganizationLogo.mock.calls[0];
     expect(orgId).toBe(orgMine);
-    expect(params.uploaderUserId).toBe("user_vitest");
+    // No uploader is named: with one, Clerk refused the upload (403 missing_organization_permission). See lib/organization.ts.
+    expect(params).not.toHaveProperty("uploaderUserId");
     expect(params.file.type).toBe("image/png");
     expect(params.file.name).toBe("logo.png");
     expect(params.file.size).toBe(2_000);

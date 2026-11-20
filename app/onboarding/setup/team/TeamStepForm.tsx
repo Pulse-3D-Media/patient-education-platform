@@ -92,7 +92,7 @@ export function TeamStepForm({
       step="team"
       welcomeBack={welcomeBack}
       actions={
-        typed || free > 0 ? (
+        typed ? (
           <button type="button" onClick={send} disabled={pending} className={SETUP_PRIMARY}>
             {pending ? "Sending..." : "Send invitations"}
           </button>

@@ -32,7 +32,7 @@ export function TestStepForm({
   const [made, setMade] = useState<{ url: string; qr: string; title: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const title = procedures.find((procedure) => procedure.id === videoId)?.title ?? "Total Knee Replacement";
+  const title = procedures.find((procedure) => procedure.id === videoId)?.title ?? preview.title;
 
   function generate() {
     setError(null);
@@ -56,7 +56,8 @@ export function TestStepForm({
     <StepBody
       step="test"
       welcomeBack={welcomeBack}
-      preview={<PatientPhonePreview {...preview} title={made?.title ?? title} />}
+      // The still belongs to one video, so it is shown only while that video is the one picked.
+      preview={<PatientPhonePreview {...preview} title={made?.title ?? title} posterUrl={videoId === preview.videoId ? preview.posterUrl : null} />}
       actions={
         <button type="button" onClick={finish} disabled={pending} className={SETUP_PRIMARY}>
           Finish

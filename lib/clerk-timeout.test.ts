@@ -74,3 +74,15 @@ describe("isSignInUnavailable", () => {
     expect(isSignInUnavailable("SIGN_IN_UNAVAILABLE")).toBe(false);
   });
 });
+
+describe("clerkRefusal: telling a refusal from Clerk not answering, in the log", () => {
+  it("gives Clerk's status and code word for a refusal, and nothing for anything else", async () => {
+    const { clerkRefusal } = await import("./clerk-timeout");
+    expect(clerkRefusal({ status: 403, errors: [{ code: "missing_organization_permission", message: "missing permission" }] })).toBe("status 403 missing_organization_permission");
+    expect(clerkRefusal({ status: 500 })).toBe("status 500");
+    expect(clerkRefusal(new TimeoutError("Clerk", 5000))).toBe("");
+    // A code that is not a plain word is left out, so nothing odd reaches the log.
+    expect(clerkRefusal({ status: 422, errors: [{ code: "Has a message: and spaces" }] })).toBe("status 422");
+    expect(clerkRefusal(null)).toBe("");
+  });
+});

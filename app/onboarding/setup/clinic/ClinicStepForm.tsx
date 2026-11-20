@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PatientPhonePreview } from "@/components/ui/PatientPhonePreview";
 import { INPUT, LABEL } from "@/components/ui/styles";
+import { typedPhoneProblem, typedUsPhone } from "@/lib/phone";
 import { saveClinicStepAction } from "../actions";
 import { SETUP_PRIMARY, StepProblem, useSetupForm } from "../SetupButtons";
 import { StepBody, StepHeading } from "../SetupFrame";
@@ -13,18 +14,33 @@ import type { PreviewFacts } from "../setup-view";
  * through Clinic branding's rename, the phone through the same rules) and
  * moves on; a refusal keeps what was typed and says why next to the box.
  */
-export function ClinicStepForm({ name, phone, preview, welcomeBack }: { name: string; phone: string; preview: PreviewFacts; welcomeBack: boolean }) {
+export function ClinicStepForm({ name, phone: initialPhone, preview, welcomeBack }: { name: string; phone: string; preview: PreviewFacts; welcomeBack: boolean }) {
   const { state, pending, form } = useSetupForm(saveClinicStepAction);
   const [typedName, setTypedName] = useState(name);
+  // The phone as shown: ten digits at most, formatted as they arrive (lib/phone.ts). Only a courtesy; the server checks again.
+  const [phone, setPhone] = useState(typedUsPhone(initialPhone));
+  const [phoneTouched, setPhoneTouched] = useState(false);
+  const phoneHint = phoneTouched ? typedPhoneProblem(phone) : null;
   const nameProblem = state?.fieldErrors?.name;
-  const phoneProblem = state?.fieldErrors?.phone;
+  const phoneProblem = phoneHint ?? state?.fieldErrors?.phone;
 
   return (
-    <form {...form} className="flex flex-1 flex-col" noValidate>
+    <form
+      {...form}
+      onSubmit={(event) => {
+        // A half-typed phone is said before anything is sent, not after.
+        if (typedPhoneProblem(phone)) {
+          event.preventDefault();
+          setPhoneTouched(true);
+        }
+      }}
+      className="flex flex-1 flex-col"
+      noValidate
+    >
       <StepBody
         step="clinic"
         welcomeBack={welcomeBack}
-        preview={<PatientPhonePreview {...preview} clinicName={typedName.trim() || name} title="Total Knee Replacement" />}
+        preview={<PatientPhonePreview {...preview} clinicName={typedName.trim() || name} />}
         actions={
           <button type="submit" disabled={pending} className={SETUP_PRIMARY}>
             {pending ? "Saving..." : "Continue"}
@@ -65,8 +81,11 @@ export function ClinicStepForm({ name, phone, preview, welcomeBack }: { name: st
               id="setup-clinic-phone"
               name="phone"
               type="tel"
+              inputMode="tel"
               autoComplete="tel"
-              defaultValue={phone}
+              value={phone}
+              onChange={(event) => setPhone(typedUsPhone(event.target.value))}
+              onBlur={() => setPhoneTouched(true)}
               placeholder="(801) 555-0123"
               aria-invalid={phoneProblem ? true : undefined}
               aria-describedby={phoneProblem ? "setup-clinic-phone-problem" : undefined}

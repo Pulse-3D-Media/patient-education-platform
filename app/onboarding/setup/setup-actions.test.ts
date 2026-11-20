@@ -19,12 +19,13 @@ vi.mock("next/navigation", () => ({
   },
 }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ host: "localhost:3000" }) }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@clerk/nextjs/server", () => ({ auth: vi.fn(async () => ({ userId: "user_vitestadmin" })) }));
 vi.mock("@/lib/roles", () => ({ isClinicAdmin: vi.fn(async () => true) }));
 vi.mock("@/lib/clinic", () => ({ getCurrentClinicId: vi.fn(async () => "clinic_vitest"), requireClinicPage: vi.fn() }));
 vi.mock("@/lib/db/setup", () => ({ recordSetupStep: vi.fn() }));
 vi.mock("@/app/admin/people/actions", () => ({ inviteAction: vi.fn() }));
-vi.mock("@/app/admin/branding/actions", () => ({ saveClinicNameAction: vi.fn(), saveClinicBrandingPartAction: vi.fn() }));
+vi.mock("@/app/admin/branding/actions", () => ({ saveClinicNameAction: vi.fn(), saveClinicBrandingPartAction: vi.fn(), uploadClinicLogoAction: vi.fn() }));
 vi.mock("@/lib/senders", () => ({ resolveSender: vi.fn() }));
 vi.mock("@/lib/db/shares", async () => {
   class ShareRefusedError extends Error {}
@@ -38,7 +39,7 @@ const { isClinicAdmin } = await import("@/lib/roles");
 const { getCurrentClinicId, requireClinicPage } = await import("@/lib/clinic");
 const { recordSetupStep } = await import("@/lib/db/setup");
 const { inviteAction } = await import("@/app/admin/people/actions");
-const { saveClinicNameAction, saveClinicBrandingPartAction } = await import("@/app/admin/branding/actions");
+const { saveClinicNameAction, saveClinicBrandingPartAction, uploadClinicLogoAction } = await import("@/app/admin/branding/actions");
 const { resolveSender } = await import("@/lib/senders");
 const { createShare } = await import("@/lib/db/shares");
 const actions = await import("./actions");
@@ -120,6 +121,47 @@ describe("step 1, the clinic's name and phone", () => {
     expect(await outcome(() => actions.saveClinicStepAction(null, form("New name", "Old name", "12")))).toMatchObject({ fieldErrors: { phone: expect.stringContaining("phone") } });
     expect(await outcome(() => actions.saveClinicStepAction(null, form("  ", "Old name")))).toMatchObject({ fieldErrors: { name: "Type your clinic's name." } });
     expect(recordSetupStep).not.toHaveBeenCalled();
+  });
+});
+
+describe("step 2, the logo and the colour (a chosen logo is never dropped without a word)", () => {
+  const form = (opts: { file?: boolean; withoutLogo?: boolean } = {}) => {
+    const data = new FormData();
+    data.set("brandColor", "#6032f6");
+    data.set("logo", opts.file ? new File([new Uint8Array(500)], "logo.png", { type: "image/png" }) : new File([], ""));
+    if (opts.withoutLogo) data.set("withoutLogo", "1");
+    return data;
+  };
+
+  it("Continue with a chosen logo uploads it through Clinic branding's upload, then saves the colour, then counts the step done", async () => {
+    vi.mocked(uploadClinicLogoAction).mockResolvedValue({ ok: "Uploaded." });
+    vi.mocked(saveClinicBrandingPartAction).mockResolvedValue({ ok: "Saved." });
+    expect(await outcome(() => actions.saveBrandingStepAction(null, form({ file: true })))).toMatch(/^redirect:/);
+    expect(uploadClinicLogoAction).toHaveBeenCalledTimes(1);
+    expect(saveClinicBrandingPartAction).toHaveBeenCalledWith("brandColor", expect.any(FormData));
+    expect(recordSetupStep).toHaveBeenCalledWith("clinic_vitest", "branding", "done");
+  });
+
+  it("a failed upload moves nothing on, marks nothing, and says the logo was not saved", async () => {
+    vi.mocked(uploadClinicLogoAction).mockResolvedValue({ error: "We could not upload the logo just now, so nothing was changed. Try again in a moment." });
+    const result = await outcome(() => actions.saveBrandingStepAction(null, form({ file: true })));
+    expect(result).toMatchObject({ fieldErrors: { logo: expect.stringContaining("could not upload") } });
+    expect(saveClinicBrandingPartAction).not.toHaveBeenCalled();
+    expect(recordSetupStep).not.toHaveBeenCalled();
+  });
+
+  it("Go on without the logo saves the colour, leaves the logo alone, and leaves the step not done", async () => {
+    vi.mocked(saveClinicBrandingPartAction).mockResolvedValue({ ok: "Saved." });
+    expect(await outcome(() => actions.saveBrandingStepAction(null, form({ file: true, withoutLogo: true })))).toMatch(/^redirect:/);
+    expect(uploadClinicLogoAction).not.toHaveBeenCalled();
+    expect(recordSetupStep).toHaveBeenCalledWith("clinic_vitest", "branding", "skipped");
+  });
+
+  it("Continue with no logo chosen saves the colour and counts the step done", async () => {
+    vi.mocked(saveClinicBrandingPartAction).mockResolvedValue({ ok: "Saved." });
+    await outcome(() => actions.saveBrandingStepAction(null, form()));
+    expect(uploadClinicLogoAction).not.toHaveBeenCalled();
+    expect(recordSetupStep).toHaveBeenCalledWith("clinic_vitest", "branding", "done");
   });
 });
 

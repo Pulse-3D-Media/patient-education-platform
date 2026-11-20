@@ -570,3 +570,26 @@ export function parsePercentToBp(text: string): number | null {
   const part = Number((match[2] ?? "").padEnd(2, "0"));
   return whole * 100 + part;
 }
+
+/**
+ * How many months a yearly plan gives free, worked out from two totals the engine quoted for the SAME plan (same
+ * categories, same seats), one monthly and one yearly. Null unless it is a true, whole number of months above zero:
+ * a pricing version whose yearly price is not a whole number of monthly payments less than twelve gets no claim at all.
+ *
+ * Today yearly is always exactly `yearlyMonths` times monthly (the ladder price times the months, and no founding
+ * offer is ever applied to a clinic's price), so this is 12 minus `yearlyMonths` ("2 months free" at 10). It is still
+ * worked out from the totals, never from the setting alone, so the words can only say what the prices say.
+ */
+export function freeMonthsOnYearly(monthlyTotalCents: number | null | undefined, yearlyTotalCents: number | null | undefined): number | null {
+  if (!monthlyTotalCents || !yearlyTotalCents || monthlyTotalCents <= 0 || yearlyTotalCents <= 0) return null;
+  const twelveMonths = monthlyTotalCents * 12;
+  if (yearlyTotalCents >= twelveMonths) return null;
+  const saved = twelveMonths - yearlyTotalCents;
+  if (saved % monthlyTotalCents !== 0) return null;
+  return saved / monthlyTotalCents;
+}
+
+/** "2 months free", "1 month free". */
+export function freeMonthsWords(months: number): string {
+  return `${months} ${months === 1 ? "month" : "months"} free`;
+}

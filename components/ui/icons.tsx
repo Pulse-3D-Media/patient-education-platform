@@ -244,7 +244,7 @@ export function HeartIcon({ className, filled = false }: IconProps & { filled?: 
   );
 }
 
-/** Three lines: the menu button at the left of the top bar, which folds the sidebar away or brings it back. */
+/** Three lines: the menu button at the top of the side rail (in the top bar on a phone), which opens the full menu and closes it. */
 export function MenuIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className={className} aria-hidden="true">

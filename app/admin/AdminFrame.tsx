@@ -1,20 +1,22 @@
 import type { ReactNode } from "react";
-import { staffLook } from "@/app/brand-look";
-import { AdminConsole } from "@/components/ui/AdminConsole";
+import { AdminPills } from "@/components/ui/AdminPills";
+import { ClinicShell } from "@/components/ui/ClinicShell";
 import type { CurrentClinic } from "@/lib/clinic";
 
 /**
- * The frame every clinic admin page draws itself inside: the admin console
- * (the clinic's logo in the top bar, the left rail with the five sections,
- * Library and the signed-in person at the bottom of the rail; on a phone the
- * sections as a row of pills) in the clinic's own branding, then the page's
- * own title and content.
+ * The frame every clinic admin page draws itself inside: the same frame as
+ * the library (ClinicShell and its side rail, Evan, 2026-11-20: Home,
+ * Library and Admin, with the admin pages under Admin when the rail opens;
+ * on a phone the admin pages as a row of pills under the top bar) in the
+ * clinic's own branding, then the page's own title and content.
  *
  * Only the page decides whether the person may see it: this frame is
  * drawn AFTER the page has checked that they are an admin (a member gets
  * <AdminsOnly /> with no frame and no navigation). A closed clinic's admin
  * does get the frame, so the rail (or the row of pills on a phone) is how
  * they reach Billing, the page that stays open when the rest is closed.
+ * (The rail also lists the library, whose pages say for themselves that the
+ * clinic is closed: a link shown grants nothing.)
  *
  * `bare` is for the pages that lay themselves out: the list-and-detail
  * pages (SplitView.tsx), whose title sits at the top of the list, and the
@@ -22,8 +24,9 @@ import type { CurrentClinic } from "@/lib/clinic";
  * still has exactly one main landmark and one top-level heading.
  *
  * It takes the clinic the page already fetched (requireClinicPage), so the
- * branding costs no extra read. The look is worked out here, on the server
- * (staffLook()), and only the checked values go to the browser.
+ * branding, the categories and the setup reminder cost no extra read. The
+ * look is worked out on the server (ClinicShell, staffLook()), and only the
+ * checked values go to the browser.
  */
 export function AdminFrame({
   clinic,
@@ -44,17 +47,15 @@ export function AdminFrame({
   bare?: boolean;
   children: ReactNode;
 }) {
-  const look = staffLook(clinic);
-  const brand = { style: look.style, fontClass: look.fontClass, theme: look.theme, clinicName: clinic.name, logoUrl: look.logoUrl };
   if (bare) {
     return (
-      <AdminConsole brand={brand}>
+      <ClinicShell clinic={clinic} showAdmin={clinic.isAdmin} phoneNav={<AdminPills />}>
         <main>{children}</main>
-      </AdminConsole>
+      </ClinicShell>
     );
   }
   return (
-    <AdminConsole brand={brand}>
+    <ClinicShell clinic={clinic} showAdmin={clinic.isAdmin} phoneNav={<AdminPills />}>
       <main className="px-4 py-6 sm:px-8 sm:py-8">
         <div className={`mx-auto ${wide ? "max-w-6xl" : "max-w-4xl"}`}>
           <header>
@@ -64,6 +65,6 @@ export function AdminFrame({
           {children}
         </div>
       </main>
-    </AdminConsole>
+    </ClinicShell>
   );
 }

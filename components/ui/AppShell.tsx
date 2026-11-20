@@ -1,45 +1,38 @@
 "use client";
 
-import type { Category } from "@/lib/categories";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { ADMIN_SECTIONS, activeAdminSection } from "@/lib/admin-nav";
 import { DEFAULT_BRAND_THEME } from "@/lib/branding";
-import { CATEGORY_GROUP } from "@/lib/categories";
 import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
+import type { SetupReminder } from "@/lib/setup";
 import { ClinicLogo } from "./ClinicLogo";
 import { AccountButton } from "./AccountButton";
-import { TourNotice } from "@/components/tour/TourNotice";
+import { SideRail, useRail, type NavCategory } from "./SideRail";
 import { TourHost } from "@/components/tour/TourHost";
-import type { SetupReminder } from "@/lib/setup";
-import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
+import { ArrowLeftIcon, MenuIcon, SearchIcon } from "./icons";
+
+export type { NavCategory } from "./SideRail";
 
 /**
- * The frame around every staff-facing page: the library and the admin
- * console. (The patient page at /watch has no frame at all, on purpose.)
- * Laid out the way YouTube does it (decided by Evan on 2026-10-15):
+ * The frame around every staff-facing page of a clinic: the library AND the
+ * admin pages, the same frame on both since Evan's notes of 2026-11-20.
+ * (The patient page at /watch has no frame at all, on purpose, and the
+ * Pulse 3D dashboard has its own, PulseShell.)
  *
- *   - THE TOP BAR, at every width: the menu button (three lines) and the
- *     clinic's logo at the left, and a "Search" box at the right that
- *     searches the whole library (/library/search; on a phone it is a
- *     magnifier that opens the box across the bar).
- *   - CLERK'S USER BUTTON (the signed-in person's avatar, with Sign out in
- *     its menu) at the foot of the rail, or of the full sidebar, as it
- *     always was. A phone has no rail, so there it rides in the top bar.
- *   - THE MENU BUTTON folds the sidebar away and brings it back, on every
- *     screen. On a wide screen (1280px and up) it switches between the full
- *     sidebar and the narrow rail, and the choice is remembered on that
- *     device (a convenience: browser storage, nothing on the server). On a
- *     tablet or a phone it slides the full sidebar out over the page.
- *   - THE FULL SIDEBAR: Home, the categories on the clinic's plan (each with
- *     its initials in a small round badge), and Admin for admins. Home is the
- *     library home, where "My favorites" is.
- *   - THE NARROW RAIL (a tablet, or a wide screen with the sidebar folded):
- *     Home, Library (which pulls out the list of categories) and Admin
- *     (which pulls out the admin sections), each icon with a small label.
- *     A phone has no rail.
+ *   - THE TOP BAR, at every width: the clinic's logo at the left (it leads
+ *     to the library home), and a "Search" box at the right that searches
+ *     the whole library (/library/search; on a phone it is a magnifier that
+ *     opens the box across the bar).
+ *   - THE SIDE RAIL down the left (SideRail.tsx): the three lines at its top,
+ *     then Home, Library and Admin as icons, and the signed-in person at the
+ *     foot. It opens into the full menu over the page: with a mouse when the
+ *     pointer rests on it, with touch from the three lines, with the keyboard
+ *     when the focus moves in. A phone has no rail: the three lines and the
+ *     person's avatar ride in the top bar there, and the menu slides out.
+ *   - `phoneNav`, under the top bar on a phone only: the admin pages draw
+ *     their row of section pills there, so every admin page is one thumb away.
  *
  * The clinic's logo sits on the bar as it is (no chip behind it; Van,
  * 2026-09-21), in a box of fixed size, with the clinic's name standing in
@@ -49,24 +42,21 @@ import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, Me
  * white one disappears, which is why the Branding form says a white or
  * pale logo suits Dark.
  *
- * The pull-outs float over the content, close on outside click, Escape, or
- * choosing something, and only one is open at a time.
+ * NOTHING MOVES: the rail is fixed to the left edge and the page keeps a
+ * 64px margin for it from a tablet up, both drawn by the server, so the
+ * first paint is final and opening the rail lays it over the page.
  *
  * Which categories are listed is navigation only, so a courtesy: the plan's
  * categories (`categories`, from the clinic the server found for this
- * person). Without a clinic (a page drawn before the clinic is known) every
- * category is listed. A category not on the plan is still reached from
- * "More categories" on the library home, and its page says it is not on
- * the plan. The search box is plain HTML (a form that asks for
- * /library/search?q=...), so it works before the page has woken up; the
- * results page decides on the server what the clinic may see.
+ * person). A category not on the plan is still reached from "More
+ * categories" on the library home, and its page says it is not on the plan.
+ * The search box is plain HTML (a form that asks for /library/search?q=...),
+ * so it works before the page has woken up; the results page decides on the
+ * server what the clinic may see.
  *
- * It is a client component only because the pull-outs and the fold need
- * state. The page content arrives as children and stays server-rendered.
- *
- * The Admin line and icon are shown only when showAdmin is true, which the
- * server sets for clinic admins. That is a courtesy so members are not
- * offered pages they cannot use; the admin pages check for themselves.
+ * The Admin heading and its pages are shown only when showAdmin is true,
+ * which the server sets for clinic admins. That is a courtesy so members are
+ * not offered pages they cannot use; the admin pages check for themselves.
  *
  * THE CLINIC'S BRANDING arrives as `brand`, already worked out and checked
  * on the server (ClinicShell, app/brand-look.ts): the colours as CSS
@@ -80,14 +70,16 @@ import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, Me
  * becomes the data-theme attribute on the outermost element, and that is
  * all it takes: every colour inside is a named token (app/globals.css) with
  * a dark value and a light one. The server writes the attribute, so there
- * is no flash of the wrong mode. Pulse 3D's own mark sits at the foot of
- * the sidebar and the category pull-out, small, as "Powered by".
+ * is no flash of the wrong mode.
  *
- * THE QUICK TOUR (components/tour): the categories, the rail's Library
- * button, the menu button and the search carry data-tour attributes so its
- * first stop can find them, the account menu has "Take the tour", and
- * TourHost at the end draws nothing (and loads none of the tour's code)
- * unless the address asks for the tour.
+ * THE QUICK TOUR (components/tour): the rail's categories and admin pages,
+ * the phone's three lines and the search carry data-tour attributes so its
+ * stops can find them, the account menu has "Take the tour", and TourHost at
+ * the end draws nothing (and loads none of the tour's code) unless the
+ * address asks for the tour.
+ *
+ * It is a client component only because the rail and the phone's search box
+ * need state. The page content arrives as children and stays server-rendered.
  */
 
 /** One clinic's look, as plain values the server has already checked. */
@@ -102,25 +94,13 @@ export type ShellBrand = {
   logoUrl: string | null;
 };
 
-
-/** Which pull-out is showing, if any: the full sidebar slid over the page, the categories, or the admin sections. */
-type Menu = "guide" | "library" | "admin" | null;
-
-/** A category as the navigation lists it: its current name and address, from the server (getCategoryList()). */
-export type NavCategory = { value: Category; label: string; slug: string };
-
-/** Where this device remembers that the wide sidebar was folded. Only a convenience: losing it unfolds the sidebar. */
-const FOLD_KEY = "p3-sidebar";
-
-/** The width from which the full sidebar is shown (Tailwind's xl). Below it the menu button slides the sidebar out instead. */
-const WIDE_QUERY = "(min-width: 1280px)";
-
 export function AppShell({
   children,
   showAdmin = false,
   brand,
   categories,
   setup = null,
+  phoneNav,
 }: {
   children: ReactNode;
   showAdmin?: boolean;
@@ -129,62 +109,23 @@ export function AppShell({
   setup?: SetupReminder | null;
   /** The categories on the clinic's plan, for the navigation, in list order with their current names. Left out, none is listed. */
   categories?: NavCategory[];
+  /** Drawn under the top bar on a phone only (the admin pages' row of section pills). */
+  phoneNav?: ReactNode;
 }) {
-  const [menu, setMenu] = useState<Menu>(null);
-  /** The wide sidebar folded down to the rail. Starts unfolded; the device's saved choice is read once the page is awake. */
-  const [folded, setFolded] = useState(false);
+  const pathname = usePathname();
+  const rail = useRail(pathname);
   /** The phone's search box, open across the top bar. */
   const [searching, setSearching] = useState(false);
-  const pathname = usePathname();
-
-  // The choice this device made last time. Read after the first paint, because the server cannot know it.
-  useEffect(() => {
-    let saved: string | null = null;
-    try {
-      saved = window.localStorage.getItem(FOLD_KEY);
-    } catch {
-      // Storage blocked (a private window): the sidebar simply starts unfolded.
-    }
-    if (saved === "rail") {
-      const timer = window.setTimeout(() => setFolded(true), 0);
-      return () => window.clearTimeout(timer);
-    }
-  }, []);
+  const phoneMenuButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!menu && !searching) return;
+    if (!searching) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      setMenu(null);
-      setSearching(false);
+      if (e.key === "Escape") setSearching(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menu, searching]);
-
-  // Pressing a rail icon opens its pull-out, pressing it again closes it, and pressing the other swaps straight over.
-  const toggle = (which: Exclude<Menu, null>) => setMenu((now) => (now === which ? null : which));
-  const close = () => setMenu(null);
-
-  /** The menu button: fold or unfold the wide sidebar, or slide the sidebar out on a smaller screen. */
-  function pressMenu() {
-    if (window.matchMedia(WIDE_QUERY).matches) {
-      const next = !folded;
-      setFolded(next);
-      setMenu(null);
-      try {
-        window.localStorage.setItem(FOLD_KEY, next ? "rail" : "full");
-      } catch {
-        // Not remembered; it still folds for now.
-      }
-    } else {
-      toggle("guide");
-    }
-  }
-
-  const onAdmin = pathname.startsWith("/admin");
-  const onHome = pathname === "/library";
-  const listed = categories ?? [];
+  }, [searching]);
 
   const logo = brand ? (
     <Link
@@ -202,11 +143,33 @@ export function AppShell({
     </Link>
   );
 
+  /** The phone's three lines: slide the menu out (and put the keyboard's focus in it), or close it. */
+  function pressPhoneMenu() {
+    const opening = rail.mode === null;
+    rail.send({ kind: "menu-pressed" });
+    if (opening) window.requestAnimationFrame(() => document.querySelector<HTMLElement>("#side-rail button")?.focus({ preventScroll: true }));
+  }
+
   return (
     <div data-theme={brand?.theme ?? DEFAULT_BRAND_THEME} className={`flex min-h-screen flex-col bg-ground text-ink ${brand?.fontClass || "staff-headings"}`} style={brand?.style}>
-      {/* The top bar, the full width of the screen */}
-      <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-ground px-3 sm:px-4">
-        <MenuButton open={menu === "guide"} onClick={pressMenu} />
+      {/* The top bar, the full width of the screen. From a tablet up its left 64px sit under the rail's three lines. */}
+      <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-line bg-ground px-3 sm:px-4 md:pl-20">
+        {/* A phone has no rail, so its three lines are here. */}
+        <button
+          ref={phoneMenuButton}
+          type="button"
+          onClick={pressPhoneMenu}
+          aria-expanded={rail.mode !== null}
+          aria-controls="side-rail"
+          aria-label="Open the menu"
+          title="Menu"
+          // On a phone, the tour's first stop points here, since the categories are inside this menu.
+          data-tour="menu"
+          data-tour-name="Menu, with the procedure categories"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft transition hover:bg-wash hover:text-ink md:hidden"
+        >
+          <MenuIcon className="h-6 w-6" />
+        </button>
         {logo}
         {/* The search box at the right of the bar, from a small tablet up (Evan, 2026-10-15). */}
         <div className="hidden min-w-0 flex-1 justify-end pl-4 sm:flex">
@@ -244,105 +207,25 @@ export function AppShell({
         )}
       </header>
 
-      <div className="flex min-w-0 flex-1">
-        {/* The narrow rail: tablets, and a wide screen with the sidebar folded. Icons with small labels. It stays put while the page scrolls. */}
-        <nav
-          aria-label="Application"
-          className={`sticky top-16 hidden h-[calc(100vh-4rem)] w-16 shrink-0 flex-col items-center gap-1 border-r border-line bg-sunken py-2 md:flex ${folded ? "" : "xl:hidden"}`}
-        >
-          <RailLink href="/library" label="Home" active={onHome}>
-            <HomeIcon className="h-6 w-6" />
-          </RailLink>
-          {setup && (
-            <RailLink href={setup.href} label="Setup" active={false} title={`${setup.title}, ${setup.doneCount} of ${setup.total} done`}>
-              <ClockIcon className="h-6 w-6" />
-            </RailLink>
-          )}
-          <RailButton label="Library" open={menu === "library"} onClick={() => toggle("library")} controls="category-menu" tourTarget>
-            <BooksIcon className="h-6 w-6" />
-          </RailButton>
-          {showAdmin && (
-            <RailButton label="Admin" open={menu === "admin" || onAdmin} onClick={() => toggle("admin")} controls="admin-menu">
-              <AdminIcon className="h-6 w-6" />
-            </RailButton>
-          )}
-          {/* "Take the tour" just above the avatar, until this browser has started the tour (components/tour/TourNotice.tsx). */}
-          <div className="mt-auto">
-            <TourNotice variant="rail" />
-          </div>
-          {/* Clerk's user button at the foot of the rail, as it always was: the signed-in person's avatar, with Sign out in its menu. The box keeps the rail lined up while Clerk loads. */}
-          <div className="flex h-11 w-11 items-center justify-center">
-            <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
-          </div>
-        </nav>
+      {phoneNav && <div className="md:hidden">{phoneNav}</div>}
 
-        {/* The full sidebar, on a wide screen while it is not folded: every line an icon and a label, YouTube-style. */}
-        <nav aria-label="Library" className={`sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 flex-col border-r border-line bg-sunken ${folded ? "" : "xl:flex"}`}>
-          <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} />
-          <TourNotice variant="wide" />
-          {/* The same avatar at the foot of the full sidebar, lined up with where it sits on the rail. */}
-          <div className="flex h-14 shrink-0 items-center border-t border-line px-[1.375rem]">
-            <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
-          </div>
-          {brand && <PoweredBy />}
-        </nav>
+      <SideRail
+        rail={rail}
+        pathname={pathname}
+        logo={logo}
+        categories={categories ?? []}
+        showAdmin={showAdmin}
+        setup={setup}
+        poweredBy={Boolean(brand)}
+        phoneMenuButton={phoneMenuButton}
+      />
 
-        {/* The open pull-out and its backdrop. Beside the rail, the backdrop leaves the top bar and the rail uncovered, so another icon can still be pressed. */}
-        {menu && (
-          <>
-            <button
-              type="button"
-              aria-label="Close the menu"
-              onClick={close}
-              className={`fixed inset-0 z-40 bg-black/60 lg:bg-black/25 ${menu === "guide" ? "" : "md:left-16 md:top-16"}`}
-            />
-            {menu === "guide" ? (
-              <aside id="guide-menu" aria-label="Library" className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-line bg-overlay shadow-drawer">
-                <div className="flex h-16 shrink-0 items-center gap-2 border-b border-line px-3">
-                  <MenuButton open onClick={close} />
-                  {logo}
-                </div>
-                <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} onChoose={close} />
-                {/* On a phone the avatar rides in the top bar, so the notice sits at the foot of this menu. */}
-                <TourNotice variant="wide" onChoose={close} />
-                {brand && <PoweredBy />}
-              </aside>
-            ) : menu === "library" ? (
-              <CategoryMenu pathname={pathname} categories={listed} onClose={close} poweredBy={Boolean(brand)} />
-            ) : (
-              <AdminMenu pathname={pathname} onClose={close} />
-            )}
-          </>
-        )}
+      {/* The page, with room kept for the rail from a tablet up. */}
+      <div className="min-w-0 flex-1 md:pl-16">{children}</div>
 
-        <div className="min-w-0 flex-1">{children}</div>
-      </div>
       {/* The quick tour: draws nothing, and loads none of its code, unless the address asks for it (components/tour). */}
       <TourHost isAdmin={showAdmin} />
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The top bar's pieces.
-// ---------------------------------------------------------------------------
-
-/** The three-line menu button. */
-function MenuButton({ open, onClick }: { open: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-expanded={open}
-      aria-label={open ? "Close the menu" : "Show or hide the menu"}
-      title="Menu"
-      // On a phone, the tour's first stop points here, since the categories are inside this menu.
-      data-tour="menu"
-      data-tour-name="Menu, with the procedure categories"
-      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft transition hover:bg-wash hover:text-ink"
-    >
-      <MenuIcon className="h-6 w-6" />
-    </button>
   );
 }
 
@@ -391,229 +274,5 @@ function SearchForm({ pathname, autoFocus = false, tourTarget = false }: { pathn
         <SearchIcon className="h-5 w-5" />
       </button>
     </form>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The narrow rail: icons with a small label under each, at least 44px to tap.
-// ---------------------------------------------------------------------------
-
-const RAIL_ITEM = "flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium leading-none transition";
-const RAIL_ON = "bg-wash-strong text-ink";
-const RAIL_OFF = "text-ink-soft hover:bg-wash hover:text-ink";
-
-function RailLink({ href, label, active, title, children }: { href: string; label: string; active: boolean; title?: string; children: ReactNode }) {
-  return (
-    <Link href={href} title={title} aria-label={title} aria-current={active ? "page" : undefined} className={`${RAIL_ITEM} ${active ? RAIL_ON : RAIL_OFF}`}>
-      {children}
-      {label}
-    </Link>
-  );
-}
-
-function RailButton({ label, open, onClick, controls, tourTarget = false, children }: { label: string; open: boolean; onClick: () => void; controls: string; tourTarget?: boolean; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-expanded={open}
-      aria-controls={controls}
-      // The rail's Library button holds the categories, so the tour's first stop points at it where there is a rail.
-      data-tour={tourTarget ? "categories" : undefined}
-      data-tour-name={tourTarget ? "Library, with the procedure categories" : undefined}
-      className={`${RAIL_ITEM} ${open ? RAIL_ON : RAIL_OFF}`}
-    >
-      {children}
-      {label}
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The full sidebar and the pull-outs share one look for a line.
-// ---------------------------------------------------------------------------
-
-const LINE = "flex min-h-11 items-center gap-4 rounded-xl px-3 text-base transition";
-const LINE_IDLE = "text-ink-soft hover:bg-wash hover:text-ink";
-const LINE_ACTIVE = "bg-wash-strong font-medium text-ink";
-
-function SideLink({ href, active, icon, onClick, children }: { href: string; active: boolean; icon: ReactNode; onClick?: () => void; children: ReactNode }) {
-  return (
-    <Link href={href} onClick={onClick} aria-current={active ? "page" : undefined} className={`${LINE} ${active ? LINE_ACTIVE : LINE_IDLE}`}>
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center">{icon}</span>
-      <span className="min-w-0 truncate">{children}</span>
-    </Link>
-  );
-}
-
-/** The full sidebar's lines: Home, the plan's categories, Admin for admins. Used on a wide screen and slid out on a smaller one. */
-function Guide({ pathname, categories, showAdmin, setup, onChoose }: { pathname: string; categories: NavCategory[]; showAdmin: boolean; setup: SetupReminder | null; onChoose?: () => void }) {
-  return (
-    <div className="flex-1 overflow-y-auto px-3 py-3">
-      <SideLink href="/library" onClick={onChoose} active={pathname === "/library"} icon={<HomeIcon className="h-6 w-6" />}>
-        Home
-      </SideLink>
-      {setup && <SetupCard setup={setup} onChoose={onChoose} />}
-
-      {categories.length > 0 && (
-        // The block the tour's first stop highlights in the full menu ("Navigate by specialty").
-        <div className="mt-4 border-t border-line pt-3" data-tour="categories" data-tour-name="Procedure categories">
-          <p className="px-3 pt-1 pb-1 text-sm font-semibold text-ink">{CATEGORY_GROUP}</p>
-          <CategoryLines pathname={pathname} categories={categories} onChoose={onChoose} />
-        </div>
-      )}
-
-      {showAdmin && (
-        <div className="mt-4 border-t border-line pt-4">
-          <SideLink href="/admin" onClick={onChoose} active={pathname.startsWith("/admin")} icon={<AdminIcon className="h-6 w-6" />}>
-            Admin
-          </SideLink>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CategoryLines({ pathname, categories, onChoose }: { pathname: string; categories: NavCategory[]; onChoose?: () => void }) {
-  return (
-    <ul className="flex flex-col gap-0.5">
-      {categories.map((c) => (
-        <li key={c.value}>
-          <SideLink href={`/library/${c.slug}`} onClick={onChoose} active={pathname === `/library/${c.slug}`} icon={<CategoryBadge category={c} />}>
-            {c.label}
-          </SideLink>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/**
- * A category's initials in a small round badge ("OS" for Orthopedic Spine,
- * "FA" for Foot & Ankle), where YouTube puts a channel's picture. Letters,
- * not the category's picture: the pictures are large stills, and the
- * sidebar is on every page.
- */
-function CategoryBadge({ category }: { category: NavCategory }) {
-  const initials = category.label
-    .split(/\s+/)
-    .filter((word) => /^[A-Za-z]/.test(word))
-    .map((word) => word[0])
-    .join("")
-    .slice(0, 2);
-  return (
-    <span aria-hidden="true" className="flex h-7 w-7 items-center justify-center rounded-full bg-brand/15 text-xs font-semibold text-brand-bright">
-      {initials}
-    </span>
-  );
-}
-
-function PoweredBy() {
-  return (
-    <p className="flex items-center gap-2 border-t border-line px-4 py-3 text-xs text-ink-muted">
-      Powered by
-      {/* Lazy: the full sidebar is in every page's HTML but hidden on smaller screens, and a lazy picture that is hidden is
-          never fetched (nor preloaded by React), so a phone or a tablet does not download it for nothing. */}
-      {/* eslint-disable-next-line @next/next/no-img-element -- small fixed logo file, served from our own address */}
-      <img src={LOGO_URL} width={LOGO_WIDTH} height={LOGO_HEIGHT} alt="Pulse 3D" loading="lazy" className="h-7 w-auto" />
-    </p>
-  );
-}
-
-// The look of the rail's pull-outs, shared by both.
-const MENU_PANEL = "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-line bg-overlay shadow-drawer md:left-16 md:top-16 md:w-64";
-
-/** The title row at the top of a pull-out. */
-function MenuHeading({ title, onClose }: { title: string; onClose: () => void }) {
-  return (
-    <div className="flex h-14 items-center justify-between px-4">
-      <p className="text-sm font-semibold uppercase tracking-wider text-ink-muted">{title}</p>
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close"
-        className="flex h-10 w-10 items-center justify-center rounded-lg text-ink-soft hover:bg-wash hover:text-ink md:hidden"
-      >
-        <CloseIcon className="h-5 w-5" />
-      </button>
-    </div>
-  );
-}
-
-/** The rail's Library pull-out: just the categories on the plan. Home is on the rail itself. */
-function CategoryMenu({ pathname, categories, onClose, poweredBy }: { pathname: string; categories: NavCategory[]; onClose: () => void; poweredBy: boolean }) {
-  return (
-    <aside id="category-menu" aria-label="Procedure categories" className={MENU_PANEL}>
-      <MenuHeading title={CATEGORY_GROUP} onClose={onClose} />
-      <nav className="flex-1 overflow-y-auto px-3 pb-4">
-        <CategoryLines pathname={pathname} categories={categories} onChoose={onClose} />
-      </nav>
-      {/* When the top bar carries the clinic's logo, Pulse 3D's own mark lives here, small. */}
-      {poweredBy && <PoweredBy />}
-    </aside>
-  );
-}
-
-/**
- * The admin pull-out: every section of the clinic admin area, from the same
- * list the row of tabs on the admin pages uses (lib/admin-nav.ts), with the
- * current one marked by the same rule. Navigation only: each admin page
- * checks on the server who may use it.
- */
-function AdminMenu({ pathname, onClose }: { pathname: string; onClose: () => void }) {
-  const current = activeAdminSection(pathname);
-
-  return (
-    <aside id="admin-menu" aria-label="Clinic admin menu" className={MENU_PANEL}>
-      <MenuHeading title="Clinic admin" onClose={onClose} />
-
-      <nav className="flex-1 overflow-y-auto px-3 pb-4">
-        <ul className="flex flex-col gap-0.5">
-          {ADMIN_SECTIONS.map((section) => {
-            const isActive = section.href === current;
-            return (
-              <li key={section.href}>
-                <Link
-                  href={section.href}
-                  onClick={onClose}
-                  aria-current={isActive ? "page" : undefined}
-                  className={`${LINE} ${isActive ? LINE_ACTIVE : LINE_IDLE}`}
-                >
-                  {section.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-    </aside>
-  );
-}
-
-/**
- * "Finish setup" in the menu (the approved design, screen 06-library-reminder):
- * a card under Home with a bar and "0 of 4 done", for an office admin until
- * nothing in setup is left undone. While the steps are under way it says
- * "Finish setup" and opens setup at the step the clinic is on; after them, it
- * names what is left ("Add your logo") and opens that step (lib/setup.ts). Only a link: it loads nothing and adds nothing to playing a video.
- */
-function SetupCard({ setup, onChoose }: { setup: SetupReminder; onChoose?: () => void }) {
-  return (
-    <Link
-      href={setup.href}
-      onClick={onChoose}
-      className="mt-2 block rounded-xl border border-brand/40 bg-brand/10 px-3 py-3 text-ink transition hover:border-brand"
-    >
-      <span className="flex items-center gap-3 text-base font-semibold">
-        <ClockIcon className="h-5 w-5 shrink-0" />
-        {setup.title}
-      </span>
-      <span role="progressbar" aria-label="Setup progress" aria-valuemin={0} aria-valuemax={setup.total} aria-valuenow={setup.doneCount} className="mt-3 block h-1.5 overflow-hidden rounded-full bg-wash-strong">
-        <span className="block h-full rounded-full bg-brand" style={{ width: `${Math.round((setup.doneCount / setup.total) * 100)}%` }} />
-      </span>
-      <span className="mt-2 block text-sm text-ink-soft">
-        {setup.doneCount} of {setup.total} done
-      </span>
-    </Link>
   );
 }

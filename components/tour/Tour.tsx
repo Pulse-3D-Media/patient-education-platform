@@ -13,6 +13,7 @@ import {
   type TourStop,
 } from "@/lib/tour";
 import { readWatchVideoId } from "@/lib/library-rows";
+import { RAIL_OPEN_EVENT, RAIL_QUERY } from "@/lib/rail";
 
 /**
  * The quick tour itself (the approved design, screens 07-tour-1 to 3). This
@@ -36,8 +37,11 @@ import { readWatchVideoId } from "@/lib/library-rows";
  *     stop needs it scrolled into view, so reduced motion is honoured.
  *
  * WHAT IT POINTS AT is found by data-tour attributes on the real controls
- * (the shell's categories and search, the watch page's row of buttons, the
- * admin pages' list), whichever of them is visible at this width. It shows
+ * (the side rail's Library and Admin blocks and the search, the watch page's
+ * row of buttons), whichever of them is visible at this width. The first and
+ * the admin stop point INTO the side rail, so they ask the shell to open it
+ * first (RAIL_OPEN_EVENT, lib/rail.ts); a phone has no rail, and there they
+ * point at the top bar's three lines and the row of admin pills instead. It shows
  * only what the page drew for this person, so someone without a seat, whose
  * page has no Send or Show QR, has only Favorite pointed at, with words that
  * say nothing about seats or plans. None of it decides who may do what.
@@ -80,11 +84,20 @@ export function Tour({ request, isAdmin }: { request: Exclude<TourRequest, null>
 
 /** Which controls each stop points at, by their data-tour names. The first one found visible at this width is used for each slot. */
 const TARGETS: Record<TourStop, string[][]> = {
-  // The categories (the full menu, or the rail's Library button, or on a phone the menu button that holds them), and the search.
+  // The categories (the opened side rail's Library block, or on a phone the three lines that hold them), and the search.
   nav: [["categories", "menu"], ["search"]],
   video: [["video-actions"]],
+  // The opened side rail's Admin block (the heading and the admin pages), or on a phone the row of admin pills.
   admin: [["admin-sections"]],
 };
+
+/** The stops that point into the side rail, which is opened for them. */
+const STOPS_IN_THE_RAIL: TourStop[] = ["nav", "admin"];
+
+/** True while this screen has a side rail and it is still closed: a stop that points into it waits for it to open. */
+function railStillClosed(): boolean {
+  return window.matchMedia(RAIL_QUERY).matches && document.querySelector('[data-rail="closed"]') !== null;
+}
 
 /** An element is usable when the page actually shows it at this width (a hidden copy has no size). */
 function isShown(element: Element): element is HTMLElement {
@@ -116,10 +129,12 @@ function highlightedNames(targets: HTMLElement[]): string[] {
  * Whether the page this stop is on has been drawn yet. The library shows a
  * loading screen while its page is read, and the tour may arrive first, so
  * each stop waits for its page: the library home's marker, or the watch
- * page's row of buttons. The admin list is part of the admin frame, there
- * from the start.
+ * page's row of buttons. The admin pages are part of the frame, there from
+ * the start. A stop that points into the side rail also waits for the rail
+ * to open.
  */
 function pageIsDrawn(stop: TourStop): boolean {
+  if (STOPS_IN_THE_RAIL.includes(stop) && railStillClosed()) return false;
   if (stop === "nav") return document.querySelector("[data-tour-home]") !== null;
   if (stop === "video") return document.querySelector('[data-tour="video-actions"]') !== null;
   return true;
@@ -198,7 +213,10 @@ function TourStopView({ stop, videoId: addressVideoId, isAdmin }: { stop: TourSt
       if (pageIsDrawn(stop)) finish(planStop(stop, addressVideoId, isAdmin));
     };
     const observer = new MutationObserver(tryNow);
-    observer.observe(document.body, { childList: true, subtree: true });
+    // attributes too: the side rail says it has opened by changing its data-rail.
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-rail"] });
+    // Ask the shell to open the side rail for a stop that points into it (nothing happens on a phone, which has none).
+    if (STOPS_IN_THE_RAIL.includes(stop)) window.dispatchEvent(new Event(RAIL_OPEN_EVENT));
     const timer = window.setTimeout(() => finish(null), WAIT_FOR_PAGE_MS);
     const frame = requestAnimationFrame(tryNow);
     return () => {

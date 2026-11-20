@@ -6,8 +6,8 @@ import { Suspense, useSyncExternalStore } from "react";
 import { TOUR_COPY, TOUR_PARAM, TOUR_START_HREF, markTourSeen, readTourSeen, subscribeTourSeen } from "@/lib/tour";
 
 /**
- * "Take the tour": a small, quiet notice at the foot of the library's menu,
- * just above the account picture (Evan, 2026-11-20: "when I open the library
+ * "Take the tour": a small, quiet notice at the foot of the side rail (on
+ * the library and the admin pages), just above the account picture (Evan, 2026-11-20: "when I open the library
  * and I haven't taken the tour yet I want a small notification on the bottom
  * left above the profile picture to say take the tour. Once they take it or
  * if they choose to take it then stop the notification.").
@@ -28,9 +28,10 @@ import { TOUR_COPY, TOUR_PARAM, TOUR_START_HREF, markTourSeen, readTourSeen, sub
  * It replaced the one-time "Take a quick tour?" card shown to someone who
  * had just joined a clinic: the two would have shown together.
  *
- * Three looks: "rail" in the narrow rail (an icon with "Tour" under it),
- * "wide" in the full menu and in the menu that slides out on a tablet or
- * phone.
+ * Two looks: "rail" on the narrow strip (an icon with "Tour" under it),
+ * "wide" in the open rail and in the menu that slides out on a phone. Both
+ * are the same link, restyled, so the keyboard's focus stays on it when the
+ * rail opens around it (components/ui/SideRail.tsx).
  */
 export function TourNotice({ variant, onChoose }: { variant: "rail" | "wide"; onChoose?: () => void }) {
   // Reading the address needs a Suspense boundary of its own, so a page drawn ahead of time is never held up by it.
@@ -61,7 +62,7 @@ function Notice({ variant, onChoose }: { variant: "rail" | "wide"; onChoose?: ()
         onClick={start}
         title={TOUR_COPY.notice.title}
         aria-label={TOUR_COPY.notice.title}
-        // The same size and look as the rail's other items (RAIL_ITEM in components/ui/AppShell.tsx), with a small dot.
+        // The same size and look as the rail's other items (itemClass in components/ui/SideRail.tsx), with a small dot.
         className="relative flex w-14 flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium leading-none text-ink-soft transition hover:bg-wash hover:text-ink focus-visible:outline-2 focus-visible:outline-brand-bright"
       >
         <PlayCircle />
@@ -72,19 +73,17 @@ function Notice({ variant, onChoose }: { variant: "rail" | "wide"; onChoose?: ()
   }
 
   return (
-    <div className="shrink-0 px-3 pb-2">
-      <Link
-        href={TOUR_START_HREF}
-        onClick={start}
-        className="flex min-h-11 items-center gap-3 rounded-xl border border-line px-3 text-[15px] font-medium text-ink hover:bg-wash focus-visible:outline-2 focus-visible:outline-brand-bright"
-      >
-        <span className="text-brand-bright">
-          <PlayCircle />
-        </span>
-        {TOUR_COPY.notice.title}
-        <span aria-hidden="true" className="ml-auto h-2 w-2 rounded-full bg-brand" />
-      </Link>
-    </div>
+    <Link
+      href={TOUR_START_HREF}
+      onClick={start}
+      className="relative mx-3 mb-2 flex min-h-11 items-center gap-3 rounded-xl border border-line px-3 text-[15px] font-medium text-ink hover:bg-wash focus-visible:outline-2 focus-visible:outline-brand-bright"
+    >
+      <span className="text-brand-bright">
+        <PlayCircle />
+      </span>
+      {TOUR_COPY.notice.title}
+      <span aria-hidden="true" className="ml-auto h-2 w-2 rounded-full bg-brand" />
+    </Link>
   );
 }
 

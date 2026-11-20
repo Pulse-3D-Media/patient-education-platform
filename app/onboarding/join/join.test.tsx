@@ -58,7 +58,12 @@ describe("the join screen", () => {
     vi.mocked(getSeatFor).mockResolvedValue({ displayName: null });
     const html = await where();
     expect(html).toContain("Join Wasatch Orthopedics");
-    expect(html).toContain("Join and open the library");
+    expect(html).toContain("Join the library");
+    expect(html).not.toContain("Join and open the library");
+    // Evan, 2026-11-20: the three helper sentences are gone from this screen; the rules behind them stay (sender-name tests).
+    expect(html).not.toContain("Only the name.");
+    expect(html).not.toContain("MD, DO and DPM add");
+    expect(html).not.toContain("Links already sent keep the name");
     expect(html).toContain("Sign out");
     expect(html).not.toContain(">Cancel<");
     expect(checkSeats).not.toHaveBeenCalled();
@@ -67,18 +72,18 @@ describe("the join screen", () => {
   it("turns the invitation's held seat into theirs first when that has not happened yet", async () => {
     vi.mocked(requireClinicPage).mockResolvedValue(clinic());
     vi.mocked(getSeatFor).mockResolvedValueOnce(null).mockResolvedValueOnce({ displayName: null });
-    expect(await where()).toContain("Join and open the library");
+    expect(await where()).toContain("Join the library");
     expect(checkSeats).toHaveBeenCalledWith("clinic_vitest");
   });
 
-  it("sends everyone with nothing to enter on to the library: the owner, someone with no seat (offered the tour once), someone whose name is chosen", async () => {
+  it("sends everyone with nothing to enter on to the library: the owner, someone with no seat, someone whose name is chosen", async () => {
     vi.mocked(requireClinicPage).mockResolvedValue(clinic({ isOwner: true, isAdmin: true }));
     expect(await where()).toBe("redirect:/library");
 
-    // Just joined, with no seat and so no name to choose: the library home, with the quick tour offered once.
+    // Just joined, with no seat and so no name to choose: the library home (its menu shows "Take the tour" until it is started).
     vi.mocked(requireClinicPage).mockResolvedValue(clinic());
     vi.mocked(getSeatFor).mockResolvedValue(null);
-    expect(await where()).toBe("redirect:/library?tour=offer");
+    expect(await where()).toBe("redirect:/library");
 
     vi.mocked(getSeatFor).mockResolvedValue({ displayName: "Marcus Lee, DO" });
     expect(await where()).toBe("redirect:/library");

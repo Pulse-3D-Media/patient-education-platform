@@ -3,12 +3,9 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  LIBRARY_HOME,
   TOUR_COPY,
-  TOUR_START_HREF,
   joinNames,
   markTourSeen,
-  readTourSeen,
   tourStopHref,
   tourStops,
   withoutTourParams,
@@ -73,7 +70,6 @@ function leaveTour() {
 
 export function Tour({ request, isAdmin }: { request: Exclude<TourRequest, null>; isAdmin: boolean }) {
   const pathname = usePathname();
-  if (request.kind === "offer") return <TourOffer pathname={pathname} />;
   // A key per stop and page, so moving on starts the next stop afresh.
   return <TourStopView key={`${request.stop}:${pathname}`} stop={request.stop} videoId={request.videoId} isAdmin={isAdmin} />;
 }
@@ -181,6 +177,11 @@ function TourStopView({ stop, videoId: addressVideoId, isAdmin }: { stop: TourSt
   const shade = useRef<SVGSVGElement>(null);
   /** The stop as worked out from the page: undefined while the page is still being drawn, null when it is not this person's stop. */
   const [plan, setPlan] = useState<Plan | null | undefined>(undefined);
+
+  // The tour has started: remembered at once, so the "Take the tour" notice in the menu goes (Evan, 2026-11-20).
+  useEffect(() => {
+    markTourSeen();
+  }, []);
 
   // Wait for the page under this stop to be drawn, then work the stop out from it.
   useEffect(() => {
@@ -359,64 +360,3 @@ function TourStopView({ stop, videoId: addressVideoId, isAdmin }: { stop: TourSt
 const TEXT_BUTTON = "inline-flex min-h-11 items-center rounded-xl px-3 text-base font-medium text-ink-soft hover:bg-wash hover:text-ink";
 const SECONDARY_BUTTON = "inline-flex min-h-11 items-center rounded-xl border border-line-strong px-4 text-base font-semibold text-ink hover:bg-wash";
 const PRIMARY_BUTTON = "inline-flex min-h-11 items-center rounded-xl bg-brand px-5 text-base font-semibold text-on-brand hover:bg-brand-hover";
-
-// ---------------------------------------------------------------------------
-// The one-time offer, for someone who has just joined a clinic.
-// ---------------------------------------------------------------------------
-
-/**
- * "Take a quick tour?" in a small card at the foot of the library home, with
- * Not now and Show me: one tap either way, or Escape for Not now. Shown only
- * when this browser has never seen or been offered the tour, and remembered
- * as offered the moment it shows, so it comes once. When storage cannot be
- * read it is not shown at all. No darkening, nothing covered for good, and
- * never on a video's page.
- */
-function TourOffer({ pathname }: { pathname: string }) {
-  const router = useRouter();
-  const card = useRef<HTMLDivElement>(null);
-  const [show] = useState(() => pathname === LIBRARY_HOME && readTourSeen() === false);
-
-  useLayoutEffect(() => {
-    if (!show) {
-      // Nothing to offer: just tidy the address (null, as in leaveTour(), so Next.js notices).
-      window.history.replaceState(null, "", withoutTourParams(window.location.href));
-      return;
-    }
-    markTourSeen();
-    rememberFocus();
-    card.current?.focus({ preventScroll: true });
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      leaveTour();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [show]);
-
-  if (!show) return null;
-  return (
-    <div
-      ref={card}
-      role="dialog"
-      aria-modal="false"
-      aria-labelledby="tour-offer-title"
-      tabIndex={-1}
-      className="fixed bottom-4 right-4 z-[61] w-[min(320px,calc(100vw-32px))] rounded-2xl border border-line bg-surface p-[18px] text-ink-soft shadow-lift outline-none focus-visible:ring-2 focus-visible:ring-brand-bright"
-    >
-      <h2 id="tour-offer-title" className="text-lg font-bold text-ink">
-        {TOUR_COPY.offer.title}
-      </h2>
-      <div className="mt-3.5 flex items-center gap-2">
-        <button type="button" onClick={leaveTour} className={TEXT_BUTTON}>
-          {TOUR_COPY.offer.no}
-        </button>
-        <span className="flex-1" />
-        <button type="button" onClick={() => router.replace(TOUR_START_HREF)} className={PRIMARY_BUTTON}>
-          {TOUR_COPY.offer.yes}
-        </button>
-      </div>
-    </div>
-  );
-}

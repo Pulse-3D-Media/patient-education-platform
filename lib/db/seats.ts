@@ -95,7 +95,8 @@ export async function getSeatSummary(clinicId: string): Promise<SeatSummary | nu
 export async function getSeatClinic(clinicId: string) {
   return prisma.clinic.findUnique({
     where: { id: clinicId },
-    select: { id: true, clerkOrgId: true, surgeonSeats: true, ownerClerkUserId: true },
+    // The name only goes into an invitation's accept address, as words for the sign-up page's heading (lib/invitation-name.ts).
+    select: { id: true, name: true, clerkOrgId: true, surgeonSeats: true, ownerClerkUserId: true },
   });
 }
 

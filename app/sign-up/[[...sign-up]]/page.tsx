@@ -6,6 +6,7 @@ import { LandingFrame } from "@/components/landing/LandingFrame";
 import { SetUpClinicForm } from "@/components/landing/SetUpClinicForm";
 import { SignInExtras } from "@/components/landing/SignInExtras";
 import { signInHandoffHref } from "@/lib/invitation-handoff";
+import { INVITED_CLINIC_PARAM, readInvitedClinicName } from "@/lib/invitation-name";
 
 /** The invited person's own screen (app/onboarding/join). */
 const JOIN_PATH = "/onboarding/join";
@@ -25,8 +26,14 @@ const JOIN_PATH = "/onboarding/join";
  *   person here with the invitation's ticket in the address, and says what
  *   they need:
  *
- *     __clerk_status=sign_up    a new person: Clerk's own ready-made sign-up
- *                               form, exactly as before, which creates their
+ *     __clerk_status=sign_up    a new person: "Accept your invitation to join
+ *                               <clinic>." over Clerk's own ready-made sign-up
+ *                               form, with no Sign in or Set up a clinic tabs
+ *                               (Evan, 2026-11-20). The clinic's name is the
+ *                               one the server put in the invitation's accept
+ *                               address, shown as words only (lib/invitation-
+ *                               name.ts); without one, "Accept your
+ *                               invitation." The form, exactly as before, creates their
  *                               account and accepts the invitation with it,
  *                               then opens the join screen (/onboarding/join),
  *                               where they enter their own name and credential.
@@ -73,8 +80,10 @@ export default async function SignUpPage({ params, searchParams }: PageProps<"/s
   }
 
   if (invited || steps.length > 0) {
+    // The heading for an invitation; a later step of Clerk's form with no invitation in its address keeps the usual one.
+    const invitation = invited ? { clinicName: readInvitedClinicName(query[INVITED_CLINIC_PARAM]) } : undefined;
     return (
-      <LandingFrame tab="set-up" redirectUrl={redirectUrl}>
+      <LandingFrame tab="set-up" redirectUrl={redirectUrl} invitation={invitation}>
         {/* After the account is made and the invitation accepted, the join screen asks for their own name and credential (05-join). */}
         <SignUp path="/sign-up" appearance={BOX_APPEARANCE} forceRedirectUrl={invited ? JOIN_PATH : undefined} />
         <SignInExtras patientLine={false} />

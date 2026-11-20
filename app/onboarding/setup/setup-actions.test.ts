@@ -215,7 +215,7 @@ describe("step 4, the test link", () => {
   });
 
   it("Finish marks the last step done and goes to the finished page", async () => {
-    expect(await outcome(() => actions.finishTestStepAction())).toBe("redirect:/onboarding/setup/done");
+    expect(await outcome(() => actions.finishTestStepAction())).toBe("redirect:/library?welcome=setup");
     expect(recordSetupStep).toHaveBeenCalledWith("clinic_vitest", "test", "done");
   });
 });

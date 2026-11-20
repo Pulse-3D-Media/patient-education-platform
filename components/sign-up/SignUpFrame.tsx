@@ -20,7 +20,19 @@ import { SIGN_UP_STEPS, stepState, stepsDone, type SignUpStepKey } from "@/lib/s
  *
  * Always light, in the Pulse colours, like the landing page before it.
  */
-export function SignUpFrame({ step, children }: { step: SignUpStepKey; children: ReactNode }) {
+export function SignUpFrame({
+  step,
+  backToPlan,
+  children,
+}: {
+  step: SignUpStepKey;
+  /**
+   * On the payment step: the plan step's address with the plan as picked (the same one its Back button uses),
+   * which makes "Plan" in the list a link (Evan, 2026-11-20). Email stays a plain line: the account is made.
+   */
+  backToPlan?: string;
+  children: ReactNode;
+}) {
   const done = stepsDone(step);
   const total = SIGN_UP_STEPS.length;
   const currentIndex = SIGN_UP_STEPS.findIndex((entry) => entry.key === step);
@@ -75,12 +87,9 @@ export function SignUpFrame({ step, children }: { step: SignUpStepKey; children:
           <ol className="mt-5 flex flex-col gap-1">
             {SIGN_UP_STEPS.map((entry, index) => {
               const state = stepState(entry.key, step);
-              return (
-                <li
-                  key={entry.key}
-                  aria-current={state === "current" ? "step" : undefined}
-                  className={`flex items-start gap-3 rounded-xl px-3 py-3 ${state === "current" ? "bg-brand/10" : ""}`}
-                >
+              const linked = entry.key === "plan" && state === "done" && backToPlan;
+              const row = (
+                <>
                   <span aria-hidden="true" className="mt-0.5 w-4 text-center text-ink">
                     {state === "done" ? "✓" : "•"}
                   </span>
@@ -95,6 +104,21 @@ export function SignUpFrame({ step, children }: { step: SignUpStepKey; children:
                     )}
                   </span>
                   {state === "done" && <span className="text-[13px] font-semibold text-ink-soft">Done</span>}
+                </>
+              );
+              return (
+                <li key={entry.key} aria-current={state === "current" ? "step" : undefined}>
+                  {linked ? (
+                    <Link
+                      href={linked}
+                      aria-label={`${entry.label}, done. Change the plan`}
+                      className="flex min-h-11 items-start gap-3 rounded-xl px-3 py-3 hover:bg-wash focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-bright"
+                    >
+                      {row}
+                    </Link>
+                  ) : (
+                    <div className={`flex items-start gap-3 rounded-xl px-3 py-3 ${state === "current" ? "bg-brand/10" : ""}`}>{row}</div>
+                  )}
                 </li>
               );
             })}

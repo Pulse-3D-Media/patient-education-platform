@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SETUP_DONE_PATH, hrefAfterSave, nextSetupState, readSetupProgress, setupIsDue, stepAfter, stepBefore } from "./setup";
+import { SETUP_FINISHED_HREF, hrefAfterSave, nextSetupState, readSetupProgress, setupIsDue, setupLeftWords, stepAfter, stepBefore, stepIsOpen } from "./setup";
 
 /** The setup rules (lib/setup.ts). Pure: no database. The writes are tested in lib/db/setup.test.ts. */
 
@@ -69,10 +69,41 @@ describe("the step order and addresses", () => {
     expect(stepBefore("team")).toBe("branding");
   });
 
-  it("sends an admin to the stored step, or the finished page", () => {
+  it("sends an admin to the stored step, or to the library with the welcome dialog once setup is behind the clinic", () => {
     expect(hrefAfterSave("team")).toBe("/onboarding/setup/team");
-    expect(hrefAfterSave("finished")).toBe(SETUP_DONE_PATH);
-    expect(hrefAfterSave(null)).toBe(SETUP_DONE_PATH);
+    // Evan, 2026-11-20: no full "You're ready for patients." page any more.
+    expect(SETUP_FINISHED_HREF).toBe("/library?welcome=setup");
+    expect(hrefAfterSave("finished")).toBe(SETUP_FINISHED_HREF);
+    expect(hrefAfterSave(null)).toBe(SETUP_FINISHED_HREF);
+  });
+});
+
+describe("which steps the progress list opens (Evan, 2026-11-20)", () => {
+  it("opens every step reached and the one after the step the clinic is on, and no further", () => {
+    const atBranding = readSetupProgress("branding", ["clinic"])!;
+    expect(stepIsOpen(atBranding, "clinic")).toBe(true);
+    expect(stepIsOpen(atBranding, "branding")).toBe(true);
+    expect(stepIsOpen(atBranding, "team")).toBe(true);
+    expect(stepIsOpen(atBranding, "test")).toBe(false);
+
+    const atStart = readSetupProgress("clinic", [])!;
+    expect(stepIsOpen(atStart, "clinic")).toBe(true);
+    expect(stepIsOpen(atStart, "branding")).toBe(true);
+    expect(stepIsOpen(atStart, "team")).toBe(false);
+  });
+
+  it("opens a skipped step, and every step once setup is finished", () => {
+    const skippedOne = readSetupProgress("test", ["clinic", "team"])!;
+    expect(stepIsOpen(skippedOne, "branding")).toBe(true);
+    const finished = readSetupProgress("finished", ["clinic"])!;
+    for (const step of ["clinic", "branding", "team", "test"] as const) expect(stepIsOpen(finished, step)).toBe(true);
+  });
+});
+
+describe("what the welcome dialog names as left for later", () => {
+  it("names each skipped step in a few words, in order, and nothing when all are done", () => {
+    expect(setupLeftWords(readSetupProgress("finished", ["clinic", "team"])!)).toEqual(["your logo", "a test link"]);
+    expect(setupLeftWords(readSetupProgress("finished", ["clinic", "branding", "team", "test"])!)).toEqual([]);
   });
 });
 

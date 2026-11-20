@@ -2,8 +2,9 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { ClinicLogo } from "@/components/ui/ClinicLogo";
 import { PULSE_STAFF_LIGHT_THEME, themeVars } from "@/lib/branding";
-import { SETUP_STEPS, setupStepHref, stepBefore, type SetupProgress, type SetupStepKey } from "@/lib/setup";
+import { SETUP_STEPS, setupStepHref, stepBefore, stepIsOpen, type SetupProgress, type SetupStepKey, type SetupStepState } from "@/lib/setup";
 import { SkipButton } from "./SetupButtons";
+import { StepLink, StepTypingWatch } from "./StepLink";
 
 /**
  * The frame around every setup step (the approved design, screens 04 and
@@ -18,7 +19,21 @@ import { SkipButton } from "./SetupButtons";
  *
  * "Finish later" goes to the library: nothing is lost, setup keeps its place,
  * and the library's menu has "Finish setup" until it is done.
+ *
+ * THE STEPS IN THE LIST ARE LINKS (Evan, 2026-11-20): every step already
+ * reached (done, left for later, or the one the clinic is on) and the one
+ * after it, as stepIsOpen() in lib/setup.ts says; each step's page asks the
+ * same question on the server. On a phone they are a row of four under the
+ * two lines, each at least 44 pixels tall. A link that would leave typed
+ * words behind asks first (StepLink).
  */
+
+/** What a screen reader hears after a step's name. */
+const STATE_WORDS: Record<SetupStepState, string> = { done: "done", later: "left for later", current: "", ahead: "" };
+
+function stepLinkLabel(label: string, state: SetupStepState): string {
+  return STATE_WORDS[state] ? `${label}, ${STATE_WORDS[state]}` : label;
+}
 export function SetupFrame({
   clinic,
   progress,
@@ -65,6 +80,31 @@ export function SetupFrame({
             Step {index + 1} of {total}: <strong className="font-semibold text-ink">{SETUP_STEPS[index].label}</strong>
           </p>
         )}
+        <ol aria-label="Setup steps" className="mt-2 grid grid-cols-4 gap-1">
+          {progress.steps.map((entry) => {
+            const onScreen = entry.key === step;
+            const body = (
+              <>
+                {entry.state === "done" && <span aria-hidden="true">✓&nbsp;</span>}
+                {entry.label}
+              </>
+            );
+            const box = "flex min-h-11 items-center justify-center rounded-lg px-1 text-center text-[13px] leading-tight";
+            return (
+              <li key={entry.key} aria-current={onScreen ? "step" : undefined}>
+                {onScreen ? (
+                  <span className={`${box} bg-brand/10 font-semibold text-ink`}>{body}</span>
+                ) : stepIsOpen(progress, entry.key) ? (
+                  <StepLink href={setupStepHref(entry.key)} ariaLabel={stepLinkLabel(entry.label, entry.state)} className={`${box} text-ink-soft underline underline-offset-2 hover:bg-wash hover:text-ink`}>
+                    {body}
+                  </StepLink>
+                ) : (
+                  <span className={`${box} text-ink-muted`}>{body}</span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
       </div>
 
       <div className="flex flex-1">
@@ -79,8 +119,9 @@ export function SetupFrame({
           <ol className="mt-5 flex flex-col gap-1">
             {progress.steps.map((entry, position) => {
               const onScreen = entry.key === step;
-              return (
-                <li key={entry.key} aria-current={onScreen ? "step" : undefined} className={`flex items-start gap-3 rounded-xl px-3 py-3 ${onScreen ? "bg-brand/10" : ""}`}>
+              const row = "flex min-h-11 items-start gap-3 rounded-xl px-3 py-3";
+              const body = (
+                <>
                   <span aria-hidden="true" className="mt-0.5 w-4 text-center text-ink">
                     {entry.state === "done" ? "✓" : entry.state === "later" ? "○" : "•"}
                   </span>
@@ -94,13 +135,32 @@ export function SetupFrame({
                   </span>
                   {!onScreen && entry.state === "done" && <span className="text-[13px] font-semibold text-ink-soft">Done</span>}
                   {!onScreen && entry.state === "later" && <span className="text-[13px] font-semibold text-ink-soft">Later</span>}
+                </>
+              );
+              return (
+                <li key={entry.key} aria-current={onScreen ? "step" : undefined}>
+                  {onScreen ? (
+                    <div className={`${row} bg-brand/10`}>{body}</div>
+                  ) : stepIsOpen(progress, entry.key) ? (
+                    <StepLink
+                      href={setupStepHref(entry.key)}
+                      ariaLabel={stepLinkLabel(entry.label, entry.state)}
+                      className={`${row} hover:bg-wash focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-brand-bright`}
+                    >
+                      {body}
+                    </StepLink>
+                  ) : (
+                    <div className={row}>{body}</div>
+                  )}
                 </li>
               );
             })}
           </ol>
         </nav>
 
-        <main className="flex min-w-0 flex-1 flex-col px-6 py-8 sm:px-12 sm:py-11">{children}</main>
+        <main className="flex min-w-0 flex-1 flex-col px-6 py-8 sm:px-12 sm:py-11">
+          <StepTypingWatch>{children}</StepTypingWatch>
+        </main>
       </div>
     </div>
   );
@@ -154,9 +214,9 @@ export function StepBody({
         {step && <SkipButton step={step} />}
         <div className="ml-auto flex flex-wrap items-center gap-3">
           {back && (
-            <Link href={setupStepHref(back)} className="inline-flex h-12 items-center rounded-xl border border-line-strong bg-surface px-5 text-[15px] font-semibold text-ink hover:border-brand">
+            <StepLink href={setupStepHref(back)} className="inline-flex h-12 items-center rounded-xl border border-line-strong bg-surface px-5 text-[15px] font-semibold text-ink hover:border-brand">
               Back
-            </Link>
+            </StepLink>
           )}
           {actions}
         </div>

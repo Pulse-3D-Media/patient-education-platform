@@ -11,6 +11,7 @@ import { LOGO_HEIGHT, LOGO_URL, LOGO_WIDTH } from "@/lib/brand";
 import { SEARCH_MAX_LENGTH, SEARCH_PATH } from "@/lib/library-rows";
 import { ClinicLogo } from "./ClinicLogo";
 import { AccountButton } from "./AccountButton";
+import { TourNotice } from "@/components/tour/TourNotice";
 import { TourHost } from "@/components/tour/TourHost";
 import type { SetupReminder } from "@/lib/setup";
 import { AdminIcon, ArrowLeftIcon, BooksIcon, ClockIcon, CloseIcon, HomeIcon, MenuIcon, SearchIcon } from "./icons";
@@ -265,8 +266,12 @@ export function AppShell({
               <AdminIcon className="h-6 w-6" />
             </RailButton>
           )}
+          {/* "Take the tour" just above the avatar, until this browser has started the tour (components/tour/TourNotice.tsx). */}
+          <div className="mt-auto">
+            <TourNotice variant="rail" />
+          </div>
           {/* Clerk's user button at the foot of the rail, as it always was: the signed-in person's avatar, with Sign out in its menu. The box keeps the rail lined up while Clerk loads. */}
-          <div className="mt-auto flex h-11 w-11 items-center justify-center">
+          <div className="flex h-11 w-11 items-center justify-center">
             <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
           </div>
         </nav>
@@ -274,6 +279,7 @@ export function AppShell({
         {/* The full sidebar, on a wide screen while it is not folded: every line an icon and a label, YouTube-style. */}
         <nav aria-label="Library" className={`sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 flex-col border-r border-line bg-sunken ${folded ? "" : "xl:flex"}`}>
           <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} />
+          <TourNotice variant="wide" />
           {/* The same avatar at the foot of the full sidebar, lined up with where it sits on the rail. */}
           <div className="flex h-14 shrink-0 items-center border-t border-line px-[1.375rem]">
             <AccountButton tour appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
@@ -297,6 +303,8 @@ export function AppShell({
                   {logo}
                 </div>
                 <Guide pathname={pathname} categories={listed} showAdmin={showAdmin} setup={setup} onChoose={close} />
+                {/* On a phone the avatar rides in the top bar, so the notice sits at the foot of this menu. */}
+                <TourNotice variant="wide" onChoose={close} />
                 {brand && <PoweredBy />}
               </aside>
             ) : menu === "library" ? (

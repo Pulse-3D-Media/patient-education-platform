@@ -187,8 +187,11 @@ Stripe test mode only, like everything above, and offered only where Billing's o
   A page already open for the same accepted plan is reused whichever flow made it, so its return address may be the other flow's; both return pages only read the record.
   `?stopped=1` shows "The payment was not finished. Nothing was charged. Try again, with another card or payment method if yours was declined." with the plan kept (from the attempt on record) and Try again: Stripe's own page says when a card is declined, and our page cannot know which it was, so it does not claim a decline.
 - **The return grants nothing**, like `/admin/billing/return`: `/onboarding/done` reads the record, shows "Confirming your payment" with the same `Confirming` part (bounded looks, then Check again), and only once the record says ACTIVE and the clinic is open does it send the owner to `/library?welcome=1` (any other admin to `/library`).
-- **The welcome dialog** ("Thanks for signing up.", `app/library/WelcomeDialog.tsx`) shows over the library only for the account owner, only when the clinic is open, and only with `?welcome=1`, which it takes out of the address as it opens, so a refresh or a second notification never shows it again; no schema.
-  "Finish setting up (recommended)" opens setup (`/onboarding/setup`, the step the clinic is on), "Take a quick tour" goes to the library until the tour exists (pull request #6), and "Go to the library" closes it.
+- **The welcome dialog** ("Thanks for signing up.", `app/library/WelcomeDialog.tsx`) shows over the library only when the clinic is open, and only with `?welcome=` in the address, which it takes out as it opens, so a refresh or a second notification never shows it again; no schema.
+  With `?welcome=1` (after the first payment) it is for the account owner only.
+  With `?welcome=setup` (after the last setup step, Evan, 2026-11-20, replacing the full "You're ready for patients." page) it is for an office admin whose clinic's setup is behind it, headed "You're ready for patients.".
+  "Finish setting up (recommended)" opens setup (`/onboarding/setup`, the step the clinic is on); once setup is behind the clinic that choice is drawn ticked as "Setup done", a line and not a button, naming in a few words anything skipped ("Left for later: your logo."), which the library's "Finish setup" reminder still opens.
+  "Take a quick tour" starts the tour, and "Go to the library" closes it.
 
 ## One more seat from setup
 

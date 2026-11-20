@@ -2,21 +2,33 @@
 
 import Link from "next/link";
 import { useEffect, useRef } from "react";
-import { SETUP_PATH } from "@/lib/setup";
-import { TOUR_START_HREF } from "@/lib/tour";
+import { SETUP_PATH, WELCOME_PARAM } from "@/lib/setup";
+import { TOUR_START_HREF, joinNames } from "@/lib/tour";
 
 /**
  * "Thanks for signing up." (the approved design, screen 03-welcome): the
  * dialog over the library after a new clinic's first payment, with three
  * choices, worded exactly as drawn.
  *
- * WHEN IT SHOWS (decided on the server, app/library/page.tsx): the address
- * says ?welcome=1, the person is the clinic's account owner, and the clinic
- * is open. Only /onboarding/done sends anyone to that address, and only once
- * the server's billing record says the payment was confirmed, so the dialog
- * never claims a clinic is open before it is.
+ * WHEN IT SHOWS (decided on the server, app/library/page.tsx), always only
+ * for an open clinic:
  *
- * ONCE: as soon as it opens it takes ?welcome=1 out of the address (without
+ *   ?welcome=1      after the first payment, for the account owner. Only
+ *                   /onboarding/done sends anyone there, and only once the
+ *                   server's billing record says the payment was confirmed,
+ *                   so the dialog never claims a clinic is open before it is.
+ *   ?welcome=setup  after the last setup step, for an office admin whose
+ *                   clinic's setup is behind it (Evan, 2026-11-20: "just go
+ *                   back to the dialogue box that pops up after sign up that
+ *                   checks set up off on its box and leaves take a tour or go
+ *                   to library"). It replaced the full "You're ready for
+ *                   patients." page.
+ *
+ * Once setup is behind the clinic, its choice is drawn ticked, as a line and
+ * not a button, and names in a few words anything that was skipped; the
+ * library's "Finish setup" reminder still opens what is left.
+ *
+ * ONCE: as soon as it opens it takes ?welcome= out of the address (without
  * reloading), so a refresh, the Back button or a second notification from
  * Stripe never brings it back. No database record is needed for that.
  *
@@ -29,7 +41,15 @@ const FINISH_SETTING_UP_HREF = SETUP_PATH;
 /** The quick tour's first stop, on the library home (components/tour). */
 const TOUR_HREF = TOUR_START_HREF;
 
-export function WelcomeDialog() {
+export function WelcomeDialog({
+  setupDone = null,
+  afterSetup = false,
+}: {
+  /** Null while setup is still to do (its choice is a link); otherwise what was skipped, in a few words each ("your logo"). */
+  setupDone?: { left: string[] } | null;
+  /** Opened by finishing setup, rather than by the first payment: the heading says so. */
+  afterSetup?: boolean;
+} = {}) {
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -37,8 +57,8 @@ export function WelcomeDialog() {
     if (element && !element.open) element.showModal();
     // Take the one-time marker out of the address, keeping everything else.
     const url = new URL(window.location.href);
-    if (url.searchParams.has("welcome")) {
-      url.searchParams.delete("welcome");
+    if (url.searchParams.has(WELCOME_PARAM)) {
+      url.searchParams.delete(WELCOME_PARAM);
       window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
     }
   }, []);
@@ -65,27 +85,42 @@ export function WelcomeDialog() {
         </svg>
       </div>
       <h2 id="welcome-heading" className="mt-5 text-center text-[1.75rem] font-semibold tracking-[-0.02em] text-ink">
-        Thanks for signing up.
+        {afterSetup ? "You’re ready for patients." : "Thanks for signing up."}
       </h2>
       <p className="mt-2 text-center text-base">We want you to have a great experience.</p>
 
       <ul className="mt-6 flex flex-col gap-3">
-        <li>
-          <Link href={FINISH_SETTING_UP_HREF} onClick={close} className={choice}>
+        {setupDone ? (
+          // Done: a ticked line, not a button. Anything skipped is named; the library's "Finish setup" opens it.
+          <li className="flex w-full items-center gap-4 rounded-2xl border border-line bg-sunken px-4 py-3.5">
             <span className={icon}>
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                <path d="M4 11l8-7 8 7v9H4z" />
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                <path d="M5 12.5l4.5 4.5L19 7.5" />
               </svg>
             </span>
             <span>
-              <span className="block text-base font-semibold text-ink">
-                Finish setting up <span className="font-normal text-ink-soft">(recommended)</span>
-              </span>
-              <span className="block text-[15px]">Clinic name, branding, your team. About 5 minutes.</span>
+              <span className="block text-base font-semibold text-ink">Setup done</span>
+              {setupDone.left.length > 0 && <span className="block text-[15px]">Left for later: {joinNames(setupDone.left)}.</span>}
             </span>
-            {chevron}
-          </Link>
-        </li>
+          </li>
+        ) : (
+          <li>
+            <Link href={FINISH_SETTING_UP_HREF} onClick={close} className={choice}>
+              <span className={icon}>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                  <path d="M4 11l8-7 8 7v9H4z" />
+                </svg>
+              </span>
+              <span>
+                <span className="block text-base font-semibold text-ink">
+                  Finish setting up <span className="font-normal text-ink-soft">(recommended)</span>
+                </span>
+                <span className="block text-[15px]">Clinic name, branding, your team. About 5 minutes.</span>
+              </span>
+              {chevron}
+            </Link>
+          </li>
+        )}
         <li>
           <Link href={TOUR_HREF} onClick={close} className={choice}>
             <span className={icon}>

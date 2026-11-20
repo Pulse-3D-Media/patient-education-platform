@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import { SECONDARY_BUTTON } from "@/components/ui/styles";
 import type { ActionResult } from "./actions";
 
@@ -32,95 +32,131 @@ export function ConfirmButton({
   onDone?: (result: ActionResult) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-  const noButton = useRef<HTMLButtonElement>(null);
-  const headingId = useId();
-  const bodyId = useId();
-
-  useEffect(() => {
-    if (!open) return;
-    noButton.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [open]);
-
-  function confirm() {
-    setError(null);
-    startTransition(async () => {
-      const result = await action();
-      if (result.error) setError(result.error);
-      else {
-        setOpen(false);
-        onDone?.(result);
-      }
-    });
-  }
+  // A new key each time it opens, so the popup starts without an old sentence in it.
+  const [opened, setOpened] = useState(0);
 
   return (
     <>
       <button
         type="button"
         onClick={() => {
-          setError(null);
+          setOpened((count) => count + 1);
           setOpen(true);
         }}
         className={danger ? `${SECONDARY_BUTTON} hover:border-danger-line hover:text-danger` : SECONDARY_BUTTON}
       >
         {label}
       </button>
-
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-5" onClick={(e) => e.target === e.currentTarget && !pending && setOpen(false)}>
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby={headingId}
-            aria-describedby={bodyId}
-            className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 shadow-panel sm:p-8"
-          >
-            <h2 id={headingId} className="text-xl font-semibold">
-              {title}
-            </h2>
-            <div id={bodyId} className="mt-4 text-base leading-relaxed text-ink-soft">
-              {body}
-            </div>
-
-            {error && (
-              <p role="alert" className="mt-4 text-sm text-problem">
-                {error}
-              </p>
-            )}
-
-            <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <button
-                ref={noButton}
-                type="button"
-                onClick={() => setOpen(false)}
-                disabled={pending}
-                className="inline-flex h-11 items-center rounded-lg border border-line-strong px-5 text-base font-medium text-ink-soft transition hover:border-brand hover:text-ink disabled:opacity-60"
-              >
-                No
-              </button>
-              <button
-                type="button"
-                onClick={confirm}
-                disabled={pending}
-                className={`inline-flex h-11 items-center rounded-lg px-5 text-base font-medium transition disabled:cursor-wait disabled:opacity-60 ${
-                  danger ? "bg-[#a33a3a] text-white hover:bg-[#872e2e]" : "bg-brand text-on-brand hover:bg-brand-hover"
-                }`}
-              >
-                {pending ? "Saving..." : yes}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {open && <ConfirmDialog key={opened} title={title} body={body} yes={yes} danger={danger} action={action} onClose={() => setOpen(false)} onDone={onDone} />}
     </>
+  );
+}
+
+/**
+ * The "Are you sure?" popup on its own, for a control that is not a button
+ * (the Admin switch asks with it before someone turns off their own admin).
+ * Drawn while open; No, the backdrop and Escape call onClose and change
+ * nothing; Yes runs the action, and success calls onDone and then onClose.
+ */
+export function ConfirmDialog({
+  title,
+  body,
+  yes,
+  danger = false,
+  action,
+  onClose,
+  onDone,
+}: {
+  title: string;
+  body: ReactNode;
+  yes: string;
+  danger?: boolean;
+  action: () => Promise<ActionResult>;
+  onClose: () => void;
+  onDone?: (result: ActionResult) => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const noButton = useRef<HTMLButtonElement>(null);
+  const headingId = useId();
+  const bodyId = useId();
+
+  // Escape closes it; an effect event, so the popup is set up once while it is open, whatever the page around it does.
+  const closeOnEscape = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key === "Escape") onClose();
+  });
+  useEffect(() => {
+    noButton.current?.focus();
+    window.addEventListener("keydown", closeOnEscape);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      document.body.style.overflow = "";
+    };
+  }, []);
+
+  function confirm() {
+    setError(null);
+    startTransition(async () => {
+      let result: ActionResult;
+      try {
+        result = await action();
+      } catch {
+        // A lost connection: a plain sentence and the same Yes to try again, never an exception on screen.
+        result = { error: "We could not confirm the change. Check the connection, then try again." };
+      }
+      if (result.error) setError(result.error);
+      else {
+        onDone?.(result);
+        onClose();
+      }
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-5" onClick={(e) => e.target === e.currentTarget && !pending && onClose()}>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        aria-describedby={bodyId}
+        className="w-full max-w-md rounded-2xl border border-line bg-surface p-6 shadow-panel sm:p-8"
+      >
+        <h2 id={headingId} className="text-xl font-semibold">
+          {title}
+        </h2>
+        <div id={bodyId} className="mt-4 text-base leading-relaxed text-ink-soft">
+          {body}
+        </div>
+
+        {error && (
+          <p role="alert" className="mt-4 text-sm text-problem">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            ref={noButton}
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+            className="inline-flex h-11 items-center rounded-lg border border-line-strong px-5 text-base font-medium text-ink-soft transition hover:border-brand hover:text-ink disabled:opacity-60"
+          >
+            No
+          </button>
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={pending}
+            className={`inline-flex h-11 items-center rounded-lg px-5 text-base font-medium transition disabled:cursor-wait disabled:opacity-60 ${
+              danger ? "bg-[#a33a3a] text-white hover:bg-[#872e2e]" : "bg-brand text-on-brand hover:bg-brand-hover"
+            }`}
+          >
+            {pending ? "Saving..." : yes}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

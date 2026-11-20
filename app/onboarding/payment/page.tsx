@@ -52,7 +52,7 @@ export default async function SignUpPaymentPage({ searchParams }: { searchParams
   );
 
   return (
-    <SignUpFrame step="payment">
+    <SignUpFrame step="payment" backToPlan={planHref(plan, "plan")}>
       <div className="mx-auto grid max-w-[884px] gap-8 lg:grid-cols-[minmax(0,1fr)_280px] lg:gap-12">
         <div>
           <h1 className="text-[2.25rem] font-semibold leading-tight tracking-[-0.02em] text-ink sm:text-[2.5rem]">Payment method</h1>

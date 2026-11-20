@@ -99,7 +99,10 @@ describe("inviting", () => {
     expect(await inviteSomeone({ clinicId, email: "New.Person@Example.test", role: "member", actor, acceptUrl: "https://app.example.test/sign-up" })).toMatchObject({ ok: true });
 
     const [invitation] = fakeClerk.invitations(orgId);
-    expect(invitation.redirectUrl).toBe("https://app.example.test/sign-up");
+    // The clinic's name rides along as words for the invited person's heading (Evan, 2026-11-20; lib/invitation-name.ts).
+    const landing = new URL(invitation.redirectUrl ?? "");
+    expect(`${landing.origin}${landing.pathname}`).toBe("https://app.example.test/sign-up");
+    expect(landing.searchParams.get("clinic")).toMatch(/^Vitest seat clinic /);
     expect(invitation).toMatchObject({ emailAddress: "new.person@example.test", role: "org:member", status: "pending" });
     const holds = await holdsOf(clinicId);
     expect(holds).toEqual([expect.objectContaining({ clerkInvitationId: invitation.id })]);

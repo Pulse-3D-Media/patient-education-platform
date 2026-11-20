@@ -17,12 +17,14 @@
  * address grants anything: the pages underneath check who may see what, as
  * always, and the tour only points at what they already drew.
  *
- * WHETHER IT HAS BEEN SEEN is one value in this browser's own storage. It is
- * only used to offer the tour once to someone who has just joined a clinic.
- * It is per browser, not per person: a second device, or cleared site data,
- * offers it once more. When storage is blocked (some private windows) the
- * answer is "unknown", and the tour is then simply not offered by itself; it
- * can still be started from the account menu.
+ * WHETHER IT HAS BEEN SEEN is one value in this browser's own storage,
+ * written the moment the tour starts. It only decides the quiet "Take the
+ * tour" notice at the foot of the library's menu (components/tour/
+ * TourNotice.tsx, Evan, 2026-11-20), which shows until then. It is per
+ * browser, not per person: a second device, or cleared site data, shows the
+ * notice once more. When storage is blocked (some private windows) the
+ * answer is "unknown", and the notice is simply not shown; the tour can still
+ * be started from the account menu.
  */
 
 import { readWatchVideoId, watchPageHref } from "./library-rows";
@@ -30,27 +32,27 @@ import { readWatchVideoId, watchPageHref } from "./library-rows";
 /** The three stops, by name. */
 export type TourStop = "nav" | "video" | "admin";
 
-/** The address parameter that says which stop is showing ("nav", "video", "admin"), or "offer". */
+/** The address parameter that says which stop is showing ("nav", "video", "admin"). */
 export const TOUR_PARAM = "tour";
 /** The address parameter that carries the video the tour opened, once one is picked. */
 export const TOUR_VIDEO_PARAM = "tv";
-/** The value of ?tour that asks for the one-time offer (after joining a clinic). */
-export const TOUR_OFFER = "offer";
 
 /** Where "Take a quick tour" and "Take the tour" go: the first stop. */
 export const TOUR_START_HREF = `/library?${TOUR_PARAM}=nav`;
-/** Where someone who has just joined a clinic lands: the library home, with the tour offered once. */
-export const TOUR_OFFER_HREF = `/library?${TOUR_PARAM}=${TOUR_OFFER}`;
 
-/** The library home, where the first stop and the offer are shown. */
+/** The library home, where the first stop is shown, and where someone who has just joined a clinic lands. */
 export const LIBRARY_HOME = "/library";
 
-/** Where this browser remembers that the tour was seen or offered. */
+/** Where this browser remembers that the tour was started. */
 export const TOUR_SEEN_KEY = "p3-tour-seen";
+
+/** The name of the event this page hears when the tour is marked as seen, so the notice hides at once. */
+export const TOUR_SEEN_EVENT = "p3-tour-seen";
 
 /** The words on each stop, exactly as the mock-up has them. No paragraphs (decided 2026-11-16). */
 export const TOUR_COPY = {
-  offer: { title: "Take a quick tour?", yes: "Show me", no: "Not now" },
+  /** The quiet notice at the foot of the library's menu until the tour has been started in this browser. */
+  notice: { title: "Take the tour", short: "Tour" },
   nav: { title: "Navigate by specialty", body: null },
   /** Stop 2 for someone holding a seat, who has Send and Show QR. */
   videoSend: { title: "Send it or save it", body: "Send the video to a patient's phone, show a QR code, or keep it as a favorite." },
@@ -59,13 +61,16 @@ export const TOUR_COPY = {
   admin: { title: "Your admin pages", body: "Links, people, clinic branding and billing. Admins only." },
 } as const;
 
-/** What the address asks the tour to do: nothing, the one-time offer, or show one stop. */
-export type TourRequest = { kind: "offer" } | { kind: "stop"; stop: TourStop; videoId: string | null } | null;
+/** What the address asks the tour to do: nothing, or show one stop. */
+export type TourRequest = { kind: "stop"; stop: TourStop; videoId: string | null } | null;
 
-/** Reads ?tour (and ?tv) from an address. Anything it does not recognise is nothing at all. */
+/**
+ * Reads ?tour (and ?tv) from an address. Anything it does not recognise is
+ * nothing at all, including the old one-time offer (?tour=offer), which the
+ * notice replaced on 2026-11-20.
+ */
 export function readTourRequest(params: Pick<URLSearchParams, "get">): TourRequest {
   const value = params.get(TOUR_PARAM);
-  if (value === TOUR_OFFER) return { kind: "offer" };
   if (value === "nav" || value === "video" || value === "admin") {
     return { kind: "stop", stop: value, videoId: readWatchVideoId(params.get(TOUR_VIDEO_PARAM) ?? undefined) };
   }
@@ -115,9 +120,8 @@ function browserStorage(): StorageLike {
 }
 
 /**
- * Has this browser seen (or been offered) the tour? true or false, or null
- * when storage cannot be read at all, in which case the tour is not offered
- * by itself. Never throws.
+ * Has this browser started the tour? true or false, or null when storage
+ * cannot be read at all, in which case the notice is not shown. Never throws.
  */
 export function readTourSeen(storage: () => StorageLike = browserStorage): boolean | null {
   try {
@@ -127,11 +131,26 @@ export function readTourSeen(storage: () => StorageLike = browserStorage): boole
   }
 }
 
-/** Remembers in this browser that the tour was seen. A blocked store just means it is not remembered. Never throws. */
+/** Remembers in this browser that the tour was started, and tells the notice on this page. A blocked store just means it is not remembered. Never throws. */
 export function markTourSeen(storage: () => StorageLike = browserStorage): void {
   try {
     storage().setItem(TOUR_SEEN_KEY, "1");
   } catch {
     // Not remembered: nothing else depends on it.
   }
+  try {
+    window.dispatchEvent(new Event(TOUR_SEEN_EVENT));
+  } catch {
+    // No window (a test without one): nothing on screen to tell.
+  }
+}
+
+/** Calls `onChange` whenever the "seen" value may have changed: in this page, or in another tab (the storage event). Returns the way to stop listening. */
+export function subscribeTourSeen(onChange: () => void): () => void {
+  window.addEventListener(TOUR_SEEN_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(TOUR_SEEN_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
 }

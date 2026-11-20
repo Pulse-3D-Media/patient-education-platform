@@ -14,7 +14,7 @@ Read the top of `lib/qr-code.ts` first.
 - **One live code per procedure per surgeon per clinic**, printed or downloaded as often as the office likes (the same code every time).
   `QrCode.liveKey` is unique while a code is live, so five presses at once end with one code.
   Setup's test link (step 4, "Generate QR code") is NOT a printed code: it is one ordinary patient link from the admin setting up, made through `createShare()` and shown as a QR code to scan, which runs out like any link.
-  Made with **+ Printed code** on `/admin/links` (`createQrCode()` in `lib/db/qr-codes.ts`): admins of an open clinic, the clinic from the session, the surgeon checked with Clerk (`resolveSender()`) and, under the same locks as `createShare()`, holding a seat here, and the clinic able to use the video.
+  Made with **+ New code** on the Permanent QR code tab of `/admin/links` (`createQrCode()` in `lib/db/qr-codes.ts`): admins of an open clinic, the clinic from the session, the surgeon checked with Clerk (`resolveSender()`) and, under the same locks as `createShare()`, holding a seat here, and the clinic able to use the video.
   Logged in the clinic log, without the code.
 - **Unguessable.** 25 characters from Node's cryptographic generator, about 128 bits; a clash on the unique column is tried again.
   The code is a secret like a key: never in a log, a log entry, a file name or an admin address (the admin pages use the row id).

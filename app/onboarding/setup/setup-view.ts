@@ -8,7 +8,7 @@ import { afterFirstPlaySentence } from "@/lib/expiry";
 import { posterForVideo } from "@/lib/playback-auth";
 import { requireClinicPage, type CurrentClinic } from "@/lib/clinic";
 import { clinicIsOpen } from "@/lib/clinic-status";
-import type { SetupProgress } from "@/lib/setup";
+import { SETUP_PATH, stepIsOpen, type SetupProgress, type SetupStepKey } from "@/lib/setup";
 
 /**
  * Who may see the setup steps, decided on the server for every request
@@ -20,15 +20,18 @@ import type { SetupProgress } from "@/lib/setup";
  *   - a clinic that is not open: Billing, which says why (every step's
  *     change needs an open clinic, as on the admin pages);
  *   - a clinic made before setup existed: the admin overview. It counts as
- *     set up, so there is nothing to walk through.
+ *     set up, so there is nothing to walk through;
+ *   - a step further ahead than the progress list links (stepIsOpen() in
+ *     lib/setup.ts): the step the clinic is on.
  */
 export type SetupPage = { clinic: CurrentClinic; progress: SetupProgress };
 
-export async function requireSetup(): Promise<SetupPage> {
+export async function requireSetup(step?: SetupStepKey): Promise<SetupPage> {
   const clinic = await requireClinicPage();
   if (!clinic.isAdmin) redirect("/library");
   if (!clinicIsOpen(clinic)) redirect("/admin/billing");
   if (!clinic.setup) redirect("/admin");
+  if (step && !stepIsOpen(clinic.setup, step)) redirect(SETUP_PATH);
   return { clinic, progress: clinic.setup };
 }
 

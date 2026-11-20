@@ -13,7 +13,7 @@ import { BrandingStepForm } from "./BrandingStepForm";
 export const dynamic = "force-dynamic";
 
 export default async function SetupBrandingPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
-  const { clinic, progress } = await requireSetup();
+  const { clinic, progress } = await requireSetup("branding");
   const [preview, welcomeBack] = await Promise.all([previewFacts(clinic), cameBack(searchParams)]);
   return (
     <SetupFrame clinic={clinic} progress={progress} step="branding">

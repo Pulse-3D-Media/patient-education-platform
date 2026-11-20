@@ -345,7 +345,11 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).toContain("New patient link");
     expect(html).toContain(">Procedure<");
     expect(html).toContain(">From<");
-    expect(html).toContain("Printed code");
+    // Two equal tabs across the top (Evan, 2026-11-20), each a real link; the patient link's tab is open first.
+    expect(html).toMatch(/aria-current="page"[^>]*>Temporary patient link</);
+    expect(html).toContain('href="/admin/links?tab=qr"');
+    expect(html).toContain(">Permanent QR code<");
+    expect(html).not.toContain("New printed code");
     expect(html).not.toContain("Existing links");
     expect(html).not.toContain("Cancel link");
     // Nothing can be made here yet (no seats, or nothing on the plan to share), and the page says why and where to fix it.
@@ -354,6 +358,21 @@ describe("an admin of an ACTIVE clinic", () => {
     expect(html).toMatch(/aria-current="page"[^>]*href="\/admin\/links"/);
     for (const word of PLAN_WORDS) expect(html).not.toContain(word);
     expect(showsAnAmount(html)).toBe(false);
+  });
+
+  it("opens the printed codes on the Permanent QR code tab, from ?tab=qr or an address naming a code, still with no patient links", async () => {
+    signInAs(orgHip, "admin", "Vitest pages clinic (hip)", [HIP_SURGEON, HIP_OWNER]);
+    const cases: Record<string, string>[] = [{ tab: "qr" }, { code: "not-a-real-id" }];
+    for (const params of cases) {
+      const html = await renderWith(LinksPage, "/admin/links", params);
+      expect(html).toMatch(/aria-current="page"[^>]*>Permanent QR code</);
+      expect(html).toContain("Printed codes");
+      expect(html).toContain("New code");
+      // No codes yet at this clinic: the new code form is what the detail shows.
+      expect(html).toContain("New printed code");
+      expect(html).not.toContain(">Create link<");
+      expect(html).not.toContain("/watch/");
+    }
   });
 
   it("is offered only the procedures in the categories on its plan in the picker", async () => {

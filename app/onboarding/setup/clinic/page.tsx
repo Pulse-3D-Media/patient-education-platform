@@ -12,7 +12,7 @@ import { ClinicStepForm } from "./ClinicStepForm";
 export const dynamic = "force-dynamic";
 
 export default async function SetupClinicPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
-  const { clinic, progress } = await requireSetup();
+  const { clinic, progress } = await requireSetup("clinic");
   const [preview, welcomeBack] = await Promise.all([previewFacts(clinic), cameBack(searchParams)]);
   return (
     <SetupFrame clinic={clinic} progress={progress} step="clinic">

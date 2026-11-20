@@ -71,6 +71,10 @@ The patient surface is never behind it.
   A Google sign-up, and anyone who reaches `/onboarding` with no clinic, still names the clinic in Clerk's form there.
   Then the new account goes where a new account always went: the page it was sent from when that page is on this site (`safeReturnPath()`), otherwise `/onboarding`.
   An invitation's link still gets Clerk's prebuilt `<SignUp />`, unchanged, and so do Clerk's later sign-up steps under `/sign-up/...`; `/sign-up/sso-callback` is Clerk's `AuthenticateWithRedirectCallback`.
+  **An invitation's page says "Accept your invitation to join <clinic>."** and draws no Sign in or Set up a clinic tabs, so nothing there offers to start a second clinic (Evan, 2026-11-20).
+  The clinic's name is the one the server put in the invitation's own accept address when it sent it (`/sign-up?clinic=<name>`, `invitationAcceptUrl()` in `lib/invitation-name.ts`, called by `inviteSomeone()`), read back as display text only: cleaned, at most 80 characters, written as text, shown only when the visit also carries an invitation, and never used to decide anything (which clinic the person joins is the ticket's, checked by Clerk).
+  Without a usable name it says "Accept your invitation."; an invitation sent before this change has none.
+  That Clerk keeps our own query in the address it returns the person to is Clerk's behaviour, not checked against real Clerk; if it does not, the plain heading shows.
   Someone already signed in who opens `/sign-up` goes to `/onboarding`.
   Under Clerk's form, `ClerkLoading` and `ClerkFailed` say "Loading sign-in" or "We could not reach sign-in just now", so the box is never blank.
 - **The Clerk forward is off, as an explicit choice** (Prompt B of the 2026-10-30 list, decided after the 2026-11-04 dashboard checks showed the browser never uses it).

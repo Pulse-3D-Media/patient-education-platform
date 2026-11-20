@@ -3,6 +3,7 @@ import { getClinicAccess } from "@/lib/db/access";
 import { getSeatFor } from "@/lib/db/seats";
 import { listUsableVideos } from "@/lib/db/videos";
 import { errorKind } from "@/lib/error-kind";
+import { posterForVideo } from "@/lib/playback-auth";
 import { effectiveSenderName } from "@/lib/sender-name";
 import { SetupFrame } from "../SetupFrame";
 import { cameBack, previewFacts, requireSetup } from "../setup-view";
@@ -21,7 +22,7 @@ import { TestStepForm } from "./TestStepForm";
 export const dynamic = "force-dynamic";
 
 export default async function SetupTestPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
-  const { clinic, progress } = await requireSetup();
+  const { clinic, progress } = await requireSetup("test");
   const { userId } = await auth();
   const [preview, welcomeBack, procedures, seat] = await Promise.all([
     previewFacts(clinic),
@@ -48,12 +49,18 @@ export default async function SetupTestPage({ searchParams }: { searchParams?: P
   );
 }
 
-/** The procedures this clinic may send, by name. An empty list when they cannot be read (the page says there is nothing to list). */
-async function readProcedures(clinicId: string): Promise<{ id: string; title: string }[]> {
+/**
+ * The procedures this clinic may send, by name, each with its still for the
+ * phone picture (found exactly as the patient page finds the one it shows
+ * before the tick: a picture, never a player), or null when it has none.
+ * An empty list when they cannot be read (the page says there is nothing to list).
+ */
+async function readProcedures(clinicId: string): Promise<{ id: string; title: string; posterUrl: string | null }[]> {
   try {
     const access = await getClinicAccess(clinicId);
     const videos = access ? await listUsableVideos(access) : [];
-    return videos.map((video) => ({ id: video.id, title: video.title }));
+    const now = new Date();
+    return videos.map((video) => ({ id: video.id, title: video.title, posterUrl: posterForVideo(video, now, null) }));
   } catch (error) {
     console.error("Setup: the procedures could not be read", errorKind(error));
     return [];

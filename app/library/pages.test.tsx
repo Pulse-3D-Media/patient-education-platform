@@ -587,6 +587,17 @@ describe("the library home's rows", () => {
     expect(knee).not.toContain(titles[0]);
   });
 
+  it("names a video the clinic may use for the tour's second stop: the first card on the page, and draws none of the tour itself", async () => {
+    const html = await renderHome();
+    const named = html.match(/data-tour-video="([^"]+)"/)?.[1];
+    expect(named).toBeTruthy();
+    // It is one of the cards the page drew, so a video this clinic may open.
+    expect(html).toContain(`/library/watch/${named}`);
+    // No tour without ?tour= in the address: no caption, no shade.
+    expect(html).not.toContain("Navigate by specialty");
+    expect(html).not.toContain("End tour");
+  });
+
   it("shows My favorites, newest heart first, with their hearts filled wherever they appear", async () => {
     await setFavorite(rowsClinic, "user_vitest", ids[1]!, true, new Date("2026-10-01T00:00:00Z"));
     await setFavorite(rowsClinic, "user_vitest", ids[5]!, true, new Date("2026-10-02T00:00:00Z"));

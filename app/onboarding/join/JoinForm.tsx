@@ -4,13 +4,15 @@ import { SignOutButton } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { setMyPatientNameAction } from "@/app/library/[category]/actions";
 import { SenderNameForm } from "@/components/ui/SenderNameForm";
+import { TOUR_OFFER_HREF } from "@/lib/tour";
 
 /**
  * The join screen's form: the shared name and credential editor (the same one
  * People and the Send panel use), with "Join and open the library" as its
  * button, and "Not you? Sign out" under it. It opens on the name from their
  * account with no credential, which is what patients would see if they
- * skipped it. Once the server has saved, the library opens.
+ * skipped it. Once the server has saved, the library opens, offering the
+ * quick tour once.
  */
 export function JoinForm({ defaultName }: { defaultName: string | null }) {
   const router = useRouter();
@@ -22,7 +24,8 @@ export function JoinForm({ defaultName }: { defaultName: string | null }) {
         heading="Your name, as patients will see it on the links you send."
         saveLabel="Join and open the library"
         onSave={(choice) => setMyPatientNameAction(choice)}
-        onSaved={() => router.push("/library")}
+        // The library home, with the quick tour offered once (one tap to decline; components/tour).
+        onSaved={() => router.push(TOUR_OFFER_HREF)}
       />
       <p className="mt-6 text-[15px] text-ink-soft">
         Not you?{" "}

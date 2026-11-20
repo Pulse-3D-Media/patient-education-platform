@@ -1,8 +1,8 @@
 "use client";
 
-import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { AccountButton } from "./AccountButton";
 import { BooksIcon } from "./icons";
 
 /**
@@ -50,6 +50,7 @@ export function ConsoleShell({
   topEnd,
   sections,
   library,
+  tour = false,
   children,
 }: {
   theme: "light" | "dark";
@@ -66,10 +67,14 @@ export function ConsoleShell({
   sections: ConsoleSection[];
   /** The way to the library: where it goes, what it says, and whether a phone's top bar carries it too (the rail always does). */
   library: { href: string; label: string; inPhoneBar?: boolean };
+  /** Adds "Take the tour" to the account menu (the clinic's admin pages; not the Pulse 3D dashboard). */
+  tour?: boolean;
   children: ReactNode;
 }) {
   const pills = useRef<HTMLElement>(null);
   const current = sections.find((section) => section.active)?.href ?? null;
+  /** What a screen reader hears when the tour highlights the sections (its admin stop points at them). */
+  const tourName = sections.map((section) => section.label).join(", ");
 
   // Bring the current pill into the middle of the phone's row. Only the row scrolls, never the page.
   useEffect(() => {
@@ -96,13 +101,13 @@ export function ConsoleShell({
             </Link>
           )}
           <div className="flex h-11 w-11 items-center justify-center md:hidden">
-            <UserButton appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
+            <AccountButton tour={tour} appearance={{ elements: { avatarBox: "h-9 w-9" } }} />
           </div>
         </div>
       </header>
 
       {/* The phone's row of pills. */}
-      <nav ref={pills} aria-label={navLabel} className="relative shrink-0 overflow-x-auto border-b border-line px-4 py-2.5 md:hidden">
+      <nav ref={pills} aria-label={navLabel} data-tour="admin-sections" data-tour-name={tourName} className="relative shrink-0 overflow-x-auto border-b border-line px-4 py-2.5 md:hidden">
         <ul className="flex min-w-max gap-2">
           {sections.map((section) => (
             <li key={section.href}>
@@ -123,7 +128,7 @@ export function ConsoleShell({
       <div className="flex min-w-0 flex-1">
         {/* The left rail, from a tablet up. */}
         <nav aria-label={navLabel} className="sticky top-16 hidden h-[calc(100vh-4rem)] w-[216px] shrink-0 flex-col border-r border-line bg-sunken px-3 py-4 md:flex">
-          <ul className="flex flex-col gap-0.5">
+          <ul className="flex flex-col gap-0.5" data-tour="admin-sections" data-tour-name={tourName}>
             {sections.map((section) => (
               <li key={section.href}>
                 <Link
@@ -151,7 +156,8 @@ export function ConsoleShell({
           </Link>
           {/* The signed-in person: Clerk's user button with their name. Its menu holds Sign out. The box keeps the rail steady while Clerk loads. */}
           <div className="flex min-h-14 items-center border-t border-line px-1 pt-2">
-            <UserButton
+            <AccountButton
+              tour={tour}
               showName
               appearance={{
                 elements: {

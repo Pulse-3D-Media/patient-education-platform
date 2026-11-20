@@ -71,13 +71,14 @@ describe("the join screen", () => {
     expect(checkSeats).toHaveBeenCalledWith("clinic_vitest");
   });
 
-  it("sends everyone with nothing to enter on to the library: the owner, someone with no seat, someone whose name is chosen", async () => {
+  it("sends everyone with nothing to enter on to the library: the owner, someone with no seat (offered the tour once), someone whose name is chosen", async () => {
     vi.mocked(requireClinicPage).mockResolvedValue(clinic({ isOwner: true, isAdmin: true }));
     expect(await where()).toBe("redirect:/library");
 
+    // Just joined, with no seat and so no name to choose: the library home, with the quick tour offered once.
     vi.mocked(requireClinicPage).mockResolvedValue(clinic());
     vi.mocked(getSeatFor).mockResolvedValue(null);
-    expect(await where()).toBe("redirect:/library");
+    expect(await where()).toBe("redirect:/library?tour=offer");
 
     vi.mocked(getSeatFor).mockResolvedValue({ displayName: "Marcus Lee, DO" });
     expect(await where()).toBe("redirect:/library");

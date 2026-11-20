@@ -47,6 +47,7 @@ import {
 } from "./seats";
 import { effectiveSenderName, parseNameChoice } from "./sender-name";
 import { invitationAcceptUrl } from "./invitation-name";
+import { sendOwnerEmails, sendOwnerEmailsLater } from "./owner-email";
 
 /**
  * THE ONLY WAY ANYONE'S SEAT, ROLE, INVITATION OR OWNERSHIP IS CHANGED.
@@ -92,6 +93,9 @@ import { invitationAcceptUrl } from "./invitation-name";
  *                   anyone's; a surgeon sets only their own.
  *   Handing over    one write here (the owner), under the lock, after Clerk
  *   the owner       has confirmed the new owner is an admin of the clinic.
+ *                   Then, after it has committed and only if it was logged,
+ *                   the owner email (lib/owner-email.ts), which never fails
+ *                   or undoes the change. Owner by staff sends it the same way.
  *
  * In no order of events can more seats be taken than the plan pays for,
  * because the only things that take one (a hold, a seat given, a waiting
@@ -563,13 +567,18 @@ export async function handOffOwner(args: { clinicId: string; toUserId: unknown; 
   if (member.role !== "admin") return { ok: false, message: `Switch admin on for ${member.name} first. The account owner is always an admin.` };
 
   try {
-    await setClinicOwner(
+    const saved = await setClinicOwner(
       args.clinicId,
       member.userId,
       { newOwnerName: member.name, oldOwnerName: args.actor.name, how: `handed over by ${args.actor.name}` },
       byAdmin(args.actor),
       { expectedOwner: args.actor.userId, oldOwnerStays: true },
     );
+    // The change has committed. Tell the new owner, without waiting for it. Only a change that was
+    // logged sends, once, keyed by its log entry. The old owner handed it over themselves, so is not emailed.
+    if (saved.noteId) {
+      sendOwnerEmailsLater({ clinicId: args.clinicId, changeId: saved.noteId, newOwnerId: member.userId, changedBy: { handedOverBy: args.actor.name } }, sendOwnerEmails);
+    }
   } catch (error) {
     if (error instanceof OwnerChangeRefusedError) return { ok: false, message: error.message };
     logFailure("the account owner could not be changed", error);
@@ -632,6 +641,20 @@ export async function setOwnerByStaff(args: { clinicId: string; toUserId: unknow
       { oldOwnerStays: oldOwnerName !== null },
     );
     logged = Boolean(saved.logged);
+    // The change has committed. Tell the new owner, and the old owner when they are still in the clinic
+    // (someone else moved them out of the role), without waiting. Only a logged change sends, once.
+    if (saved.noteId) {
+      sendOwnerEmailsLater(
+        {
+          clinicId: args.clinicId,
+          changeId: saved.noteId,
+          newOwnerId: member.userId,
+          changedBy: { pulse: true },
+          tellFormerOwner: oldOwnerName !== null ? clinic.ownerClerkUserId : null,
+        },
+        sendOwnerEmails,
+      );
+    }
   } catch (error) {
     logFailure("the account owner could not be set", error);
     const why = error instanceof OwnerChangeRefusedError ? `${error.message} ` : "";

@@ -84,3 +84,10 @@ Vercel does not retry a failed call; the next day's run catches up, inside each 
 "not configured" in the log means `CRON_SECRET` is missing on Production (add it, then redeploy, since a deployment reads it when it is built).
 A failed send names one word (refused, unreachable): check Resend's dashboard and the two email settings.
 To run it by hand, call the address with the header (`curl -H "Authorization: Bearer <secret>" https://<site>/api/cron/setup-reminders`): it is safe to repeat.
+
+## The owner email
+
+When the account owner changes by a handover on `/admin/people` or by Pulse staff on `/pulse`, the new owner gets an email, and on `/pulse` the old owner too when still in the clinic (see "The owner email" under "Roles" in `docs/areas/auth-and-roles.md`).
+It is sent from that request, after the change has committed, never from a scheduled job.
+If one does not arrive, the owner change itself still went through: check the clinic log on `/pulse` for "Account owner changed", then the server log for a line starting `Owner email:`, which names the reason in one word (not-configured, refused, unreachable) or that a lookup failed, and Resend's dashboard.
+There is no resend button: the change can be made again (hand it back and forward), which sends a new email for the new change.

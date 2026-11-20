@@ -9,6 +9,7 @@ import * as seatsDb from "./db/seats";
 import { checkSeats, giveSeat, handOffOwner, inviteSomeone, releaseOwnSeat, removePerson, revokeInvitation, setAdmin, setOwnerByStaff, setOwnPatientName, setPatientName } from "./seat-changes";
 import { PENDING_WINDOW_MS } from "./seats";
 import { fakeClerk } from "./testing/fake-clerk";
+import * as ownerEmail from "./owner-email";
 
 /**
  * The seat model end to end: the real database (the Neon testing branch)
@@ -34,6 +35,15 @@ vi.mock("./db/seats", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./db/seats")>();
   return { ...actual, releaseSeatHold: vi.fn(actual.releaseSeatHold), linkSeatHold: vi.fn(actual.linkSeatHold), releaseSeat: vi.fn(actual.releaseSeat) };
 });
+
+// The owner emails (lib/owner-email.ts), wrapped so the tests can count them, wait for them, or make one fail.
+// With the real code behind the wrapper, and no email settings in the tests (vitest.setup.ts empties them),
+// a send does nothing unless a test hands in made-up settings and a stand-in for Resend.
+vi.mock("./owner-email", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./owner-email")>();
+  return { ...actual, sendOwnerEmails: vi.fn(actual.sendOwnerEmails) };
+});
+const ownerEmails = vi.mocked(ownerEmail.sendOwnerEmails);
 
 const createdClinicIds: string[] = [];
 const id = () => randomBytes(6).toString("hex");
@@ -62,6 +72,7 @@ const logOf = async (clinicId: string) => (await listNotesForClinic(clinicId)).m
 
 beforeEach(() => {
   fakeClerk.reset();
+  ownerEmails.mockClear();
   vi.spyOn(console, "error").mockImplementation(() => undefined); // failures are logged on purpose; keep the test output readable
 });
 
@@ -636,6 +647,148 @@ describe("the seat check", () => {
     await checkSeats(clinicId);
     expect(await seatsOf(clinicId)).toEqual([dr]);
     expect(await ownerOf(clinicId)).toBe(owner);
+  });
+});
+
+describe("the owner email", () => {
+  /** What each owner email was asked for, without the change's own id (which is a fresh log entry each time). */
+  const asked = () => ownerEmails.mock.calls.map(([change]) => ({ ...change, changeId: typeof change.changeId }));
+
+  it("a handover asks for one email to the new owner, keyed by its log entry, and none for the old owner", async () => {
+    const next = user();
+    const { clinicId, actor } = await makeClinic(2, [{ userId: next, firstName: "Nia", lastName: "Next", role: "org:admin" }]);
+
+    expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: true });
+    expect(asked()).toEqual([{ clinicId, changeId: "string", newOwnerId: next, changedBy: { handedOverBy: "Olive Owner" } }]);
+    const entry = await prisma.clinicNote.findFirst({ where: { clinicId, body: { startsWith: "Account owner changed" } }, select: { id: true } });
+    expect(ownerEmails.mock.calls[0][0].changeId).toBe(entry?.id);
+  });
+
+  it("the same handover sent twice (a double click, a retried request) asks for one email", async () => {
+    const next = user();
+    const { clinicId, actor } = await makeClinic(2, [{ userId: next, role: "org:admin" }]);
+
+    expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: true });
+    expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: false });
+    expect(ownerEmails).toHaveBeenCalledTimes(1);
+  });
+
+  it("two handoffs from two tabs at once ask for one email, to the one who won", async () => {
+    const [a, b] = [user(), user()];
+    const { clinicId, actor } = await makeClinic(3, [{ userId: a, role: "org:admin" }, { userId: b, role: "org:admin" }]);
+
+    await Promise.all([handOffOwner({ clinicId, toUserId: a, actor }), handOffOwner({ clinicId, toUserId: b, actor })]);
+    expect(ownerEmails).toHaveBeenCalledTimes(1);
+    expect(ownerEmails.mock.calls[0][0].newOwnerId).toBe(await ownerOf(clinicId));
+  });
+
+  it("a refused handover asks for nothing", async () => {
+    const member = user();
+    const { clinicId, actor } = await makeClinic(2, [{ userId: member }]);
+    expect(await handOffOwner({ clinicId, toUserId: member, actor })).toMatchObject({ ok: false });
+    expect(ownerEmails).not.toHaveBeenCalled();
+  });
+
+  it("the handover still goes through, and is logged, when the email fails", async () => {
+    const next = user();
+    const { clinicId, actor } = await makeClinic(2, [{ userId: next, firstName: "Nia", lastName: "Next", role: "org:admin" }]);
+    ownerEmails.mockRejectedValueOnce(new Error("Resend is down"));
+
+    expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: true, message: "Nia Next is now the account owner." });
+    await Promise.resolve(ownerEmails.mock.results[0].value).catch(() => undefined);
+    expect(await ownerOf(clinicId)).toBe(next);
+    expect((await logOf(clinicId)).filter((line) => line.includes("Account owner changed"))).toHaveLength(1);
+  });
+
+  it("end to end with a stand-in for Resend: one email to the new owner's address, and no address or name in the log", async () => {
+    const next = user();
+    const { clinicId, actor } = await makeClinic(2, [{ userId: next, firstName: "Nia", lastName: "Next", role: "org:admin", identifier: "nia.next@example.test" }]);
+    const sent: { to: string[]; text: string; key: string | null }[] = [];
+    vi.stubEnv("RESEND_API_KEY", "re_madeup_for_tests");
+    vi.stubEnv("EMAIL_FROM", "Pulse 3D <no-reply@example.test>");
+    vi.stubEnv("APP_ORIGINS", "https://app.example.test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body));
+        sent.push({ to: body.to, text: body.text, key: (init.headers as Record<string, string>)["Idempotency-Key"] ?? null });
+        return new Response("{}", { status: 200 });
+      }),
+    );
+    const logged: string[] = [];
+    vi.mocked(console.error).mockImplementation((...args: unknown[]) => void logged.push(args.map(String).join(" ")));
+    try {
+      expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: true });
+      expect(await ownerEmails.mock.results[0].value).toEqual({ newOwner: { sent: true }, formerOwner: null });
+      expect(await handOffOwner({ clinicId, toUserId: next, actor })).toMatchObject({ ok: false });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toEqual(["nia.next@example.test"]);
+    expect(sent[0].text).toContain("Olive Owner handed the account over to you.");
+    expect(sent[0].text).toContain("https://app.example.test/admin/people");
+    expect(sent[0].key).toMatch(/^owner-change-[0-9a-f]{64}$/);
+    for (const line of logged) for (const secret of ["@", "Nia", "Olive", "Vitest seat clinic"]) expect(line).not.toContain(secret);
+  });
+
+  it("Pulse staff setting the owner asks for one email to the new owner, and one to the old owner who is still in the clinic", async () => {
+    const member = user();
+    const { clinicId, owner } = await makeClinic(2, [{ userId: member, firstName: "Mo", lastName: "Member" }]);
+
+    expect(await setOwnerByStaff({ clinicId, toUserId: member, staffName: "Evan Miller" })).toMatchObject({ ok: true });
+    expect(asked()).toEqual([{ clinicId, changeId: "string", newOwnerId: member, changedBy: { pulse: true }, tellFormerOwner: owner }]);
+
+    // Asked again for the same person: nothing changes, nothing is logged, nothing more is sent.
+    expect(await setOwnerByStaff({ clinicId, toUserId: member, staffName: "Evan Miller" })).toMatchObject({ ok: true, message: expect.stringContaining("was already") });
+    expect(ownerEmails).toHaveBeenCalledTimes(1);
+  });
+
+  it("Pulse staff setting the owner of a clinic that had none tells only the new owner", async () => {
+    const member = user();
+    const { clinicId } = await makeClinic(2, [{ userId: member }], { owner: null });
+    expect(await setOwnerByStaff({ clinicId, toUserId: member, staffName: "Evan Miller" })).toMatchObject({ ok: true });
+    expect(asked()).toEqual([{ clinicId, changeId: "string", newOwnerId: member, changedBy: { pulse: true }, tellFormerOwner: null }]);
+  });
+
+  it("Pulse staff replacing an owner who has left the clinic tells only the new owner", async () => {
+    const member = user();
+    const { clinicId, orgId, owner } = await makeClinic(2, [{ userId: member, role: "org:admin" }]);
+    fakeClerk.removeMember(orgId, owner);
+    // The seat check has not run yet, so our row still names the old owner.
+    expect(await setOwnerByStaff({ clinicId, toUserId: member, staffName: "Evan Miller" })).toMatchObject({ ok: true });
+    expect(asked()).toEqual([{ clinicId, changeId: "string", newOwnerId: member, changedBy: { pulse: true }, tellFormerOwner: null }]);
+  });
+
+  it("Pulse staff: the owner is still set when the email fails", async () => {
+    const member = user();
+    const { clinicId } = await makeClinic(2, [{ userId: member }]);
+    ownerEmails.mockImplementationOnce(() => {
+      throw new Error("Resend is down");
+    });
+    expect(await setOwnerByStaff({ clinicId, toUserId: member, staffName: "Evan Miller" })).toMatchObject({ ok: true });
+    expect(await ownerOf(clinicId)).toBe(member);
+  });
+
+  it("creating a clinic at sign-up sends nothing: the creator was never handed anything", async () => {
+    const orgId = `org_test_${id()}`;
+    const creator = user();
+    fakeClerk.addOrg(orgId, `Vitest signup ${id()}`, [{ userId: creator, role: "org:admin" }], creator);
+    fakeClerk.signIn(creator, orgId);
+    const clinic = await getCurrentClinic();
+    if (clinic) createdClinicIds.push(clinic.id);
+    expect(clinic?.isOwner).toBe(true);
+    expect(ownerEmails).not.toHaveBeenCalled();
+  });
+
+  it("the seat check clearing an owner who left sends nothing: nobody became the owner", async () => {
+    const { clinicId, orgId, owner } = await makeClinic(1, [{ userId: user(), role: "org:admin" }]);
+    fakeClerk.removeMember(orgId, owner);
+    await checkSeats(clinicId);
+    await checkSeats(clinicId);
+    expect(await ownerOf(clinicId)).toBeNull();
+    expect(ownerEmails).not.toHaveBeenCalled();
   });
 });
 

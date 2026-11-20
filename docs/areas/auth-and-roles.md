@@ -159,6 +159,24 @@ The owner:
   Pulse staff setting a new owner does the same when the old owner is still in the clinic.
   The handoff is checked again under the clinic's row lock, so two tabs handing over at once end with one owner and one log entry.
 
+**The owner email** (Evan, 2026-11-20; `lib/owner-email.ts`).
+Whoever is handed the account gets one email saying so: which clinic, that they are now its account owner, what that means (always an admin, cannot be removed or have admin switched off on the People page, decides their own seat, can hand it on), who made the change, and an Open People button on the app's own address.
+It says nothing about billing, because any office admin can change the plan.
+The two paths that hand the account to someone both send it, from `lib/seat-changes.ts`:
+
+- **A handover on `/admin/people`** (`handOffOwner()`): the new owner is emailed, with the name of the person who handed it over ("Olive Smith handed the account over to you."); the person who handed it over is not, because they did it themselves.
+- **Pulse staff on `/pulse`** (`setOwnerByStaff()`): the new owner is emailed ("Pulse 3D made this change.", never the staff member's own name), and the old owner, when Clerk says they are still in the clinic, gets a short second email: "You are no longer the account owner for <clinic>.", who the owner is now, and whether they are still an admin.
+
+Nothing else sends it.
+The person who creates a clinic at sign-up becomes its owner without being handed anything, so they get nothing.
+No automatic repair picks a new owner: the seat check (and the Clerk webhook, which runs it) only clears an owner who has left the clinic, so it sends nothing, and Pulse staff set the next owner by hand, which sends the email above.
+**Once per change.** The email is sent only when `setClinicOwner()` wrote a clinic-log entry, so a second click, a second tab or a retried request (refused, or "was already the account owner") sends nothing; the send carries an idempotency key built from the clinic, the person and that log entry's id (`ownerEmailKey()`), so Resend drops a repeat within a day; and the clinic's row is read again right before sending, so nothing goes to someone who is no longer the owner.
+**Never in the way.** It is started after the change has committed, handed to Next.js's `after()`, and never throws: a send that fails leaves the owner change and its log entry exactly as they are, with one log line in words and a reason (never an address, a name or the clinic's name).
+The address is the person's own, read from Clerk for that clinic's organization at the moment of sending.
+With `EMAIL_REPLY_TO` set, replies go there and the email says a person will answer; without it, the email does not mention replying.
+Without `RESEND_API_KEY` and `EMAIL_FROM`, or with no known address for the app, nothing is sent and the change is unaffected.
+**It runs wherever email is configured, production included**: it is sent from the ordinary request that changes the owner, not from a scheduled job, so it needs no setting of its own.
+
 **Clerk's own organization panel is not on our screens** (taken off in October 2026, Prompt L, after the 2026-10-08 security audit): its Members tab invited, removed and changed roles around our seat holds, owner protections and clinic log, and its General tab could offer to delete the organization.
 Every people action is on `/admin/people`, and the name and logo are on `/admin/branding`.
 Clerk's dashboard, a person's own account menu (leaving the organization), and an office admin acting in Clerk directly rather than on our screens can still change a membership behind the app's back: Clerk will not take membership management or deleting the organization away from its admin role (checked by Evan in the Clerk dashboard on 2026-11-04), so the owner protections hold on our screens only.

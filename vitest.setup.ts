@@ -60,3 +60,13 @@ process.env.DIRECT_URL = testUrlWithPatience.toString();
 (globalThis as unknown as { prisma?: PrismaClient }).prisma = new PrismaClient({
   transactionOptions: { maxWait: 15_000, timeout: 45_000 },
 });
+
+// No test may ever reach the real email service. Prisma copies the app's .env
+// into the environment, and that file holds the testing Resend key, so a test
+// that hands the account over (lib/owner-email.ts sends after a handoff) would
+// otherwise really call Resend. Empty, not deleted: a loader that fills in
+// missing settings leaves an empty one alone. Tests that check sending hand in
+// made-up settings and a stand-in for Resend of their own.
+process.env.RESEND_API_KEY = "";
+process.env.EMAIL_FROM = "";
+process.env.EMAIL_REPLY_TO = "";

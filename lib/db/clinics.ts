@@ -464,16 +464,17 @@ async function changeClinicWithLog(
     const values = typeof data === "function" ? await data(before, tx) : data;
 
     const body = describe(before, values);
-    if (body === null) return { clinic: before, logged: null };
+    if (body === null) return { clinic: before, logged: null, noteId: null };
 
     const clinic = await tx.clinic.update({ where: { id: clinicId }, data: values, select: PULSE_CLINIC_FIELDS });
-    await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: changedBy }, select: { id: true } });
+    // The entry's id names this one change: the owner email (lib/owner-email.ts) builds its idempotency key from it.
+    const note = await tx.clinicNote.create({ data: { clinicId, kind: "STATUS", body, authorName: changedBy }, select: { id: true } });
     // A clinic Pulse staff have just opened, or given its first seats, seats
     // its owner when nobody else holds or is invited to a seat (the rule is
     // ownerAutoSeatDue() in lib/seats.ts). Under the same lock, in the same
     // transaction; most changes are not an opening and it does nothing.
     await seatOwnerIfDue(tx, clinicId, before);
-    return { clinic, logged: body };
+    return { clinic, logged: body, noteId: note.id as string | null };
   });
 }
 

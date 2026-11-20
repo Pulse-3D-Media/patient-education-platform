@@ -8,9 +8,10 @@ import { getClinicForShell } from "@/lib/clinic";
 import { RememberLibraryPages } from "./watch/[videoId]/BackLink";
 
 /**
- * Every library page sits inside the shared shell: thin top banner, icon
- * rail, and the category drawer that opens from the books icon. The page
- * itself is server-rendered and passed through as children.
+ * Every library page sits inside the shared shell: the top bar, and the
+ * side rail that opens into the full menu with the categories (the same
+ * frame as the admin pages). The page itself is server-rendered and passed
+ * through as children.
  *
  * Clerk's provider goes around the shell so the user button in the banner
  * works. Signing in itself is checked in proxy.ts and in each page, not

@@ -6,10 +6,12 @@
  * addresses without pulling the tour itself in.
  *
  * THE STOPS, in order:
- *   1. "nav"   on the library home: the categories and the search box.
+ *   1. "nav"   on the library home: the categories (in the side rail, opened
+ *              for the stop) and the search box.
  *   2. "video" on an open video's page: Favorite, Send to patient, Show QR.
  *              Skipped when the clinic has no video it can open.
- *   3. "admin" on the admin overview: the admin pages. Office admins only.
+ *   3. "admin" on the admin overview: Admin and the admin pages in the side
+ *              rail, opened for the stop. Office admins only.
  *
  * WHERE THE TOUR IS kept in the address, as ?tour=<stop> (and ?tv=<video id>
  * once a video has been picked, so Back from the admin pages can find it
@@ -19,7 +21,7 @@
  *
  * WHETHER IT HAS BEEN SEEN is one value in this browser's own storage,
  * written the moment the tour starts. It only decides the quiet "Take the
- * tour" notice at the foot of the library's menu (components/tour/
+ * tour" notice at the foot of the side rail (components/tour/
  * TourNotice.tsx, Evan, 2026-11-20), which shows until then. It is per
  * browser, not per person: a second device, or cleared site data, shows the
  * notice once more. When storage is blocked (some private windows) the

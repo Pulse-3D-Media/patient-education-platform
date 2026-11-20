@@ -137,7 +137,7 @@ Until 2026-11-18 a save of Dark wrote nothing (dark was the default then), so a 
   Every shell writes its mode on its outermost element: `data-theme="light"` gives the same names their light values, `data-theme="dark"` the dark ones.
   **New staff UI uses the tokens; a literal colour there is a bug in light mode.**
   The exceptions are things that sit on a picture or a fill and stay as they are in both modes: the labels and chips over a library tile or a thumbnail, the white box behind a QR code, the red "Yes, cancel it" button, the amber placeholder badge, and the clinic's mark on the video (the round logo and the dark chips) with the players' controls.
-- **The server writes the attribute** (`staffLook()` in `app/brand-look.ts`, through `ClinicShell` to `AppShell` in the library and through `AdminFrame` to `AdminConsole` in the admin area), so the first paint is already right.
+- **The server writes the attribute** (`staffLook()` in `app/brand-look.ts`, through `ClinicShell` to `AppShell`, which the library's layout and every admin page's `AdminFrame` both draw), so the first paint is already right.
   Never set it from a script after load.
 - **The accent is worked out per mode.**
   `staffTheme(color, mode)` lightens the clinic's colour until it stands out from near-black, or darkens it until it stands out from the darkest light surface (`STAFF_LIGHT_GROUND`, the icon rail).

@@ -502,11 +502,12 @@ describe("an admin of an ACTIVE clinic", () => {
         // The clinic's own font on the console, and so no Schibsted Grotesk headings.
         expect(html).toContain("font-montserrat");
         expect(html).not.toContain("staff-headings");
-        // The clinic's name is always in the banner, on every admin page: it labels the logo's link to the overview, and stands in as words until the logo has loaded.
-        expect(html).toContain('aria-label="Vitest pages clinic (active), admin overview"');
+        // The clinic's name is always in the banner, on every admin page: it labels the logo's link home (the library home, as in the library since 2026-11-20), and stands in as words until the logo has loaded.
+        expect(html).toContain('aria-label="Vitest pages clinic (active), library home"');
         expect(html).toMatch(/<header\b[\s\S]*?Vitest pages clinic \(active\)[\s\S]*?<\/header>/);
-        // The console's section navigation (the rail, and the phone's row of pills), with this page marked, and the way to the library.
-        expect(html.match(/<nav aria-label="Clinic admin"/g)).toHaveLength(2);
+        // The side rail (closed when the server draws it: its admin pages are added when it opens), and the phone's row of admin pills with this page marked, and the way to the library.
+        expect(html.match(/<nav [^>]*aria-label="Menu"/g)).toHaveLength(1);
+        expect(html.match(/<nav aria-label="Clinic admin"/g)).toHaveLength(1);
         // React writes attributes in prop order, and Link puts href last, so the mark comes before the address.
         expect(html).toMatch(new RegExp(`aria-current="page"[^>]*href="${path}"`));
         expect(html).toContain('href="/library"');

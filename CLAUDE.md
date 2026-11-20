@@ -307,7 +307,7 @@ Read `docs/areas/pulse-dashboard-and-reports.md`.
 | Video | **Mux signed playback**, and the Webflow CDN for a video that still has an address there | Only `lib/playback-auth.ts` builds an address a player loads. See `docs/areas/video-and-mux.md`. |
 | Logins | **Clerk** (`@clerk/nextjs`) | Staff only. See `docs/areas/auth-and-roles.md`. |
 | Tests | **Vitest**, against a real database | See `docs/areas/tests.md`. |
-| Payments | **Stripe**, **test mode only** | Only `lib/stripe.ts` talks to it. See `docs/areas/billing.md`. |
+| Payments | **Stripe**, **test mode only** | Only `lib/stripe.ts` talks to it from the server. In the browser, only the sign-up payment step loads Stripe's own script, from js.stripe.com (no package), to draw Stripe's card form; a test publishable key only. See `docs/areas/billing.md`. |
 | Email | **Resend**, over plain HTTPS, no package | Only `lib/email.ts` talks to it. |
 
 The same table with every note is in `docs/areas/operations.md`.

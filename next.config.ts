@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { securityHeaders } from "./lib/security-headers";
+import { headerRules } from "./lib/security-headers";
 
 const nextConfig: NextConfig = {
   // Next.js would otherwise append its own notes to AGENTS.md every time the
@@ -11,26 +11,17 @@ const nextConfig: NextConfig = {
   // what the site is built with and helps nobody who uses it.
   poweredByHeader: false,
 
-  // The security headers, on every response. What each one does, and why the
-  // full content policy only reports for now, is in lib/security-headers.ts.
-  // Worked out when the deployment is built, from settings that are fixed for
-  // that deployment.
+  // The security headers, on every response, plus the two per-page additions
+  // (Stripe's card form on the sign-up payment step, and "not in search
+  // engines" on the patient's pages). What each one does is in
+  // lib/security-headers.ts (headerRules). Worked out when the deployment is
+  // built, from settings that are fixed for that deployment.
   async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: securityHeaders({
-          clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-          vercelEnv: process.env.VERCEL_ENV,
-          dev: process.env.NODE_ENV === "development",
-        }),
-      },
-      // The patient's pages, a link's and a printed QR code's (and the route its
-      // Play tap posts to): never in a search engine, whatever asks, a HEAD
-      // request included. The pages also say so in their own HTML.
-      { source: "/watch/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
-      { source: "/q/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
-    ];
+    return headerRules({
+      clerkPublishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+      vercelEnv: process.env.VERCEL_ENV,
+      dev: process.env.NODE_ENV === "development",
+    });
   },
 };
 

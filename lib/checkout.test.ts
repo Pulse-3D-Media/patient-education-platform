@@ -2,7 +2,7 @@ import type { Category } from "./categories";
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubscriptionSnapshot } from "./billing-state";
-import { checkPayment, startCheckout, type CheckoutDeps } from "./checkout";
+import { CHECKOUT_CLOSED_MESSAGE, checkPayment, startCheckout, type CheckoutDeps } from "./checkout";
 import type { PlanSelection } from "./checkout-rules";
 import { clinicIsOpen } from "./clinic-status";
 import { handleStripeEvent } from "./billing-events";
@@ -11,7 +11,7 @@ import { setClinicManagedByPulse, setClinicStatusByStaff } from "./db/clinics";
 import { listSellableCategories } from "./db/category-config";
 import { createPricingVersion, getActivePricing, type CurrentPricing } from "./db/pricing";
 import { DEFAULT_PRICING_CONFIG, type PricingConfig } from "./pricing";
-import { checkoutSessionParams, type CheckoutGateway, type CheckoutSessionArgs, type CheckoutSessionInfo } from "./stripe";
+import { checkoutIdempotencyKey, checkoutSessionParams, type CheckoutGateway, type CheckoutSessionArgs, type CheckoutSessionInfo } from "./stripe";
 
 /**
  * Self-serve checkout, end to end on the server side, against the real test
@@ -77,7 +77,9 @@ function fakeStripe() {
       return customers.get(clinicId) as string;
     },
     async listOpenSessions(customerId) {
-      return sessions.filter((session) => session.customerId === customerId && session.status === "open").map(({ id, url, status, planId }) => ({ id, url, status, planId }));
+      return sessions
+        .filter((session) => session.customerId === customerId && session.status === "open")
+        .map(({ id, url, status, planId, embedded, clientSecret }) => ({ id, url, status, planId, embedded, clientSecret }));
     },
     async expireSession(sessionId) {
       calls.expireSession += 1;
@@ -85,22 +87,30 @@ function fakeStripe() {
       if (session && session.status === "open") {
         session.status = "expired";
         session.url = null;
+        session.clientSecret = null;
       }
     },
     async createSession(args) {
       calls.createSession += 1;
-      // The same key (one per plan) gets the first answer again, as Stripe does.
-      const before = firstAnswers.get(args.planId);
+      // The same key (one per plan and kind of page) gets the first answer again, as Stripe does.
+      const key = checkoutIdempotencyKey(args.planId, args.flow);
+      const before = firstAnswers.get(key);
       if (before) return { ...before };
       const id = `cs_test_vitest${tag}${(serial += 1)}`;
-      const info: CheckoutSessionInfo = { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", planId: args.planId };
+      // The card form on our own page ("signup-card") has no address, only the value Stripe's script draws it from.
+      const embedded = args.flow === "signup-card";
+      const info: CheckoutSessionInfo = embedded
+        ? { id, url: null, status: "open", planId: args.planId, embedded, clientSecret: `${id}_secret_madeup` }
+        : { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", planId: args.planId, embedded, clientSecret: null };
       sessions.push({ ...info, customerId: args.customerId, args });
-      firstAnswers.set(args.planId, { ...info });
+      firstAnswers.set(key, { ...info });
       return { ...info };
     },
     async getSession(sessionId) {
       const session = sessions.find((candidate) => candidate.id === sessionId);
-      return session ? { id: session.id, url: session.url, status: session.status, planId: session.planId } : null;
+      return session
+        ? { id: session.id, url: session.url, status: session.status, planId: session.planId, embedded: session.embedded, clientSecret: session.clientSecret }
+        : null;
     },
     async listSubscriptions(customerId) {
       return [...subscriptions.values()].filter((sub) => sub.customerId === customerId).map((sub) => ({ id: sub.subscriptionId, planId: sub.planId, status: sub.status }));
@@ -113,6 +123,7 @@ function fakeStripe() {
     if (!session || session.status !== "open") throw new Error("That page cannot be paid.");
     session.status = "complete";
     session.url = null;
+    // Stripe keeps a finished card form's value, but it can no longer pay anything.
     const subscriptionId = `sub_vitest${tag}${(serial += 1)}`;
     subscriptions.set(subscriptionId, {
       subscriptionId,
@@ -650,5 +661,101 @@ describe("what opens the clinic", () => {
     const clinicId = await makeClinic("never started");
     expect(await checkPayment({ clinicId, gateway: fake.gateway, fetchSubscription: fake.fetchSubscription })).toMatchObject({ status: "NONE", message: expect.stringContaining("No checkout has been started") });
     expect(await checkPayment({ clinicId: "clinic_that_does_not_exist", gateway: fake.gateway, fetchSubscription: fake.fetchSubscription })).toMatchObject({ status: "NONE" });
+  });
+});
+
+describe("the card form on our own sign-up page (\"signup-card\", Evan 2026-11-20)", () => {
+  const card = (fake: Fake, clinicId: string, selection = pick(["KNEE", "HIP"], 2, "MONTH", 17800), more: Partial<CheckoutDeps> = {}) =>
+    startCheckout({ clinicId, selection, actor, origin: ORIGIN, flow: "signup-card", deps: depsFor(fake, more) });
+
+  it("answers with the value Stripe's script draws the form from, never an address, for exactly the same amounts as the hosted page", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("card form");
+    const result = await card(fake, clinicId);
+
+    expect(result).toEqual({ kind: "embedded", clientSecret: `${fake.sessions[0].id}_secret_madeup` });
+    const params = checkoutSessionParams(fake.sessions[0].args);
+    expect(params).toMatchObject({
+      ui_mode: "embedded_page",
+      redirect_on_completion: "if_required",
+      return_url: `${ORIGIN}/onboarding/done`,
+      mode: "subscription",
+      payment_method_types: ["card"],
+      line_items: [{ quantity: 2, price_data: { unit_amount: 8900, recurring: { interval: "month" } } }],
+    });
+    // A card form has no hosted page's addresses (Stripe refuses them together).
+    expect(params).not.toHaveProperty("success_url");
+    expect(params).not.toHaveProperty("cancel_url");
+    // The plan id still rides on the SUBSCRIPTION, where the webhook looks.
+    expect(params.subscription_data?.metadata).toMatchObject({ billingPlanId: (await plansOf(clinicId))[0].id, clinicId });
+  });
+
+  it("opening the page three times at once, or again after a refresh: one attempt, one payment page, the same form", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("card form twice");
+    const results = await Promise.all([card(fake, clinicId), card(fake, clinicId), card(fake, clinicId)]);
+    const again = await card(fake, clinicId);
+
+    expect(new Set([...results, again].map((result) => (result.kind === "embedded" ? result.clientSecret : result.kind)))).toHaveProperty("size", 1);
+    expect(fake.sessions).toHaveLength(1);
+    expect(await plansOf(clinicId)).toHaveLength(1);
+    expect(fake.calls.createCustomer).toBeLessThanOrEqual(3);
+    expect(new Set(fake.sessions.map((session) => session.customerId)).size).toBe(1);
+  });
+
+  it("a refresh after paying in the form starts nothing new: it goes to the page that confirms the payment", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("card form paid");
+    await card(fake, clinicId);
+    fake.pay(fake.sessions[0].id);
+
+    expect(await card(fake, clinicId)).toEqual({ kind: "confirming" });
+    expect(fake.sessions).toHaveLength(1);
+    expect(await plansOf(clinicId)).toHaveLength(1);
+  });
+
+  it("the card form and Stripe's hosted page are never both payable: whichever came second closes the other", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("card and hosted");
+    const selection = pick(["KNEE"], 1, "MONTH", 5900);
+    const hosted = await startCheckout({ clinicId, selection, actor, origin: ORIGIN, deps: depsFor(fake) });
+    expect(hosted.kind).toBe("redirect");
+
+    // The same plan, now on the card form: a card form is made (a hosted address is never handed to it), and the hosted page is closed.
+    expect((await card(fake, clinicId, selection)).kind).toBe("embedded");
+    expect(fake.sessions.map((session) => [session.embedded, session.status])).toEqual([
+      [false, "expired"],
+      [true, "open"],
+    ]);
+
+    // And back to the hosted page (the fallback): the card form is closed in turn.
+    expect((await startCheckout({ clinicId, selection, actor, origin: ORIGIN, deps: depsFor(fake) })).kind).toBe("redirect");
+    expect(fake.sessions.filter((session) => session.status === "open")).toHaveLength(1);
+    const stillOpen = fake.sessions.find((session) => session.status === "open");
+    expect(stillOpen?.embedded).toBe(false);
+    // Stripe answers the hosted page's key with its first, now closed, page, so a fresh attempt is written for it;
+    // the clinic's record waits on the attempt whose page is the one still open.
+    expect((await billingOf(clinicId))?.pendingPlanId).toBe(stillOpen?.planId);
+  });
+
+  it("a first payment still under way refuses the card form too, so a second subscription cannot start", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("card form under way");
+    await card(fake, clinicId, pick(["KNEE"], 1, "MONTH", 5900));
+    fake.pay(fake.sessions[0].id, "unconfirmed");
+    await checkPayment({ clinicId, gateway: fake.gateway, fetchSubscription: fake.fetchSubscription });
+
+    const second = await card(fake, clinicId, pick(["KNEE", "HIP"], 3, "MONTH", 26700));
+    expect(second).toMatchObject({ kind: "refused", message: expect.stringContaining("still under way") });
+    expect(fake.sessions).toHaveLength(1);
+    expect(fake.subscriptions.size).toBe(1);
+  });
+
+  it("is refused before anything is read where checkout is not open, exactly like the hosted page", async () => {
+    const fake = fakeStripe();
+    const clinicId = await makeClinic("card form closed");
+    expect(await card(fake, clinicId, undefined, { isOpen: false })).toEqual({ kind: "refused", message: CHECKOUT_CLOSED_MESSAGE });
+    expect(fake.sessions).toHaveLength(0);
+    expect(await plansOf(clinicId)).toHaveLength(0);
   });
 });

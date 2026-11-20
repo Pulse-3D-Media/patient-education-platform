@@ -103,6 +103,36 @@ const MUX_STREAM = ["https://stream.mux.com", "https://*.mux.com"];
  */
 const MUX_UPLOADS = ["https://storage.googleapis.com"];
 
+/**
+ * Stripe's card form, added to the policy of ONE page only: the sign-up payment step (CARD_FORM_PATH below),
+ * and never on the production deployment, where that page is never offered (Evan approved the card form and
+ * this change on 2026-11-20). Each host is one Stripe's security guide lists
+ * (docs.stripe.com/security/guide, "Content Security Policy"), read on 2026-11-20:
+ *
+ *   js.stripe.com, *.js.stripe.com   Stripe's script itself (script-src), and the small hidden frames it
+ *                                    draws to do its work safely (frame-src). Stripe's "Stripe.js" list.
+ *   checkout.stripe.com              the card form's own frame (frame-src), what it loads (script-src) and
+ *                                    the calls to it (connect-src). Stripe's "Checkout" list.
+ *   hooks.stripe.com                 the bank's check (3-D Secure) some cards ask for, shown in a frame
+ *                                    (frame-src). Stripe: needed for "cards that might require 3D Secure".
+ *   api.stripe.com                   Stripe's script talking to Stripe (connect-src). Stripe.js list.
+ *   *.stripe.com (pictures only)     card brand marks and Stripe's own pictures (img-src). Checkout list.
+ *   link.com, *.link.com             Link, Stripe's saved-card button, which the card form offers by default
+ *                                    (frame-src, connect-src, img-src). Stripe's "Link" list.
+ *
+ * Left out on purpose: maps.googleapis.com (Stripe lists it for address suggestions, and the form asks for no
+ * address). No style or font host is needed: the form draws its own look inside Stripe's frame.
+ */
+const STRIPE_CARD_FORM = {
+  script: ["https://js.stripe.com", "https://*.js.stripe.com", "https://checkout.stripe.com"],
+  frame: ["https://js.stripe.com", "https://*.js.stripe.com", "https://checkout.stripe.com", "https://hooks.stripe.com", "https://link.com", "https://*.link.com"],
+  connect: ["https://api.stripe.com", "https://checkout.stripe.com", "https://link.com", "https://*.link.com"],
+  img: ["https://*.stripe.com", "https://*.link.com"],
+};
+
+/** The one page that shows Stripe's card form, and so the only one whose policy lets Stripe in. */
+export const CARD_FORM_PATH = "/onboarding/payment";
+
 /** Clerk's bot check (Cloudflare Turnstile) and its newer protection service, both shown on sign-up. */
 const CLERK_CHALLENGES = ["https://challenges.cloudflare.com", "https://*.protect.clerk.com"];
 
@@ -128,10 +158,14 @@ export function clerkFrontendOrigin(publishableKey: string | undefined): string 
 /** The three rules enforced today. Safe for every page: nothing here frames, embeds a plug-in or rewrites <base>. */
 const ENFORCED_POLICY = "frame-ancestors 'none'; object-src 'none'; base-uri 'self'";
 
-/** The full list: where everything on our pages may come from. */
-export function contentSecurityPolicy(settings: SecurityHeaderSettings): string {
+/**
+ * The full list: where everything on our pages may come from. `stripeCardForm` adds Stripe's hosts
+ * (STRIPE_CARD_FORM above) and is asked for only for the sign-up payment step (headerRules below).
+ */
+export function contentSecurityPolicy(settings: SecurityHeaderSettings, options: { stripeCardForm?: boolean } = {}): string {
   const clerk = clerkFrontendOrigin(settings.clerkPublishableKey);
   const preview = settings.vercelEnv === "preview";
+  const stripe = options.stripeCardForm ? STRIPE_CARD_FORM : { script: [], frame: [], connect: [], img: [] };
 
   const directives: Record<string, string[]> = {
     "default-src": ["'self'"],
@@ -139,14 +173,14 @@ export function contentSecurityPolicy(settings: SecurityHeaderSettings): string 
     // to start React; allowing them by a per-request number (a nonce) would
     // make every page dynamic, which the speed rule does not allow on the
     // patient page. 'unsafe-eval' is for `next dev` only.
-    "script-src": ["'self'", "'unsafe-inline'", ...(settings.dev ? ["'unsafe-eval'"] : []), clerk, ...CLERK_CHALLENGES, ...(preview ? ["https://vercel.live"] : [])],
+    "script-src": ["'self'", "'unsafe-inline'", ...(settings.dev ? ["'unsafe-eval'"] : []), clerk, ...CLERK_CHALLENGES, ...stripe.script, ...(preview ? ["https://vercel.live"] : [])],
     "style-src": ["'self'", "'unsafe-inline'", ...(preview ? ["https://vercel.live"] : [])],
     // Pictures come only from the list in lib/picture-hosts.ts (the Webflow
     // CDN, Clerk's image host, Mux's stills), which the logo, poster and tile
     // picture boxes on /pulse also refuse anything outside of. Clerk's own
     // address too, for anything its sign-in pieces draw, and Vercel's on
     // previews for the comment toolbar's avatars.
-    "img-src": ["'self'", "data:", "blob:", ...PICTURE_SOURCES, clerk, ...(preview ? ["https://vercel.live", "https://vercel.com"] : [])],
+    "img-src": ["'self'", "data:", "blob:", ...PICTURE_SOURCES, clerk, ...stripe.img, ...(preview ? ["https://vercel.live", "https://vercel.com"] : [])],
     "media-src": ["'self'", "blob:", ...WEBFLOW_CDN, ...MUX_STREAM],
     // Our fonts are served from our own address (app/brand-fonts.ts).
     "font-src": ["'self'", "data:", ...(preview ? ["https://vercel.live", "https://assets.vercel.com"] : [])],
@@ -159,9 +193,10 @@ export function contentSecurityPolicy(settings: SecurityHeaderSettings): string 
       ...MUX_STREAM,
       ...MUX_UPLOADS,
       ...CLERK_CHALLENGES,
+      ...stripe.connect,
       ...(preview ? ["https://vercel.live", "wss://ws-us3.pusher.com"] : []),
     ],
-    "frame-src": ["'self'", ...CLERK_CHALLENGES, ...(preview ? ["https://vercel.live"] : [])],
+    "frame-src": ["'self'", ...CLERK_CHALLENGES, ...stripe.frame, ...(preview ? ["https://vercel.live"] : [])],
     "worker-src": ["'self'", "blob:"],
     // Checkout leaves for Stripe by a plain page change, not a form, so no
     // form on our pages needs to send anywhere but here.
@@ -194,9 +229,9 @@ export function checkClerkKeyForBuild(settings: SecurityHeaderSettings): void {
   }
 }
 
-export function securityHeaders(settings: SecurityHeaderSettings): Header[] {
+export function securityHeaders(settings: SecurityHeaderSettings, options: { stripeCardForm?: boolean } = {}): Header[] {
   checkClerkKeyForBuild(settings);
-  const full = contentSecurityPolicy(settings);
+  const full = contentSecurityPolicy(settings, options);
   return [
     CSP_ENFORCED
       ? { key: "Content-Security-Policy", value: full }
@@ -211,5 +246,41 @@ export function securityHeaders(settings: SecurityHeaderSettings): Header[] {
     { key: "X-Content-Type-Options", value: "nosniff" },
     { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
     { key: COOP_ENFORCED ? "Cross-Origin-Opener-Policy" : "Cross-Origin-Opener-Policy-Report-Only", value: "same-origin" },
+  ];
+}
+
+/** One entry of next.config.ts's headers(): an address pattern and the headers it gets. */
+export type HeaderRule = { source: string; headers: Header[] };
+
+/**
+ * Everything next.config.ts sends, in order. Next.js lets a later entry that sets the same header for the
+ * same address replace the earlier one, which is how the sign-up payment step gets the wider policy while
+ * every other page keeps the usual one:
+ *
+ *   1. every address: the security headers above;
+ *   2. the sign-up payment step only, and NOT on the production deployment (where that page is never
+ *      offered): the same policy plus Stripe's card form hosts. Nothing else is changed for it;
+ *   3. the patient's pages: never in a search engine.
+ *
+ * The patient's pages (/watch, /q) are never given Stripe's hosts. lib/security-headers.test.ts checks it.
+ */
+export function headerRules(settings: SecurityHeaderSettings): HeaderRule[] {
+  const cardForm: HeaderRule[] =
+    settings.vercelEnv === "production"
+      ? []
+      : [
+          {
+            source: CARD_FORM_PATH,
+            headers: securityHeaders(settings, { stripeCardForm: true }).filter((header) => header.key.startsWith("Content-Security-Policy")),
+          },
+        ];
+  return [
+    { source: "/:path*", headers: securityHeaders(settings) },
+    ...cardForm,
+    // The patient's pages, a link's and a printed QR code's (and the route its
+    // Play tap posts to): never in a search engine, whatever asks, a HEAD
+    // request included. The pages also say so in their own HTML.
+    { source: "/watch/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
+    { source: "/q/:path*", headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }] },
   ];
 }

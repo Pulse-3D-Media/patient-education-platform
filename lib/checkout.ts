@@ -15,7 +15,7 @@ import { getCategoryList, libraryForQuote, listSellableCategories } from "./db/c
 import { getActivePricing } from "./db/pricing";
 import { categoryLabel, formatCents, quote } from "./pricing";
 import { PULSE_CONTACT_WORDS } from "./brand";
-import type { CheckoutFlow, CheckoutGateway, FetchSubscription } from "./stripe";
+import type { CheckoutFlow, CheckoutGateway, CheckoutSessionInfo, FetchSubscription } from "./stripe";
 import { STRIPE_CHECKOUT_PREFIX } from "./stripe-pages";
 
 /**
@@ -70,6 +70,11 @@ import { STRIPE_CHECKOUT_PREFIX } from "./stripe-pages";
 export type StartCheckoutResult =
   /** Send the admin to this Stripe address. */
   | { kind: "redirect"; url: string }
+  /**
+   * Draw Stripe's card form inside our sign-up page with this one-time value (the "signup-card" flow only).
+   * Meant for the browser by Stripe's design; never logged or stored.
+   */
+  | { kind: "embedded"; clientSecret: string }
   /** The total is not the one the admin saw. Nothing was created; show the message and let them press again. */
   | { kind: "changed"; message: string }
   /** The payment page for this attempt was already paid. Send them to the return page, which confirms it. */
@@ -94,7 +99,11 @@ export async function startCheckout(args: {
   actor: { id: string; name: string };
   /** A trusted origin for Stripe's return addresses (lib/trusted-origin.ts). */
   origin: string;
-  /** Which page Stripe sends the person back to (checkoutReturnUrls in lib/stripe.ts). Left out, Billing. Nothing else depends on it. */
+  /**
+   * Where the payment page is and where Stripe sends the person afterwards (CheckoutFlow in lib/stripe.ts).
+   * Left out, Billing. "signup-card" answers with Stripe's card form for our own page instead of an address.
+   * Nothing about the price or the guards depends on it.
+   */
   flow?: CheckoutFlow;
   deps: CheckoutDeps;
 }): Promise<StartCheckoutResult> {
@@ -224,8 +233,14 @@ export async function startCheckout(args: {
       flow,
     });
 
+  // A page this flow can use: the card form for "signup-card" (it has a one-time value and no address),
+  // Stripe's hosted page for the others (it has an address). One kind is never handed out as the other.
+  const embedded = flow === "signup-card";
+  const usable = (candidate: CheckoutSessionInfo) =>
+    candidate.status === "open" && (embedded ? candidate.embedded && Boolean(candidate.clientSecret) : !candidate.embedded && Boolean(candidate.url));
+
   const open = await gateway.listOpenSessions(customerId);
-  let session = open.find((candidate) => candidate.planId === attempt.planId && candidate.url) ?? null;
+  let session = open.find((candidate) => candidate.planId === attempt.planId && usable(candidate)) ?? null;
   if (!session) {
     session = await pageFor(attempt.planId, attempt.createdAt);
     if (attempt.reused) {
@@ -233,7 +248,7 @@ export async function startCheckout(args: {
       // time, so for an attempt used again, ask where its page stands NOW.
       const current = await gateway.getSession(session.id);
       if (current?.status === "complete") return { kind: "confirming" };
-      if (!current || current.status !== "open" || !current.url) {
+      if (!current || !usable(current)) {
         // Its page has closed and cannot be paid. Start a fresh attempt.
         attempt = await acceptPlanForCheckout(clinicId, input, { now: deps.now, forceNew: true });
         session = await pageFor(attempt.planId, attempt.createdAt);
@@ -255,6 +270,10 @@ export async function startCheckout(args: {
     if (other.id !== session.id) await gateway.expireSession(other.id);
   }
 
+  if (embedded) {
+    if (!session.embedded || !session.clientSecret) throw new Error("Checkout: Stripe returned a card form with nothing to draw it from.");
+    return { kind: "embedded", clientSecret: session.clientSecret };
+  }
   if (!session.url || !session.url.startsWith(STRIPE_CHECKOUT_PREFIX)) {
     throw new Error("Checkout: Stripe returned a payment page with no usable address.");
   }

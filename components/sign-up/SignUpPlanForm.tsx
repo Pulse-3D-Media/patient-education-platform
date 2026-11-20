@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Category } from "@/lib/categories";
 import { PULSE_CONTACT_URL } from "@/lib/brand";
-import type { PricingConfig } from "@/lib/pricing";
+import { freeMonthsOnYearly, freeMonthsWords, type PricingConfig } from "@/lib/pricing";
 import { planHref } from "@/lib/sign-up-steps";
 // A type only, so nothing of that server file reaches the browser.
 import type { CategoryOption } from "@/app/admin/billing/checkout-view";
@@ -42,8 +42,22 @@ export function SignUpPlanForm({
   const clinicMax = config.seats.clinicMax;
   const tooManySeats = seats > clinicMax;
   const plan = { categories: options.map((option) => option.value).filter((value) => picked.includes(value)), seats, interval: every };
-  const current = tooManySeats ? null : quotePlan(config, options, plan);
+  // Both intervals are quoted for the same picks, so the yearly mark can say exactly what the prices say.
+  const monthly = tooManySeats ? null : quotePlan(config, options, { ...plan, interval: "MONTH" });
+  const yearly = tooManySeats ? null : quotePlan(config, options, { ...plan, interval: "YEAR" });
+  const current = every === "YEAR" ? yearly : monthly;
   const totalCents = current?.amounts?.totalCents ?? null;
+  // "2 months free" beside Yearly, only when the two totals make it true and whole (freeMonthsOnYearly in lib/pricing.ts).
+  // With nothing picked yet, a one-category, one-seat plan stands in: every plan has the same months, since yearly is
+  // a whole number of monthly payments for every category count and seat count.
+  const sample = { categories: plan.categories.length > 0 ? plan.categories : options.filter((option) => option.availability === "sellable").slice(0, 1).map((option) => option.value), seats: 1 };
+  const freeMonths =
+    monthly && yearly
+      ? freeMonthsOnYearly(monthly.amounts?.totalCents, yearly.amounts?.totalCents)
+      : freeMonthsOnYearly(
+          quotePlan(config, options, { ...sample, interval: "MONTH" })?.amounts?.totalCents,
+          quotePlan(config, options, { ...sample, interval: "YEAR" })?.amounts?.totalCents,
+        );
   const canContinue = totalCents !== null && !going;
 
   const toggle = (category: Category) => setPicked((now) => (now.includes(category) ? now.filter((value) => value !== category) : [...now, category]));
@@ -90,7 +104,7 @@ export function SignUpPlanForm({
           </div>
         </fieldset>
 
-        <div className="mt-7 flex flex-wrap gap-x-[120px] gap-y-7">
+        <div className="mt-7 flex flex-wrap gap-x-16 gap-y-7">
           <div>
             <p id="seats-label" className="text-sm font-semibold text-ink">
               Seats
@@ -122,10 +136,15 @@ export function SignUpPlanForm({
               {(["MONTH", "YEAR"] as const).map((value) => (
                 <label
                   key={value}
-                  className="cursor-pointer rounded-lg px-4 py-2.5 text-base font-medium text-ink-soft has-[:checked]:bg-brand has-[:checked]:text-on-brand has-[:focus-visible]:outline has-[:focus-visible]:outline-2"
+                  className="group cursor-pointer rounded-lg px-4 py-2.5 text-base font-medium text-ink-soft has-[:checked]:bg-brand has-[:checked]:text-on-brand has-[:focus-visible]:outline has-[:focus-visible]:outline-2"
                 >
                   <input type="radio" name="sign-up-interval" value={value} checked={every === value} onChange={() => setEvery(value)} className="sr-only" />
                   {value === "MONTH" ? "Monthly" : "Yearly"}
+                  {value === "YEAR" && freeMonths !== null && (
+                    <span data-free-months="" className="ml-2 rounded-md bg-brand/10 px-1.5 py-0.5 text-[13px] font-semibold text-brand-bright group-has-[:checked]:bg-white/20 group-has-[:checked]:text-on-brand">
+                      {freeMonthsWords(freeMonths)}
+                    </span>
+                  )}
                 </label>
               ))}
             </div>
@@ -144,7 +163,7 @@ export function SignUpPlanForm({
       </div>
 
       <div className="flex flex-col gap-8">
-        <PlanSummary names={categoryNames(options, plan.categories)} seats={seats} interval={every} totalCents={totalCents} />
+        <PlanSummary names={categoryNames(options, plan.categories)} seats={seats} interval={every} totalCents={totalCents} freeMonths={freeMonths} />
       </div>
 
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end lg:col-span-2">

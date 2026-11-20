@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { PayForm } from "@/components/sign-up/PayForm";
-import { formatCents } from "@/lib/pricing";
+import { formatCents, freeMonthsOnYearly } from "@/lib/pricing";
 import { categoryNames, quotePlan } from "@/components/sign-up/plan-quote";
 import { PlanSummary } from "@/components/sign-up/PlanSummary";
 import { SignUpFrame } from "@/components/sign-up/SignUpFrame";
@@ -45,6 +45,11 @@ export default async function SignUpPaymentPage({ searchParams }: { searchParams
   if (!priced || !amounts || priced.band === "enterprise") redirect(planHref(plan, "plan"));
 
   const per = plan.interval === "YEAR" ? "year" : "month";
+  // "2 months free" on a yearly plan, worked out here from the same plan quoted both ways (never a fixed claim).
+  const freeMonths = freeMonthsOnYearly(
+    quotePlan(offer.config, offer.options, { ...plan, interval: "MONTH" })?.amounts?.totalCents,
+    quotePlan(offer.config, offer.options, { ...plan, interval: "YEAR" })?.amounts?.totalCents,
+  );
 
   return (
     <SignUpFrame step="payment">
@@ -79,7 +84,7 @@ export default async function SignUpPaymentPage({ searchParams }: { searchParams
         </div>
 
         <div>
-          <PlanSummary names={categoryNames(offer.options, priced.selectedCategories)} seats={plan.seats} interval={plan.interval} totalCents={amounts.totalCents} />
+          <PlanSummary names={categoryNames(offer.options, priced.selectedCategories)} seats={plan.seats} interval={plan.interval} totalCents={amounts.totalCents} freeMonths={freeMonths} />
         </div>
 
         <PayForm plan={plan} versionId={offer.versionId} totalCents={amounts.totalCents} retry={stopped} />

@@ -168,7 +168,7 @@ Built with the design of 2026-11-19 (screens 02-signup-2, 3, 3b and 03-welcome):
 Stripe test mode only, like everything above, and offered only where Billing's own plan picker is.
 
 - **The pages.**
-  `/onboarding/plan` ("Choose your plan": category tiles, seats with minus and plus, Monthly or Yearly, "Your plan" with the total), `/onboarding/payment` ("Payment method", no subtitle) and `/onboarding/done` (the return from Stripe), all inside `SignUpFrame` (`components/sign-up`): the logo and "Finish later" across the top and the progress list on the left (Email, Plan, Payment), never the app's menu.
+  `/onboarding/plan` ("Choose your plan": category tiles, seats with minus and plus, Monthly or Yearly with "2 months free" beside Yearly when the prices make it true, "Your plan" with the total), `/onboarding/payment` ("Payment method", no subtitle) and `/onboarding/done` (the return from Stripe), all inside `SignUpFrame` (`components/sign-up`): the logo and "Finish later" across the top and the progress list on the left (Email, Plan, Payment), never the app's menu.
   "Finish later" goes to `/admin/billing`.
 - **Offered only where Billing's picker is.**
   `requireSignUpPicker()` (`app/onboarding/sign-up-view.ts`) draws the steps only when `getCheckoutView()` would draw Billing's plan picker for the clinic, so `checkoutIsOpen()` (not edited), a missing pricing version, a first payment under way, a hospital, a managed clinic, a hand pause and a live subscription all keep them shut.

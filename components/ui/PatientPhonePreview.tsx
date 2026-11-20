@@ -37,6 +37,7 @@ export function PatientPhonePreview({
   senderName,
   title,
   deadline,
+  posterUrl = null,
 }: {
   clinicName: string;
   /** The clinic's checked logo address, or null. */
@@ -50,6 +51,12 @@ export function PatientPhonePreview({
   title: string;
   /** The quiet line about when the link stops working, in the patient page's words, or null. */
   deadline: string | null;
+  /**
+   * A still of the video for the box, as the patient page shows before the tick (a picture, never a player), or
+   * null for the plain dark box. Worked out on the server (the setup steps use posterForVideo); a picture that does
+   * not load leaves the dark box.
+   */
+  posterUrl?: string | null;
 }) {
   return (
     <div
@@ -87,6 +94,10 @@ export function PatientPhonePreview({
             </div>
 
             <div className="@container relative aspect-video w-full overflow-hidden rounded-[18px] bg-[#10181d] shadow-[0_10px_30px_-14px_rgba(18,32,42,.4)]">
+              {posterUrl && (
+                // eslint-disable-next-line @next/next/no-img-element -- one small still, already sized by the box; no player is loaded
+                <img src={posterUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              )}
               <div className="absolute left-3 top-3 right-3">
                 <ClinicMark key={logoUrl ?? "no-logo"} logoUrl={logoUrl} name={clinicName} senderName={senderName} />
               </div>

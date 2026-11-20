@@ -67,7 +67,7 @@ export default async function JoinPage() {
             <JoinForm defaultName={clinic.defaultPatientName} />
           </div>
           <div className="hidden shrink-0 lg:block">
-            <PatientPhonePreview {...preview} title="Total Knee Replacement" />
+            <PatientPhonePreview {...preview} />
           </div>
         </div>
       </main>

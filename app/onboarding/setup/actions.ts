@@ -1,10 +1,11 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { inviteAction } from "@/app/admin/people/actions";
-import { saveClinicBrandingPartAction, saveClinicNameAction } from "@/app/admin/branding/actions";
+import { saveClinicBrandingPartAction, saveClinicNameAction, uploadClinicLogoAction } from "@/app/admin/branding/actions";
 import { getCurrentClinicId } from "@/lib/clinic";
 import { createShare, SenderRefusedError, ShareRefusedError } from "@/lib/db/shares";
 import { recordSetupStep } from "@/lib/db/setup";
@@ -25,8 +26,8 @@ import { hrefAfterSave, isSetupStep, type SetupStepKey } from "@/lib/setup";
  *   Clinic name   saveClinicNameAction (Clinic branding's rename: Clerk first,
  *                 then our copy, logged) and the phone through
  *                 saveClinicBrandingPartAction (the same rules as Branding).
- *   Branding      the logo is uploaded by uploadClinicLogoAction straight
- *                 from the form; the colour through saveClinicBrandingPartAction.
+ *   Branding      the chosen logo through uploadClinicLogoAction, then the
+ *                 colour through saveClinicBrandingPartAction, both on Continue.
  *   Your team     inviteAction (People's invite: a seat held first, then
  *                 Clerk's invitation), one call per email, always as a member.
  *   Test link     createShare, exactly as Shared links makes a link: the
@@ -62,6 +63,9 @@ async function moveOn(clinicId: string, step: SetupStepKey, outcome: "done" | "s
   } catch (error) {
     console.error("Recording a setup step failed", errorKind(error));
   }
+  // The library's frame is a layout, which the browser keeps between pages; without this its "Finish setup"
+  // card went on showing an older count after setup was finished (Evan, 2026-11-19, "3 of 4 done").
+  revalidatePath("/library", "layout");
   redirect(next === null ? hrefAfterSave(step) : hrefAfterSave(next));
 }
 
@@ -97,13 +101,32 @@ export async function saveClinicStepAction(_previous: SetupFormState, formData: 
   return moveOn(clinicId, "clinic", "done");
 }
 
-/** Step 2, "Add your branding": the colour (the logo is uploaded on its own, as it is picked). */
+/**
+ * Step 2, "Add your branding": the chosen logo, if there is one, then the
+ * colour. The logo goes through Clinic branding's own upload
+ * (uploadClinicLogoAction: an admin of an open clinic, asked of Clerk live,
+ * the file checked by its size and bytes). If the upload fails, NOTHING moves
+ * on and the step is not marked: the form says the logo was not saved, keeps
+ * the file and the colour, and offers to try again or to go on without it
+ * ("withoutLogo"), which saves the colour and leaves the step not done, so the
+ * library's reminder says "Add your logo". A chosen file is never dropped
+ * without a word.
+ */
 export async function saveBrandingStepAction(_previous: SetupFormState, formData: FormData): Promise<SetupFormState> {
   const clinicId = await adminClinic();
   if (!clinicId) return { error: NOT_ALLOWED };
+  const withoutLogo = formData.get("withoutLogo") === "1";
+
+  const file = formData.get("logo");
+  const logoChosen = !withoutLogo && file instanceof File && file.size > 0;
+  if (logoChosen) {
+    const uploaded = await uploadClinicLogoAction(null, formData);
+    if (uploaded?.error) return { error: uploaded.error, fieldErrors: { logo: uploaded.error } };
+  }
+
   const saved = await saveClinicBrandingPartAction("brandColor", formData);
   if (saved?.error) return { error: saved.error };
-  return moveOn(clinicId, "branding", "done");
+  return moveOn(clinicId, "branding", withoutLogo ? "skipped" : "done");
 }
 
 /** What the team step gets back: which addresses were sent, and a sentence for each that was not. The boxes that failed keep their address. */

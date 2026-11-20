@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { isTestPublishableKey } from "./stripe-pages";
 import {
   STRIPE_API_VERSION,
   StripeConfigError,
@@ -578,5 +579,39 @@ describe("where Stripe sends the person back to (the sign-up steps or Billing)",
     const billing = checkoutSessionParams(args);
     const signup = checkoutSessionParams({ ...args, flow: "signup" });
     expect({ ...signup, success_url: "", cancel_url: "" }).toEqual({ ...billing, success_url: "", cancel_url: "" });
+  });
+
+  it("the card form on our own page: Stripe's embedded mode, one return address, a card payment ends on our page, its own idempotency key", () => {
+    const params = checkoutSessionParams({ ...args, flow: "signup-card" });
+    expect(params.ui_mode).toBe("embedded_page");
+    expect(params.return_url).toBe("https://app.example.com/onboarding/done");
+    expect(params.redirect_on_completion).toBe("if_required");
+    expect(params).not.toHaveProperty("success_url");
+    expect(params).not.toHaveProperty("cancel_url");
+    expect(checkoutIdempotencyKey("plan_made_up", "signup-card")).toBe("p3d:checkout:plan_made_up:signup-card");
+    // Every key is different, because Stripe refuses one key with two different requests.
+    expect(new Set(["billing", "signup", "signup-card"].map((flow) => checkoutIdempotencyKey("p", flow as never))).size).toBe(3);
+  });
+
+  it("the card form changes nothing about what is charged either", () => {
+    const billing: Record<string, unknown> = { ...checkoutSessionParams(args) };
+    const card: Record<string, unknown> = { ...checkoutSessionParams({ ...args, flow: "signup-card" }) };
+    for (const where of ["success_url", "cancel_url"]) delete billing[where];
+    for (const where of ["ui_mode", "return_url", "redirect_on_completion"]) delete card[where];
+    expect(card).toEqual(billing);
+  });
+
+  it("Billing's and the hosted sign-up's requests never ask for the embedded mode", () => {
+    expect(checkoutSessionParams(args)).not.toHaveProperty("ui_mode");
+    expect(checkoutSessionParams({ ...args, flow: "signup" })).not.toHaveProperty("ui_mode");
+  });
+});
+
+describe("the card form's publishable key: test keys only, matching the server's refusal of a live secret key", () => {
+  it("accepts a pk_test_ key and nothing else", () => {
+    expect(isTestPublishableKey("pk_test_madeUpExample123")).toBe(true);
+    for (const key of ["pk_live_madeUpExample123", "sk_test_madeUpExample123", "rk_test_madeUp", "pk_test_", "pk_test_has space", "pk_test_x\"><script>", "", undefined, null]) {
+      expect(isTestPublishableKey(key)).toBe(false);
+    }
   });
 });

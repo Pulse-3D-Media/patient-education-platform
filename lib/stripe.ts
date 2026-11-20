@@ -346,6 +346,17 @@ export type CheckoutSessionInfo = {
   status: string;
   /** The accepted plan this page is for (metadata this server wrote when it made the page). */
   planId: string | null;
+  /**
+   * True for a card form drawn inside our own sign-up page (Stripe's "embedded_page" mode), false for
+   * Stripe's own hosted page. The two are never swapped for each other: each flow only reuses its own kind.
+   */
+  embedded: boolean;
+  /**
+   * For an embedded card form only: the one-time value Stripe's script in the browser needs to draw the
+   * form for this page. Meant for the browser by Stripe's design (it can only show and pay this one page),
+   * but never written to a log, the database or the address bar. Null for a hosted page.
+   */
+  clientSecret: string | null;
 };
 
 /** What a payment page is made from. Every amount comes from an accepted BillingPlan row, never from a form. */
@@ -366,25 +377,43 @@ export type CheckoutSessionArgs = {
   flow?: CheckoutFlow;
 };
 
-/** Where a payment page was started from: the Billing page, or the sign-up steps for a new clinic (app/onboarding). */
-export type CheckoutFlow = "billing" | "signup";
+/**
+ * Where a payment page was started from, and what kind it is:
+ *
+ *   billing       the Billing page; Stripe's own hosted page, by redirect
+ *   signup        the sign-up payment step; Stripe's hosted page, by redirect (used only when the card
+ *                 form cannot be drawn, because the publishable key is missing; see app/onboarding/payment)
+ *   signup-card   the sign-up payment step; Stripe's card form drawn INSIDE our page (Evan, 2026-11-20).
+ *                 The card is typed into Stripe's own frame and goes straight to Stripe, never to us.
+ *
+ * What is charged is identical for all three: only where the form is drawn and where the person is sent
+ * afterwards differ.
+ */
+export type CheckoutFlow = "billing" | "signup" | "signup-card";
 
 /**
  * Where Stripe sends the person back to, after paying (success) or after
  * leaving its page without paying (cancel). Neither address proves or grants
  * anything: the return pages only read the clinic's billing record.
+ *
+ * The card form inside our page has no "cancel": the person never leaves our page. It has one return
+ * address, used only if a payment method ever needs a trip to the bank's own page; for a card Stripe
+ * calls our page back instead (redirect_on_completion "if_required", see checkoutSessionParams).
  */
-export function checkoutReturnUrls(origin: string, flow: CheckoutFlow = "billing"): { success: string; cancel: string } {
+export function checkoutReturnUrls(origin: string, flow: CheckoutFlow = "billing"): { success: string; cancel: string | null } {
+  if (flow === "signup-card") return { success: `${origin}/onboarding/done`, cancel: null };
   if (flow === "signup") return { success: `${origin}/onboarding/done`, cancel: `${origin}/onboarding/payment?stopped=1` };
   return { success: `${origin}/admin/billing/return`, cancel: `${origin}/admin/billing?checkout=cancelled` };
 }
 
 /**
  * The idempotency key a payment page is made with. Built from the accepted plan's id, so a double click
- * gets the same page. A page started from the sign-up steps has different return addresses, and Stripe
- * refuses a repeated key whose request differs, so its key says so; Billing's key is unchanged.
+ * gets the same page. A page started from the sign-up steps has different return addresses (and the card
+ * form is a different kind of page), and Stripe refuses a repeated key whose request differs, so each
+ * key says which it is; Billing's key is unchanged.
  */
 export function checkoutIdempotencyKey(planId: string, flow: CheckoutFlow = "billing"): string {
+  if (flow === "signup-card") return `p3d:checkout:${planId}:signup-card`;
   return flow === "signup" ? `p3d:checkout:${planId}:signup` : `p3d:checkout:${planId}`;
 }
 
@@ -410,9 +439,20 @@ export function checkoutIdempotencyKey(planId: string, flow: CheckoutFlow = "bil
  *     itself does not travel to subscription notifications.
  *   - No tax is collected or calculated. That is a decision still to be made
  *     before live payments, not one to slip in here.
+ *   - The card form inside our sign-up page ("signup-card") is the same request
+ *     with Stripe's "embedded_page" mode: Stripe answers with a one-time value
+ *     for the browser instead of an address, and the form is drawn in Stripe's
+ *     own frame on our page. "redirect_on_completion: if_required" means a card
+ *     payment ends on our page (Stripe tells the page it is finished) and only a
+ *     method that needs the bank's own page would use the return address.
  */
 export function checkoutSessionParams(args: CheckoutSessionArgs): Stripe.Checkout.SessionCreateParams {
   const metadata = { [PLAN_METADATA_KEY]: args.planId, [CLINIC_METADATA_KEY]: args.clinicId };
+  const returns = checkoutReturnUrls(args.origin, args.flow);
+  const where: Partial<Stripe.Checkout.SessionCreateParams> =
+    args.flow === "signup-card"
+      ? { ui_mode: "embedded_page", return_url: returns.success, redirect_on_completion: "if_required" }
+      : { success_url: returns.success, cancel_url: returns.cancel ?? undefined };
   return {
     mode: "subscription",
     customer: args.customerId,
@@ -431,15 +471,22 @@ export function checkoutSessionParams(args: CheckoutSessionArgs): Stripe.Checkou
     ],
     subscription_data: { metadata, description: args.description.slice(0, 480) },
     metadata,
-    success_url: checkoutReturnUrls(args.origin, args.flow).success,
-    cancel_url: checkoutReturnUrls(args.origin, args.flow).cancel,
+    ...where,
     expires_at: Math.floor(args.expiresAt.getTime() / 1000),
   };
 }
 
 function sessionInfo(session: Stripe.Checkout.Session): CheckoutSessionInfo {
   const planId = session.metadata?.[PLAN_METADATA_KEY];
-  return { id: session.id, url: session.url ?? null, status: session.status ?? "", planId: typeof planId === "string" && planId ? planId : null };
+  const embedded = session.ui_mode === "embedded_page";
+  return {
+    id: session.id,
+    url: session.url ?? null,
+    status: session.status ?? "",
+    planId: typeof planId === "string" && planId ? planId : null,
+    embedded,
+    clientSecret: embedded ? (session.client_secret ?? null) : null,
+  };
 }
 
 function isStripeRequestError(error: unknown, code?: string): boolean {

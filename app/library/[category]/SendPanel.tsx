@@ -5,8 +5,15 @@ import { useModalFocus } from "@/components/ui/useModalFocus";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CloseIcon } from "@/components/ui/icons";
 import { SenderNameForm } from "@/components/ui/SenderNameForm";
+import { PatientMessageButtons } from "@/components/ui/PatientMessageButtons";
 import { SECONDARY_BUTTON } from "@/components/ui/styles";
+import { patientMessage } from "@/lib/patient-message";
 import { setMyPatientNameAction, type SendResult } from "./actions";
+
+/** Copy message, Share message, Text message, Email: 48px tall, for a thumb on a tablet held in one hand. */
+const MESSAGE_BUTTON =
+  "inline-flex min-h-12 shrink-0 items-center gap-2 rounded-lg border border-line-strong px-4 text-base font-medium text-ink transition hover:border-brand hover:bg-wash active:scale-[0.97]";
+const MESSAGE_BUTTON_DONE = "inline-flex min-h-12 shrink-0 items-center gap-2 rounded-lg border border-transparent bg-brand/20 px-4 text-base font-medium text-brand-bright";
 
 /**
  * The panel that opens when a surgeon taps Send on a procedure card.
@@ -27,11 +34,14 @@ export function SendPanel({
   title,
   placeholder = false,
   result,
+  clinicName,
   onRetry,
   onClose,
 }: {
   title: string;
   placeholder?: boolean;
+  /** The clinic's name, for the ready-made message when the link names only the clinic. */
+  clinicName: string;
   /** null while the link is still being created. */
   result: SendResult | null;
   onRetry: () => void;
@@ -81,6 +91,7 @@ export function SendPanel({
             unclaimedUntil={result.unclaimedUntil}
             daysAfterFirstPlay={result.daysAfterFirstPlay}
             senderName={result.senderName}
+            clinicName={clinicName}
             onRemake={onRetry}
           />
         ) : (
@@ -131,6 +142,7 @@ function Ready({
   unclaimedUntil,
   daysAfterFirstPlay,
   senderName,
+  clinicName,
   onRemake,
 }: {
   link: string;
@@ -138,6 +150,7 @@ function Ready({
   unclaimedUntil: string;
   daysAfterFirstPlay: number;
   senderName: string | null;
+  clinicName: string;
   /** Make the link again, after the surgeon has changed their name. */
   onRemake: () => void;
 }) {
@@ -164,6 +177,12 @@ function Ready({
 
         <div className="mt-3">
           <CopyButton text={link} label="Copy link" />
+        </div>
+
+        {/* The ready-made message with the link in it, to copy or hand to this device's own share sheet, text or email app.
+            Made here in the browser from what the panel already has; nothing about it goes to the server (lib/patient-message.ts). */}
+        <div className="mt-3">
+          <PatientMessageButtons message={patientMessage({ link, senderName, clinicName })} buttonClass={MESSAGE_BUTTON} doneClass={MESSAGE_BUTTON_DONE} />
         </div>
 
         {/* The same numbers createShare copied onto this link, so this says what the link will actually do. */}

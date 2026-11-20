@@ -82,6 +82,7 @@ describe("the Send panel's 'Sent as' line", () => {
     renderToStaticMarkup(
       <SendPanel
         title="Total Knee Replacement"
+        clinicName="Example Orthopedics"
         result={{ ok: true, code: "k7m2xq", link: "http://localhost:3000/watch/k7m2xq", qrImage: "data:image/svg+xml;utf8,", unclaimedUntil: "2027-01-01T00:00:00.000Z", daysAfterFirstPlay: 10, senderName }}
         onRetry={vi.fn()}
         onClose={vi.fn()}

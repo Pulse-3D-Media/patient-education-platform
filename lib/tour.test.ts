@@ -1,9 +1,9 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   TOUR_COPY,
-  TOUR_OFFER_HREF,
+  TOUR_SEEN_EVENT,
   TOUR_SEEN_KEY,
   TOUR_START_HREF,
   joinNames,
@@ -31,15 +31,15 @@ const blocked = () => {
 };
 
 describe("the address the tour reads", () => {
-  it("reads the offer and each stop", () => {
-    expect(readTourRequest(new URLSearchParams("tour=offer"))).toEqual({ kind: "offer" });
+  it("reads each stop", () => {
     expect(readTourRequest(new URLSearchParams("tour=nav"))).toEqual({ kind: "stop", stop: "nav", videoId: null });
     expect(readTourRequest(new URLSearchParams("tour=video&tv=abc_123"))).toEqual({ kind: "stop", stop: "video", videoId: "abc_123" });
     expect(readTourRequest(new URLSearchParams("tour=admin&tv=abc"))).toEqual({ kind: "stop", stop: "admin", videoId: "abc" });
   });
 
   it("treats anything else as no tour at all", () => {
-    for (const query of ["", "tour=", "tour=NAV", "tour=4", "tour=billing", "welcome=1", "tour=nav%00"]) {
+    // Including the old one-time offer, which the notice in the menu replaced (Evan, 2026-11-20).
+    for (const query of ["", "tour=", "tour=NAV", "tour=4", "tour=billing", "welcome=1", "tour=nav%00", "tour=offer"]) {
       expect(readTourRequest(new URLSearchParams(query))).toBeNull();
     }
   });
@@ -69,7 +69,6 @@ describe("the address of each stop", () => {
   it("starts on the library home", () => {
     expect(TOUR_START_HREF).toBe("/library?tour=nav");
     expect(tourStopHref("nav", "v1")).toBe(TOUR_START_HREF);
-    expect(TOUR_OFFER_HREF).toBe("/library?tour=offer");
   });
 
   it("opens the video's own watch page, keeping the video for later stops", () => {
@@ -101,6 +100,30 @@ describe("whether this browser has seen the tour", () => {
   it("is unknown, never an error, when storage is blocked, and marking it changes nothing", () => {
     expect(readTourSeen(blocked)).toBeNull();
     expect(() => markTourSeen(blocked)).not.toThrow();
+  });
+});
+
+describe("telling the notice in the menu", () => {
+  it("fires an event on this page when the tour is marked as seen, so the notice goes at once", () => {
+    // The tests run without a browser, so a plain event target stands in for the window.
+    const page = new EventTarget();
+    vi.stubGlobal("window", page);
+    let heard = 0;
+    page.addEventListener(TOUR_SEEN_EVENT, () => heard++);
+    try {
+      markTourSeen(() => memoryStorage());
+      expect(heard).toBe(1);
+      // Even when storage is blocked: the notice on this page still goes.
+      markTourSeen(blocked);
+      expect(heard).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("has a short, quiet label", () => {
+    expect(TOUR_COPY.notice.title).toBe("Take the tour");
+    expect(TOUR_COPY.notice.short).toBe("Tour");
   });
 });
 

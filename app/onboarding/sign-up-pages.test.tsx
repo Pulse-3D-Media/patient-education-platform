@@ -94,6 +94,9 @@ type Setup = {
   owner?: boolean;
   categories?: string[];
   billing?: { status: BillingStatus; plan: "pending" | "current" };
+  /** Where setup stands (Clinic.setupStep and setupDone); left out, the clinic was made before setup. */
+  setupStep?: string;
+  setupDone?: string[];
 };
 
 async function makeClinic(setup: Setup = {}) {
@@ -107,6 +110,8 @@ async function makeClinic(setup: Setup = {}) {
       staffAccess: setup.staffAccess ?? null,
       categories: setup.categories ?? [],
       ownerClerkUserId: setup.owner === false ? null : "user_vitest",
+      setupStep: setup.setupStep ?? null,
+      setupDone: setup.setupDone ?? [],
     },
     select: { id: true },
   });
@@ -279,6 +284,9 @@ describe("the payment step", () => {
     const total = formatCents(expected?.amounts?.totalCents ?? -1);
     expect(html).toContain("Payment method");
     expect(html).toContain("Step 3 of 3");
+    // Plan in the list on the left goes back to the plan step with the plan as picked, like Back (Evan, 2026-11-20).
+    expect(html).toContain('aria-label="Plan, done. Change the plan"');
+    expect(html).toMatch(/<a aria-label="Plan, done. Change the plan"[^>]*href="\/onboarding\/plan\?categories=KNEE%2CHIP&amp;seats=3&amp;interval=MONTH"/);
     expect(html).toContain("Test mode: no card is charged");
     expect(html).toContain(`Pay ${total} and start`);
     expect(html).toContain("3 seats · monthly");
@@ -364,6 +372,31 @@ describe("the welcome dialog on the library", () => {
   it("never shows over a clinic that is not open", async () => {
     signInAs(await makeClinic({ categories: ["KNEE"] }), "admin");
     expect(await drawLibrary({ welcome: "1" })).not.toContain("Thanks for signing up.");
+  });
+
+  it("after the last setup step, shows setup ticked (not a button), names what was skipped, and still offers the tour and the library (Evan, 2026-11-20)", async () => {
+    signInAs(await makeClinic({ status: "ACTIVE", categories: ["KNEE"], setupStep: "finished", setupDone: ["clinic", "team", "test"] }), "admin");
+    const html = await drawLibrary({ welcome: "setup" });
+    expect(html).toContain("You\u2019re ready for patients.");
+    expect(html).toContain("Setup done");
+    expect(html).toContain("Left for later: your logo.");
+    expect(html).not.toContain("Finish setting up");
+    expect(html).not.toContain('href="/onboarding/setup"');
+    expect(html).toContain("Take a quick tour");
+    expect(html).toContain("Go to the library");
+
+    // Everything done: nothing left to name.
+    signInAs(await makeClinic({ status: "ACTIVE", categories: ["KNEE"], setupStep: "finished", setupDone: ["clinic", "branding", "team", "test"] }), "admin");
+    const all = await drawLibrary({ welcome: "setup" });
+    expect(all).toContain("Setup done");
+    expect(all).not.toContain("Left for later");
+  });
+
+  it("after setup, never shows while setup is still under way, or for a member", async () => {
+    signInAs(await makeClinic({ status: "ACTIVE", categories: ["KNEE"], setupStep: "team", setupDone: ["clinic"] }), "admin");
+    expect(await drawLibrary({ welcome: "setup" })).not.toContain("Setup done");
+    signInAs(await makeClinic({ status: "ACTIVE", categories: ["KNEE"], setupStep: "finished", setupDone: ["clinic"] }), "member");
+    expect(await drawLibrary({ welcome: "setup" })).not.toContain("Setup done");
   });
 });
 

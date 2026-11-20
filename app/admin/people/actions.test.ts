@@ -158,8 +158,10 @@ describe("what an admin can do", () => {
     fakeClerk.signIn(owner, orgId);
 
     expect(await inviteAction("new@example.test", "member")).toMatchObject({ message: expect.stringContaining("Invitation sent to new@example.test") });
-    // The email's link comes back to our own sign-up page, not Clerk's hosted pages.
-    expect(fakeClerk.invitations(orgId)[0].redirectUrl).toBe("http://localhost:3000/sign-up");
+    // The email's link comes back to our own sign-up page, not Clerk's hosted pages, carrying the clinic's name as words for its heading.
+    const landing = new URL(fakeClerk.invitations(orgId)[0].redirectUrl ?? "");
+    expect(`${landing.origin}${landing.pathname}`).toBe("http://localhost:3000/sign-up");
+    expect(landing.searchParams.get("clinic")).toMatch(/^Vitest people clinic /);
     expect((await inviteAction("another@example.test", "member")).error).toContain("All 1 seat is taken");
 
     expect(await revokeInvitationAction(fakeClerk.invitations(orgId)[0].id)).toEqual({ message: "Invitation revoked." });

@@ -40,6 +40,7 @@ export function SenderNameForm({
   onSaved,
   onCancel,
   saveLabel = "Save name",
+  plain = false,
 }: {
   /** Makes the boxes' ids unique on a page with several forms. */
   idPrefix: string;
@@ -53,8 +54,13 @@ export function SenderNameForm({
   onSaved: (message: string | undefined) => void;
   /** Left out where there is nothing to go back to (the join screen): then no Cancel button is drawn. */
   onCancel?: () => void;
-  /** The save button's words. "Save name" unless the place it is used says otherwise ("Join and open the library"). */
+  /** The save button's words. "Save name" unless the place it is used says otherwise ("Join the library"). */
   saveLabel?: string;
+  /**
+   * True on the join screen (Evan, 2026-11-20): no helper sentences under the boxes, only "Patients will see ..."
+   * as the live result. The rules are the same: a name with "Dr" or a comma is still refused, with its own sentence.
+   */
+  plain?: boolean;
 }) {
   const start = readSenderName(current);
   const [name, setName] = useState(start.choice.name);
@@ -102,7 +108,7 @@ export function SenderNameForm({
           placeholder="Jane Smith"
           className={INPUT}
         />
-        <p className="mt-1 text-xs text-ink-muted">Only the name. &ldquo;Dr.&rdquo; and any title come from the list below.</p>
+        {!plain && <p className="mt-1 text-xs text-ink-muted">Only the name. &ldquo;Dr.&rdquo; and any title come from the list below.</p>}
       </div>
 
       <div>
@@ -111,7 +117,7 @@ export function SenderNameForm({
         </label>
         <select
           id={`${idPrefix}-credential`}
-          aria-describedby={`${idPrefix}-credential-help`}
+          aria-describedby={plain ? undefined : `${idPrefix}-credential-help`}
           value={credential}
           onChange={(event) => setCredential(event.target.value as CredentialPick)}
           className={INPUT}
@@ -124,9 +130,11 @@ export function SenderNameForm({
             </option>
           ))}
         </select>
-        <p id={`${idPrefix}-credential-help`} className="mt-1 text-xs text-ink-muted">
-          MD, DO and DPM add &ldquo;Dr.&rdquo; in front. Without a credential, choose None: patients see just the name.
-        </p>
+        {!plain && (
+          <p id={`${idPrefix}-credential-help`} className="mt-1 text-xs text-ink-muted">
+            MD, DO and DPM add &ldquo;Dr.&rdquo; in front. Without a credential, choose None: patients see just the name.
+          </p>
+        )}
       </div>
 
       {credential === "other" && (
@@ -153,7 +161,7 @@ export function SenderNameForm({
           Patients will see: <span className="font-medium text-ink">{checked.words}</span>
         </p>
       )}
-      <p className="text-xs text-ink-muted">Links already sent keep the name they were made with.</p>
+      {!plain && <p className="text-xs text-ink-muted">Links already sent keep the name they were made with.</p>}
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="submit" disabled={pending} className={PRIMARY_BUTTON}>

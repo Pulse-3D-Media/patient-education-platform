@@ -46,6 +46,7 @@ import {
   type SeatSummary,
 } from "./seats";
 import { effectiveSenderName, parseNameChoice } from "./sender-name";
+import { invitationAcceptUrl } from "./invitation-name";
 
 /**
  * THE ONLY WAY ANYONE'S SEAT, ROLE, INVITATION OR OWNERSHIP IS CHANGED.
@@ -220,7 +221,10 @@ export async function inviteSomeone(args: { clinicId: string; email: unknown; ro
 
   let invitationId: string;
   try {
-    invitationId = await sendInvitationFromClerk(clinic.orgId, { email, role, inviterUserId: args.actor.userId, seatHoldId: hold.holdId, acceptUrl: args.acceptUrl ?? null });
+    invitationId = await sendInvitationFromClerk(clinic.orgId, { email, role, inviterUserId: args.actor.userId, seatHoldId: hold.holdId,
+      // The clinic's name rides in the accept address, as words for the invited person's heading only (lib/invitation-name.ts).
+      acceptUrl: args.acceptUrl ? invitationAcceptUrl(args.acceptUrl, clinic.name) : null,
+    });
   } catch (error) {
     logFailure("Clerk did not send the invitation", error);
     if (isClerkTimeout(error)) {

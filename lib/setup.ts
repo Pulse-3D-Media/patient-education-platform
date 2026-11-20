@@ -49,7 +49,19 @@ export const SETUP_START: SetupStepKey = "clinic";
 
 /** Where setup lives. The address of one step is SETUP_PATH/<step>. */
 export const SETUP_PATH = "/onboarding/setup";
+/** The old finished page. It only sends people on to SETUP_FINISHED_HREF now (Evan, 2026-11-20). */
 export const SETUP_DONE_PATH = `${SETUP_PATH}/done`;
+
+/**
+ * Where finishing setup lands: the library, with the welcome dialog over it
+ * showing setup as done (decided by Evan on 2026-11-20, replacing the full
+ * "You're ready for patients." page). app/library/page.tsx decides on the
+ * server whether the dialog is drawn: an office admin of an open clinic whose
+ * setup is behind it.
+ */
+export const WELCOME_PARAM = "welcome";
+export const WELCOME_AFTER_SETUP = "setup";
+export const SETUP_FINISHED_HREF = `/library?${WELCOME_PARAM}=${WELCOME_AFTER_SETUP}`;
 
 export function isSetupStep(value: unknown): value is SetupStepKey {
   return typeof value === "string" && SETUP_STEPS.some((step) => step.key === value);
@@ -147,9 +159,37 @@ export function nextSetupState(
   return { setupStep, setupDone };
 }
 
-/** Where to send an admin after a step: the next step while setup is under way, else the finished page. */
+/** Where to send an admin after a step: the next step while setup is under way, else the library with the welcome dialog. */
 export function hrefAfterSave(setupStep: string | null): string {
-  return isSetupStep(setupStep) ? setupStepHref(setupStep) : SETUP_DONE_PATH;
+  return isSetupStep(setupStep) ? setupStepHref(setupStep) : SETUP_FINISHED_HREF;
+}
+
+/**
+ * May this step be opened right now? The steps already reached (done, left
+ * for later, or the one the clinic is on) and the one after the step the
+ * clinic is on; every step once setup is behind the clinic. The progress list
+ * on the left links exactly these (Evan, 2026-11-20: "I also want the steps on
+ * the left menu to be clickable"), and each step's page asks this again on
+ * the server, so an address typed by hand cannot jump further ahead.
+ * Opening a step changes nothing stored: only its Continue or Skip does.
+ */
+export function stepIsOpen(progress: SetupProgress, step: SetupStepKey): boolean {
+  if (progress.finished || !progress.current) return true;
+  const at = position(progress.current);
+  return position(step) <= at + 1;
+}
+
+/** A few words for each step left undone, for the welcome dialog after setup ("Left for later: your logo."). */
+export const SETUP_STEP_LEFT: Record<SetupStepKey, string> = {
+  clinic: "your clinic's name",
+  branding: "your logo",
+  team: "your team",
+  test: "a test link",
+};
+
+/** The steps left undone (skipped), in order, as the welcome dialog names them. Empty when everything is done. */
+export function setupLeftWords(progress: SetupProgress): string[] {
+  return progress.steps.filter((step) => step.state !== "done").map((step) => SETUP_STEP_LEFT[step.key]);
 }
 
 /** What the library's reminder says for a step left undone once the steps are behind the clinic (Evan, 2026-11-19). */

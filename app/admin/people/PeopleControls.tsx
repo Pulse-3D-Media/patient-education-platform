@@ -3,7 +3,7 @@
 import { useState, useTransition, type FormEvent } from "react";
 import { INPUT, LABEL, PRIMARY_BUTTON, SECONDARY_BUTTON } from "@/components/ui/styles";
 import { ROLE_WORDS, type Role } from "@/lib/role-names";
-import { ConfirmButton } from "./ConfirmButton";
+import { ConfirmButton, ConfirmDialog } from "./ConfirmButton";
 import {
   giveSeatAction,
   handOffOwnerAction,
@@ -46,15 +46,26 @@ function Note({ pending, result }: { pending: boolean; result: ActionResult | nu
  * them away, and neither changes the seat count. It saves the moment it is
  * flipped (the server checks who is asking and protects the account owner);
  * a refusal flips it back and says why. The owner's switch stays on.
+ *
+ * TURNING OFF YOUR OWN ADMIN ASKS FIRST (Evan, 2026-11-20): only an office
+ * admin can switch admin on, so someone who switches off their own cannot
+ * switch it back; another admin would have to. The popup says exactly that,
+ * and nothing changes until Yes. Who may do what is unchanged.
  */
-export function AdminSwitch({ userId, name, role, isOwner }: { userId: string; name: string; role: Role; isOwner: boolean }) {
+export function AdminSwitch({ userId, name, role, isOwner, isSelf = false }: { userId: string; name: string; role: Role; isOwner: boolean; isSelf?: boolean }) {
   const [current, setCurrent] = useState<Role>(role);
   const [result, setResult] = useState<ActionResult | null>(null);
+  const [asking, setAsking] = useState(false);
   const [pending, startTransition] = useTransition();
   const on = current === "admin";
 
   function flip() {
     if (pending || isOwner) return;
+    if (isSelf && on) {
+      setResult(null);
+      setAsking(true);
+      return;
+    }
     const next: Role = on ? "member" : "admin";
     setResult(null);
     startTransition(async () => {
@@ -67,6 +78,20 @@ export function AdminSwitch({ userId, name, role, isOwner }: { userId: string; n
   return (
     <div className="flex flex-col items-start gap-1">
       <Toggle on={on} disabled={pending || isOwner} onFlip={flip} label="Admin" describedBy={name} />
+      {asking && (
+        <ConfirmDialog
+          title="Turn off your own admin?"
+          body={<p>You will lose the admin pages, and you cannot turn admin back on yourself. Another office admin would have to.</p>}
+          yes="Turn it off"
+          danger
+          action={() => setAdminAction(userId, false)}
+          onClose={() => setAsking(false)}
+          onDone={(answer) => {
+            setResult(answer);
+            setCurrent("member");
+          }}
+        />
+      )}
       {isOwner && !pending && !result && <p className="pl-[3.75rem] text-sm text-ink-muted">The account owner always has admin.</p>}
       <div className="pl-[3.75rem]">
         <Note pending={pending} result={result} />

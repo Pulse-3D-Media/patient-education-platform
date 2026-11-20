@@ -56,12 +56,15 @@ Stop 3, "Your admin pages", on the admin overview: the list of admin pages, for 
 The video at stop 2 is the first card on the library home, so one the clinic's plan allows (the home page names it in a hidden attribute, from lists it already read through the access rule); a clinic with no video it can open skips that stop, and the count says "1 of 2".
 **Someone without a seat** has no Send or Show QR on the page, so stop 2 highlights only Favorite and reads "Save it", with nothing about seats or plans.
 The tour only points at what the page already drew for this person; hiding or showing something in it decides nothing about who may do what.
-**How it starts:** from the welcome dialog's "Take a quick tour", from "Take the tour" at the end of setup, and from "Take the tour" in the account menu (Clerk's user button, on every library and admin page) at any time.
-Someone who has just joined a clinic (the join screen, or an invited person with no seat) lands on the library home with the tour offered once in a small card, "Take a quick tour?", with Not now and Show me.
+**How it starts:** from the welcome dialog's "Take a quick tour" (after the first payment, and again after the last setup step), from "Take the tour" in the account menu (Clerk's user button, on every library and admin page) at any time, and from the "Take the tour" notice.
+**The notice** (Evan, 2026-11-20, `components/tour/TourNotice.tsx`): a small, quiet "Take the tour" at the foot of the library's menu, just above the account picture (an icon with "Tour" in the narrow rail, a line in the full menu, and at the foot of the menu that slides out on a tablet or phone, where the avatar is in the top bar).
+It shows until this browser starts the tour, by any way in, and never while the tour is on screen.
+It is a plain link in the menu, never over the page, so it covers nothing, Play included; it imports none of the tour's code, and the server draws nothing for it, so it appears just after the page wakes.
+It replaced the one-time "Take a quick tour?" card for someone who had just joined, which would have shown alongside it: the join screen and an invited person with no seat now land on the plain library home, and an old `?tour=offer` address is read as no tour at all.
 Where the tour is lives in the address (`?tour=nav`, `?tour=video`, `?tour=admin`, and `?tv=` for the video), and moving between stops replaces the address rather than adding to the history, so the browser's Back never brings it back.
-**Whether it has been seen is kept in the browser's own storage** (one value, `p3-tour-seen`), with no table and no schema change, because people live in Clerk and there is no per-person table.
-It is per browser, not per person: a second device, another browser or cleared site data offers it once more.
-It only decides the one-time offer; when storage is blocked the offer is simply not shown, and the account menu still starts the tour.
+**Whether it has been seen is kept in the browser's own storage** (one value, `p3-tour-seen`, written the moment a stop is shown), with no table and no schema change, because people live in Clerk and there is no per-person table.
+It is per browser, not per person: a second device, another browser or cleared site data shows the notice once more.
+It only decides the notice; when storage is blocked the notice is simply not shown, and the account menu still starts the tour.
 **The speed rule outranks the tour.**
 Its code is a separate file loaded lazily, only when the address asks for the tour, so a normal library visit downloads none of it and the first paint is unchanged.
 It never starts by itself over a video (the offer is only ever on the library home), never starts, pauses or touches a video (the watch page opens paused, as always), and pressing Play ends it.

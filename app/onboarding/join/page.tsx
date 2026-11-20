@@ -7,7 +7,7 @@ import { getSeatFor } from "@/lib/db/seats";
 import { errorKind } from "@/lib/error-kind";
 import { PULSE_STAFF_LIGHT_THEME, themeVars } from "@/lib/branding";
 import { checkSeats } from "@/lib/seat-changes";
-import { TOUR_OFFER_HREF } from "@/lib/tour";
+import { LIBRARY_HOME } from "@/lib/tour";
 import { previewFacts } from "../setup/setup-view";
 import { JoinForm } from "./JoinForm";
 
@@ -48,9 +48,9 @@ export default async function JoinPage() {
     await checkSeats(clinic.id).catch((error) => console.error("Join: the seats could not be checked", errorKind(error)));
     seat = await getSeatFor(clinic.id, userId);
   }
-  // Someone without a seat has no name to choose: straight to the library, with the quick tour offered once (it is
-  // offered only if this browser has never seen it). Someone who already chose a name has joined before: just the library.
-  if (!seat) redirect(TOUR_OFFER_HREF);
+  // Someone without a seat has no name to choose: straight to the library, whose menu shows "Take the tour" until this
+  // browser has started it. Someone who already chose a name has joined before: just the library.
+  if (!seat) redirect(LIBRARY_HOME);
   if (seat.displayName) redirect("/library");
 
   const preview = await previewFacts(clinic);

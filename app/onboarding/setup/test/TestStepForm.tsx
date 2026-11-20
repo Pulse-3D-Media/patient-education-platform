@@ -22,7 +22,8 @@ export function TestStepForm({
   preview,
   welcomeBack,
 }: {
-  procedures: { id: string; title: string }[];
+  /** Each with its still, or null when it has none (the picture then shows the still the other steps show). */
+  procedures: { id: string; title: string; posterUrl: string | null }[];
   /** Why no link can be made here right now, or null. */
   blocked: string | null;
   preview: PreviewFacts;
@@ -32,7 +33,10 @@ export function TestStepForm({
   const [made, setMade] = useState<{ url: string; qr: string; title: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const title = procedures.find((procedure) => procedure.id === videoId)?.title ?? preview.title;
+  const picked = procedures.find((procedure) => procedure.id === videoId);
+  const title = picked?.title ?? preview.title;
+  // The picture follows the procedure picked: its own still, else the one the other steps show (Evan, 2026-11-20).
+  const posterUrl = picked?.posterUrl ?? preview.posterUrl;
 
   function generate() {
     setError(null);
@@ -56,8 +60,7 @@ export function TestStepForm({
     <StepBody
       step="test"
       welcomeBack={welcomeBack}
-      // The still belongs to one video, so it is shown only while that video is the one picked.
-      preview={<PatientPhonePreview {...preview} title={made?.title ?? title} posterUrl={videoId === preview.videoId ? preview.posterUrl : null} />}
+      preview={<PatientPhonePreview {...preview} title={made?.title ?? title} posterUrl={posterUrl} />}
       actions={
         <button type="button" onClick={finish} disabled={pending} className={SETUP_PRIMARY}>
           Finish

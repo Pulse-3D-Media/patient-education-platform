@@ -28,7 +28,7 @@ import { TeamStepForm } from "./TeamStepForm";
 export const dynamic = "force-dynamic";
 
 export default async function SetupTeamPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> } = {}) {
-  const { clinic, progress } = await requireSetup();
+  const { clinic, progress } = await requireSetup("team");
   const { userId } = await auth();
   const [board, canAddSeat, welcomeBack] = await Promise.all([readBoard(clinic.id), addSeatOffered(clinic.id), cameBack(searchParams)]);
 

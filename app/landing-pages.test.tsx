@@ -136,9 +136,32 @@ describe("/sign-up", () => {
     expect(html).toContain('data-path="/sign-up"');
     expect(html).toContain('data-after="/onboarding/join"');
     expect(html).not.toContain(">Your name</label>");
-    // The invitation's ticket never leaks into the other tab's address.
+    // The invitation's ticket never leaks into the page.
     expect(html).not.toContain("made.up.ticket");
     expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("says Accept your invitation, names the clinic from the accept address, and offers no Set up a clinic tab (Evan, 2026-11-20)", async () => {
+    const named = renderToStaticMarkup(await draw({ __clerk_status: "sign_up", __clerk_ticket: "made.up.ticket", clinic: "Wasatch Orthopedics" }));
+    expect(named).toContain("Accept your invitation to join Wasatch Orthopedics.");
+    expect(named).not.toContain("Set up your <span");
+    expect(named).not.toContain(">Set up a clinic</a>");
+    expect(named).not.toContain(">Sign in</a>");
+
+    // No name, or one that is not usable: the plain heading. Words only: markup in the name is shown as text.
+    const plain = renderToStaticMarkup(await draw({ __clerk_ticket: "made.up.ticket" }));
+    expect(plain).toContain("Accept your invitation.");
+    const tooLong = renderToStaticMarkup(await draw({ __clerk_ticket: "made.up.ticket", clinic: "x".repeat(81) }));
+    expect(tooLong).toContain("Accept your invitation.");
+    const markup = renderToStaticMarkup(await draw({ __clerk_ticket: "made.up.ticket", clinic: "<b>Clinic</b>" }));
+    expect(markup).toContain("&lt;b&gt;Clinic&lt;/b&gt;");
+    expect(markup).not.toContain("<b>Clinic</b>");
+
+    // A name in the address without an invitation changes nothing: the usual sign-up page.
+    signedIn(null);
+    const notInvited = renderToStaticMarkup(await draw({ clinic: "Wasatch Orthopedics" }));
+    expect(notInvited).toContain("Set up your <span");
+    expect(notInvited).not.toContain("Wasatch Orthopedics");
   });
 
   it("an invitation for someone with an account, or one already accepted, is sent on: to sign in, or to the join screen once accepted", async () => {

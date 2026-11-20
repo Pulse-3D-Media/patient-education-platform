@@ -340,7 +340,7 @@ function PersonDetail({
         )}
 
         <div className="mt-6">
-          <AdminSwitch key={`${person.userId}:${person.role}`} userId={person.userId} name={person.name} role={person.role} isOwner={person.isOwner} />
+          <AdminSwitch key={`${person.userId}:${person.role}`} userId={person.userId} name={person.name} role={person.role} isOwner={person.isOwner} isSelf={me} />
         </div>
 
         {!person.isOwner && !me && (

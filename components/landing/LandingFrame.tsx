@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { STAFF_TEXT_FAMILY, STAFF_TYPE_CLASS } from "@/app/staff-fonts";
 import { StaffClerkProvider } from "@/components/ui/StaffClerkProvider";
 import { PULSE_STAFF_LIGHT_THEME, themeVars } from "@/lib/branding";
+import { invitationHeading } from "@/lib/invitation-name";
 import { LANDING_SUBTITLE, SITE_ORIGIN, tabHref } from "@/lib/landing";
 import { BOX_LOCALIZATION } from "./clerk-look";
 import { SiteNav } from "./SiteNav";
@@ -34,10 +35,17 @@ export function LandingProviders({ children }: { children: ReactNode }) {
 export function LandingFrame({
   tab,
   redirectUrl,
+  invitation,
   children,
 }: {
   /** Which tab is open: "sign-in" ("Welcome back.") or "set-up" ("Set up your clinic."). */
   tab: "sign-in" | "set-up";
+  /**
+   * Set when the visit carries an invitation (Evan, 2026-11-20): the heading becomes "Accept your invitation to join
+   * <clinic>." (or "Accept your invitation." without a usable name) and the two tabs are not drawn, so nothing on the
+   * page offers to set up a second clinic. The name is display text only (lib/invitation-name.ts).
+   */
+  invitation?: { clinicName: string | null };
   /** The page someone was sent from, carried to the other tab (lib/landing.ts, tabHref()). */
   redirectUrl?: unknown;
   children: ReactNode;
@@ -53,8 +61,11 @@ export function LandingFrame({
 
       <main className="mx-auto grid w-full max-w-[1180px] flex-1 content-center items-center gap-8 px-4 pb-12 pt-7 [grid-template-areas:'head'_'box'_'ways'] min-[860px]:grid-cols-[minmax(0,1.25fr)_440px] min-[860px]:gap-x-14 min-[860px]:gap-y-8 min-[860px]:p-14 min-[860px]:[grid-template-areas:'head_box'_'ways_box']">
         <div className="[grid-area:head] min-[860px]:self-end">
-          <h1 className="text-[2.5rem] font-medium leading-[1.04] tracking-[-0.025em] text-ink min-[860px]:text-[4rem]">
-            {signIn ? (
+          {/* An invitation's heading is a longer sentence with the clinic's name in it, so it is set a size smaller. */}
+          <h1 className={`font-medium leading-[1.04] tracking-[-0.025em] text-ink ${invitation ? "text-[2.25rem] min-[860px]:text-[3rem]" : "text-[2.5rem] min-[860px]:text-[4rem]"}`}>
+            {invitation ? (
+              invitationHeading(invitation.clinicName)
+            ) : signIn ? (
               <>
                 Welcome <span className="text-brand-bright">back.</span>
               </>
@@ -69,15 +80,17 @@ export function LandingFrame({
           </p>
         </div>
 
-        <section aria-label={signIn ? "Sign in" : "Set up a clinic"} className="min-w-0 rounded-3xl border border-line bg-surface p-5 shadow-lift [grid-area:box] min-[860px]:row-span-2 min-[860px]:self-center min-[860px]:p-7">
-          <nav aria-label="Sign in or set up a clinic" className="mb-6 grid grid-cols-2 rounded-full bg-sunken p-1">
-            <a href={tabHref("/sign-in", redirectUrl)} aria-current={signIn ? "page" : undefined} className={signIn ? openTab : closedTab}>
-              Sign in
-            </a>
-            <a href={tabHref("/sign-up", redirectUrl)} aria-current={signIn ? undefined : "page"} className={signIn ? closedTab : openTab}>
-              Set up a clinic
-            </a>
-          </nav>
+        <section aria-label={invitation ? "Accept your invitation" : signIn ? "Sign in" : "Set up a clinic"} className="min-w-0 rounded-3xl border border-line bg-surface p-5 shadow-lift [grid-area:box] min-[860px]:row-span-2 min-[860px]:self-center min-[860px]:p-7">
+          {!invitation && (
+            <nav aria-label="Sign in or set up a clinic" className="mb-6 grid grid-cols-2 rounded-full bg-sunken p-1">
+              <a href={tabHref("/sign-in", redirectUrl)} aria-current={signIn ? "page" : undefined} className={signIn ? openTab : closedTab}>
+                Sign in
+              </a>
+              <a href={tabHref("/sign-up", redirectUrl)} aria-current={signIn ? undefined : "page"} className={signIn ? closedTab : openTab}>
+                Set up a clinic
+              </a>
+            </nav>
+          )}
           {children}
         </section>
 

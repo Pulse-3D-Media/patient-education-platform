@@ -197,3 +197,27 @@ describe("planLibraryGap: the plan paid for against what the library opens", () 
     expect(planLibraryGap(paid, ["KNEE", "SHOULDER"])).toEqual({ offInLibrary: ["HIP"], extraInLibrary: ["SHOULDER"] });
   });
 });
+
+describe("readAddSeatConfirm: what the Add a seat? confirmation sends back", () => {
+  const form = (entries: Record<string, string>) => {
+    const data = new FormData();
+    for (const [key, value] of Object.entries(entries)) data.set(key, value);
+    return data;
+  };
+
+  it("reads only what was shown, never what is bought", async () => {
+    const { readAddSeatConfirm } = await import("./plan-change");
+    expect(readAddSeatConfirm(form({ seenVersionId: "version12345", seenTotalCents: "43600", seenTiming: "now", seenAt: "1790000000", seenDueNowCents: "7200", seats: "99" }))).toEqual({
+      ok: true,
+      seen: { timing: "now", at: new Date(1790000000 * 1000), dueNowCents: 7200, versionId: "version12345", totalCents: 43600 },
+    });
+  });
+
+  it("refuses a page that is out of date or altered", async () => {
+    const { readAddSeatConfirm } = await import("./plan-change");
+    expect(readAddSeatConfirm(form({ seenVersionId: "x", seenTotalCents: "43600", seenTiming: "now" })).ok).toBe(false);
+    expect(readAddSeatConfirm(form({ seenVersionId: "version12345", seenTotalCents: "-5", seenTiming: "renewal" })).ok).toBe(false);
+    expect(readAddSeatConfirm(form({ seenVersionId: "version12345", seenTotalCents: "43600", seenTiming: "later" })).ok).toBe(false);
+    expect(readAddSeatConfirm(form({ seenVersionId: "version12345", seenTotalCents: "43600", seenTiming: "now", seenAt: "soon", seenDueNowCents: "1" })).ok).toBe(false);
+  });
+});

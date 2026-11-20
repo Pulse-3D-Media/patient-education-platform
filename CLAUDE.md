@@ -21,7 +21,7 @@ The patient scans a QR code or opens the link, watches an animation explaining t
 
 **Phase 1 is done:** create a link, watch a video, link expires.
 **We are in Phase 2, the clinic dashboard.**
-Built: logins, clinics and people, the Pulse 3D master dashboard, the clinic admin area, clinic branding (device acceptance pending), paused links a clinic can turn back on, calm error pages, error alerts and a health check, billing in steps, real video hosting on Mux, reports for Pulse staff, and printed QR codes.
+Built: logins, clinics and people, the Pulse 3D master dashboard, the clinic admin area, clinic branding (device acceptance pending), paused links a clinic can turn back on, calm error pages, error alerts and a health check, billing in steps, real video hosting on Mux, reports for Pulse staff, printed QR codes, and the approved sign-up design up to setup (the landing page, sign-up's plan and payment steps in test mode, the welcome dialog, four setup steps with saved progress, and the join screen for invited people).
 Where each piece stands, and what is still not built, is in `docs/areas/product-scope.md`.
 **Billing is built in Stripe test mode only.**
 **Nothing real is ever charged: the app refuses a live Stripe key, and test-mode checkout, plan changes and Stripe's billing page are never offered on the production deployment.**
@@ -284,6 +284,7 @@ Read `docs/areas/library.md`.
 **`app/admin` is the back-office surface**, and each page has a fixed job: `/admin` (overview), `/admin/links` (making a link, and printed QR codes), `/admin/people`, `/admin/billing`, `/admin/branding`; `/admin/reports` only redirects to `/admin`.
 Never move a job to another page or merge two.
 **Never put a list of past links back on the clinic side, and never put plan or billing detail anywhere but `/admin/billing`** and the sign-up steps a new clinic's owner goes through before the clinic opens (`/onboarding/plan` and `/onboarding/payment`, never the library).
+The one other place is setup's "Add a seat?" confirmation (`/onboarding/setup/team`), which shows the price of one more seat, worked out by Billing's own plan-change code, before it is bought, and only where Billing would offer the change.
 Billing stays reachable when the clinic is closed.
 Clinics get no reports or usage numbers at all.
 Read `docs/areas/admin-area.md`.

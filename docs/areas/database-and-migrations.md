@@ -59,6 +59,12 @@ An applied migration is never edited, never deleted from the folder, and never r
 Fourteen models and nine enums (the tenth, `Category`, became plain text in K2, approved by Evan on 2026-10-24; see "Categories are text" below; `QrCode` was the thirteenth, approved by Evan on 2026-10-08 for Prompt 9; `PersonalVideo` the fourteenth, approved by Evan on 2026-10-15 for the library rows).
 If a task seems to need a fifteenth model, stop and ask. (`Video` and `Clinic` also list `personalVideos PersonalVideo[]`: a back-reference Prisma needs, with no column of its own.)
 
+**Setup progress (`Clinic.setupStep`, `Clinic.setupDone`, migration `20261119180000_add_clinic_setup_progress`, approved by Evan on 2026-11-18).**
+Two additive columns on `Clinic`, no new model: `setupStep` (optional text: the step to come back to, or "finished") and `setupDone` (a list of the steps completed, empty by default).
+Every clinic that existed before the migration has `setupStep` empty, which the app reads as set up, so no clinic already open is asked to go through setup and no data script is needed; a clinic gets "clinic" when its row is first made (`upsertClinicForClerkOrg()`).
+The same empty value is how the owner's automatic seat tells a clinic made before the 2026-11-19 rule from one made after (see "Surgeon seats").
+They are written only by `recordSetupStep()` in `lib/db/setup.ts`, under the clinic's row lock, never moving backwards.
+
 **Why `Clinic` existed in Phase 1 when there was only one of them.**
 Adding a tenant column to a table that already holds real customer data is a migration plus a hunt through every query for the ones that forgot to filter.
 Adding it early cost one table and one column.

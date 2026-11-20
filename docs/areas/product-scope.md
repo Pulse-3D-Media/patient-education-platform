@@ -19,7 +19,7 @@ Not built: tax, a founding discount, billing emails of our own.
 
 **In scope:** the three original models (Video, Clinic, Share) · `app/library` to browse and play · `app/admin` to create and manage share links · `app/watch/[code]` for patients · QR code generation · link expiry.
 
-**The landing page is built** (the bare address for a signed-out visitor, with Sign in and Set up a clinic in one box), and so is sign-up step one; the design's plan step, payment step and welcome dialog are the next pull request, and the setup steps, the tour and the reminder emails come after it.
+**The landing page is built** (the bare address for a signed-out visitor, with Sign in and Set up a clinic in one box), and so are sign-up's steps, the welcome dialog, the four setup steps and the join screen; the tour and the reminder emails come after them.
 **Still not built unless a task asks for it:** tax, a founding discount, pricing tiers by clinic size, analytics dashboards (beyond the aggregate Pulse reports), reports for clinics, any email but the two that exist (a paused link's request to the clinic, see "How a link expires, pauses, and is turned back on", and the error alert to Pulse, see "When something breaks"), file storage of our own (video files live in Mux, uploaded from `/pulse/videos` straight from the staff member's browser; see "The video boundary").
 (The billing state, the Stripe webhook, self-serve checkout, surgeon seat limits, plan changes and Stripe's billing page exist; see "Billing state", "Surgeon seats" and "Plan changes and billing recovery".)
 
@@ -45,7 +45,9 @@ Prices, founding terms, tax, refund and cancellation terms and the customer-faci
 
 **Built so far:** a person signs up on the landing page's "Set up a clinic" tab (name and work email, then the email code; see "The landing page and sign-up" in `docs/areas/auth-and-roles.md`), gets a clinic (a Clerk organization) with a provisional name from their own, becomes its account owner, and goes through the plan and payment steps (`/onboarding/plan`, `/onboarding/payment`, Stripe's hosted page in test mode, then the welcome dialog over the library once Stripe confirms the payment; see "Sign-up's plan and payment steps" in `docs/areas/billing.md`).
 Where checkout is not open (production today), they land on `/admin/billing` on a PENDING clinic that shows "Choose a plan to start" until Pulse staff open it by hand on `/pulse` (or with `npm run db:set-status`), exactly as before.
-Not built yet from the same design: the setup steps after payment (the real clinic name is typed on Clinic branding until then), the tour, the reminder emails, and Stripe's form inside our page.
+Then, from the welcome dialog's "Finish setting up" or the library's "Finish setup", the clinic's office admins go through **setup** at `/onboarding/setup`: four skippable steps (the clinic's real name and phone, its logo and colour, the team, a test link), with where it stands saved on the clinic so anyone who leaves comes back to the same step, ending "You're ready for patients." (`lib/setup.ts`; clinics made before setup count as set up).
+An invited person enters their own name and credential on the join screen when they accept (`/onboarding/join`; see "Surgeon seats").
+Not built yet from the same design: the tour, the reminder emails, and Stripe's form inside our page.
 Once it is open, admins invite people from `/admin/people` (each invitation holds a seat) and switch admin on or off for each person.
 Pulse staff set each clinic's plan (categories and surgeon seats) on `/pulse` or with `npm run db:set-plan`.
 The categories on the plan decide what the clinic's library shows and what it may share (see Category entitlements below), and the surgeon seats decide how many people may hold one (see Surgeon seats).

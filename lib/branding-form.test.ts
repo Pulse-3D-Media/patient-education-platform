@@ -91,3 +91,26 @@ describe("readLogoField", () => {
     expect(readLogoField(form({ logoUrl: "https://other.example.org/b.png" }), "https://cdn.example.org/summit.png")).toMatchObject({ error: expect.stringContaining("Webflow CDN") });
   });
 });
+
+describe("readPhoneField and readColorField: one part of the branding, for setup", () => {
+  const form = (entries: [string, string][]) => {
+    const data = new FormData();
+    for (const [key, value] of entries) data.append(key, value);
+    return data;
+  };
+
+  it("reads a phone in any format, an empty one as none, and refuses what is not a US number", async () => {
+    const { readPhoneField } = await import("./branding-form");
+    expect(readPhoneField(form([["phone", "(801) 555-0123"]]))).toEqual({ phone: "8015550123" });
+    expect(readPhoneField(form([["phone", ""]]))).toEqual({ phone: null });
+    expect(readPhoneField(form([["phone", "12"]]))).toHaveProperty("error");
+    expect(readPhoneField(form([["phone", "8015550123"], ["phone", "8015550124"]]))).toHaveProperty("error");
+  });
+
+  it("reads a hex colour, an empty one as the Pulse colour, and refuses anything else", async () => {
+    const { readColorField } = await import("./branding-form");
+    expect(readColorField(form([["brandColor", "#1E5668"]]))).toEqual({ brandColor: "#1e5668" });
+    expect(readColorField(form([["brandColor", ""]]))).toEqual({ brandColor: null });
+    expect(readColorField(form([["brandColor", "teal"]]))).toHaveProperty("error");
+  });
+});

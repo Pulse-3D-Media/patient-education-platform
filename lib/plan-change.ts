@@ -230,6 +230,29 @@ export function readChangeConfirm(formData: FormData, known?: Category[]): Chang
   return { ok: true, request: read.request, seen: { timing, at: new Date(Number(atText) * 1000), dueNowCents: Number(dueText) } };
 }
 
+export type AddSeatConfirmResult = { ok: true; seen: ChangeSeen & { versionId: string; totalCents: number } } | { ok: false; error: string };
+
+/**
+ * What the "Add a seat?" confirmation sends back when the admin presses Add
+ * a seat (setup's team step): only what it was shown (the pricing version,
+ * the new total, and the moment and amount due today). WHAT is bought is not
+ * in it at all: the server builds "the plan in force, plus one seat" itself
+ * (confirmAddSeat in lib/plan-changes.ts), and these values are only
+ * compared with what it works out again.
+ */
+export function readAddSeatConfirm(formData: FormData): AddSeatConfirmResult {
+  const versionId = String(formData.get("seenVersionId") ?? "");
+  const totalText = String(formData.get("seenTotalCents") ?? "");
+  if (!/^[a-z0-9]{8,40}$/i.test(versionId) || !/^\d{1,12}$/.test(totalText)) return { ok: false, error: OUT_OF_DATE };
+  const timing = String(formData.get("seenTiming") ?? "");
+  if (timing === "renewal") return { ok: true, seen: { timing, at: null, dueNowCents: null, versionId, totalCents: Number(totalText) } };
+  if (timing !== "now") return { ok: false, error: OUT_OF_DATE };
+  const atText = String(formData.get("seenAt") ?? "");
+  const dueText = String(formData.get("seenDueNowCents") ?? "");
+  if (!/^\d{9,11}$/.test(atText) || !/^-?\d{1,12}$/.test(dueText)) return { ok: false, error: OUT_OF_DATE };
+  return { ok: true, seen: { timing, at: new Date(Number(atText) * 1000), dueNowCents: Number(dueText), versionId, totalCents: Number(totalText) } };
+}
+
 /** How long an amount shown on the review step may be confirmed for. After that the admin reviews again, so the amount is fresh. */
 export const REVIEW_MINUTES = 15;
 

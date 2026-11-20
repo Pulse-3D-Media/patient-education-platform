@@ -7,6 +7,9 @@ import { SetUpClinicForm } from "@/components/landing/SetUpClinicForm";
 import { SignInExtras } from "@/components/landing/SignInExtras";
 import { signInHandoffHref } from "@/lib/invitation-handoff";
 
+/** The invited person's own screen (app/onboarding/join). */
+const JOIN_PATH = "/onboarding/join";
+
 /**
  * The sign-up page, at /sign-up: the landing page with its "Set up a
  * clinic" tab open. What the box holds depends on how the person arrived.
@@ -24,13 +27,15 @@ import { signInHandoffHref } from "@/lib/invitation-handoff";
  *
  *     __clerk_status=sign_up    a new person: Clerk's own ready-made sign-up
  *                               form, exactly as before, which creates their
- *                               account and accepts the invitation with it.
- *                               (The invited person's own screen is a later
- *                               pull request of the design.)
+ *                               account and accepts the invitation with it,
+ *                               then opens the join screen (/onboarding/join),
+ *                               where they enter their own name and credential.
  *     __clerk_status=sign_in    they already have an account: they are handed
  *                               to /sign-in with the same address, whose
  *                               form signs them in and accepts it.
- *     __clerk_status=complete   already accepted: on to /onboarding.
+ *     __clerk_status=complete   already accepted: on to the join screen, which
+ *                               sends anyone with nothing to enter on to the
+ *                               library.
  *
  *   /sign-up/sso-callback: where Google sends someone back to after "Continue
  *   with Google" on this tab; Clerk's own component finishes the sign-up (or
@@ -50,7 +55,7 @@ import { signInHandoffHref } from "@/lib/invitation-handoff";
 export default async function SignUpPage({ params, searchParams }: PageProps<"/sign-up/[[...sign-up]]">) {
   const query = await searchParams;
   const status = typeof query.__clerk_status === "string" ? query.__clerk_status : null;
-  if (status === "complete") redirect("/onboarding");
+  if (status === "complete") redirect(JOIN_PATH);
   // The ticket and status travel with them unchanged; nothing else does (lib/invitation-handoff.ts).
   if (status === "sign_in") redirect(signInHandoffHref(query));
 
@@ -70,7 +75,8 @@ export default async function SignUpPage({ params, searchParams }: PageProps<"/s
   if (invited || steps.length > 0) {
     return (
       <LandingFrame tab="set-up" redirectUrl={redirectUrl}>
-        <SignUp path="/sign-up" appearance={BOX_APPEARANCE} />
+        {/* After the account is made and the invitation accepted, the join screen asks for their own name and credential (05-join). */}
+        <SignUp path="/sign-up" appearance={BOX_APPEARANCE} forceRedirectUrl={invited ? JOIN_PATH : undefined} />
         <SignInExtras patientLine={false} />
       </LandingFrame>
     );

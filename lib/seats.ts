@@ -8,10 +8,10 @@
  *   The ACCOUNT OWNER   One person per clinic: whoever created it, until they
  *                       hand it to someone else. Always an admin. The only
  *                       person who does not need a seat, and who may still
- *                       take one. The owner of a clinic that bought exactly
- *                       one seat is given it automatically when the clinic
- *                       opens (ownerAutoSeatDue() below, decided by the user
- *                       on 2026-11-16, and limited to one seat on 2026-11-18).
+ *                       take one. The person who signs up is given a seat
+ *                       automatically when the clinic opens, if one is free
+ *                       (ownerAutoSeatDue() below, decided by Evan on
+ *                       2026-11-19).
  *   Everyone else       Holds one of the seats the clinic pays for
  *                       (Clinic.surgeonSeats). There is no free "staff" kind
  *                       any more. Whether someone is an admin is a separate
@@ -190,7 +190,7 @@ export function overAllocatedWords(summary: SeatSummary): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// A solo owner is seated when the clinic opens
+// The person who signed up is seated when the clinic opens
 // ---------------------------------------------------------------------------
 
 /**
@@ -203,55 +203,62 @@ export const OWNER_AUTO_SEAT_WORDS = "The account owner was given a seat when th
 
 /** The full log entry: the fixed words, then the count. */
 export function ownerAutoSeatNote(summary: SeatSummary): string {
-  return `${OWNER_AUTO_SEAT_WORDS}, because nobody else holds or is invited to one. Now ${seatCountWords(summary)}.`;
+  return `${OWNER_AUTO_SEAT_WORDS}, because the person who sets up a clinic takes a seat when one is free. Now ${seatCountWords(summary)}.`;
 }
 
 /**
  * Should the account owner be given a seat automatically, right now?
- * (Decided by the user on 2026-11-16: a solo owner is seated automatically.
- * Limited by the user on 2026-11-18 to clinics that bought EXACTLY ONE seat:
- * an owner who buys several is often an office manager buying seats for
- * others, so they keep choosing with Take a seat, as before.)
  *
- * Before this, an owner who bought one seat for themselves still had to find
- * "Take a seat" on the People page, and the library sent them to "ask your
- * clinic's office admin", who was themselves. So, at the moment a clinic
- * BECOMES OPEN WITH SEATS (its first confirmed payment, or Pulse staff
- * opening it or setting its plan), the owner is given a seat when ALL of
- * these are true:
+ * THE RULE (decided by Evan on 2026-11-19, replacing the one-seat rule the
+ * user set on 2026-11-16 and 2026-11-18): the person who signs up takes a
+ * seat, so a clinic of three seats is "you and 2 more" in setup. At the
+ * moment a clinic BECOMES OPEN WITH SEATS (its first confirmed payment, a
+ * recovery, or Pulse staff opening it or setting its plan), the owner is
+ * given a seat when ALL of these are true:
  *
  *   - the clinic was not open with at least one seat a moment ago, and is now;
- *   - its plan has exactly one surgeon seat (a plan of two or more, a
- *     clinic Pulse manages included, is never seated by this);
- *   - it has an account owner;
- *   - nobody holds a seat and no invitation holds one (so the owner holds
- *     none either, and a seat is free: the plan has at least one);
+ *   - it has an account owner, who holds no seat yet;
+ *   - a seat is free: the seats people hold and the open invitations together
+ *     are fewer than the plan pays for. A seat someone holds or was invited
+ *     to is never taken; if every seat is taken, the owner is simply not
+ *     seated, and nothing else changes;
  *   - this has never been done at this clinic before (its log has no entry
- *     starting with OWNER_AUTO_SEAT_WORDS). So an owner who later gives the
- *     seat up is never seated again by this; they take one themselves if
- *     they want it back.
+ *     starting with OWNER_AUTO_SEAT_WORDS), so an owner who later gives the
+ *     seat up is never seated again by this;
+ *   - and the clinic was made from now on (it goes through setup, so
+ *     Clinic.setupStep is set: `newClinic`), OR its plan has exactly one
+ *     seat. Clinics that already existed keep the rule they had: they are
+ *     left as they are unless the owner takes a seat themselves.
  *
  * Asked only under the clinic's row lock, with counts read under that lock,
- * so two openings at the same moment seat the owner once.
+ * so two openings at the same moment seat the owner once, and an invitation
+ * reaching for the last seat at the same moment either takes it first (the
+ * owner is then not seated) or finds it taken.
  */
 export function ownerAutoSeatDue(facts: {
   wasOpenWithSeats: boolean;
   isOpenWithSeats: boolean;
-  /** The surgeon seats on the clinic's plan now. Only exactly one qualifies. */
+  /** The surgeon seats on the clinic's plan now. */
   planSeats: number;
   ownerClerkUserId: string | null;
+  /** Does the owner hold a seat here already? */
+  ownerSeated: boolean;
+  /** Seats held by people. */
   seated: number;
   invited: number;
   doneBefore: boolean;
+  /** Made after setup existed (Clinic.setupStep is set). */
+  newClinic: boolean;
 }): boolean {
+  const seatFree = facts.seated + facts.invited < facts.planSeats;
   return (
     !facts.wasOpenWithSeats &&
     facts.isOpenWithSeats &&
-    facts.planSeats === 1 &&
     isClerkUserId(facts.ownerClerkUserId) &&
-    facts.seated === 0 &&
-    facts.invited === 0 &&
-    !facts.doneBefore
+    !facts.ownerSeated &&
+    seatFree &&
+    !facts.doneBefore &&
+    (facts.newClinic || facts.planSeats === 1)
   );
 }
 

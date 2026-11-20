@@ -71,14 +71,16 @@ describe("/onboarding sends each person on", () => {
     expect(await where()).toBe("redirect:/library");
   });
 
-  it("a member, or an admin who is not the owner, goes to the library, open clinic or not", async () => {
+  it("a member, or an admin who is not the owner, goes to the join screen (which sends them on to the library when there is nothing to enter), open clinic or not", async () => {
     signedIn("org_vitest");
     for (const who of [
       { isOwner: false, isAdmin: false },
       { isOwner: false, isAdmin: true },
     ]) {
-      vi.mocked(getCurrentClinic).mockResolvedValue(clinic("PENDING", who));
-      expect(await where()).toBe("redirect:/library");
+      for (const status of ["PENDING", "ACTIVE"] as const) {
+        vi.mocked(getCurrentClinic).mockResolvedValue(clinic(status, who));
+        expect(await where()).toBe("redirect:/onboarding/join");
+      }
     }
   });
 

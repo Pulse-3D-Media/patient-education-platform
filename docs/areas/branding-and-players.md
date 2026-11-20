@@ -17,6 +17,10 @@ Making a new clinic is not logged.
 ## Clinic branding and dependable playback (Prompt 10)
 
 Pulse staff use a clinic's **Branding** tab at /pulse/clinics/[id]; an office admin uses /admin/branding.
+A new clinic's admins also meet two parts of it in setup: the name and phone (step 1) and the logo and colour (step 2), through the same name, logo and branding actions, with the phone and the colour each saved on its own (`saveClinicBrandingPartAction`, `updateClinicBrandingPart()`), so a step never writes back the font or mode it did not show.
+In step 2 the logo and the colour are one form: a chosen file shows in the phone picture at once (a local picture only), and Continue uploads it and then saves the colour; if the upload fails nothing moves on, the page says the logo was not saved, and "Go on without the logo" leaves the step undone so the library's reminder says "Add your logo".
+**A logo upload names no uploader to Clerk** (fixed 2026-11-19): with `uploaderUserId` Clerk refused every upload with 403 `missing_organization_permission`, even for the admin who created the organization; the action has already asked Clerk, live, that the person is an admin, so Clerk is not asked to check again (`uploadClerkOrganizationLogo()` in `lib/organization.ts`).
+**The clinic phone box** (setup step 1 and Clinic branding) takes ten digits at most as they are typed or pasted, shown as "(801) 555-0123", drops a leading "+1" or "1", and says how many digits are missing before anything is sent (`typedUsPhone()`, `typedPhoneProblem()` in `lib/phone.ts`); the server checks what arrives with `normalizeUsPhone()` as before.
 The clinic id for the admin save comes from its server-checked session, never the form.
 Members and closed clinics cannot save branding.
 Both forms validate the whole submission; malformed or duplicate values are refused.

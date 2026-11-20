@@ -36,3 +36,30 @@ export function telHref(digits: string | null | undefined): string | null {
   if (!digits || !/^\d{10}$/.test(digits)) return null;
   return `tel:+1${digits}`;
 }
+
+/**
+ * What the phone box shows while someone types or pastes (the setup step and
+ * Clinic branding): at most the ten digits of the number, shown as
+ * "(801) 555-0123" as they arrive. Spaces, dashes, brackets and dots are
+ * ignored, and a leading "+1" or "1" is taken as the country code and dropped
+ * (no US area code starts with 1), so "+1 801 555 0123" pasted whole fits.
+ * An eleventh digit of the number itself is simply not taken.
+ *
+ * Only a courtesy in the browser: the server checks what is sent with
+ * normalizeUsPhone() above, whatever the box allowed.
+ */
+export function typedUsPhone(input: string): string {
+  let digits = input.replace(/\D/g, "");
+  if (digits.startsWith("1")) digits = digits.slice(1);
+  digits = digits.slice(0, 10);
+  if (digits.length === 0) return "";
+  if (digits.length <= 3) return `(${digits}`;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+/** The sentence beside the phone box before anything is sent, or null when it is empty or complete. */
+export function typedPhoneProblem(shown: string): string | null {
+  const count = shown.replace(/\D/g, "").length;
+  return count === 0 || count === 10 ? null : `That is ${count} of the 10 digits. Enter the whole number, like (801) 555-0123.`;
+}

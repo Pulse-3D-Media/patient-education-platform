@@ -188,7 +188,16 @@ Stripe test mode only, like everything above, and offered only where Billing's o
   `?stopped=1` shows "The payment was not finished. Nothing was charged. Try again, with another card or payment method if yours was declined." with the plan kept (from the attempt on record) and Try again: Stripe's own page says when a card is declined, and our page cannot know which it was, so it does not claim a decline.
 - **The return grants nothing**, like `/admin/billing/return`: `/onboarding/done` reads the record, shows "Confirming your payment" with the same `Confirming` part (bounded looks, then Check again), and only once the record says ACTIVE and the clinic is open does it send the owner to `/library?welcome=1` (any other admin to `/library`).
 - **The welcome dialog** ("Thanks for signing up.", `app/library/WelcomeDialog.tsx`) shows over the library only for the account owner, only when the clinic is open, and only with `?welcome=1`, which it takes out of the address as it opens, so a refresh or a second notification never shows it again; no schema.
-  "Finish setting up (recommended)" goes to Clinic branding until setup exists (pull request #5), "Take a quick tour" to the library until the tour exists (pull request #6), and "Go to the library" closes it.
+  "Finish setting up (recommended)" opens setup (`/onboarding/setup`, the step the clinic is on), "Take a quick tour" goes to the library until the tour exists (pull request #6), and "Go to the library" closes it.
+
+## One more seat from setup
+
+Setup's team step (`/onboarding/setup/team`) offers **Add another** where a paying clinic may change its plan right now: exactly where Billing would show its change form (`getCheckoutView()` gives a "changer"), so test mode only and never on the production deployment; elsewhere the button is not drawn.
+It opens **Add a seat?** (screen 04-setup-3b-add-seat): the plan's seats now and after, the new price with what it was, and what is charged today.
+The change is built on the server, never from the browser: the plan in force with the same categories and interval, at the prices the clinic signed up at, plus one seat (`reviewAddSeat()` and `confirmAddSeat()` in `lib/plan-changes.ts`, called by `reviewAddSeatAction` and `confirmAddSeatAction` in `app/admin/billing/actions.ts`).
+Both run through `reviewPlanChange()` and `confirmPlanChange()`, so every check of a plan change applies, Stripe is asked what it would charge today, and the live admin check runs before anything is bought.
+What the confirmation sends back is only what it was shown (the pricing version, the new total, the moment and the amount due today, read by `readAddSeatConfirm()` in `lib/plan-change.ts`), and it is only compared: a second press, another admin's change or new prices make it "out of date", nothing is bought, and the new figures are shown.
+Once Stripe confirms the payment the seat is the clinic's and a new email box opens.
 
 ## Plan changes and billing recovery
 

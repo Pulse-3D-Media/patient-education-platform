@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { staffLook } from "@/app/brand-look";
 import type { CurrentClinic } from "@/lib/clinic";
+import { setupReminder } from "@/lib/setup";
 import { AppShell } from "./AppShell";
 
 /**
@@ -21,6 +22,8 @@ export function ClinicShell({ clinic, showAdmin = false, children }: { clinic: C
     <AppShell
       showAdmin={showAdmin}
       categories={clinic.planCategories}
+      // "Finish setup" in the menu: for the clinic's office admins only, until nothing is left undone (setupReminder in lib/setup.ts).
+      setup={clinic.isAdmin ? setupReminder(clinic.setup) : null}
       brand={{ style: look.style, fontClass: look.fontClass, theme: look.theme, clinicName: clinic.name, logoUrl: look.logoUrl }}
     >
       {children}

@@ -6,6 +6,7 @@ import { prisma } from "./db/client";
 import { listNotesForClinic } from "./db/notes";
 import { listSeatRows, reserveSeat } from "./db/seats";
 import type { sendEmail } from "./email";
+import * as ownerEmail from "./owner-email";
 import { fakeClerk } from "./testing/fake-clerk";
 
 /**
@@ -26,6 +27,11 @@ import { fakeClerk } from "./testing/fake-clerk";
 
 vi.mock("@clerk/nextjs/server", async () => (await import("@/lib/testing/fake-clerk")).clerkServerModule());
 vi.setConfig({ testTimeout: 30_000 });
+// Counted, to prove the webhook never sends the owner email (it only ever clears an owner who left).
+vi.mock("./owner-email", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./owner-email")>();
+  return { ...actual, sendOwnerEmails: vi.fn(actual.sendOwnerEmails) };
+});
 
 const createdClinicIds: string[] = [];
 const id = () => randomBytes(6).toString("hex");
@@ -105,6 +111,16 @@ describe("an owner who was the clinic's only member", () => {
 });
 
 describe("the owner's admin switched off in Clerk directly", () => {
+  it("the owner leaving, delivered twice, never sends the owner email: nobody became the owner", async () => {
+    vi.mocked(ownerEmail.sendOwnerEmails).mockClear();
+    const { clinicId, orgId, owner } = await makeClinic([{ userId: user(), role: "org:admin" }]);
+    fakeClerk.removeMember(orgId, owner);
+    await handleClerkEvent(membership(orgId, owner), "msg_owner1", { env: ENV, send });
+    await handleClerkEvent(membership(orgId, owner), "msg_owner1", { env: ENV, send });
+    expect(await ownerOf(clinicId)).toBeNull();
+    expect(ownerEmail.sendOwnerEmails).not.toHaveBeenCalled();
+  });
+
   it("writes one entry, emails once, and a repeated delivery adds nothing", async () => {
     const { clinicId, orgId, owner } = await makeClinic();
     fakeClerk.setRoleOutsideTheApp(orgId, owner, "org:member");

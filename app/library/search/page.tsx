@@ -61,6 +61,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/library/s
             heartedIds={heartedIds}
             // Only people holding a seat send links; everyone can browse and play. The Send action checks the seat again.
             canSend={seat !== null}
+            clinicName={clinic.name}
             seatHelp={await seatHelpFor(clinic, seat)}
           >
             <VideoGrid videos={items} />

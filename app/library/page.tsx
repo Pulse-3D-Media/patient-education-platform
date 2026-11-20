@@ -148,6 +148,7 @@ export default async function LibraryPage({ searchParams }: { searchParams?: Pro
             favorites={toLibraryItems(favorites, now)}
             heartedIds={heartedIds}
             canSend={seat !== null}
+            clinicName={clinic.name}
           >
             <div className="flex flex-col gap-9">
               {/* First on the page: Home in the sidebar is where favorites are. */}

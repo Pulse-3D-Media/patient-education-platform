@@ -60,6 +60,24 @@ It replaced the menu that folded between a full sidebar and a rail and was remem
 A phone has no rail: the three lines in its top bar slide the full menu out from the left, and the admin pages also keep their row of pills under the top bar.
 Its width transition is switched off for anyone whose device asks for reduced motion.
 
+## Ways to send a new link (Evan, 2026-11-20)
+
+Most clinics send materials through what they already use (a nurse's texting app, email, a patient portal such as MyChart), so the Send panel helps someone paste the link there rather than sending anything itself.
+Under the new link, after the existing **Copy link** (the plain option, unchanged): **Copy message**, which copies a ready-made message with the link in it, and then whichever of the device's own ways this device really has.
+The message is "Here is a short video about your procedure from <the name on the link>: <link>", with the clinic's name when the link names only the clinic.
+Its words live in one place, `patientMessage()` in `lib/patient-message.ts`, and are not changed without asking.
+They are true whoever pastes them and whenever (a nurse before the visit as well as the doctor after it), name no procedure (a text often shows on a locked screen), never mention consent or understanding, and carry no "for education only" line, because the patient page asks for that tick before the video plays.
+**Share message** opens the browser's own share sheet (`navigator.share`, every phone and tablet and some computers) with the message.
+Where there is no share sheet, **Email** opens the device's own email app (`mailto:`), and on a touch-first device (no hover, a finger as the pointer) **Text message** opens its own texting app (`sms:`); a computer with no share sheet gets Email only, since a Text message button there would do nothing.
+What shows is decided by what the device can do, never by the width of the screen.
+**There is never a recipient:** no box for a patient's name, number or email on our pages, and the text or email opens with nobody filled in, so the person sending picks the patient in their own app and the number or address never reaches us (rule 2).
+The message is put together in the browser from what the panel already has; copying or sharing sends nothing to our server, records nothing and counts nothing.
+A refused clipboard, or a share sheet that will not open, says so in one sentence and shows the message in a box, selected, to copy by hand; a share sheet the person closes does nothing.
+The buttons appear only with a link the server has just made, which is always working, so a paused or expired link is never offered for sharing.
+Show QR on screen gets no message buttons: it is for a patient scanning in the room.
+Setup's test link gets none either: it is for the admin to try, not for a patient.
+Not built, on purpose (Evan, 2026-11-20): a front-desk list of links made in the exam room, texting from the app itself, and any MyChart integration.
+
 ## The quick tour
 
 **The tour** (the approved design, screens 07-tour-1 to 3; `lib/tour.ts` for the rules, `components/tour/` for the code) is two stops for everyone and a third for office admins.

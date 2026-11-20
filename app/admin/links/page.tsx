@@ -193,7 +193,7 @@ export default async function LinksPage(props: LinksProps = {}) {
           <div className="max-w-3xl">
             <DetailHeader title="New patient link" sub={days ? `For one patient. Stops working ${days} after the first play.` : "For one patient."} />
             <Blocked words={blocked} />
-            <NewLinkForm {...choices} baseUrl={where?.origin ?? ""} />
+            <NewLinkForm {...choices} baseUrl={where?.origin ?? ""} clinicName={clinic.name} />
           </div>
         </section>
       ) : (

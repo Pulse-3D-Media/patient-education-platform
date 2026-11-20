@@ -164,7 +164,6 @@ export default async function WatchPage({ params }: PageProps<"/watch/[code]">) 
       deadline={patientDeadline(share, now)}
       now={now}
       early={early}
-      share="now"
       player={
         <WatchPlayer
           poster={poster}

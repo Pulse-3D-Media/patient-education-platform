@@ -29,8 +29,7 @@ import WatchPage from "./page";
 // The play count is a Server Action the player imports; rendering never calls it.
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // The "ask my clinic" piece refreshes the page after a tap that did not go through; a render never taps.
-// The share button reads the address (usePathname) to know whether there is a link of the patient's own yet.
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }), usePathname: () => "/watch/vitest" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {} }) }));
 // The request action reads the request's host to build the email's address; a render never asks.
 vi.mock("next/headers", () => ({ headers: async () => new Map([["host", "localhost:3000"]]) }));
 
@@ -522,14 +521,14 @@ describe("what stays the same", () => {
     expect(html).not.toContain("Placeholder animation");
   });
 
-  it("before the first tap there is one thing to press on the video, Play, and the one named exception under it, with the strip's logo and names hidden from screen readers", async () => {
+  it("before the first tap there is one thing to press, Play, with the strip's logo and names hidden from screen readers", async () => {
     const clinic = await makeClinic({ logoUrl: "https://example.com/summit.png" });
     const html = await render(await makeShare(clinic.id, videoId));
 
-    // Play, and "Save or share this link" (the one exception, decided on 2026-11-16), and nothing else.
-    expect(html.match(/<button/g)).toHaveLength(2);
+    // Play, and nothing else ("Save or share this link" was taken off on 2026-11-20, Evan).
+    expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('aria-label="Play Vitest Total Knee Replacement"');
-    expect(html).toContain("Save or share this link");
+    expect(html).not.toContain("Save or share this link");
     expect(html).not.toContain("Make the video bigger");
     // Our Vimeo-style controls arrive with the first play, not before (they are not drawn at all until then).
     expect(html).not.toContain('aria-label="Full screen"');
@@ -883,8 +882,6 @@ describe("for screen readers, the keyboard and a browser without JavaScript (202
     expect(noscript).toContain("To play this video, your browser needs JavaScript turned on.");
     expect(noscript).toContain(`call ${clinic.name}`);
     expect(noscript).toContain('href="tel:+18015550123"');
-    // The share button needs JavaScript too, so it is hidden there rather than left doing nothing.
-    expect(noscript).toContain("[data-needs-script]{display:none}");
     expect(noscript).not.toMatch(/error|invalid/i);
   });
 
@@ -905,22 +902,18 @@ describe("for screen readers, the keyboard and a browser without JavaScript (202
   });
 });
 
-describe("Save or share this link (decided on 2026-11-16)", () => {
-  it("is on a working link's page, under the video's length and the deadline line, 48px tall, with its words as its label", async () => {
+describe("no Save or share this link (taken off on 2026-11-20, Evan, reversing 2026-11-16)", () => {
+  it("is not on a working link's page: the deadline line is the last thing under the video, and the only input is the tick box", async () => {
     const clinic = await makeClinic({});
     const html = await render(await makeShare(clinic.id, videoId));
-    expect(html).toMatch(/<button type="button" data-share-link="" class="[^"]*min-h-12[^"]*">.*?Save or share this link<\/button>/);
-    // Below the player and below "About 2 minutes" and the deadline line, so it never pushes the video down.
-    expect(html.indexOf("Save or share this link")).toBeGreaterThan(html.indexOf("About 2 minutes"));
-    expect(html.indexOf("This link works until")).toBeGreaterThan(0);
-    expect(html.indexOf("Save or share this link")).toBeGreaterThan(html.indexOf("This link works until"));
-    expect(html.indexOf("Save or share this link")).toBeGreaterThan(html.indexOf("<video"));
-    // No box to type into came with it: the page's only input is still the tick box.
+    expect(html).toContain("This link works until");
+    expect(html).not.toContain("Save or share this link");
+    expect(html).not.toContain("data-share-link");
     expect(html.match(/<input/g)).toHaveLength(1);
     expect(html).not.toContain("<form");
   });
 
-  it("is not on a paused, finished (expired), taken-down or not-found page", async () => {
+  it("is not on a paused, finished (expired), taken-down or not-found page either", async () => {
     const clinic = await makeClinic({ phone: "8015550123" });
     const DAY = 86_400_000;
     const paused = await prisma.share.create({
